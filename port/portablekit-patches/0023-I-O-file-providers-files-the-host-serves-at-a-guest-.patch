@@ -1,7 +1,7 @@
 From 27cdd504b0977ca464e477356fe3fdf42380c290 Mon Sep 17 00:00:00 2001
 From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
 Date: Mon, 19 Oct 2026 06:55:12 +1030
-Subject: [PATCH 23/27] I/O: file providers, files the host serves at a guest
+Subject: [PATCH 23/28] I/O: file providers, files the host serves at a guest
  path
 
 hle_extension::add_file_provider (interface version 4) lets a port or a

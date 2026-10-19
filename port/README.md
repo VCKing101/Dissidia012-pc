@@ -128,7 +128,8 @@ doubling), `D012_NO_PIXEL_MASK=1` (pixel mask), `D012_NO_VBLANK_CALLBACKS=1` (ca
 `D012_NO_STENCIL=1` (GE stencil), `D012_NO_SHARED_DEPTH=1` (depth buffers shared by address),
 `D012_NO_THROUGH_DEPTH=1` (depth in through mode), `D012_NO_SCREEN_SPRITES=1` (transformed sprites upright on the
 screen), `D012_NO_SAVEDATA_LIST_STAR=1` (`*` in LIST patterns), `D012_NO_HOST_AUDIO=1` (host audio files: no mod
-music is decoded or served), `D012_NO_EXTRA_BUTTONS=1` (L2/R2 never reach the port; the triggers press L and R).
+music is decoded or served), `D012_NO_EXTRA_BUTTONS=1` (L2/R2 never reach the port; the triggers press L and R), `D012_NO_STICK_SQUARE=1`
+(the left stick's circle passed on as it is, as the menu's "Full diagonals" off does).
 
 ## Overlays
 
@@ -183,12 +184,14 @@ fresh clone of `33800c4`, apply them with `git checkout -b dissidia 33800c4` and
 | 0025 | Host audio tracks: a host audio file (MP3, Ogg Vorbis, Opus, FLAC, WAV) decoded to 44,100 Hz stereo and played through a stand-in ATRAC3plus file whose private `PKHA` chunk names it; sceAtrac fills its frames from the file and runs everything else as for the game's own tracks (`host/audio/host_audio.*`, `host/hle/hle_atrac.cpp`); `<prefix>_NO_HOST_AUDIO` turns it off | Mod music with no ATRAC3plus encoding |
 | 0026 | Extra buttons: L2, R2, L3, R3, which a PSP lacks, for a port to give a meaning of its own. `GameProfile::extra_buttons` names them; with L2 or R2 named the triggers press those instead of copies of L and R; `hle_extension::extra_buttons()` reads them (interface version 5); keyboard actions L2/R2/L3/R3 (1 and 3 for L2 and R2 by default), listed in the menu only for the named ones (`host/input/bindings.*`, `host/gpu/vulkan_renderer.*`, `host/hle/hle_media.cpp`, `host/profile.*`, `host/ui/menu.cpp`; checks in `tests/input_tests.cpp`); `<prefix>_NO_EXTRA_BUTTONS` turns it off | The BGM playlist's focus switch |
 | 0027 | Game overlays: `ui::add_game_overlay` draws a port's own picture with ImGui over every game frame it asks for, `ui::game_picture()` says where the game's 480x272 picture is in the window, `ui::game_text_font()` is the game's text face as an ImGui font (`host/ui/ui.hpp`, `layer.cpp`, `menu.cpp`, `host/gpu/vulkan_renderer.*`, `host/fonts/game_font.*`). Nothing is drawn until a port adds one | Showing the BGM playlist's focus beside the game's box |
+| 0028 | The left stick as the nub: dead zones on the vector's length, full from 0.95 of the radius, then circle to square, so a full push in any direction reaches the edge of the nub's square range and a full diagonal its corner; each axis rounded to the nearest step, full left/up now 0 rather than 1 (`host/input/stick.*`, `host/gpu/vulkan_renderer.cpp`, `host/settings/settings.*`, `host/ui/menu.cpp`; checks in `tests/input_tests.cpp`). On by default; the controls page's "Full diagonals" (`input.stick_square`) or `<prefix>_NO_STICK_SQUARE` turns the square off | A round stick's full diagonal reached the nub as about 0.71 per axis (bytes 217/39). The game's pad module drops each axis within 100 of 127.5 (`docs/research/pad-module.md`), so every full diagonal read as no input and 22.5 degrees off a straight push as 0.64 of one |
 
 Patches 0012 and 0013 were made on a separate worktree branch during the recompiled-build work and merged onto
 `dissidia` on 18 October 2026; patches 0014 and 0015 followed the same day (bring-up log, section "Stencil"), and
 patches 0016 to 0022 that evening (section "HP bar, orbs and saves"), patches 0023 to 0025 on 19 October for mods
 ([mod-folder.md](../docs/port/mod-folder.md)), and patches 0026 and 0027 the same day for the BGM playlist
-([bgm-playlist-design.md](../docs/port/bgm-playlist-design.md), section 10).
+([bgm-playlist-design.md](../docs/port/bgm-playlist-design.md), section 10); patch 0028 that evening, for analog
+diagonals that felt dead on a real controller.
 PortableKit's 21 framework tests pass on the branch and `portablekit_host_check` builds.
 
 ## Recompiled build

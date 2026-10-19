@@ -1,0 +1,438 @@
+From 0291ca00e7284abe1d48bc512035591d6aabc58d Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Mon, 19 Oct 2026 19:09:22 +1030
+Subject: [PATCH 28/28] Stick: a full diagonal reaches the PSP nub's corner
+
+A modern stick's gate is a circle, so at a full diagonal each axis is only
+about 0.71 of its travel, and the left stick passed that on to the nub. The
+PSP's nub reaches its corners, and a game that treats each axis on its own
+sees a modern stick's diagonal as a smaller push, or none: a game with a
+per-axis dead zone of 100 out of 127.5 read every full diagonal as no input
+at all, and 22.5 degrees off a straight push as 0.64 of one.
+
+input/stick.hpp maps the stick to the nub as a vector: the dead zone on its
+length (as before), full deflection from 0.95 of the radius, then circle to
+square, stretching the vector along its own direction until its longer axis
+is its length, so a full push in any direction reaches the edge of the
+square and a diagonal its corner. Each axis is rounded to the nearest step
+and both ends are reached: -1 is 0 rather than 1. The keyboard's stick keys
+and the on-screen stick go through the same rounding and square.
+
+On by default. input.stick_square, the controls page's "Full diagonals"
+row, turns the square off; <prefix>_NO_STICK_SQUARE does the same. Checks
+in tests/input_tests.cpp. The right stick is unchanged.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ CMakeLists.txt               |  6 ++-
+ cmake/PortableKit.cmake      |  1 +
+ host/gpu/vulkan_renderer.cpp | 32 +++++++++-----
+ host/input/stick.cpp         | 41 +++++++++++++++++
+ host/input/stick.hpp         | 64 +++++++++++++++++++++++++++
+ host/settings/settings.cpp   |  4 ++
+ host/settings/settings.hpp   |  4 ++
+ host/ui/menu.cpp             | 10 +++++
+ tests/input_tests.cpp        | 86 +++++++++++++++++++++++++++++++++++-
+ 9 files changed, 233 insertions(+), 15 deletions(-)
+ create mode 100644 host/input/stick.cpp
+ create mode 100644 host/input/stick.hpp
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index b612b11..899e851 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -399,11 +399,13 @@ if(PSPRECOMP_BUILD_TESTS)
+ endif()
+ 
+ # Keyboard and mouse bindings: names, settings.ini spelling, the menu's
+-# assignment rules and what held keys press. No SDL or game data.
++# assignment rules and what held keys press; and the stick's mapping to the
++# PSP nub. No SDL or game data.
+ if(PSPRECOMP_BUILD_TESTS)
+     add_executable(portablekit_input_tests
+         "${PORTABLEKIT_ROOT}/tests/input_tests.cpp"
+-        "${PORTABLEKIT_ROOT}/host/input/bindings.cpp")
++        "${PORTABLEKIT_ROOT}/host/input/bindings.cpp"
++        "${PORTABLEKIT_ROOT}/host/input/stick.cpp")
+     target_include_directories(portablekit_input_tests PRIVATE "${PORTABLEKIT_ROOT}/host")
+     set_target_properties(portablekit_input_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+     add_test(NAME portablekit_input_tests COMMAND portablekit_input_tests)
+diff --git a/cmake/PortableKit.cmake b/cmake/PortableKit.cmake
+index 4697646..0e7f237 100644
+--- a/cmake/PortableKit.cmake
++++ b/cmake/PortableKit.cmake
+@@ -38,6 +38,7 @@ set(PORTABLEKIT_HOST_SOURCES
+     host/gpu/ge_state.cpp
+     host/gpu/texture_decode.cpp
+     host/input/bindings.cpp
++    host/input/stick.cpp
+     host/input/touch_controls.cpp
+     host/input/tilt.cpp
+     host/gpu/texture_pack.cpp
+diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
+index 7c5c838..03e9c49 100644
+--- a/host/gpu/vulkan_renderer.cpp
++++ b/host/gpu/vulkan_renderer.cpp
+@@ -17,6 +17,7 @@
+ #include "perf/perf_overlay.hpp"
+ #include "input/bindings.hpp"
+ #include "input/motion.hpp"
++#include "input/stick.hpp"
+ #include "settings/settings.hpp"
+ 
+ #if defined(PORTABLEKIT_ANDROID_APP)
+@@ -642,6 +643,7 @@ bool write_bmp(const std::string &path, const std::uint8_t *pixels, std::uint32_
+ 
+ struct PadTuning {
+     float dead_zone{0.15f};
++    bool stick_square{true};
+     float trigger{0.25f};
+     std::uint32_t triggers{};
+     float right_stick{0.5f};
+@@ -663,6 +665,7 @@ PadTuning pad_tuning() {
+     const settings::Settings &player = settings::current();
+     PadTuning value{};
+     value.dead_zone = player.dead_zone;
++    value.stick_square = player.stick_square;
+     value.trigger = player.trigger;
+     value.triggers = player.trigger_profile;
+     value.right_stick = player.right_stick_zone;
+@@ -778,13 +781,14 @@ void read_gamepad(SDL_Gamepad *device, PadState &pad, int &analog_x, int &analog
+     if (tuning.right_stick_mode == settings::RightStick::Camera)
+         deflect(tuning.invert_x ? -right_x : right_x, tuning.invert_y ? -right_y : right_y, pad.right_x, pad.right_y);
+ 
+-    const float left_x = axis(SDL_GAMEPAD_AXIS_LEFTX);
+-    const float left_y = axis(SDL_GAMEPAD_AXIS_LEFTY);
+-    std::uint8_t nub_x = 0x80u;
+-    std::uint8_t nub_y = 0x80u;
+-    deflect(left_x, left_y, nub_x, nub_y);
+-    analog_x += static_cast<int>(nub_x) - 0x80;
+-    analog_y += static_cast<int>(nub_y) - 0x80;
++    // The left stick is the PSP's nub: radial dead zones, the circle
++    // stretched to the nub's square range and rounded to its steps
++    // (input/stick.hpp), so a full diagonal reaches the corner as on a PSP.
++    const input::stick::Nub nub = input::stick::to_nub(
++        axis(SDL_GAMEPAD_AXIS_LEFTX), axis(SDL_GAMEPAD_AXIS_LEFTY),
++        {tuning.dead_zone, input::stick::kFullDeflection, tuning.stick_square});
++    analog_x += static_cast<int>(nub.x) - 0x80;
++    analog_y += static_cast<int>(nub.y) - 0x80;
+ }
+ 
+ // Background texture decoding (<prefix>_SYNC_TEXTURE_DECODE turns it off): a
+@@ -5630,8 +5634,9 @@ void VulkanRenderer::Impl::sample_pad(bool focused) {
+     PadState pad{};
+     pad.buttons = typed.buttons;
+     pad.extra = typed.extra;
+-    int analog_x = typed.stick_x;
+-    int analog_y = typed.stick_y;
++    // Keys push the stick to the end of the nub's range each way: 0 or 255.
++    int analog_x = input::stick::nub_offset(static_cast<float>(typed.stick_x) / 127.0f);
++    int analog_y = input::stick::nub_offset(static_cast<float>(typed.stick_y) / 127.0f);
+     // Camera keys push the second stick fully, as a right stick would: in
+     // the D-pad mode they press the D-pad instead, and with it off, nothing.
+     if (player.right_stick == settings::RightStick::Camera) {
+@@ -5649,9 +5654,12 @@ void VulkanRenderer::Impl::sample_pad(bool focused) {
+     // So do the on-screen controls.
+     if (impl_->touch_visible) {
+         pad.buttons |= impl_->touch.buttons();
+-        const input::touch::Point stick = impl_->touch.stick();
+-        analog_x += static_cast<int>(std::lround(stick.x * 127.0f));
+-        analog_y += static_cast<int>(std::lround(stick.y * 127.0f));
++        // The on-screen stick moves in a circle too.
++        const input::touch::Point touched = impl_->touch.stick();
++        input::stick::Vector stick{touched.x, touched.y};
++        if (player.stick_square) stick = input::stick::to_square(stick);
++        analog_x += input::stick::nub_offset(stick.x);
++        analog_y += input::stick::nub_offset(stick.y);
+     }
+ 
+     pad.analog_x = static_cast<std::uint8_t>(std::clamp(0x80 + analog_x, 0, 255));
+diff --git a/host/input/stick.cpp b/host/input/stick.cpp
+new file mode 100644
+index 0000000..5fb55cf
+--- /dev/null
++++ b/host/input/stick.cpp
+@@ -0,0 +1,41 @@
++#include "input/stick.hpp"
++
++#include <algorithm>
++#include <cmath>
++
++namespace portablekit::input::stick {
++
++Vector deflection(float x, float y, float dead_zone, float full) {
++    const float length = std::sqrt(x * x + y * y);
++    if (!(length > dead_zone) || !(length > 0.0f)) return {};
++    // A full point at or inside the dead zone would divide by nothing; past
++    // the dead zone is then full at once.
++    const float span = full - dead_zone;
++    const float amount = span > 1e-4f ? std::min((length - dead_zone) / span, 1.0f) : 1.0f;
++    return {x / length * amount, y / length * amount};
++}
++
++Vector to_square(Vector v) {
++    const float longer = std::max(std::fabs(v.x), std::fabs(v.y));
++    if (!(longer > 0.0f)) return {};
++    // Scaling by length / longer axis makes the longer axis the length: the
++    // circle of radius r goes to the square of half-side r.
++    const float scale = std::sqrt(v.x * v.x + v.y * v.y) / longer;
++    return {std::clamp(v.x * scale, -1.0f, 1.0f), std::clamp(v.y * scale, -1.0f, 1.0f)};
++}
++
++int nub_offset(float value) {
++    if (!(value == value)) return 0;  // NaN
++    value = std::clamp(value, -1.0f, 1.0f);
++    // The centre is 0x80, so there are 128 steps below it and 127 above:
++    // each side is scaled to its own end, and both ends are reached.
++    return static_cast<int>(std::lround(value * (value < 0.0f ? 128.0f : 127.0f)));
++}
++
++Nub to_nub(float x, float y, const Tuning &tuning) {
++    Vector v = deflection(x, y, tuning.dead_zone, tuning.full);
++    if (tuning.square) v = to_square(v);
++    return {static_cast<std::uint8_t>(0x80 + nub_offset(v.x)), static_cast<std::uint8_t>(0x80 + nub_offset(v.y))};
++}
++
++} // namespace portablekit::input::stick
+diff --git a/host/input/stick.hpp b/host/input/stick.hpp
+new file mode 100644
+index 0000000..3213e16
+--- /dev/null
++++ b/host/input/stick.hpp
+@@ -0,0 +1,64 @@
++#pragma once
++
++#include <cstdint>
++
++// A gamepad's analog stick as the PSP's analog nub. Pure arithmetic: no SDL.
++//
++// A PSP game reads the nub as two bytes, X and Y, each 0..255 with the centre
++// at 0x80, and the nub's range reaches its corners: pushed fully to a corner
++// it reads near 0 or 255 on both axes. Many games treat each axis on its own,
++// with a dead zone or a speed per axis. A modern stick's gate is a circle, so
++// at a full diagonal each axis is only cos 45 degrees, about 0.71 of its
++// travel. Passed on as it is, a full diagonal reaches a game as about 0.71 on
++// each axis: a game with a large per-axis dead zone sees a smaller push, or
++// nothing at all.
++//
++// So the stick is taken as a vector:
++//   1. dead zones on its length, not per axis (radial), so a diagonal is not
++//      cut or shortened more than a straight push: nothing within
++//      `dead_zone` of the centre, and full deflection from `full` outwards,
++//      with the length rescaled linearly in between;
++//   2. circle to square (`square`): the vector is stretched along its own
++//      direction until its longer axis equals its length, so a full push in
++//      any direction reaches the edge of the nub's square range, a full
++//      diagonal its corner. The direction is unchanged, and so is a straight
++//      push;
++//   3. each axis, -1..1, to a byte: -1 is 0, 0 is 0x80 and 1 is 255, rounded
++//      to the nearest step.
++namespace portablekit::input::stick {
++
++// The length from which a push counts as full: sticks that stop a little
++// short of the edge, worn or badly calibrated ones, still reach it.
++inline constexpr float kFullDeflection = 0.95f;
++
++struct Vector {
++    float x{};
++    float y{};
++};
++
++struct Tuning {
++    float dead_zone{0.15f};            // fraction of the radius that does nothing
++    float full{kFullDeflection};       // fraction of the radius that is a full push
++    bool square{true};                 // circle to square, step 2 above
++};
++
++// Step 1: the stick at x, y (each -1..1, right and down positive) after the
++// radial dead zones, same direction, length 0..1.
++[[nodiscard]] Vector deflection(float x, float y, float dead_zone, float full = kFullDeflection);
++
++// Step 2: a vector in the unit circle stretched onto the unit square.
++[[nodiscard]] Vector to_square(Vector v);
++
++// Step 3: one axis, -1..1, as an offset from the nub's centre 0x80:
++// -128..127, so 0x80 plus it is 0..255.
++[[nodiscard]] int nub_offset(float value);
++
++struct Nub {
++    std::uint8_t x{0x80u};
++    std::uint8_t y{0x80u};
++};
++
++// All three steps: the stick at x, y as the nub's two bytes.
++[[nodiscard]] Nub to_nub(float x, float y, const Tuning &tuning);
++
++} // namespace portablekit::input::stick
+diff --git a/host/settings/settings.cpp b/host/settings/settings.cpp
+index fb1e30e..54078af 100644
+--- a/host/settings/settings.cpp
++++ b/host/settings/settings.cpp
+@@ -253,6 +253,10 @@ const std::vector<Field> &fields() {
+          [](Settings &s, const std::string &t) { return parse_float(t, 0.0f, 0.9f, s.dead_zone); },
+          [](const Settings &s) { return format_float(s.dead_zone); },
+          [](Settings &s, const char *t) { s.dead_zone = variable_float(t, 0.15f, 0.0f, 0.9f); }},
++        {"input.stick_square", "NO_STICK_SQUARE",
++         [](Settings &s, const std::string &t) { return parse_bool(t, s.stick_square); },
++         [](const Settings &s) { return std::string(s.stick_square ? "1" : "0"); },
++         [](Settings &s, const char *t) { s.stick_square = !variable_flag(t); }},
+         {"input.trigger", "PAD_TRIGGER",
+          [](Settings &s, const std::string &t) { return parse_float(t, 0.05f, 1.0f, s.trigger); },
+          [](const Settings &s) { return format_float(s.trigger); },
+diff --git a/host/settings/settings.hpp b/host/settings/settings.hpp
+index 17058ff..9405fe7 100644
+--- a/host/settings/settings.hpp
++++ b/host/settings/settings.hpp
+@@ -73,6 +73,10 @@ struct Settings {
+     // where cross confirms, east where circle does.
+     bool confirm_south{};
+     float dead_zone{0.15f};
++    // The left stick's circle stretched to the PSP nub's square range, so a
++    // full diagonal reaches the corner (input/stick.hpp). Off passes the
++    // circle on as it is.
++    bool stick_square{true};
+     float trigger{0.25f};
+     // What LT/RT (L2/R2) press past the trigger point: 0 is L and R like the
+     // shoulders, n the game's GameProfile::trigger_profiles[n - 1].
+diff --git a/host/ui/menu.cpp b/host/ui/menu.cpp
+index cb7bf05..2e8c18f 100644
+--- a/host/ui/menu.cpp
++++ b/host/ui/menu.cpp
+@@ -724,6 +724,15 @@ void Menu::controls() {
+         s.dead_zone = static_cast<float>(dead_zone) / 100.0f;
+         settings::save();
+     }
++    if (toggle_row("Full diagonals", s.stick_square,
++                   options_for("input.stick_square",
++                               "A full push of the left stick in any direction reaches the edge of the PSP stick's "
++                               "square range, a diagonal its corner, as on a PSP. Off: a round stick's diagonal "
++                               "reaches only about 70% on each axis, which some games read as a smaller push or "
++                               "none."))) {
++        s.stick_square = !s.stick_square;
++        settings::save();
++    }
+     int trigger = static_cast<int>(std::lround(s.trigger * 100.0f));
+     if (slider_row("Trigger point", trigger, 5, 100, 5, "%d%%",
+                    options_for("input.trigger", "How far LT/RT (L2/R2) travel before they press anything."))) {
+@@ -943,6 +952,7 @@ void Menu::controls() {
+         };
+         restore("input.confirm", s.confirm_south, d.confirm_south);
+         restore("input.dead_zone", s.dead_zone, d.dead_zone);
++        restore("input.stick_square", s.stick_square, d.stick_square);
+         restore("input.trigger", s.trigger, d.trigger);
+         restore("input.trigger_profile", s.trigger_profile, d.trigger_profile);
+         restore("input.right_stick", s.right_stick, d.right_stick);
+diff --git a/tests/input_tests.cpp b/tests/input_tests.cpp
+index 7875ea0..f68357b 100644
+--- a/tests/input_tests.cpp
++++ b/tests/input_tests.cpp
+@@ -1,7 +1,12 @@
+-// Keyboard and mouse bindings, without SDL or game data.
++// Keyboard and mouse bindings, and the stick's mapping to the PSP nub,
++// without SDL or game data.
+ #include "input/bindings.hpp"
++#include "input/stick.hpp"
+ 
++#include <algorithm>
+ #include <cmath>
++#include <cstdlib>
++#include <limits>
+ #include <cstdint>
+ #include <iostream>
+ #include <array>
+@@ -139,6 +144,84 @@ void test_mouse_turn() {
+     check(std::fabs(t.yaw + 0.5f) < 1e-5f && std::fabs(t.pitch - 1.0f) < 1e-5f, "inversion and the aim's share apply");
+ }
+ 
++// The stick at `degrees` (counterclockwise from right, up being negative Y as
++// on a gamepad) and `length`, as the nub's bytes.
++stick::Nub nub_at(float degrees, float length, bool square = true) {
++    const float r = degrees * 3.14159265f / 180.0f;
++    return stick::to_nub(length * std::cos(r), -length * std::sin(r), {0.15f, stick::kFullDeflection, square});
++}
++
++bool is(stick::Nub n, int x, int y) { return n.x == x && n.y == y; }
++
++void test_stick() {
++    check(stick::nub_offset(-1.0f) == -128 && stick::nub_offset(1.0f) == 127 && stick::nub_offset(0.0f) == 0,
++          "each end of an axis reaches the end of the byte: 0 and 255 about 0x80");
++    check(stick::nub_offset(-3.0f) == -128 && stick::nub_offset(3.0f) == 127 && stick::nub_offset(std::numeric_limits<float>::quiet_NaN()) == 0,
++          "out of range is clamped, NaN is the centre");
++    check(stick::nub_offset(0.5f) == 64 && stick::nub_offset(-0.5f) == -64, "rounded to the nearest step");
++
++    // Full tilt: every direction reaches the edge of the square, a diagonal
++    // its corner; the direction is kept.
++    check(is(nub_at(0.0f, 1.0f), 255, 128), "full right is 255");
++    check(is(nub_at(90.0f, 1.0f), 128, 0), "full up is 0");
++    check(is(nub_at(180.0f, 1.0f), 0, 128), "full left is 0, not 1");
++    check(is(nub_at(270.0f, 1.0f), 128, 255), "full down is 255");
++    check(is(nub_at(45.0f, 1.0f), 255, 0) && is(nub_at(135.0f, 1.0f), 0, 0) && is(nub_at(225.0f, 1.0f), 0, 255) &&
++              is(nub_at(315.0f, 1.0f), 255, 255),
++          "a full diagonal is the nub's corner");
++    // tan 22.5 = 0.4142: 53 steps from the centre on the short axis.
++    check(is(nub_at(22.5f, 1.0f), 255, 75), "22.5 degrees: the long axis full, the short one at tan 22.5");
++    check(is(nub_at(67.5f, 1.0f), 181, 0), "67.5 degrees: the same, the other way round");
++
++    // Without the square, the circle is passed on as it is (cos 45 = 0.7071).
++    check(is(nub_at(45.0f, 1.0f, false), 218, 37), "the switch off: a full diagonal is about 0.71 on each axis");
++    check(is(nub_at(0.0f, 1.0f, false), 255, 128), "and a straight push is unchanged");
++
++    // The dead zone is on the length, so a diagonal is never cut where a
++    // straight push of the same length is not.
++    check(is(nub_at(45.0f, 0.14f), 128, 128) && is(nub_at(0.0f, 0.14f), 128, 128), "inside the dead zone: the centre");
++    const stick::Nub small = nub_at(45.0f, 0.2f);
++    check(small.x > 128 && small.y < 128 && small.x - 128 == 128 - small.y,
++          "just past the dead zone a diagonal moves both axes equally (a per-axis dead zone would cut both)");
++    // Half tilt: (0.5 - 0.15) / (0.95 - 0.15) = 0.4375 of the way, on each axis
++    // at a diagonal once squared.
++    check(is(nub_at(45.0f, 0.5f), 184, 72) && is(nub_at(0.0f, 0.5f), 184, 128), "half tilt: the same reach any way");
++    check(is(nub_at(0.0f, 0.96f), 255, 128) && is(nub_at(45.0f, 0.96f), 255, 0),
++          "a stick stopping a little short of its edge still reaches full");
++    check(is(nub_at(45.0f, 1.3f), 255, 0), "beyond the circle (a squarish gate) stays at the corner");
++
++    // Over every angle and length: the square keeps the direction, makes the
++    // longer axis the length, and never moves backwards as the push grows.
++    bool direction = true;
++    bool longer_is_length = true;
++    bool monotonic = true;
++    for (int degrees = 0; degrees < 360; degrees += 3) {
++        const float r = static_cast<float>(degrees) * 3.14159265f / 180.0f;
++        int last_reach = 0;
++        for (int step = 0; step <= 20; ++step) {
++            const float length = static_cast<float>(step) / 20.0f;
++            const stick::Vector v = stick::deflection(length * std::cos(r), length * std::sin(r), 0.15f);
++            const stick::Vector q = stick::to_square(v);
++            const float v_length = std::hypot(v.x, v.y);
++            if (v_length > 1e-3f) {
++                direction = direction && std::fabs(std::atan2(q.y, q.x) - std::atan2(v.y, v.x)) < 1e-4f;
++                longer_is_length =
++                    longer_is_length && std::fabs(std::max(std::fabs(q.x), std::fabs(q.y)) - v_length) < 1e-4f;
++            }
++            const stick::Nub n = nub_at(static_cast<float>(degrees), length);
++            const int reach = std::max(std::abs(n.x - 128), std::abs(n.y - 128));
++            monotonic = monotonic && reach >= last_reach;
++            last_reach = reach;
++        }
++    }
++    check(direction, "the square keeps the stick's direction");
++    check(longer_is_length, "the square's longer axis is the stick's length");
++    check(monotonic, "a bigger push never reaches less far");
++
++    const stick::Vector at_once = stick::deflection(0.96f, 0.0f, 0.95f, 0.95f);
++    check(at_once.x == 1.0f && at_once.y == 0.0f, "a dead zone at the full point: full at once past it");
++}
++
+ } // namespace
+ 
+ void test_keep_saved() {
+@@ -174,6 +257,7 @@ int main() {
+     test_assign();
+     test_read();
+     test_mouse_turn();
++    test_stick();
+     std::cout << (failures ? "FAIL" : "PASS") << ": input bindings (" << failures << " failures)\n";
+     return failures ? 1 : 0;
+ }
+-- 
+2.53.0.windows.1
+

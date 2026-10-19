@@ -1,7 +1,7 @@
 From 2005ae552b0e021fd0cd1e574bb18b1caec90881 Mon Sep 17 00:00:00 2001
 From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
 Date: Sun, 18 Oct 2026 22:00:55 +1030
-Subject: [PATCH 16/27] Input script: a speed step
+Subject: [PATCH 16/28] Input script: a speed step
 
 `speed unlimited` and `speed normal` switch the game speed as the menu's
 Game speed option does, without saving it, so a scripted run can reach a

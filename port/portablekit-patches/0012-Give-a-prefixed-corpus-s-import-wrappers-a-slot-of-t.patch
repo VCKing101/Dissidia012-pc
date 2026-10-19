@@ -1,7 +1,7 @@
 From 754c102ec2750c286a340f14a0a8b9ecc6e316fe Mon Sep 17 00:00:00 2001
 From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
 Date: Sun, 18 Oct 2026 18:35:54 +1030
-Subject: [PATCH 12/27] Give a prefixed corpus's import wrappers a slot of
+Subject: [PATCH 12/28] Give a prefixed corpus's import wrappers a slot of
  their own
 
 Import wrappers call Runtime::invoke_import_cached with a slot that

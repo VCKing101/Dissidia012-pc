@@ -1,7 +1,7 @@
 From 0dfc83f9af04b133696a7167f93e50b8d6932601 Mon Sep 17 00:00:00 2001
 From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
 Date: Mon, 19 Oct 2026 09:29:47 +1030
-Subject: [PATCH 27/27] Interface: pictures of the port's own over the running
+Subject: [PATCH 27/28] Interface: pictures of the port's own over the running
  game
 
 A port that extends one of the game's screens needs to show it there: a
