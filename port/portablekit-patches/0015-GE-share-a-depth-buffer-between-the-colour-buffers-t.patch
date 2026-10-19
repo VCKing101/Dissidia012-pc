@@ -1,7 +1,7 @@
 From 6c0f01c41cd4f503b15a78da97a574ceac3807f2 Mon Sep 17 00:00:00 2001
 From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
 Date: Sun, 18 Oct 2026 20:11:33 +1030
-Subject: [PATCH 15/28] GE: share a depth buffer between the colour buffers
+Subject: [PATCH 15/29] GE: share a depth buffer between the colour buffers
  that name it
 
 Each render target had its own depth image, and the depth buffer address

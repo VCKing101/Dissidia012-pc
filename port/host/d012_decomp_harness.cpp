@@ -269,7 +269,7 @@ void run_decomp(Machine &m, AllegrexContext &c, const CallState &in, DecompFunct
     Guest g = make_guest(m, c.gpr[29]);
     GuestRegs out{};
     run(&g, in, out);
-    if (returns == Returns::Integer) {
+    if (returns == Returns::Integer || returns == Returns::Integer64) {
         c.gpr[2] = out.v0;
         c.gpr[3] = out.v1;
     } else if (returns == Returns::Float) {
@@ -438,8 +438,10 @@ void compare(const char *name, std::uint32_t address, Returns returns, DecompFun
     }
 
     std::vector<std::string> problems;
-    if (returns == Returns::Integer && (a.gpr[2] != b.gpr[2]))
+    if ((returns == Returns::Integer || returns == Returns::Integer64) && (a.gpr[2] != b.gpr[2]))
         problems.push_back("v0 " + hex(a.gpr[2]) + " vs " + hex(b.gpr[2]));
+    if (returns == Returns::Integer64 && (a.gpr[3] != b.gpr[3]))
+        problems.push_back("v1 " + hex(a.gpr[3]) + " vs " + hex(b.gpr[3]));
     if (returns == Returns::Float && std::memcmp(&a.fpr[0], &b.fpr[0], 4) != 0) problems.push_back("f0 differs");
     for (int r : {16, 17, 18, 19, 20, 21, 22, 23, 28, 29, 30}) {
         if (a.gpr[r] != b.gpr[r])
@@ -495,6 +497,7 @@ void compare(const char *name, std::uint32_t address, Returns returns, DecompFun
         ++h.same;
         line << "SAME (" << written << " bytes written, " << log_a.size() << " system calls";
         if (returns == Returns::Integer) line << ", v0=" << hex(a.gpr[2]);
+        if (returns == Returns::Integer64) line << ", v0:v1=" << hex(a.gpr[2]) << ":" << hex(a.gpr[3]);
         line << ")";
     } else {
         ++h.different;
@@ -615,6 +618,12 @@ void verify_probe(const char *name, std::uint32_t address, Returns returns, Deco
     AllegrexContext entry{};
     entry.gpr = caller.gpr;
     entry.fpr = caller.fpr;
+    // The VFPU prefixes as between any two instructions (each one consumes
+    // them): the identity swizzle, no destination saturation or mask. Zero
+    // would read every source lane as x.
+    entry.vfpu_ctrl[0] = 0xE4u;
+    entry.vfpu_ctrl[1] = 0xE4u;
+    entry.vfpu_ctrl[2] = 0u;
     load_arguments(entry, arguments);
     if (h.live == nullptr) return;
     compare(name, address, returns, run, *h.live, entry);

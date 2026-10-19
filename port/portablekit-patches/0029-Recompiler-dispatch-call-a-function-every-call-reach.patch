@@ -1,0 +1,82 @@
+From ed844caabb7e2e1ca2f6c4ae5a134565ab5deae6 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Mon, 19 Oct 2026 21:36:06 +1030
+Subject: [PATCH 29/29] Recompiler: --dispatch-call, a function every call
+ reaches by lookup
+
+A call to a function in the caller's own unit is a plain goto in the
+generated code, so a host function registered at that address with
+Runtime::register_function, a port's replacement of a game function, only
+took the calls from other units. A game whose function is called from its
+own unit could not replace it.
+
+psp_recomp --dispatch-call ADDR (repeatable) makes every fixed JAL to ADDR
+a cross-unit call through Runtime::invoke_chained_call, the runtime's lookup,
+so it reaches whatever is registered there; with nothing registered the
+original runs as before. J, branches and computed jumps to it are unchanged.
+Only the calls to the listed addresses change in the generated code.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ tools/codegen_main.cpp | 24 ++++++++++++++++++++++--
+ 1 file changed, 22 insertions(+), 2 deletions(-)
+
+diff --git a/tools/codegen_main.cpp b/tools/codegen_main.cpp
+index 865e50f..589d1ee 100644
+--- a/tools/codegen_main.cpp
++++ b/tools/codegen_main.cpp
+@@ -946,6 +946,16 @@ std::string branch_condition(const psprecomp::DecodedInstruction &d) {
+ // point and its units, so corpora stay distinguishable in one process.
+ std::string g_symbol_prefix = "recomp";
+ 
++// Functions whose fixed calls always leave through the runtime's lookup
++// (--dispatch-call). A call to a function in the same unit is otherwise a
++// plain goto, so a host function registered at that address with
++// Runtime::register_function (a port's replacement of a game function) would
++// only take the calls that come from other units. Listed here, every JAL to
++// the address goes through Runtime::invoke_chained_call as a cross-unit call
++// does, and reaches whatever is registered there. J, branches and computed
++// jumps to it are unchanged.
++std::set<std::uint32_t> g_dispatch_calls;
++
+ std::string generated_unit_cpp_name(std::uint32_t unit) {
+     std::ostringstream name;
+     name << g_symbol_prefix << "_unit_" << std::setfill('0') << std::setw(4) << unit;
+@@ -1173,7 +1183,8 @@ std::string emit_function_source(const GeneratedFunctionInput &function,
+                     if (decoded.kind == psprecomp::OpcodeKind::J) {
+                         emit_target(body, target, function.entry_labels, "    ", function.executable_base, function.unit_span_bytes, function.direct_entry_ids, function.import_stubs, function.unit_indices);
+                     } else if (function.entry_labels.contains(target) &&
+-                               (function.import_stubs == nullptr || !function.import_stubs->contains(target))) {
++                               (function.import_stubs == nullptr || !function.import_stubs->contains(target)) &&
++                               !g_dispatch_calls.contains(target)) {
+                         // Fixed same-unit JAL: the destination is already a C++
+                         // label. Going through ctx.pc + LOCAL_DISPATCH needlessly
+                         // re-decodes a dense entry id and burns the local-transfer
+@@ -1193,7 +1204,10 @@ std::string emit_function_source(const GeneratedFunctionInput &function,
+                         }
+                         // Otherwise run the callee inline and resume locally only
+                         // if it came back to our return address.
+-                        const bool direct_unit = function.unit_span_bytes != 0u &&
++                        // A --dispatch-call target takes the runtime's lookup, never a
++                        // direct unit chain.
++                        const bool direct_unit = !g_dispatch_calls.contains(target) &&
++                            function.unit_span_bytes != 0u &&
+                             target >= function.executable_base &&
+                             (function.unit_indices == nullptr || function.unit_indices->contains(
+                                 (target - function.executable_base) / function.unit_span_bytes));
+@@ -1851,6 +1865,12 @@ int main(int argc, char **argv) {
+                                           static_cast<std::uint32_t>(std::stoul(range.substr(dash + 1), nullptr, 0))});
+                     continue;
+                 }
++                // A function whose calls must all reach the runtime's lookup,
++                // for a host replacement (g_dispatch_calls). Repeatable.
++                if (option == "--dispatch-call" && i + 1 < argc) {
++                    g_dispatch_calls.insert(static_cast<std::uint32_t>(std::stoul(argv[++i], nullptr, 0)));
++                    continue;
++                }
+                 positional.emplace_back(option);
+             }
+             const std::uint32_t load_base = !positional.empty()
+-- 
+2.53.0.windows.1
+

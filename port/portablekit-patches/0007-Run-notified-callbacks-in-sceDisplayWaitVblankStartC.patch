@@ -1,7 +1,7 @@
 From a9568cb9233a55ee32e7428bc4a97fdb9b417de3 Mon Sep 17 00:00:00 2001
 From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
 Date: Sun, 18 Oct 2026 18:51:20 +1030
-Subject: [PATCH 07/28] Run notified callbacks in sceDisplayWaitVblankStartCB
+Subject: [PATCH 07/29] Run notified callbacks in sceDisplayWaitVblankStartCB
 
 The CB forms of the vblank wait did not run the thread's notified
 callbacks; the comment said the kernel would run them at the next

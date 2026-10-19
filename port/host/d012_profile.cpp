@@ -85,8 +85,9 @@ const GameProfile &game() {
         .adhoc_product_code = "ULUS10566",
 
         // L2 and R2, which a PSP lacks, switch the loading screen's D-pad
-        // between its menu and the battle music (d012_bgm_playlist.cpp).
-        .extra_buttons = input::kExtraL2 | input::kExtraR2,
+        // between its menu and the battle music (d012_bgm_playlist.cpp); R3
+        // recentres the battle camera (d012_camera.cpp).
+        .extra_buttons = input::kExtraL2 | input::kExtraR2 | input::kExtraR3,
 
         .register_extra_hle = &d012::register_extra_hle,
         .patch_loaded_image = &d012::patch_loaded_image,

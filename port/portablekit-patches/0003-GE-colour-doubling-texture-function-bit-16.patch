@@ -1,7 +1,7 @@
 From 4b7ce2d0f7d96a156f47bf418e2601c8cb7fa6f1 Mon Sep 17 00:00:00 2001
 From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
 Date: Sun, 18 Oct 2026 17:52:44 +1030
-Subject: [PATCH 03/28] GE: colour doubling (texture function bit 16)
+Subject: [PATCH 03/29] GE: colour doubling (texture function bit 16)
 
 The texture function word carries a colour doubling bit (0xC9, bit 16) that
 was ignored. Games that draw textured quads with a vertex colour of 0x80 and

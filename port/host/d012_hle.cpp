@@ -2,6 +2,7 @@
 // profile's hooks. MIT licence; see port/README.md.
 
 #include "d012_bgm_playlist.hpp"
+#include "d012_camera.hpp"
 #include "d012_hle.hpp"
 #include "d012_mods.hpp"
 
@@ -95,6 +96,8 @@ void register_extra_hle(portablekit::HleRegistrar &hle) {
     mods::install(hle);
     // The loading screen's music choice by series (d012_bgm_playlist.cpp).
     playlist::install(hle);
+    // The right-stick battle camera and R3 (d012_camera.cpp).
+    camera::install(hle);
 }
 
 void patch_loaded_image(psprecomp::Runtime &runtime, const psprecomp::Elf32Image &elf) {

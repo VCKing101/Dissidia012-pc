@@ -37,7 +37,8 @@ struct CallState {
     std::array<float, 32> fpr{};
 };
 
-enum class Returns { Nothing, Integer, Float };
+// Integer64: a 64-bit result in $v0:$v1, both compared.
+enum class Returns { Nothing, Integer, Float, Integer64 };
 enum class Module { Main, BattleOverlay };
 
 // Runs the decompiled function on `g` with the arguments in `in`; puts what

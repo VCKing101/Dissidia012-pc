@@ -74,9 +74,10 @@ git -C tools/local/port/PortableKit worktree add ../PortableKit-recomp -b dissid
     "-DD012_WORK_DIR=$PWD/build/port/recomp" -DPSPRECOMP_GENERATED_JOBS=4
 .\tools\port\pk_cmake.cmd --build tools/local/port/build-d012-recomp --target psp_recomp -j4
 
-# 2. Main corpus (EBOOT.ELF from prepare_game_dir.py)
+# 2. Main corpus (EBOOT.ELF from prepare_game_dir.py), with --dispatch-call for the main rows of
+#    port/config/dispatch-calls.txt (overlay_meta.py passes the overlay rows itself)
 tools\local\port\build-d012-recomp\portablekit\psp_recomp.exe build/port/game/EBOOT.ELF `
-    --auto build/port/recomp/generated 0x08804000
+    --auto build/port/recomp/generated 0x08804000 --dispatch-call 0x08872138
 
 # 3. Overlays and the disc PRX: meta.txt plus corpus, into build/port/recomp/overlays
 New-Item -ItemType Directory -Force build/port/ovl, build/port/prx

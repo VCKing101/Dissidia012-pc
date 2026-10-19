@@ -42,7 +42,9 @@ interpreter build's build/port/overlays is left alone, because a meta.txt there
 would add overlay targets to that build). --recompile also runs psp_recomp on
 the ELF into that directory with the matching symbol prefix; --recompiler names
 the psp_recomp to use (default: the recompiled build's, else the interpreter
-build's).
+build's), and passes it --dispatch-call for that overlay's rows of
+port/config/dispatch-calls.txt (functions with a native override that must
+take the calls from their own unit too).
 """
 
 import argparse
@@ -61,6 +63,18 @@ RECOMPILERS = [os.path.join(ROOT, "tools", "local", "port", build, "portablekit"
 PRX_BASE = 0x09B81000  # where port/host/d012_prx.cpp's block allocation places the PRX
 SHT_PSP_REL = 0x700000A0
 R_MIPS_32, R_MIPS_26, R_MIPS_HI16, R_MIPS_LO16 = 2, 4, 5, 6
+
+
+def dispatch_calls(name):
+    """--dispatch-call arguments for an overlay (or "main") from port/config/dispatch-calls.txt."""
+    args = []
+    path = os.path.join(ROOT, "port", "config", "dispatch-calls.txt")
+    if os.path.isfile(path):
+        for line in open(path, encoding="utf-8"):
+            words = line.split("#", 1)[0].split()
+            if len(words) >= 2 and words[0] == name:
+                args += ["--dispatch-call", words[1]]
+    return args
 
 
 def fnv1a64(data):
@@ -206,7 +220,8 @@ def main():
                       f"hash=0x{digest:016X}\nsource={os.path.basename(path)}\n")
         print(f"{name}: base {base:#010x}, size {len(image)}, code_size {code_size}, hash {digest:#018x} -> {target}")
         if options.recompile:
-            subprocess.run([recompiler, path, "--auto", target, f"0x{base:08X}", "--prefix", prefix], check=True)
+            subprocess.run([recompiler, path, "--auto", target, f"0x{base:08X}", "--prefix", prefix]
+                           + dispatch_calls(name), check=True)
     return 0
 
 

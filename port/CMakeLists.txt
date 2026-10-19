@@ -31,12 +31,17 @@ portablekit_add_game(D012Native
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_nintendo_stream.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_decomp_harness.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_decomp_bgm.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_decomp_pad.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_bgm_playlist.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_camera.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_loading_layout.cpp")
 target_include_directories(D012Native PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/host")
 
 # Decompiled game functions (C), run as native overrides (port/decomp/).
 enable_language(C)
 add_library(d012_decomp STATIC "${CMAKE_CURRENT_SOURCE_DIR}/decomp/bgm_table.c"
-                               "${CMAKE_CURRENT_SOURCE_DIR}/decomp/bgm_selector.c")
+                               "${CMAKE_CURRENT_SOURCE_DIR}/decomp/bgm_selector.c"
+                               "${CMAKE_CURRENT_SOURCE_DIR}/decomp/battle_camera.c"
+                               "${CMAKE_CURRENT_SOURCE_DIR}/decomp/pad.c"
+                               "${CMAKE_CURRENT_SOURCE_DIR}/decomp/pad_walk.c")
 target_link_libraries(D012Native PRIVATE d012_decomp)

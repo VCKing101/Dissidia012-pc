@@ -1,0 +1,10 @@
+# Game functions whose every call must reach the runtime's lookup, so that a
+# native override registered there (port/host/d012_decomp_*.cpp) replaces the
+# calls from its own 16 KiB unit too. Passed to psp_recomp as --dispatch-call
+# when the corpus is generated: tools/port/overlay_meta.py --recompile reads
+# the overlay rows, and the main corpus is generated with the main rows
+# (docs/port/analog-movement.md, "Regenerating the corpus").
+#
+# module  address     function
+main      0x08872138  # PadMgr_applyDeadZone (pad module): the port keeps a radial-dead-zone stick beside it
+battle    0x08B38A0C  # the world map walker's input direction: the port's analog walk
