@@ -23,6 +23,8 @@ import threading
 import time
 from typing import Optional
 
+from . import nintendo
+
 TOOL_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(TOOL_DIR)))
 EXE = ".exe" if os.name == "nt" else ""
@@ -247,7 +249,15 @@ class Decoder:
 
     def info(self, path: str, decode: bool = True) -> dict:
         """What the editor and the validator need about a file: rate,
-        channels, samples (exact, from the decoded WAV), tags, loop tags."""
+        channels, samples (exact, from the decoded WAV), tags, loop tags.
+        For a BRSTM, BCSTM or BFSTM, "stream" is its header (nintendo.py)
+        and "loop_tags" the header's loop, which the port's "auto" takes."""
+        stream = None
+        if nintendo.kind_of(path):
+            try:
+                stream = nintendo.read_header(path)
+            except (nintendo.StreamError, OSError) as error:
+                return {"error": str(error)}
         details = dict(self.probe(path))
         if details.get("error"):
             return details
@@ -259,5 +269,13 @@ class Decoder:
             # the port's loop samples count in.
             details["rate"] = exact["rate"]
             details["decoded_channels"] = exact["channels"]
-        details["loop_tags"] = loop_tags(details.get("tags") or {})
+        if stream is not None:
+            details["stream"] = {key: stream[key] for key in ("format", "big_endian", "version", "codec_name", "channels",
+                                                              "rate", "loop_flag", "loop_start", "samples",
+                                                              "loop_problem")}
+            details["stream"]["description"] = nintendo.describe(stream)
+            # FFmpeg's own "loop_start" tag for these files is in microseconds; the header is in samples.
+            details["loop_tags"] = dict(stream["loop"], source=f"the {stream['format']} header") if stream["loop"]                 else None
+        else:
+            details["loop_tags"] = loop_tags(details.get("tags") or {})
         return details

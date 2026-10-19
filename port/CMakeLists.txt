@@ -28,6 +28,7 @@ portablekit_add_game(D012Native
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_prx.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_json.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_mods.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_nintendo_stream.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_decomp_harness.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_decomp_bgm.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_bgm_playlist.cpp"

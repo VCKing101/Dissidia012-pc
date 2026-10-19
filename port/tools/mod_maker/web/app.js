@@ -428,7 +428,7 @@ function renderTrackEditor() {
   let line = `File: ${t.file}`;
   if (info && !info.error) {
     const ch = info.channels === 1 ? "mono" : info.channels === 2 ? "stereo" : `${info.channels} channels`;
-    line += ` · ${info.codec} · ${info.rate} Hz ${ch}`;
+    line += ` · ${info.stream ? info.stream.description : info.codec} · ${info.rate} Hz ${ch}`;
     if (info.samples) line += ` · ${formatTime(info.samples, info.rate)} · ${info.samples.toLocaleString()} samples`;
     line += info.rate === 44100 ? " · the port plays it at its own rate" : " · the port resamples it to 44,100 Hz (loop points to the nearest frame)";
   } else if (info && info.error) line += ` · cannot be read: ${info.error}`;
@@ -436,7 +436,12 @@ function renderTrackEditor() {
   const loop = loopOf(t);
   document.querySelectorAll('input[name="loop-mode"]').forEach((r) => { r.checked = r.value === loop.mode; });
   const tags = info && info.loop_tags;
-  $("auto-note").textContent = tags ? `(the file's loop tags: ${tags.start} to ${tags.end ?? "the end"})` : "(no loop tags in the file, so the whole file)";
+  const stream = info && info.stream;
+  $("auto-note").textContent = tags && tags.source
+    ? `(from the file: ${tags.source}'s loop, ${tags.start.toLocaleString()} to ${tags.end.toLocaleString()}; pick Custom loop to change it)`
+    : tags ? `(the file's loop tags: ${tags.start} to ${tags.end ?? "the end"})`
+    : stream ? `(the ${stream.format} header has ${stream.loop_problem ? "a broken loop" : "no loop"}, so the whole file)`
+    : "(no loop tags in the file, so the whole file)";
   renderLoopFields();
   renderTrackErrors();
 }

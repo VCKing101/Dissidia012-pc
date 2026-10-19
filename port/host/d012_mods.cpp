@@ -7,6 +7,7 @@
 #include "d012_mods.hpp"
 
 #include "d012_json.hpp"
+#include "d012_nintendo_stream.hpp"
 
 #include "audio/host_audio.hpp"
 #include "hle/hle_common.hpp"
@@ -69,7 +70,8 @@ bool valid_key(std::string_view key) {
 }
 
 const std::set<std::string> &audio_extensions() {
-    static const std::set<std::string> extensions = {".mp3", ".ogg", ".oga", ".opus", ".flac", ".wav"};
+    static const std::set<std::string> extensions = {".mp3", ".ogg",   ".oga",   ".opus",  ".flac",
+                                                     ".wav", ".brstm", ".bcstm", ".bfstm"};
     return extensions;
 }
 
@@ -80,6 +82,7 @@ public:
     void error(const Value *at, const std::string &what) { line(at, "error", what); ++errors_; }
     void warning(const Value *at, const std::string &what) { line(at, "warning", what); }
     [[nodiscard]] int errors() const noexcept { return errors_; }
+    [[nodiscard]] const std::string &where() const noexcept { return where_; }
 
 private:
     void line(const Value *at, const char *kind, const std::string &what) {
@@ -223,8 +226,15 @@ std::optional<std::filesystem::path> track_file(const Value &value, const std::f
         }
     }
     const std::string extension = lower(utf8(relative.extension()));
+    if (extension == ".bwav" || extension == ".nus3audio") {
+        report.error(&value, context + " \"file\" is a " + extension.substr(1u) +
+                                 " file, which is not supported (FFmpeg cannot decode it); use the BRSTM version of "
+                                 "the track");
+        return std::nullopt;
+    }
     if (!audio_extensions().contains(extension)) {
-        report.error(&value, context + " \"file\" must be .mp3, .ogg, .opus, .flac or .wav, not \"" + extension + "\"");
+        report.error(&value, context + " \"file\" must be .mp3, .ogg, .opus, .flac, .wav, .brstm, .bcstm or .bfstm, "
+                                       "not \"" + extension + "\"");
         return std::nullopt;
     }
     const std::filesystem::path full = folder / relative;
@@ -234,6 +244,39 @@ std::optional<std::filesystem::path> track_file(const Value &value, const std::f
         return std::nullopt;
     }
     return full;
+}
+
+// A BRSTM, BCSTM or BFSTM track: its header is checked, and "loop": "auto"
+// takes the header's loop (from its loop start to the end of the stream, the
+// format's loop end) or, without a loop flag, the whole file. An explicit
+// loop in the manifest is kept as it is.
+bool read_stream_header(const Value &file, const std::filesystem::path &path, audio::HostTrack &track, Report &report,
+                        const std::string &context) {
+    if (!nintendo_stream::is_stream_extension(lower(utf8(path.extension())))) return true;
+    std::string error;
+    const auto info = nintendo_stream::read_header(path, error);
+    if (!info) {
+        report.error(&file, context + " \"file\" " + file.text + ": " + error);
+        return false;
+    }
+    if (track.loop != audio::HostTrack::Loop::Auto) return true;
+    if (!info->loop_flag) {
+        track.loop = audio::HostTrack::Loop::Whole;
+        return true;
+    }
+    if (info->loop_start >= info->samples) {
+        report.warning(&file, context + ": the " + info->format + " header's loop starts at sample " +
+                                  std::to_string(info->loop_start) + ", at or past the end of its " +
+                                  std::to_string(info->samples) + " samples; the whole file loops");
+        track.loop = audio::HostTrack::Loop::Whole;
+        return true;
+    }
+    track.loop = audio::HostTrack::Loop::Range;
+    track.loop_start = {audio::HostLoopPoint::Unit::Samples, info->loop_start};
+    track.loop_end.reset();  // the end of the stream, which is where the format's loop ends
+    std::cout << "[mods] " << report.where() << ", " << context << ": the " << info->format << " header's loop, samples " << info->loop_start
+              << " to " << info->samples << " at " << info->rate << " Hz" << std::endl;
+    return true;
 }
 
 struct LoadedTrack {
@@ -377,7 +420,8 @@ LoadedMod read_mod(const std::filesystem::path &folder) {
             }
             LoadedTrack track;
             const auto path = track_file(*file, folder, report, track_context);
-            if (!path || !read_loop(item.find("loop"), track.audio, report, track_context)) {
+            if (!path || !read_loop(item.find("loop"), track.audio, report, track_context) ||
+                !read_stream_header(*file, *path, track.audio, report, track_context)) {
                 report.error(&item, track_context + " is left out");
                 continue;
             }

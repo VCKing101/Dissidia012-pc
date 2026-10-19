@@ -106,13 +106,15 @@ Members the port does not know are reported as warnings and ignored, so a newer 
 | --- | --- | --- |
 | `key` | yes | Unique in the whole mod (not only in its series), same rules as `id` |
 | `title` | yes | Shown to the player, 1 to 64 bytes |
-| `file` | yes | The audio file, a path relative to the mod's folder with `/` between folders. It must stay inside the folder (no `..`, no absolute path) and end in `.mp3`, `.ogg`, `.oga`, `.opus`, `.flac` or `.wav` |
+| `file` | yes | The audio file, a path relative to the mod's folder with `/` between folders. It must stay inside the folder (no `..`, no absolute path) and end in `.mp3`, `.ogg`, `.oga`, `.opus`, `.flac`, `.wav`, `.brstm`, `.bcstm` or `.bfstm` |
 | `loop` | no (`"auto"`) | How the track loops, below |
 
 `loop` is one of:
 
 - `"auto"`: the file's own loop tags if it has them (`LOOPSTART` with `LOOPLENGTH` or `LOOPEND`, in samples, as
-  Ogg and FLAC tools write them; `LOOPEND` is taken as the first sample after the loop), else `"whole"`.
+  Ogg and FLAC tools write them; `LOOPEND` is taken as the first sample after the loop), else `"whole"`. For a
+  BRSTM, BCSTM or BFSTM, the loop in its header (section 3): from its loop start to the end of the stream, or
+  `"whole"` when its loop flag is off.
 - `"whole"`: the whole file, over and over.
 - `"none"`: plays once. What the game does when a battle's music ends is the game's own behaviour (not tested).
 - `{"start": S, "end": E}`: from sample `S` to just before sample `E`, counted in samples of the file at its own
@@ -147,6 +149,35 @@ recording sits about as loud as the game's. A title is shown on the game's band 
 shows as written, any other character as `?` (the series name, drawn by the port, may use any character).
 
 Only add music you have the right to use. Never add the game's own music to a mod; it is already in the game.
+
+### Nintendo stream files: BRSTM, BCSTM, BFSTM
+
+Game-music libraries share many tracks as Nintendo stream files with the loop built in: BRSTM (Wii), BCSTM (3DS),
+BFSTM (Wii U, big-endian, and Switch, little-endian). A mod can use them as they are: put the file in the mod and
+leave `loop` out (or `"auto"`), and the track loops where its header says.
+
+- **The loop.** The port reads the header itself (`port/host/d012_nintendo_stream.cpp`): the stream info's loop
+  flag, loop start and sample count, through the header's own references (BRSTM: HEAD's first reference; BCSTM and
+  BFSTM: the INFO block's stream info reference). Both are in samples of the file at its own rate; the loop runs
+  from the loop start to the end of the stream, which is where these formats end their loop (the sample count is
+  the loop end). A file whose loop flag is off loops whole with `"auto"`; `"none"` plays it once. A loop flag with
+  a start at or past the end is a warning, and the file loops whole. A BFSTM's later "original loop" fields are not
+  used (players use the loop start). FFmpeg's own `loop_start` metadata for these files is in microseconds, so it is
+  not used either.
+- **An explicit loop wins.** `{"start": ...}` or any other `loop` in the manifest is used as written, in the file's
+  samples, like any track.
+- **Decoding.** FFmpeg's `brstm` and `bfstm` demuxers (the second reads both BFSTM and BCSTM, in both byte orders)
+  and its `adpcm_thp`/`adpcm_thp_le` decoders. Only DSP-ADPCM streams are taken, which is what nearly every file
+  holds. FFmpeg cannot decode IMA-ADPCM (some BCSTMs), and it reads PCM8/PCM16 streams wrongly (7.1: the last block
+  is cut to the length DSP-ADPCM would have, and a BFSTM's PCM starts 24 bytes early), so those are refused with an
+  error that says to use a DSP-ADPCM BRSTM, or a WAV or FLAC with the loop in the manifest.
+- **Exact samples.** DSP-ADPCM has no encoder delay (8-byte frames of 14 samples, each block's decoder history in
+  the ADPC or SEEK table), and FFmpeg decodes exactly the header's sample count, so sample N of the header is
+  sample N of the decoded track (V: section 7).
+- **Channels.** A file with more than two channels (several tracks of a layered piece) is mixed down to stereo,
+  all its channels together. Files at 32,000 or 48,000 Hz are resampled to 44,100 Hz like any other.
+- **Not supported:** BWAV and NUS3AUDIO. FFmpeg has no demuxer for either, and the port would need its own decoder
+  for them; a manifest naming one is an error that says to use the track's BRSTM version.
 
 ## 4. The example mod
 
@@ -241,8 +272,21 @@ and scanned for the test frequencies with a Goertzel filter every 0.25 s.
   host served its stand-in, and the dump has 440 Hz for 2 s, then 660 and 880 Hz alternating
   ([bgm-playlist-design.md](bgm-playlist-design.md), section 10.6).
 
+- V (19 October 2026, Nintendo streams): a 4 s stereo 44.1 kHz DSP-ADPCM BRSTM of test tones (440 Hz to sample
+  88,207, which is not a multiple of a 14-sample frame; then 660 Hz, 880 Hz and a 990 Hz marker to the end, sample
+  176,407), its header saying loop flag on, loop start 88,207, imported through the mod maker's API and saved as
+  `"auto"`, chosen with `D012_TEST_BGM_START` in a Quick Battle. The log: `the BRSTM header's loop, samples 88207
+  to 176407` and `176407 frames at 44100 Hz, loop 88207..176406`. A Goertzel scan of the dump (10 ms windows, 5 ms
+  steps) shows the marker up to each of 9 matched seams, 2.000 s apart, and 660 Hz right after it, never 440 Hz;
+  matched to the sample against the expected stream, every seam's shift is 0 (the three with no battle sound over
+  them to -80 dB), and a shift of one sample is far worse. The same run's decode check: the same tones as BCSTM,
+  Wii U BFSTM, Switch BFSTM at 48 kHz (header loop 96,008, frame 88,207 after resampling), a BRSTM without a loop
+  flag (whole file) and a BRSTM with `{"start": 132300}` in the manifest (the manifest wins) all loop where
+  expected; an IMA-ADPCM BCSTM and a BWAV are refused with their errors.
+  `port/tools/mod_maker/tests/stream_port_check.py`, output in `build/port/brstm-test/analysis.txt`.
+
 Not verified: a long real-world MP3 or Ogg (decode time), a track that plays once to its end in battle, the
-source-built FFmpeg on macOS and Linux.
+source-built FFmpeg on macOS and Linux, a real (not synthetic) BRSTM, BCSTM or BFSTM.
 
 ## 8. Making a mod with the mod maker
 
@@ -264,11 +308,17 @@ folder. Stop it with Ctrl+C.
 2. **Series.** *+ Series*, then its name as the selector shows it (*ABC* turns it upper case, like the game's own:
    FINAL FANTASY XV), its key (made from the name) and its order. ▲ and ▼ move a series in the game's list (they
    renumber `order`, which is what the port sorts by).
-3. **Tracks.** Drag audio files onto a series, or *Add files...*. Each file is **copied** into the mod's `music/`
-   (the original is never touched) under a plain name; the title comes from the file's tags (or its name) and the
-   key from the title, unique in the mod. Edit either; a key stays as it is once saved, because saved choices refer
+3. **Tracks.** Drag audio files onto a series, or *Add files...* (MP3, Ogg, Opus, FLAC, WAV, BRSTM, BCSTM, BFSTM).
+   Each file is **copied** into the mod's `music/` (the original is never touched) under a plain name; the title
+   comes from the file's tags (or its name, as for BRSTM and its kin, which have no tags) and the key from the
+   title, unique in the mod. Edit either; a key stays as it is once saved, because saved choices refer
    to it. ▲ ▼ order the tracks in their series; *Series* moves a track to another.
 4. **The loop.** Pick *Custom loop*, *Whole file*, *None* (plays once) or *Auto* (the file's loop tags, if any).
+   A BRSTM, BCSTM or BFSTM with a loop comes in as *Auto*, its header's loop shown "from the file" and drawn on the
+   waveform; *Custom loop* starts from those points to change them. It is saved as `"auto"` until it is changed, so
+   the loop stays in one place, the file, which the port reads with the same rules as the tool: replacing the file
+   with a better rip keeps the right loop, and no number in the manifest can drift from the file it belongs to. A
+   changed loop is saved in samples like any custom loop.
    For a custom loop:
    - the waveform: wheel zooms, drag pans, the strip below shows the whole file; click puts the cursor;
    - **S** and **E** set the loop start and end at the playhead (while playing) or the cursor; Shift+click and
@@ -311,9 +361,16 @@ encoder delay and padding.
 
 ### Verification (19 October 2026)
 
-- `python -m unittest discover -s port/tools/mod_maker/tests`: 52 tests (manifest rules against the port's,
+- `python -m unittest discover -s port/tools/mod_maker/tests`: 69 tests (manifest rules against the port's,
   including every case in section 7's validation list; keys and ids; samples and seconds; the API's token, host
-  check and path safety; decoding). One is skipped on Windows without the right to make a symbolic link.
+  check and path safety; decoding; Nintendo stream headers). One is skipped on Windows without the right to make a
+  symbolic link. `tests/test_streams.py` writes its own BRSTM, BCSTM and BFSTM files (`tests/stream_fixtures.py`:
+  FFmpeg has no muxer or encoder for them, so a small DSP-ADPCM encoder with eight fixed predictors and FFmpeg's
+  decoding arithmetic) and checks the header parser on each variant, without a loop, with a loop past the end, with
+  unsupported codecs and broken headers, and with the numbers of a real song's header patched in (loop 3,641,344 to
+  9,734,769 at 44,100 Hz). With FFmpeg: every variant decodes to exactly the samples encoded and the header's count;
+  silence, then a tone from the loop start (sample 3,001, mid-frame, small blocks), decodes with its first sound at
+  sample 3,001; importing through the API pre-fills the loop and saves `"auto"`; BWAV and IMA-ADPCM are refused.
 - `python port/tools/mod_maker/tests/port_check.py` (end to end, test tones only): makes an MP3 of tones (440 Hz
   for 2 s, 660 Hz for 1 s, 880 Hz for 0.95 s, a 50 ms 990 Hz marker, then 1320 Hz), creates the mod
   `modmaker-test` **through the tool's HTTP API** in `build/port/data-modmaker-test/mods` (a muted copy of

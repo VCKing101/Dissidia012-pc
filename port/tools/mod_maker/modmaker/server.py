@@ -26,6 +26,7 @@ from typing import Optional
 
 from . import manifest as mf
 from .audio import REPO_ROOT, TOOL_DIR, Decoder
+from .nintendo import UNSUPPORTED
 
 WEB_DIR = os.path.join(TOOL_DIR, "web")
 STATIC = {"index.html": "text/html; charset=utf-8", "style.css": "text/css; charset=utf-8",
@@ -49,14 +50,17 @@ def safe_file_name(name: str) -> str:
     base = re.split(r"[\\/]", name or "")[-1]
     stem, extension = os.path.splitext(base)
     extension = extension.lower()
+    if extension in UNSUPPORTED:
+        raise ApiError(f"\"{base}\": {UNSUPPORTED[extension]}")
     if extension not in mf.AUDIO_EXTENSIONS:
-        raise ApiError(f"\"{base}\" is not .mp3, .ogg, .oga, .opus, .flac or .wav")
+        raise ApiError(f"\"{base}\" is not {mf.EXTENSION_LIST.replace('.ogg, ', '.ogg, .oga, ')}")
     stem = unicodedata.normalize("NFKD", stem).encode("ascii", "ignore").decode("ascii")
     stem = re.sub(r"[^A-Za-z0-9 ._()-]+", "_", stem).strip(" ._") or "track"
     return stem[:80] + extension
 
 
 def title_from_file(name: str) -> str:
+    """A title from a file name, for files without a title tag (BRSTM and its kin have no tags at all)."""
     stem = os.path.splitext(re.split(r"[\\/]", name)[-1])[0]
     stem = re.sub(r"^\d{1,3}[ ._-]+", "", stem)  # a leading track number
     return " ".join(stem.replace("_", " ").split()) or "Track"

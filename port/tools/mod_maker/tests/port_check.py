@@ -218,7 +218,24 @@ def expected_at(x, t, delta=0):
     length = LOOP_END - LOOP_START
     if t < LOOP_END - delta:
         return x[t] if 0 <= t < len(x) else 0
-    return x[LOOP_START - delta + (t - (LOOP_END - delta)) % length]
+    at = LOOP_START - delta + (t - (LOOP_END - delta)) % length
+    return x[at] if 0 <= at < len(x) else 0
+
+
+def find_onset(marks, hop, size):
+    """The dump sample, to about 0.1 s, where the loop first starts: the
+    first of three passes of 660 Hz then 880 Hz a second later. `marks` is
+    tone_of() every `hop` samples. None when the loop is not found."""
+    def is_tone(i, freq):
+        return any(0 <= k < len(marks) and marks[k][0] == freq and marks[k][1] > 0.45 for k in (i - 1, i, i + 1))
+    for i in range(len(marks) - 60):
+        hits = sum(is_tone(i + 20 * r, 660) + is_tone(i + 10 + 20 * r, 880) for r in range(3))
+        if hits >= 5:
+            first = i
+            while first >= 20 and is_tone(first - 20, 660) + is_tone(first - 10, 880) >= 1:
+                first -= 20  # back to the first pass of the loop
+            return first * hop + size // 2
+    return None
 
 
 def analyse():
@@ -232,17 +249,7 @@ def analyse():
     size, hop = 2048, 4410
     marks = [tone_of(dump, at, size, rate) for at in range(0, len(dump) - size, hop)]
 
-    def is_tone(i, freq):
-        return any(0 <= k < len(marks) and marks[k][0] == freq and marks[k][1] > 0.45 for k in (i - 1, i, i + 1))
-    onset = None
-    for i in range(len(marks) - 60):
-        hits = sum(is_tone(i + 20 * r, 660) + is_tone(i + 10 + 20 * r, 880) for r in range(3))
-        if hits >= 5:
-            first = i
-            while first >= 20 and is_tone(first - 20, 660) + is_tone(first - 10, 880) >= 1:
-                first -= 20  # back to the first pass of the loop
-            onset = first * hop + size // 2
-            break
+    onset = find_onset(marks, hop, size)
     if onset is None:
         print("FAIL: the loop (660 Hz and 880 Hz taking turns) is not in the dump")
         return False

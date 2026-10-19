@@ -21,12 +21,15 @@ import re
 import unicodedata
 from typing import Any, Callable, Iterable, Optional
 
+from .nintendo import UNSUPPORTED as UNSUPPORTED_EXTENSIONS
+
 FORMAT = 1
 HOST_RATE = 44_100
 MAX_MANIFEST_BYTES = 1 << 20
 MAX_KEY_LENGTH = 64
 MAX_JSON_DEPTH = 64
-AUDIO_EXTENSIONS = (".mp3", ".ogg", ".oga", ".opus", ".flac", ".wav")
+AUDIO_EXTENSIONS = (".mp3", ".ogg", ".oga", ".opus", ".flac", ".wav", ".brstm", ".bcstm", ".bfstm")
+EXTENSION_LIST = ".mp3, .ogg, .opus, .flac, .wav, .brstm, .bcstm or .bfstm"
 # The port's limit on a track's length (host_audio.cpp kMaxFrames).
 MAX_TRACK_SECONDS = 30 * 60
 
@@ -303,8 +306,10 @@ def check_file_text(text: str) -> Optional[str]:
         return "\"file\" must not leave the mod's folder (\"..\")"
     name = text.rsplit("/", 1)[-1]
     extension = os.path.splitext(name)[1].lower()
+    if extension in UNSUPPORTED_EXTENSIONS:
+        return f"\"file\" is a {extension[1:]} file, which is not supported (FFmpeg cannot decode it); use the BRSTM "                "version of the track"
     if extension not in AUDIO_EXTENSIONS:
-        return f"\"file\" must be .mp3, .ogg, .opus, .flac or .wav, not \"{extension}\""
+        return f"\"file\" must be {EXTENSION_LIST}, not \"{extension}\""
     return None
 
 
@@ -535,6 +540,13 @@ def validate(document: Any, folder: Optional[str] = None,
                 if why is not None:
                     report.error(f"{t_path}.loop", f"{t_context}: {why}")
                     continue
+                stream = details.get("stream")
+                if stream and loop.get("mode") == "auto" and stream.get("loop_problem"):
+                    report.warning(f"{t_path}.loop", f"{t_context}: {stream['loop_problem']}; the port loops the whole "
+                                                     "file")
+                if stream and samples and samples != stream.get("samples"):
+                    report.warning(f"{t_path}.file", f"{t_context}: FFmpeg decodes {samples} samples, but the "
+                                                     f"{stream['format']} header says {stream.get('samples')}")
             if not title.isascii():
                 report.warning(f"{t_path}.title", f"{t_context}: the game's band shows a character outside ASCII as ?")
             playable += 1

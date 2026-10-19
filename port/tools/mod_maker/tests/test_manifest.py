@@ -186,7 +186,7 @@ class Validation(unittest.TestCase):
             self.assertEqual(errors_of(base(), folder=folder), [])
 
     def test_file_that_is_not_audio(self):
-        self.assertTrue(any("must be .mp3, .ogg, .opus, .flac or .wav, not \".txt\"" in e
+        self.assertTrue(any("must be .mp3, .ogg, .opus, .flac, .wav, .brstm, .bcstm or .bfstm, not \".txt\"" in e
                             for e in errors_of(base(file="music/a.txt"))))
         # The right extension, but FFmpeg cannot read it.
         found = errors_of(base(), info=lambda f: {"error": "not a file FFmpeg can read"})

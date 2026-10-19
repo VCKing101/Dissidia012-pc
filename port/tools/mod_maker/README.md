@@ -23,7 +23,10 @@ python port/tools/mod_maker/mod_maker.py --ffmpeg C:\ffmpeg\bin\ffmpeg.exe --por
 | `mod_maker.py` | Starts the server and the browser |
 | `modmaker/manifest.py` | The port's manifest rules (validation, keys, ids, sample and seconds conversion), building `mod.json` |
 | `modmaker/audio.py` | Finding FFmpeg, reading tags with ffprobe, decoding to WAV at the file's own rate |
+| `modmaker/nintendo.py` | The loop in a BRSTM, BCSTM or BFSTM header (the rules of the port's `d012_nintendo_stream.cpp`) |
 | `modmaker/server.py` | The HTTP API and the path checks |
 | `web/` | The page: waveform and seam views (`waveform.js`), the editor (`app.js`), loop suggestions in a worker (`suggest.js`) |
 | `tests/test_*.py` | Unit tests: `python -m unittest discover -s port/tools/mod_maker/tests` |
 | `tests/port_check.py` | End-to-end: makes a tone mod through the API, runs the port (90 s at most) and checks the loop in its audio dump |
+| `tests/stream_fixtures.py` | Synthetic BRSTM, BCSTM and BFSTM files of test tones (a small DSP-ADPCM encoder), for the tests |
+| `tests/stream_port_check.py` | End-to-end for a BRSTM's header loop in the game, and the other stream variants in the port's log |
