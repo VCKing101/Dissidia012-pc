@@ -25,8 +25,11 @@ game's executable and overlays.
 
 - **60 fps** display by frame interpolation over the game's 30 Hz logic.
 - **Higher internal resolution.**
+- **A right-stick camera** in battle and on the world map; R3 recentres ([notes](docs/port/right-stick-camera.md)).
+- **True analog movement** on the world map instead of the original's 8 directions, and full diagonals from a
+  modern stick ([notes](docs/port/analog-movement.md)).
 - **A mod folder** for content that adds to the game and never replaces it; the first kind is battle music in MP3,
-  Ogg Vorbis, Opus, FLAC or WAV with loop points ([format](docs/port/mod-folder.md)).
+  Ogg Vorbis, Opus, FLAC, WAV, or BRSTM/BCSTM/BFSTM with their own loops ([format](docs/port/mod-folder.md)).
 - **A BGM playlist selector** on the loading screen: choose music by series and track, mod tracks included
   ([design](docs/port/bgm-playlist-design.md)).
 - **A Battle BGM Maker**: a local browser tool for writing a mod's `mod.json` and setting its loop points
