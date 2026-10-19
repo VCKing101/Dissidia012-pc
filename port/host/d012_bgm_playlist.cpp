@@ -390,10 +390,104 @@ void use_box_text(Guest *g, Screen &sc, gaddr names, std::int32_t count, std::in
     write_box_text(g, sc, index);
 }
 
+// ---- The box's name sprite, swapped without a gap ---------------------------
+//
+// The game retires the old name sprite and makes the new one from the old
+// one's end callback (battle 0x08AF5C6C). That callback belongs to the old
+// sprite's text block (its glyph buffer, sprite +0x00), which the text
+// system's frame (main 0x0887DBD4) frees two passes after the block's last
+// sprite went: reference count 1 -> 0 at the delete, 0 -> -1 at the next pass,
+// and at the pass after that (the GPU no longer reads it) the buffer is freed
+// (main 0x0887D828), the block goes back to its pool and the callback runs.
+// So the box had no name for two game frames at every change (V:
+// D012_TRACE_BGM_NAME, design doc 11.7). A
+// new sprite draws in the frame it is made (main 0x0887D868 builds its
+// glyphs at once), so the playlist makes the new sprite first and retires the
+// old one in the same frame, without the callback: one text sprite made and
+// one deleted per change, as the game's way, and the old block is still
+// freed by the text system two frames later, as always.
+
+// Takes `sprite` out of layout element `owner`'s sprite list (as the game
+// does inline at battle 0x08AF8DF8).
+void unlink_name(Guest *g, gaddr owner, gaddr sprite) {
+    g_st32(g, sprite + SPRITE_FLAGS, g_ld32(g, sprite + SPRITE_FLAGS) & ~SPRITE_IN_LIST);
+    const gaddr prev = g_ld32(g, sprite + SPRITE_PREV);
+    const gaddr next = g_ld32(g, sprite + SPRITE_NEXT);
+    if (prev == 0) g_st32(g, owner + LAYOUT_SPRITE_HEAD, next);
+    else g_st32(g, prev + SPRITE_NEXT, next);
+    if (next == 0) g_st32(g, owner + LAYOUT_SPRITE_TAIL, prev);
+    else g_st32(g, next + SPRITE_PREV, prev);
+    g_st32(g, sprite + SPRITE_PREV, 0);
+    g_st32(g, sprite + SPRITE_NEXT, 0);
+    g_st32(g, owner + LAYOUT_SPRITE_COUNT, g_ld32(g, owner + LAYOUT_SPRITE_COUNT) - 1u);
+}
+
+// D012_TRACE_BGM_NAME=1: the name sprite and the text system's counts (live
+// sprites +0x170, live text blocks +0x17C) at each change and for a few
+// frames after it.
+bool tracing_name() {
+    static const bool on = flag("D012_TRACE_BGM_NAME");
+    return on;
+}
+
+struct NameTrace {
+    int frames_left = 0;
+    std::uint64_t updates = 0;
+    std::uint64_t changes = 0;
+};
+
+NameTrace &name_trace() {
+    static NameTrace value;
+    return value;
+}
+
+void trace_name(Guest *g, gaddr selector, const char *where) {
+    if (!tracing_name()) return;
+    const gaddr text_system = g_ld32(g, G_TEXT_SYSTEM);
+    const gaddr text = G_STRUCT(g, BgmSelector, selector)->text;
+    const gaddr block = text != 0 ? g_ld32(g, text) : 0u;
+    std::printf("[playlist] name %s: update %llu, change %llu, sprite %08X (block %08X), text system: %u sprites, "
+                "%u blocks\n",
+                where, static_cast<unsigned long long>(name_trace().updates),
+                static_cast<unsigned long long>(name_trace().changes), text, block,
+                text_system != 0 ? g_ld32(g, text_system + 0x170u) : 0u,
+                text_system != 0 ? g_ld32(g, text_system + 0x17Cu) : 0u);
+    std::fflush(stdout);
+}
+
+// The name sprite of the current choice made at once, the old one retired
+// in the same frame. Falls back to the game's way (the old sprite's end
+// callback makes the new one) when there is no old sprite or the text system
+// could not make a new one now.
+void swap_name(Guest *g, gaddr selector) {
+    BgmSelector *s = G_STRUCT(g, BgmSelector, selector);
+    ++name_trace().changes;
+    const gaddr old = s->text;
+    if (old == 0 || s->name[s->index] == 0 || s->layout == 0) {
+        bgm_selector_name_changed(g, selector);
+        return;
+    }
+    s->text = 0;
+    bgm_selector_make_name(g, selector);  // the game's: makes, shows and lists the new sprite
+    if (s->text == 0) {
+        std::cerr << "[playlist] the text system could not make the name now; it follows the game's way\n";
+        s->text = old;
+        bgm_selector_name_changed(g, selector);
+        return;
+    }
+    unlink_name(g, s->layout, old);
+    g_call1(g, F_SPRITE_FINISH, old);
+    g_call1(g, F_SPRITE_DELETE, old);
+}
+
 // After the choice changed: the box's text, then the name sprite made again.
 void show_choice(Guest *g, const Screen &sc, gaddr selector) {
     write_box_text(g, sc, G_STRUCT(g, BgmSelector, selector)->index);
-    bgm_selector_name_changed(g, selector);
+    swap_name(g, selector);
+    if (tracing_name()) {
+        name_trace().frames_left = 3;
+        trace_name(g, selector, "changed");
+    }
 }
 
 // The pad as the game read it last, before the wrapper took anything out.
@@ -497,7 +591,7 @@ void adopt(Guest *g, gaddr selector) {
         if (s->entry[i] == shown) s->index = i;
     sc.box_text = box_text_at(selector, s->count);
     use_box_text(g, sc, selector + 0x418u, s->count, s->index);
-    if (sc.box_text != 0) bgm_selector_name_changed(g, selector);
+    if (sc.box_text != 0) swap_name(g, selector);
     if (!flat()) loading_layout::move_pages(g, selector - 0x6ACu);
     std::cout << "[playlist] took over a selector at " << hex(selector) << std::endl;
     log_choices(g, sc);
@@ -710,6 +804,11 @@ void run_update(Guest *g, const CallState &in, GuestRegs &) {
     const gaddr position = frame;          /* a 4x4 matrix */
     const gaddr colour = frame + 0x40u;    /* RGBA */
     BgmSelector *s = G_STRUCT(g, BgmSelector, selector);
+    ++name_trace().updates;
+    if (name_trace().frames_left > 0) {
+        --name_trace().frames_left;
+        trace_name(g, selector, "frame");
+    }
     if (++sc.frames == 60u && flag("D012_TRACE_BGM_LAYOUT")) loading_layout::dump(g, selector - 0x6ACu);
     // The pages drew their rows earlier in this frame (battle 0x08AF94D8).
     loading_layout::hide_overflow(g, selector - 0x6ACu);

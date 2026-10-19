@@ -90,7 +90,8 @@ Selectable rows, by series (id, then `*` = needs an unlock flag): FF I 0 1 71 2*
     sound (main `0x088A24D4(0, 10000, 1, 0)`). `index = (index + count ± 1) % count`.
   - On a change: if there is no name sprite, make one (battle `0x08AF5AE8`: text sprite from the game's text system,
     main `0x0887D868`, appended to element 0's sprite list); otherwise unlink the old one, give it an end callback
-    (battle `0x08AF5C6C`, which makes the new name) and delete it.
+    (battle `0x08AF5C6C`, which makes the new name) and delete it. The box is blank for two frames at each change;
+    the playlist avoids it (11.7).
   - Place the name at anchor 0 and the arrows at anchors 1 and 2 of element 0.
 - **What else the screen takes**: L/R (`0x10000`/`0x20000`, pressed) switch the info pages, **D-pad up/down
   (`0x10`/`0x20`, repeat) scroll the page's list** (battle `0x08AF3E60`), confirm (`0x4`) ends the screen (battle
@@ -567,6 +568,7 @@ and the wheel follow. After confirm the list stays, dimmed, while the screen fad
 | `D012_TEST_BGM_UNLOCK_ALL=1` | Test only: the selector offers every row with a weight, locked or not (five tracks a series; the test save has three at most). Nothing is written to the save |
 | `D012_TEST_OVERLAY_FIXED_STEP=1` | Test only: the wheel's roll advances by 1/60 s per drawn frame instead of by the clock, so frame captures (which pause the game while saving) show the motion. Used for the README animation |
 | `D012_TRACE_BGM_LAYOUT=1` | Logs the screen's elements, the layout's animations, parts, pictures and anchors, 60 frames into the screen |
+| `D012_TRACE_BGM_NAME=1` | Logs the box's name sprite and the text system's live sprites and text blocks at each change and for three frames after it (11.7) |
 
 ### 11.5 Evidence (V)
 
@@ -605,6 +607,40 @@ route, data in `build/port/data-wheel-test` (a copy of `build/port/data` plus th
   spacing were not seen either (the save shows two). The scroll itself is the game's own, with `visible = 6`.
 - The fallback on an unexpected layout (by code only). Other languages' layouts and the European disc.
 - A real gamepad, fullscreen and the Fill aspect.
+
+### 11.7 The box's blank frames at each change (fixed 19 October 2026)
+
+**Cause** (V: `D012_TRACE_BGM_NAME`, run `build/port/playlist/flicker/trace1`). At a change the update unlinks the old
+name sprite, gives it the end callback battle `0x08AF5C6C`, hides it and deletes it (main `0x0887BA5C`: the sprite
+goes back to the text system's pool at once, its text block's count 1 → 0), and sets the selector's sprite to 0. The
+callback belongs to the old sprite's **text block** (sprite `+0x00`: the glyph buffer, `+0x14` callback, `+0x28` count),
+and the text system's frame (main `0x0887DBD4`, once a game frame) frees a block two passes after its count
+reaches 0: 0 → −1 at the first, and at the second (the GPU no longer reads it) it frees the buffer (main
+`0x0887D828`), returns the block and runs the callback, which makes the new sprite (main `0x0887D868`). So two
+updates draw no name: the one with the change and the next; the third draws the new one. A new sprite draws in the
+frame it is made (its glyphs are built in `0x0887D868`). The game has the same gap (`D012_NO_BGM_PLAYLIST=1`, run
+`off1`).
+
+**Fix** (`swap_name` in `d012_bgm_playlist.cpp`, the playlist's update and every change of choice): the new sprite is
+made first (the decompiled `bgm_selector_make_name`, with the old sprite set aside), then the old one is unlinked,
+hidden and deleted in the same update, without the callback. Still one text sprite made and one deleted per change;
+the old block is freed by the text system two frames later as before. If the text system cannot make a sprite now, it
+falls back to the game's way (logged). The decompiled originals and `D012_NO_BGM_PLAYLIST=1` are
+unchanged.
+
+**Evidence** (V; recompiled build, `PSPRECOMP_NO_INTERPRETER=1`, data `build/port/data-readme-shots`, the README GIF's
+route, runs in `build/port/playlist/flicker/<run>/`):
+
+- `build/port/playlist/flicker_before.png` (the README GIF's captures): two blank captures after each of the 9 steps,
+  18 of 99. `flicker_after.png` (run `after1`, the same route, a capture of every frame round each step): the new
+  name in the next capture, **0 blank of 126**. `flat1` (`D012_BGM_PLAYLIST_FLAT=1`): 0 of 24.
+- **No leak** (`leak1`): D-pad down and right held together for 400 frames in BGM focus, then left for 300 in menu
+  focus: 431 changes, 180 of them on consecutive updates; the text system's live sprites 80 at every change and
+  after, its live text blocks 81-82 while changing and back to 80 two updates after the last change.
+- `verify1` (`D012_DECOMP_BGM=1 D012_DECOMP_VERIFY=1`): series and track changes in BGM focus, left/right in menu
+  focus, FINAL FANTASY VIII 5/5 confirmed: opens `U_08PREMONI.AT3`; 1,857 comparisons, all SAME. `modtrack1`: eight
+  series right, one left, one right, down, confirmed in BGM focus: the host serves `MDE64FADBE.AT3`
+  (`ff-battle-collection:veiled-in-black`); 1,816 comparisons (`table_name` 139 among them), all SAME.
 
 ## Reproduce
 
