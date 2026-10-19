@@ -34,7 +34,8 @@ portablekit_add_game(D012Native
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_decomp_pad.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_bgm_playlist.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_camera.cpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_loading_layout.cpp")
+            "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_loading_layout.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_crash_report.cpp")
 target_include_directories(D012Native PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/host")
 
 # Decompiled game functions (C), run as native overrides (port/decomp/).

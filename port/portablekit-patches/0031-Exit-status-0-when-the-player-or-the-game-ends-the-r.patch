@@ -1,0 +1,131 @@
+From 0e99f0168c704c6c0b8ce5d6b4611c88075c43cd Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Mon, 19 Oct 2026 22:33:57 +1030
+Subject: [PATCH 31/31] Exit status 0 when the player or the game ends the run
+
+main returned 4 whenever the runtime had a stop reason, and every stop has
+one: closing the window, Quit in the menu, the input script's quit and the
+game's own sceKernelExitGame all exited with 4, the code of an error stop. The
+reasons for those endings are now named constants in system.hpp, and
+is_requested_stop() tells them from the others. They exit with 0; any other
+stop (no runnable thread, an unmapped address, a missing import) still exits
+with 4.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/hle/hle_media.cpp  |  9 +++++----
+ host/hle/hle_system.cpp |  3 ++-
+ host/main.cpp           |  4 +++-
+ host/system.hpp         | 13 +++++++++++++
+ 4 files changed, 23 insertions(+), 6 deletions(-)
+
+diff --git a/host/hle/hle_media.cpp b/host/hle/hle_media.cpp
+index b130657..8c0542a 100644
+--- a/host/hle/hle_media.cpp
++++ b/host/hle/hle_media.cpp
+@@ -9,6 +9,7 @@
+ #include "kernel/load_trace.hpp"
+ 
+ #include "overlays.hpp"
++#include "system.hpp"
+ 
+ #include "audio/audio_sink.hpp"
+ #include "audio/sas_core.hpp"
+@@ -276,7 +277,7 @@ void present_frame(Runtime &rt) {
+         stall_watchdog::set_stalled_pump([&rt] {
+             if (media().renderer && !media().renderer->pump_events()) {
+                 std::cerr << "[stall] the window was closed while the game stalled; stopping" << std::endl;
+-                rt.stop("window closed");
++                rt.stop(std::string(kStopWindowClosed));
+             }
+         });
+         return true;
+@@ -352,9 +353,9 @@ void present_frame(Runtime &rt) {
+     const bool window_open = renderer.pump_events();
+     feed_mouse(renderer);
+     if (!window_open) {
+-        rt.stop("window closed");
++        rt.stop(std::string(kStopWindowClosed));
+     } else if (ui::take_quit_request()) {
+-        rt.stop("quit from the menu");
++        rt.stop(std::string(kStopQuitFromMenu));
+     } else if (!ui::menu_over_game() && ui::menu_requested()) {
+         if (ui::menu_pauses()) {
+             // The menu pauses the game: guest code and emulated time stand
+@@ -369,7 +370,7 @@ void present_frame(Runtime &rt) {
+             // and keep the pause out of the frame statistics.
+             kernel().resync_real_time();
+             perf::restart_measurement();
+-            if (!keep_playing) rt.stop("quit from the menu");
++            if (!keep_playing) rt.stop(std::string(kStopQuitFromMenu));
+         } else {
+             // The game keeps running, sound and pacing included; the menu is
+             // drawn over each frame and takes all input until it closes.
+diff --git a/host/hle/hle_system.cpp b/host/hle/hle_system.cpp
+index b53ce8d..cf09b75 100644
+--- a/host/hle/hle_system.cpp
++++ b/host/hle/hle_system.cpp
+@@ -6,6 +6,7 @@
+ 
+ #include "kernel/rtc_time.hpp"
+ #include "overlays.hpp"
++#include "system.hpp"
+ 
+ #include "psprecomp/common.hpp"
+ 
+@@ -82,7 +83,7 @@ void register_process(HleRegistrar &hle) {
+     hle.add("LoadExecForUser", "sceKernelRegisterExitCallback", success);
+     hle.add("LoadExecForUser", "sceKernelExitGame", [](Runtime &rt, AllegrexContext &ctx) {
+         (void)ctx;
+-        rt.stop("guest called sceKernelExitGame");
++        rt.stop(std::string(kStopGameExited));
+     });
+     hle.add("StdioForUser", "sceKernelStdin", [](Runtime &, AllegrexContext &ctx) { kernel().finish(ctx, 0u); });
+     hle.add("StdioForUser", "sceKernelStdout", [](Runtime &, AllegrexContext &ctx) { kernel().finish(ctx, 1u); });
+diff --git a/host/main.cpp b/host/main.cpp
+index 1cc86c7..94aaa48 100644
+--- a/host/main.cpp
++++ b/host/main.cpp
+@@ -439,7 +439,9 @@ int main(int argc, char **argv) {
+         std::cout << portablekit::kernel().describe_threads() << "\n";
+         runtime.report_hle_histogram();
+         portablekit::gpu::GeState::report_ignored_commands();
+-        return runtime.stop_reason().empty() ? 0 : 4;
++        // A quit the player or the game asked for is a success; any other stop
++        // (no runnable thread, an unmapped address, a missing import) is not.
++        return portablekit::is_requested_stop(runtime.stop_reason()) ? 0 : 4;
+     } catch (const std::exception &e) {
+         portablekit::adhoc_shutdown();
+         std::cerr << portablekit::game().app_name << " error: " << e.what() << "\n";
+diff --git a/host/system.hpp b/host/system.hpp
+index fdacabd..b48d104 100644
+--- a/host/system.hpp
++++ b/host/system.hpp
+@@ -6,6 +6,7 @@
+ #include <cstdint>
+ #include <filesystem>
+ #include <iterator>
++#include <string_view>
+ 
+ namespace portablekit {
+ 
+@@ -25,4 +26,16 @@ void install_system(psprecomp::Runtime &runtime, const psprecomp::Elf32Image &el
+ // this function.
+ [[nodiscard]] std::filesystem::path memory_stick_directory(const std::filesystem::path &game_dir);
+ 
++// The runtime's stop reasons for an ending the player or the game asked for:
++// the window closed (its close button, the input script's quit, SIGTERM), Quit
++// in the menu, or the game's own sceKernelExitGame. The process exits with 0
++// after one of these and with 4 after any other stop, which is an error.
++inline constexpr std::string_view kStopWindowClosed = "window closed";
++inline constexpr std::string_view kStopQuitFromMenu = "quit from the menu";
++inline constexpr std::string_view kStopGameExited = "guest called sceKernelExitGame";
++
++[[nodiscard]] inline bool is_requested_stop(std::string_view reason) {
++    return reason.empty() || reason == kStopWindowClosed || reason == kStopQuitFromMenu || reason == kStopGameExited;
++}
++
+ } // namespace portablekit
+-- 
+2.53.0.windows.1
+

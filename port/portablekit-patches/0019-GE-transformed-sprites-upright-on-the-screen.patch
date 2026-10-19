@@ -1,7 +1,7 @@
 From f591c67667db5c9d2af9a380874ad2a6749400c1 Mon Sep 17 00:00:00 2001
 From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
 Date: Sun, 18 Oct 2026 22:00:56 +1030
-Subject: [PATCH 19/29] GE: transformed sprites upright on the screen
+Subject: [PATCH 19/31] GE: transformed sprites upright on the screen
 
 A sprite drawn through the transform is still a screen rectangle on the
 GE: both corners are transformed and the rectangle between them is drawn

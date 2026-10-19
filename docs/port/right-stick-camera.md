@@ -186,14 +186,14 @@ All runs used the recompiled build with `PSPRECOMP_NO_INTERPRETER=1` and `D012_U
   - After unpausing, R3 recentred as usual.
 - **`worldmap`, `worldmap_verify`**: as in section 5.
 
-Open item, not the camera's:
+Shutdown crash, not the camera's (fixed 19 October 2026):
 
-- **Some runs ended with an access violation after the script's `quit`**, once the game had already stopped. It
-  happened 5 times in 17 runs, all with diagnostics on (`D012_TRACE_CAMERA`, `D012_DECOMP_VERIFY`).
-- A temporary exception handler caught one (`crash6`). The fault was in `amdvlk64.dll`, called from
-  `VulkanRenderer::Impl::destroy_target` ← `VulkanRenderer::shutdown` ← `~VulkanRenderer`, run by the C runtime's
-  atexit destructors.
-- So it is the renderer's teardown at process exit, in PortableKit, with this driver. It is not the camera code.
+- **Some runs ended with an access violation after the script's `quit`**, once the game had already stopped. The
+  fault was in `amdvlk64.dll`, called from `VulkanRenderer::Impl::destroy_target` <- `VulkanRenderer::shutdown` <-
+  `~VulkanRenderer`, run by the C runtime's atexit destructors.
+- The cause was PortableKit freeing render targets' descriptor sets from a descriptor pool it had just destroyed. It
+  happened on every quit and faulted in about 1 run in 13, with the camera on or off. Patch 0030 fixes it; see
+  [quit-crash.md](quit-crash.md).
 
 ## 7. Reproduce
 

@@ -25,6 +25,7 @@ the menus to Quick Battles, with the HUD's HP bars, billboarded particles and si
 | `host/d012_json.cpp`, `.hpp` | A small JSON reader for the manifests |
 | `host/d012_bgm_playlist.cpp`, `.hpp` | The BGM playlist: the loading screen's music choice by series and track, L2/R2 to switch the D-pad between the screen's menu and the music, mod tracks as rows of the game's BGM table, the pad-read wrapper, the series in the BATTLE BGM box and the track wheel under it ([docs/port/bgm-playlist-design.md](../docs/port/bgm-playlist-design.md), sections 10 and 11) |
 | `host/d012_loading_layout.cpp`, `.hpp` | The loading screen's right-half pages moved down and made shorter for the track wheel, by checked edits of the screen's layout data in memory (section 11) |
+| `host/d012_crash_report.cpp` | `D012_CRASH_DUMP=<dir>`: a minidump and a symbolised stack on an unhandled exception, for diagnosis ([docs/port/quit-crash.md](../docs/port/quit-crash.md)) |
 | `host/d012_decomp_harness.cpp`, `.hpp`, `host/d012_decomp_bgm.cpp` | Decompiled functions as native overrides, and the differential test against the recompiled originals |
 | `decomp/` | The decompiled BGM functions (C) |
 | `examples/mods/example-tones/` | An example mod: a manifest and a script that writes its generated test tones (no audio files are kept) |
@@ -45,6 +46,7 @@ Outside this directory:
 | `tools/port/overlay_meta.py` | Writes PortableKit's `meta.txt` for the three overlays (and can run `psp_recomp` on them) |
 | `tools/port/shots_to_png.py` | Converts a run's BMP captures to PNG, optionally as a contact sheet |
 | `tools/port/ge_list_summary.py` | Folds a `D012_TRACE_GE_LIST` dump into one line per draw state (targets, textures, stencil, masks); `--detail` adds depth function, blend, texture function, alpha and colour tests, cull |
+| `tools/port/check_quit_crash.py` | Runs the recompiled build to a battle or the world map and quits, N times, camera on and off, and counts the runs that crash on the way out ([docs/port/quit-crash.md](../docs/port/quit-crash.md)) |
 
 ## Build
 
@@ -122,6 +124,7 @@ The profile's own switches:
 | `D012_TRACE_BGM_PLAYLIST=1` | Log every mod row and every choice of the selector with its series, id, volume and file |
 | `D012_TEST_BGM_START=<id>` | Test only: the selector starts on that track (a BGM id, or a mod track's id text) instead of the game's random default |
 | `D012_DECOMP_BGM=1`, `D012_DECOMP_VERIFY=1` | All twelve decompiled BGM functions in the game; the differential test of them (bgm-playlist-design.md, section 2) |
+| `D012_CRASH_DUMP=<dir>` | On an unhandled exception, write `<dir>/crash_<pid>.dmp` and log the faulting stack (names from `D012Native.pdb` when the build links with `/DEBUG`) |
 
 And the framework changes' off switches, each restoring the old behaviour: `D012_NO_COLOR_DOUBLING=1` (colour
 doubling), `D012_NO_PIXEL_MASK=1` (pixel mask), `D012_NO_VBLANK_CALLBACKS=1` (callbacks in the vblank waits),
@@ -185,6 +188,8 @@ fresh clone of `33800c4`, apply them with `git checkout -b dissidia 33800c4` and
 | 0026 | Extra buttons: L2, R2, L3, R3, which a PSP lacks, for a port to give a meaning of its own. `GameProfile::extra_buttons` names them; with L2 or R2 named the triggers press those instead of copies of L and R; `hle_extension::extra_buttons()` reads them (interface version 5); keyboard actions L2/R2/L3/R3 (1 and 3 for L2 and R2 by default), listed in the menu only for the named ones (`host/input/bindings.*`, `host/gpu/vulkan_renderer.*`, `host/hle/hle_media.cpp`, `host/profile.*`, `host/ui/menu.cpp`; checks in `tests/input_tests.cpp`); `<prefix>_NO_EXTRA_BUTTONS` turns it off | The BGM playlist's focus switch |
 | 0027 | Game overlays: `ui::add_game_overlay` draws a port's own picture with ImGui over every game frame it asks for, `ui::game_picture()` says where the game's 480x272 picture is in the window, `ui::game_text_font()` is the game's text face as an ImGui font (`host/ui/ui.hpp`, `layer.cpp`, `menu.cpp`, `host/gpu/vulkan_renderer.*`, `host/fonts/game_font.*`). Nothing is drawn until a port adds one | Showing the BGM playlist's focus beside the game's box |
 | 0028 | The left stick as the nub: dead zones on the vector's length, full from 0.95 of the radius, then circle to square, so a full push in any direction reaches the edge of the nub's square range and a full diagonal its corner; each axis rounded to the nearest step, full left/up now 0 rather than 1 (`host/input/stick.*`, `host/gpu/vulkan_renderer.cpp`, `host/settings/settings.*`, `host/ui/menu.cpp`; checks in `tests/input_tests.cpp`). On by default; the controls page's "Full diagonals" (`input.stick_square`) or `<prefix>_NO_STICK_SQUARE` turns the square off | A round stick's full diagonal reached the nub as about 0.71 per axis (bytes 217/39). The game's pad module drops each axis within 100 of 127.5 (`docs/research/pad-module.md`), so every full diagonal read as no input and 22.5 degrees off a straight push as 0.64 of one |
+| 0030 | The render targets are destroyed before the descriptor pool at shutdown, and the pool's handle is cleared (`host/gpu/vulkan_renderer.cpp`) | `destroy_target` frees a sampled target's descriptor sets from that pool; after the pool was destroyed, about 1 quit in 13 faulted in the AMD driver ([docs/port/quit-crash.md](../docs/port/quit-crash.md)) |
+| 0031 | Exit status 0 after closing the window, Quit in the menu or the game's `sceKernelExitGame`; 4 only after an error stop (`host/system.hpp`, `host/main.cpp`, `host/hle/hle_media.cpp`, `host/hle/hle_system.cpp`) | Every run exited with 4, an error's code, however it ended |
 
 Patches 0012 and 0013 were made on a separate worktree branch during the recompiled-build work and merged onto
 `dissidia` on 18 October 2026; patches 0014 and 0015 followed the same day (bring-up log, section "Stencil"), and

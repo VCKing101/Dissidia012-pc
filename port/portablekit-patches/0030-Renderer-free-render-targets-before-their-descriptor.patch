@@ -1,0 +1,59 @@
+From ca541b3e47e4c40919f56ea78b695ae499ea72ce Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Mon, 19 Oct 2026 22:33:55 +1030
+Subject: [PATCH 30/31] Renderer: free render targets before their descriptor
+ pool at shutdown
+
+VulkanRenderer::shutdown destroyed the descriptor pool, then the render
+targets, and destroy_target frees each sampled target's copy descriptor sets
+with vkFreeDescriptorSets on that pool. Every quit after a target had been
+sampled (8 sets in 4 targets in a battle or on a world map) called it with the
+destroyed pool. On AMD's driver the pool's memory is sometimes unmapped by
+then, and the process faulted in amdvlk64.dll at exit (access violation, about
+1 run in 13). The targets now go first, and the pool handle is cleared once
+destroyed.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/gpu/vulkan_renderer.cpp | 17 +++++++++++------
+ 1 file changed, 11 insertions(+), 6 deletions(-)
+
+diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
+index 03e9c49..ce1e3e5 100644
+--- a/host/gpu/vulkan_renderer.cpp
++++ b/host/gpu/vulkan_renderer.cpp
+@@ -8841,7 +8841,18 @@ void VulkanRenderer::shutdown() {
+     vkDestroySampler(impl.device, impl.sharp_sampler, nullptr);
+     vkDestroySampler(impl.device, impl.clamp_sampler, nullptr);
+     vkDestroySampler(impl.device, impl.clamp_sharp_sampler, nullptr);
++    // Render targets before the descriptor pool: a target that was sampled
++    // holds descriptor sets from it, which destroy_target frees. Freeing them
++    // after vkDestroyDescriptorPool used the destroyed pool, and some drivers
++    // faulted on it at exit.
++    for (auto &[address, target] : impl.targets) impl.destroy_target(target);
++    impl.targets.clear();
++    impl.destroy_target(impl.held);
++    impl.held = {};
++    impl.holding = false;
++    impl.destroy_interpolation_targets();
+     vkDestroyDescriptorPool(impl.device, impl.descriptor_pool, nullptr);
++    impl.descriptor_pool = VK_NULL_HANDLE;
+     vkDestroyDescriptorSetLayout(impl.device, impl.descriptor_layout, nullptr);
+     vkDestroyDescriptorSetLayout(impl.device, impl.lighting_layout, nullptr);
+     vkDestroyPipelineLayout(impl.device, impl.pipeline_layout, nullptr);
+@@ -8851,12 +8862,6 @@ void VulkanRenderer::shutdown() {
+     vkDestroyBuffer(impl.device, impl.check_buffer, nullptr);
+     vkFreeMemory(impl.device, impl.check_memory, nullptr);
+     vkDestroyShaderModule(impl.device, impl.fragment_shader, nullptr);
+-    for (auto &[address, target] : impl.targets) impl.destroy_target(target);
+-    impl.targets.clear();
+-    impl.destroy_target(impl.held);
+-    impl.held = {};
+-    impl.holding = false;
+-    impl.destroy_interpolation_targets();
+     for (VkFence fence : impl.present_fences) vkDestroyFence(impl.device, fence, nullptr);
+     if (impl.present_timer != VK_NULL_HANDLE) vkDestroyQueryPool(impl.device, impl.present_timer, nullptr);
+     vkDestroyRenderPass(impl.device, impl.render_pass, nullptr);
+-- 
+2.53.0.windows.1
+

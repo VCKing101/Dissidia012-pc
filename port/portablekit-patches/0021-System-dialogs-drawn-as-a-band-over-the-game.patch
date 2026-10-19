@@ -1,7 +1,7 @@
 From f724d09fc91bb060ab3aeea1e66067501674fd53 Mon Sep 17 00:00:00 2001
 From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
 Date: Sun, 18 Oct 2026 22:00:56 +1030
-Subject: [PATCH 21/29] System dialogs drawn as a band over the game
+Subject: [PATCH 21/31] System dialogs drawn as a band over the game
 
 The message dialog and the save-data dialog are the game's, opened over a
 running game, not the port's menus: they now sit in a translucent band

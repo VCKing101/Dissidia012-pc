@@ -1,7 +1,7 @@
 From 5633a6832d18b2cc199b241d97e5e907ad8765f2 Mon Sep 17 00:00:00 2001
 From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
 Date: Sun, 18 Oct 2026 22:00:57 +1030
-Subject: [PATCH 22/29] Docs: TRACE_GE_LIST's word limit
+Subject: [PATCH 22/31] Docs: TRACE_GE_LIST's word limit
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
