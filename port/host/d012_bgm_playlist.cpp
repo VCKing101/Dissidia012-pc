@@ -620,13 +620,31 @@ void press_arrow(Guest *g, gaddr arrow, std::uint32_t pressed, std::uint16_t res
     cursor_sound(g);
 }
 
-// Up or down in BGM focus, from the pad as read (the game no longer sees
-// them), with the pad module's own key repeat.
-int vertical_step(Guest *g, Screen &sc) {
+// Up (-1), down (1) or neither in the pad as read (the game no longer sees
+// them in BGM focus).
+int vertical_direction() {
     const std::uint32_t raw = pad_seen().raw;
     const bool up = (raw & RAW_DPAD_UP) != 0u;
     const bool down = (raw & RAW_DPAD_DOWN) != 0u;
-    const int direction = up == down ? 0 : (up ? -1 : 1);
+    return up == down ? 0 : (up ? -1 : 1);
+}
+
+bool sideways_held() { return (pad_seen().raw & (RAW_DPAD_LEFT | RAW_DPAD_RIGHT)) != 0u; }
+
+// Up or down seen while left or right is held belong to that press (a D-pad
+// rocked on the way to or from a side, a thumb on a diagonal): they count as
+// held from now, so they step only if still held when the key repeat's delay
+// has passed. Without this a left/right press that touched up or down also
+// stepped the track (design doc 11.8).
+void hold_vertical(Screen &sc) {
+    sc.repeat_direction = vertical_direction();
+    sc.repeat_timer = PAD_REPEAT_DELAY;
+}
+
+// Up or down in BGM focus, from the pad as read, with the pad module's own
+// key repeat.
+int vertical_step(Guest *g, Screen &sc) {
+    const int direction = vertical_direction();
     if (direction != sc.repeat_direction) {
         sc.repeat_direction = direction;
         sc.repeat_timer = PAD_REPEAT_DELAY;
@@ -854,11 +872,16 @@ void run_update(Guest *g, const CallState &in, GuestRegs &) {
                 press_arrow(g, s->arrow_left, 2, 1);
                 series_step = -1;
             }
+            // Left/right always change the series, and up/down never step
+            // while left or right is down.
             if (series_step != 0) {
                 const auto next = static_cast<std::size_t>(
                     g_rem(static_cast<std::int32_t>(series_index) + series_count + series_step, series_count));
                 const Series &to = sc.series[next];
                 s->index = static_cast<std::int32_t>(to.first + std::min(to.last, to.choices.size() - 1u));
+                hold_vertical(sc);
+            } else if (sideways_held()) {
+                hold_vertical(sc);
             } else if (const int step = vertical_step(g, sc); step != 0) {
                 const Series &in_series = sc.series[series_index];
                 const auto n = static_cast<std::int32_t>(in_series.choices.size());

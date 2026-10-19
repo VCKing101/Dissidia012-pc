@@ -642,6 +642,74 @@ route, runs in `build/port/playlist/flicker/<run>/`):
   series right, one left, one right, down, confirmed in BGM focus: the host serves `MDE64FADBE.AT3`
   (`ff-battle-collection:veiled-in-black`); 1,816 comparisons (`table_name` 139 among them), all SAME.
 
+### 11.8 Left/right stepping tracks in BGM focus (fixed 19 October 2026)
+
+**Report.** In BGM focus on a mod series, left/right seemed to step through the series' tracks instead of switching
+series; the README GIF was cited (FINAL FANTASY XV 1/5, 2/5, 3/5, then CRISIS CORE).
+
+**What the traces showed** (V; runs in `build/port/playlist/modlr/<run>/`, data `build/port/data-modlr-test`, a copy of
+`build/port/data` with the owner's two-series mod):
+
+- The series of the choice, the grouping and order of the mod rows (the list override, battle `0x08ADE4E0`) and the
+  focus were right: with clean presses every left/right changed the series, game or mod, both ways, at unthrottled
+  and real-time speed, on the virtual pad and the keyboard (`repro1`, `rt1`). The left stick does nothing on this
+  screen (`rt2`). The game's own update never runs while the playlist is on (its override replaces it).
+- The README GIF shows no fault: its route (`build/port/readme-shots/series2/run.log`) pressed **down twice** in
+  FINAL FANTASY XV (frames 7366 and 7386), which the GIF cannot show; the next right went to CRISIS CORE.
+- **The cause**: a left/right press that also touches up or down. The update took the series step only on the frame
+  the game's key repeat reports left/right (the press, then every 4 after 30), and on **every other frame** it ran the
+  up/down step, which steps at once when the vertical direction changes. A D-pad rocked onto a diagonal for a frame or
+  two while pressing left/right (common on a real pad, never in a script, whose presses are single buttons) therefore
+  changed the series and then the track: `diag1`, right with down for 2 frames from FINAL FANTASY XIII:
+  FINAL FANTASY XIV 1/5 then 2/5; FINAL FANTASY XV 1/5 then 2/5. And because each series remembers the track last
+  shown in it, coming back later lands on the stepped track. It is not specific to mods; it shows most in five-track
+  series (the test save's game series have 1 to 3 tracks).
+
+**Why the earlier verification missed it**: every scripted press was one button for 4 frames, so no left/right ever
+carried up/down; and the GIF's deliberate up/down looked like the reported symptom.
+
+**Fix** (`run_update`, BGM focus only): left/right always win. While left or right is held in the pad as read, up/down
+do not step; the direction held then counts as already held (`hold_vertical`), so it steps only if still held when the
+key repeat's delay has passed (a deliberate hold), and a fresh up/down after the side is released steps at once as
+before. Menu focus, the game's key repeat for left/right and the decompiled originals are unchanged.
+`RAW_DPAD_RIGHT`/`RAW_DPAD_LEFT` (`0x20`, `0x80`) are added to `bgm_types.h`.
+
+**Regression check**: `tools/port/check_bgm_series_keys.py`. It makes a data directory under
+`build/port/playlist/series-keys/` (the saves of `build/port/data`, only read; a generated tone-only mod of two
+series of five tracks; copies of any `--mods` folders), runs the recompiled build twice with
+`PSPRECOMP_NO_INTERPRETER=1` and checks the logs: from FINAL FANTASY XIII in BGM focus, 21 presses right and 21 left,
+every third rocked onto up or down for 2 frames, must each change the series to the next/previous one in the
+screen's list and nothing else; both wraps (NO MUSIC to FINAL FANTASY I and back) and game and mod series in both
+directions must be crossed; deliberate up/down must roll within the series; right in menu focus must step the flat
+list; a tone track chosen in BGM focus must be opened by the battle (`D012_TRACE_IO`). `--verify` adds
+`D012_DECOMP_BGM=1 D012_DECOMP_VERIFY=1` and fails on any DIFFERENT or INCONCLUSIVE; any `[interpreter]` line fails.
+
+```powershell
+.\.venv\Scripts\python.exe tools/port/check_bgm_series_keys.py --verify `
+    --mods build/port/data-readme-shots/mods/ff-battle-collection
+```
+
+**Evidence** (V):
+
+- Before the fix (`series-keys/before`, the same build without it): **FAIL**, 15 problems, every one a rocked
+  up/down that stepped the track after a series change (FINAL FANTASY XV 1 → 2, TONE SERIES B 1 → 5, FINAL FANTASY II
+  1 → 2, ...).
+- After (`series-keys/verify`, with `--verify` and the showcase mod; 19 series): **PASS**: 22 right and 22 left in
+  BGM focus each changed the series, 14 rocked up/down changed nothing, 5 down and 2 up rolled within the series, 3
+  right in menu focus stepped the flat list; `TONE SERIES B` 4/5 chosen and confirmed: `open
+  DISC0:/PSP_GAME/USRDIR/DATA/BGM/MD2F822D52.AT3`. Comparisons: 2,673 (keys run) and 986 (play run), all SAME; no
+  interpreter fallback. The same check with the owner's mod in place of the showcase mod (locally, `owner-mod`):
+  PASS.
+- Captures `build/port/playlist/series_keys_steps.png`: FINAL FANTASY XIII, then right six times (DISSIDIA, FINAL
+  FANTASY XV, TONE SERIES A (a rocked press), CRISIS CORE, TONE SERIES B, NO MUSIC) and left six times back to FINAL
+  FANTASY XIII, each landing on the series' remembered track, 1/n here.
+- `docs/images/bgm-playlist-wheel.gif` re-recorded with the fixed build (run `build/port/playlist/modlr/gif4`, as in
+  11.7: `build/port/data-readme-shots`, `D012_TEST_OVERLAY_FIXED_STEP=1`, `D012_TEST_BGM_UNLOCK_ALL=1`,
+  `D012_SCREENSHOT_EVERY=0`, perf overlay off, a capture every 2 frames cropped to the right half's top and scaled to
+  832x290, 60 ms a frame): down, down, up within FINAL FANTASY XIII, then one right at a time to DISSIDIA, FINAL
+  FANTASY XV and CRISIS CORE and one left at a time back to FINAL FANTASY XIII. 94 frames, 7.1 s, 556 KB; every frame
+  checked: the box's label never blank, no debug text, every left/right a new series.
+
 ## Reproduce
 
 ```powershell

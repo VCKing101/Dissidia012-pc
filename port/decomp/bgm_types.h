@@ -125,6 +125,8 @@ typedef struct BgmSelector {
  * logical pad has them as 0x10 and 0x20). */
 #define RAW_DPAD_UP 0x0010u
 #define RAW_DPAD_DOWN 0x0040u
+#define RAW_DPAD_RIGHT 0x0020u
+#define RAW_DPAD_LEFT 0x0080u
 
 /* main 0x089CAB94 "DISC0:/PSP_GAME/USRDIR/DATA/BGM/%s" */
 #define G_FMT_DISC_BGM 0x089CAB94u

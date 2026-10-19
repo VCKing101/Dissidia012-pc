@@ -50,7 +50,7 @@ and L2 or R2 again hands the D-pad back. Mods add series of their own after the 
 
 *Switching series (left/right):*
 
-![The track wheel rolling through FINAL FANTASY XIII, then left and right switching to DISSIDIA, a mod's FINAL FANTASY XV and CRISIS CORE](docs/images/bgm-playlist-wheel.gif)
+![The track wheel rolling through FINAL FANTASY XIII, then left and right switching to DISSIDIA, a mod's FINAL FANTASY XV and CRISIS CORE, and back](docs/images/bgm-playlist-wheel.gif)
 
 The FINAL FANTASY XV and CRISIS CORE series in these captures come from a test mod with track titles only; it plays
 generated tones.
