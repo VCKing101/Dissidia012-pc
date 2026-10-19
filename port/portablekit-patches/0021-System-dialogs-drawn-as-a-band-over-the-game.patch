@@ -1,0 +1,575 @@
+From f724d09fc91bb060ab3aeea1e66067501674fd53 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Sun, 18 Oct 2026 22:00:56 +1030
+Subject: [PATCH 21/27] System dialogs drawn as a band over the game
+
+The message dialog and the save-data dialog are the game's, opened over a
+running game, not the port's menus: they now sit in a translucent band
+across the screen (widgets.hpp, band::) with white text centred in it, a
+soft highlight on the selected choice and the button hints at the band's
+lower right, in the spirit of the handheld's own dialogs. The save list
+shows the slots down the left and the selected save's title, detail and
+date on the right. Original drawing and colours; no console assets and no
+code from other projects.
+
+hints() takes an optional style (the band's is kBandHints), hints_width()
+measures, and draw_band() and draw_choice() draw the band and the
+highlight. The menus' own look is unchanged. Input, answers and results
+are as before.
+
+Verified on Windows with one game: its autosave notice, a yes/no
+question, the load list and its confirmation, and the save list, with a
+virtual pad. Not verified: the mouse and touch in these dialogs, very
+narrow windows.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/ui/message_dialog.cpp   |  79 ++++++++++++-----------
+ host/ui/message_dialog.hpp   |   6 +-
+ host/ui/save_list_dialog.cpp | 121 +++++++++++++++++++++++++++++++----
+ host/ui/save_list_dialog.hpp |   5 +-
+ host/ui/widgets.cpp          |  85 ++++++++++++++++++------
+ host/ui/widgets.hpp          |  36 +++++++++++
+ 6 files changed, 258 insertions(+), 74 deletions(-)
+
+diff --git a/host/ui/message_dialog.cpp b/host/ui/message_dialog.cpp
+index 2a22131..6123b04 100644
+--- a/host/ui/message_dialog.cpp
++++ b/host/ui/message_dialog.cpp
+@@ -133,23 +133,20 @@ void handle_input() {
+     if (ImGui::IsKeyPressed(confirm, false)) choose();
+ }
+ 
+-// One button; true when clicked. Hovering a question's button selects it.
+-bool button(const char *label, ImVec2 min, ImVec2 size, bool selected, bool &hovered) {
++// One choice of the dialog: its label centred in `min`..`min + size`, with
++// the band's highlight when selected. True when clicked; `hovered` says
++// whether the pointer is over it.
++bool choice(const char *label, ImVec2 min, ImVec2 size, bool selected, bool &hovered) {
+     ImGui::SetCursorScreenPos(min);
+     ImGui::PushID(label);
+-    const bool clicked = ImGui::InvisibleButton("##button", size);
++    const bool clicked = ImGui::InvisibleButton("##choice", size);
+     hovered = ImGui::IsItemHovered();
+     ImGui::PopID();
+     ImDrawList *draw = ImGui::GetWindowDrawList();
+-    const ImVec2 max{min.x + size.x, min.y + size.y};
+-    const float rounding = px(6.0f);
+-    draw->AddRectFilled(min, max, selected ? colors::kAccent : colors::kTrack, rounding);
+-    if (selected)
+-        draw->AddRect({min.x - px(2.0f), min.y - px(2.0f)}, {max.x + px(2.0f), max.y + px(2.0f)},
+-                      colors::kAccentBright, rounding + px(2.0f), 0, px(2.0f));
++    draw_choice(draw, min, {min.x + size.x, min.y + size.y}, selected);
+     const ImVec2 text = ImGui::CalcTextSize(label);
+-    draw->AddText({min.x + (size.x - text.x) * 0.5f, min.y + (size.y - text.y) * 0.5f},
+-                  selected ? colors::kPanel : colors::kText, label);
++    draw->AddText({std::round(min.x + (size.x - text.x) * 0.5f), std::round(min.y + (size.y - text.y) * 0.5f)},
++                  selected ? band::kText : band::kTextDim, label);
+     return clicked;
+ }
+ 
+@@ -187,7 +184,7 @@ void game_message_frame() {
+     if (!d.open) return;
+ 
+     const ImGuiIO &io = ImGui::GetIO();
+-    ImGui::GetBackgroundDrawList()->AddRectFilled({0, 0}, io.DisplaySize, IM_COL32(0, 0, 0, 120));
++    ImGui::GetBackgroundDrawList()->AddRectFilled({0, 0}, io.DisplaySize, band::kDim);
+     ImGui::SetNextWindowPos({0, 0}, ImGuiCond_Always);
+     ImGui::SetNextWindowSize(io.DisplaySize, ImGuiCond_Always);
+     ImGui::Begin("##message", nullptr,
+@@ -195,55 +192,63 @@ void game_message_frame() {
+                      ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoBackground);
+     ImDrawList *draw = ImGui::GetWindowDrawList();
+ 
++    // The message, the choices under it and the hints at the band's lower
++    // right, the whole centred on the screen.
+     ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * 1.1f);
+     const float width = std::min(io.DisplaySize.x * 0.8f, font() * 36.0f);
+     const std::vector<std::string> lines = wrap(d.request.text, width);
+     const float line_height = ImGui::GetTextLineHeightWithSpacing();
+     const float text_height = line_height * static_cast<float>(lines.size());
+-    const ImVec2 button_size{std::round(font() * 6.0f), std::round(font() * 1.9f)};
+-    const float gap = std::round(font() * 1.2f);
+-    const float block = text_height + gap + button_size.y;
++    ImGui::PopFont();
++    const ImVec2 choice_size{std::round(font() * 5.5f), std::round(font() * 1.7f)};
++    const float gap = std::round(font() * 1.1f);
++    const float hint_height = std::round(font() * 1.3f);
++    const float margin = std::round(font() * 1.2f);
++    const float block = text_height + gap + choice_size.y + gap * 0.6f + hint_height;
+     const float top = std::round((io.DisplaySize.y - block) * 0.5f);
++    const float band_top = top - margin;
++    const float band_bottom = top + block + margin * 0.6f;
++    draw_band(ImGui::GetBackgroundDrawList(), band_top, band_bottom);
+ 
+-    // The band: two rules across the whole screen, a little outside the
+-    // text and the buttons, and a darker strip between them.
+-    const float margin = std::round(font() * 1.1f);
+-    const float rule_top = top - margin;
+-    const float rule_bottom = top + block + margin;
+-    draw->AddRectFilled({0, rule_top}, {io.DisplaySize.x, rule_bottom}, IM_COL32(0, 0, 0, 110));
+-    draw->AddLine({0, rule_top}, {io.DisplaySize.x, rule_top}, IM_COL32(255, 255, 255, 200), px(1.5f));
+-    draw->AddLine({0, rule_bottom}, {io.DisplaySize.x, rule_bottom}, IM_COL32(255, 255, 255, 200), px(1.5f));
+-
++    ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * 1.1f);
+     float y = top;
+     for (const std::string &line : lines) {
+         const ImVec2 size = ImGui::CalcTextSize(line.c_str());
+-        draw->AddText({std::round((io.DisplaySize.x - size.x) * 0.5f), y}, IM_COL32(255, 255, 255, 255), line.c_str());
++        draw->AddText({std::round((io.DisplaySize.x - size.x) * 0.5f), y}, band::kText, line.c_str());
+         y += line_height;
+     }
+     ImGui::PopFont();
+ 
+-    const float buttons_y = top + text_height + gap;
++    const float choices_y = top + text_height + gap;
++    const bool moved = io.MouseDelta.x * io.MouseDelta.x + io.MouseDelta.y * io.MouseDelta.y > 0.0f;
+     bool hovered = false;
+     if (d.request.question) {
+-        const float spacing = std::round(font() * 1.5f);
+-        const float left = std::round((io.DisplaySize.x - button_size.x * 2.0f - spacing) * 0.5f);
+-        const bool yes = button("Yes", {left, buttons_y}, button_size, !d.no_selected, hovered);
+-        if (hovered && io.MouseDelta.x * io.MouseDelta.x + io.MouseDelta.y * io.MouseDelta.y > 0.0f) d.no_selected = false;
+-        const bool no = button("No", {left + button_size.x + spacing, buttons_y}, button_size, d.no_selected, hovered);
+-        if (hovered && io.MouseDelta.x * io.MouseDelta.x + io.MouseDelta.y * io.MouseDelta.y > 0.0f) d.no_selected = true;
++        const float spacing = std::round(font() * 1.2f);
++        const float left = std::round((io.DisplaySize.x - choice_size.x * 2.0f - spacing) * 0.5f);
++        const bool yes = choice("Yes", {left, choices_y}, choice_size, !d.no_selected, hovered);
++        if (hovered && moved) d.no_selected = false;
++        const bool no = choice("No", {left + choice_size.x + spacing, choices_y}, choice_size, d.no_selected, hovered);
++        if (hovered && moved) d.no_selected = true;
+         if (yes) {
+             answer(MessageAnswer::Yes);
+         } else if (no) {
+             answer(MessageAnswer::No);
+         }
+     } else {
+-        const float left = std::round((io.DisplaySize.x - button_size.x) * 0.5f);
+-        if (button("OK", {left, buttons_y}, button_size, true, hovered)) answer(MessageAnswer::Yes);
++        const float left = std::round((io.DisplaySize.x - choice_size.x) * 0.5f);
++        if (choice("OK", {left, choices_y}, choice_size, true, hovered)) answer(MessageAnswer::Yes);
+     }
+ 
+-    ImGui::SetCursorScreenPos({std::round((io.DisplaySize.x - width) * 0.5f), rule_bottom + px(10.0f)});
+-    if (d.request.question && d.request.allow_back) hints({{Control::Confirm, "Enter"}, {Control::Back, "Back"}});
+-    else hints({{Control::Confirm, d.request.question ? "Enter" : "OK"}});
++    const float hints_y = band_bottom - margin * 0.6f - hint_height + std::round((hint_height - font()) * 0.5f);
++    const float right = std::min(io.DisplaySize.x - margin, (io.DisplaySize.x + width) * 0.5f + font() * 4.0f);
++    if (d.request.question && d.request.allow_back) {
++        ImGui::SetCursorScreenPos({right - hints_width({{Control::Confirm, "Enter"}, {Control::Back, "Back"}}), hints_y});
++        hints({{Control::Confirm, "Enter"}, {Control::Back, "Back"}}, kBandHints);
++    } else {
++        const char *label = d.request.question ? "Enter" : "OK";
++        ImGui::SetCursorScreenPos({right - hints_width({{Control::Confirm, label}}), hints_y});
++        hints({{Control::Confirm, label}}, kBandHints);
++    }
+     ImGui::End();
+ }
+ 
+diff --git a/host/ui/message_dialog.hpp b/host/ui/message_dialog.hpp
+index 4a6dda8..c434bc9 100644
+--- a/host/ui/message_dialog.hpp
++++ b/host/ui/message_dialog.hpp
+@@ -4,9 +4,9 @@
+ #include <string>
+ 
+ // The game's message dialog (sceUtilityMsgDialog), drawn by the interface
+-// layer over the running game: the message, centred between two rules across
+-// the screen, and an OK button for a notice or Yes and No for a question, with
+-// the button hints underneath.
++// layer over the running game: the message centred in a translucent band
++// across the screen (widgets.hpp, band::), OK for a notice or Yes and No for
++// a question under it, and the button hints at the band's lower right.
+ //
+ // Gamepad: left/right (D-pad or left stick) moves between Yes and No, confirm
+ // chooses, back answers a question with Back unless the game turned that off.
+diff --git a/host/ui/save_list_dialog.cpp b/host/ui/save_list_dialog.cpp
+index 9f041c4..e2fbbfe 100644
+--- a/host/ui/save_list_dialog.cpp
++++ b/host/ui/save_list_dialog.cpp
+@@ -7,7 +7,12 @@
+ #include "gpu/vulkan_renderer.hpp"
+ 
+ #include "imgui.h"
++#include "imgui_internal.h"
+ 
++#include <algorithm>
++#include <cmath>
++#include <initializer_list>
++#include <optional>
+ #include <string>
+ #include <utility>
+ 
+@@ -166,29 +171,119 @@ void game_save_list_frame() {
+         return;
+     }
+ 
+-    begin_panel("##savelist", action_title(d.request.action), "Save data", true);
+-    begin_content();
++    // The band across the screen (widgets.hpp, band::): the action at the
++    // top, the slots down the left, the selected save's title, detail and
++    // date on the right, and the hints at the lower right.
++    const ImGuiIO &io = ImGui::GetIO();
++    const float font = layer.font_size();
++    const auto px = [&](float value) { return std::round(value * layer.scale()); };
++    ImDrawList *background = ImGui::GetBackgroundDrawList();
++    background->AddRectFilled({0, 0}, io.DisplaySize, band::kDim);
++    const float band_top = std::round(io.DisplaySize.y * 0.1f);
++    const float band_bottom = std::round(io.DisplaySize.y * 0.9f);
++    draw_band(background, band_top, band_bottom);
++    const float margin = std::round(font * 1.0f);
++    const float inner_width = std::min(io.DisplaySize.x - 2.0f * margin, font * 46.0f);
++    const float inner_left = std::round((io.DisplaySize.x - inner_width) * 0.5f);
++    ImGui::SetNextWindowPos({inner_left, band_top + margin * 0.6f}, ImGuiCond_Always);
++    ImGui::SetNextWindowSize({inner_width, band_bottom - band_top - margin * 1.2f}, ImGuiCond_Always);
++    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {0.0f, 0.0f});
++    ImGui::Begin("##savelist", nullptr,
++                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
++                     ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoBringToFrontOnFocus);
++    ImGui::PopStyleVar();
++    ImDrawList *draw = ImGui::GetWindowDrawList();
++
++    ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * 1.2f);
++    ImGui::PushStyleColor(ImGuiCol_Text, band::kText);
++    ImGui::TextUnformatted(action_title(d.request.action));
++    ImGui::PopStyleColor();
++    ImGui::PopFont();
++    ImGui::Dummy({0.0f, px(6.0f)});
++
++    const float hint_height = std::round(font * 1.4f);
++    const float list_width = std::round(inner_width * 0.48f);
++    const float list_height = std::max(font * 3.0f, ImGui::GetContentRegionAvail().y - hint_height - px(6.0f));
++    const ImVec2 list_at = ImGui::GetCursorScreenPos();
+     std::optional<std::size_t> chosen;
++    ImGui::PushStyleColor(ImGuiCol_ScrollbarGrab, band::kTextFaint);
++    ImGui::PushStyleColor(ImGuiCol_ScrollbarGrabHovered, band::kTextDim);
++    ImGui::PushStyleColor(ImGuiCol_ScrollbarGrabActive, band::kText);
++    ImGui::BeginChild("slots", {list_width, list_height}, ImGuiChildFlags_NavFlattened,
++                      ImGuiWindowFlags_NoBackground);
++    const float row_height = std::round(font * 2.6f);
++    const float row_width = ImGui::GetContentRegionAvail().x - px(8.0f);
+     for (std::size_t i = 0; i < d.request.slots.size(); ++i) {
+         const SaveSlot &slot = d.request.slots[i];
+         if (!usable(slot, d.request.action)) continue;
++        const ImVec2 min = ImGui::GetCursorScreenPos();
++        const ImVec2 max{min.x + row_width, min.y + row_height};
++        const std::string id = "##slot" + std::to_string(i);
++        if (ImGui::InvisibleButton(id.c_str(), {row_width, row_height}, ImGuiButtonFlags_EnableNav)) chosen = i;
+         if (d.focus_pending && i == d.selected) {
+-            focus_next_row();
++            ImGui::FocusItem();
++            ImGui::SetScrollHereY(0.3f);
+             d.focus_pending = false;
+         }
+-        const std::string id = "##slot" + std::to_string(i);
+-        const std::string name = slot.exists ? (slot.title.empty() ? slot.name : slot.title) : "New data";
+-        const std::string detail = slot.exists ? slot.modified : slot.name;
+-        if (list_row(id.c_str(), name, detail, ListIcon::File, slot.exists)) chosen = i;
+-        if (ImGui::IsItemFocused()) {
+-            d.selected = i;
+-            if (slot.exists && !slot.detail.empty()) layer.set_description(slot.detail);
++        const bool focused = ImGui::IsItemFocused();
++        if (focused) d.selected = i;
++        ImDrawList *rows = ImGui::GetWindowDrawList();
++        const float rounding = px(6.0f);
++        if (focused) {
++            rows->AddRectFilled(min, max, band::kSelect, rounding);
++            rows->AddRect(min, max, band::kSelectEdge, rounding, 0, std::max(1.0f, px(1.0f)));
++        } else if (ImGui::IsItemHovered()) {
++            rows->AddRectFilled(min, max, IM_COL32(255, 255, 255, 18), rounding);
+         }
++        // A plain card where the handheld shows the save's icon.
++        const float card = std::round(font * 1.7f);
++        const ImVec2 card_min{min.x + px(10.0f), min.y + std::round((row_height - card) * 0.5f)};
++        const ImVec2 card_max{card_min.x + std::round(card * 1.6f), card_min.y + card};
++        if (slot.exists) rows->AddRectFilled(card_min, card_max, IM_COL32(255, 255, 255, 40), px(3.0f));
++        rows->AddRect(card_min, card_max, slot.exists ? band::kTextDim : band::kTextFaint, px(3.0f), 0,
++                      std::max(1.0f, px(1.0f)));
++        const float text_x = card_max.x + px(12.0f);
++        const std::string name = slot.exists ? (slot.title.empty() ? slot.name : slot.title) : "New data";
++        const std::string second = slot.exists ? slot.modified : std::string{};
++        const float name_y = second.empty() ? min.y + std::round((row_height - font) * 0.5f)
++                                            : min.y + std::round(row_height * 0.5f - font * 1.05f);
++        rows->PushClipRect(min, {max.x - px(6.0f), max.y}, true);
++        rows->AddText({text_x, name_y}, focused ? band::kText : band::kTextDim, name.c_str());
++        if (!second.empty())
++            rows->AddText({text_x, min.y + std::round(row_height * 0.5f + font * 0.05f)}, band::kTextFaint,
++                          second.c_str());
++        rows->PopClipRect();
++    }
++    touch_scroll();
++    ImGui::EndChild();
++    ImGui::PopStyleColor(3);
++
++    // The selected save on the right.
++    const SaveSlot &shown = d.request.slots[d.selected < d.request.slots.size() ? d.selected : 0u];
++    const float detail_left = list_at.x + list_width + px(24.0f);
++    const float detail_width = inner_left + inner_width - detail_left;
++    float y = list_at.y + px(4.0f);
++    const auto paragraph_at = [&](const std::string &text, ImU32 color) {
++        if (text.empty()) return;
++        draw->AddText(nullptr, 0.0f, {detail_left, y}, color, text.c_str(), nullptr, detail_width);
++        y += ImGui::CalcTextSize(text.c_str(), nullptr, false, detail_width).y + px(8.0f);
++    };
++    if (shown.exists) {
++        paragraph_at(shown.title.empty() ? shown.name : shown.title, band::kText);
++        paragraph_at(shown.detail, band::kTextDim);
++        paragraph_at(shown.modified, band::kTextFaint);
++    } else {
++        paragraph_at("New data", band::kText);
++        paragraph_at(d.request.action == SaveAction::Save ? "Create a new save here." : "", band::kTextDim);
+     }
+-    begin_footer();
+-    hints({{Control::Confirm, "Choose"}, {Control::Back, "Back"}});
+-    end_panel();
++
++    const std::initializer_list<Hint> keys{{Control::Confirm, "Enter"}, {Control::Back, "Back"}};
++    ImGui::SetCursorScreenPos({inner_left + inner_width - hints_width(keys),
++                               list_at.y + list_height + px(6.0f) + std::round((hint_height - font) * 0.5f)});
++    hints(keys, kBandHints);
++    ImGui::End();
+     if (chosen) ask(*chosen);
++
+ }
+ 
+ } // namespace portablekit::ui
+diff --git a/host/ui/save_list_dialog.hpp b/host/ui/save_list_dialog.hpp
+index f9eeca6..f863adf 100644
+--- a/host/ui/save_list_dialog.hpp
++++ b/host/ui/save_list_dialog.hpp
+@@ -7,7 +7,10 @@
+ #include <vector>
+ 
+ // The save-data dialog (sceUtilitySavedata list and confirmation modes),
+-// drawn by the interface layer over the running game.
++// drawn by the interface layer over the running game as a translucent band
++// across the screen (widgets.hpp, band::): the slots down the left, the
++// selected save's title, detail and date on the right, the hints at the
++// lower right.
+ //
+ // A list request shows the game's save slots, each with the title and detail
+ // of the save in it or "New data"; the player picks one, confirms it in a
+diff --git a/host/ui/widgets.cpp b/host/ui/widgets.cpp
+index dfd5014..1049cde 100644
+--- a/host/ui/widgets.cpp
++++ b/host/ui/widgets.cpp
+@@ -115,25 +115,31 @@ float draw_value(const Row &r, const std::string &value, const RowOptions &optio
+     return x;
+ }
+ 
+-// A rounded label such as a shoulder button or a key.
+-float draw_cap(ImDrawList *draw, ImVec2 at, const char *text, bool filled) {
++// A rounded label such as a shoulder button or a key. With no draw list it
++// only measures.
++float draw_cap(ImDrawList *draw, ImVec2 at, const char *text, bool filled, ImU32 edge = colors::kTextDim,
++               ImU32 ink = colors::kText) {
+     const float height = font() * 1.15f;
+     const ImVec2 text_size = ImGui::CalcTextSize(text);
+     const float width = std::max(height, text_size.x + font() * 0.7f);
++    if (draw == nullptr) return width;
+     const ImVec2 min{at.x, at.y + (font() - height) * 0.5f};
+     const ImVec2 max{min.x + width, min.y + height};
+     if (filled) draw->AddRectFilled(min, max, colors::kAccent, height * 0.3f);
+-    else draw->AddRect(min, max, colors::kTextDim, height * 0.3f, 0, px(1.5f));
++    else draw->AddRect(min, max, edge, height * 0.3f, 0, px(1.5f));
+     draw->AddText({min.x + (width - text_size.x) * 0.5f, min.y + (height - text_size.y) * 0.5f},
+-                  filled ? colors::kPanel : colors::kText, text);
++                  filled ? colors::kPanel : ink, text);
+     return width;
+ }
+ 
+ // A face button as the pad in use labels it: a PlayStation shape or a letter.
+-float draw_face(ImDrawList *draw, ImVec2 at, SDL_GamepadButton button) {
++// With no draw list it only measures.
++float draw_face(ImDrawList *draw, ImVec2 at, SDL_GamepadButton button, ImU32 fill = colors::kAccent,
++                ImU32 ink = colors::kPanel) {
+     const float radius = font() * 0.62f;
++    if (draw == nullptr) return radius * 2.0f;
+     const ImVec2 center{at.x + radius, at.y + font() * 0.5f};
+-    draw->AddCircleFilled(center, radius, colors::kAccent);
++    draw->AddCircleFilled(center, radius, fill);
+     SDL_Gamepad *pad = Layer::get().attached() ? Layer::get().renderer().gamepad() : nullptr;
+     SDL_GamepadButtonLabel label = pad != nullptr ? SDL_GetGamepadButtonLabel(pad, button)
+                                                   : SDL_GAMEPAD_BUTTON_LABEL_UNKNOWN;
+@@ -146,7 +152,6 @@ float draw_face(ImDrawList *draw, ImVec2 at, SDL_GamepadButton button) {
+         default: label = SDL_GAMEPAD_BUTTON_LABEL_Y; break;
+         }
+     }
+-    const ImU32 ink = colors::kPanel;
+     const float s = radius * 0.45f;
+     const float thickness = std::max(1.5f, radius * 0.16f);
+     switch (label) {
+@@ -634,38 +639,48 @@ void heading(const std::string &text) {
+     ImGui::Dummy({0.0f, px(4.0f)});
+ }
+ 
+-void hints(std::initializer_list<Hint> list) {
+-    ImDrawList *draw = ImGui::GetWindowDrawList();
++namespace {
++
++// Lays out the hints from `start`, drawing them unless `draw` is null, and
++// returns their width.
++float lay_out_hints(ImDrawList *draw, ImVec2 start, std::initializer_list<Hint> list, const HintStyle &style) {
+     const bool pad = Layer::get().input_device() == InputDevice::Gamepad;
+     const bool south = Layer::get().confirm_south();
+     const SDL_GamepadButton confirm = south ? SDL_GAMEPAD_BUTTON_SOUTH : SDL_GAMEPAD_BUTTON_EAST;
+     const SDL_GamepadButton back = south ? SDL_GAMEPAD_BUTTON_EAST : SDL_GAMEPAD_BUTTON_SOUTH;
+-    const ImVec2 start = ImGui::GetCursorScreenPos();
+     ImVec2 at = start;
+     const float gap = px(6.0f);
++    const auto face = [&](float x, SDL_GamepadButton button) {
++        return draw_face(draw, {x, at.y}, button, style.face, style.face_ink);
++    };
+     for (const Hint &hint : list) {
+         // The browser's file filter switch has a button on the pad only.
+         const bool pad_only = hint.control == Control::Toggle || hint.control == Control::Shift ||
+                               hint.control == Control::Space || hint.control == Control::Symbols;
+         if (pad_only && !pad) continue;
+         float x = at.x;
+-        const auto cap = [&](const char *text) { x += draw_cap(draw, {x, at.y}, text, false) + gap; };
++        const auto cap = [&](const char *text) {
++            x += draw_cap(draw, {x, at.y}, text, false, style.cap_edge, style.cap_text) + gap;
++        };
+         const auto arrows = [&] {
+             const float size = font() * 1.15f;
+             for (int i = 0; i < 2; ++i) {
+                 const ImVec2 min{x, at.y + (font() - size) * 0.5f};
+-                draw->AddRect(min, {min.x + size, min.y + size}, colors::kTextDim, size * 0.3f, 0, px(1.5f));
+-                draw_triangle(draw, {min.x + size * 0.5f, min.y + size * 0.5f}, size * 0.4f, i == 1, colors::kText);
++                if (draw != nullptr) {
++                    draw->AddRect(min, {min.x + size, min.y + size}, style.cap_edge, size * 0.3f, 0, px(1.5f));
++                    draw_triangle(draw, {min.x + size * 0.5f, min.y + size * 0.5f}, size * 0.4f, i == 1,
++                                  style.cap_text);
++                }
+                 x += size + gap;
+             }
+         };
+         switch (hint.control) {
+         case Control::Confirm:
+-            if (pad) x += draw_face(draw, {x, at.y}, confirm) + gap;
++            if (pad) x += face(x, confirm) + gap;
+             else cap("Enter");
+             break;
+         case Control::Back:
+-            if (pad) x += draw_face(draw, {x, at.y}, back) + gap;
++            if (pad) x += face(x, back) + gap;
+             else cap("Esc");
+             break;
+         case Control::Tabs:
+@@ -683,12 +698,12 @@ void hints(std::initializer_list<Hint> list) {
+             break;
+         case Control::Start: cap(pad ? "Start" : "Enter"); break;
+         case Control::Toggle:
+-        case Control::Space: x += draw_face(draw, {x, at.y}, SDL_GAMEPAD_BUTTON_NORTH) + gap; break;
++        case Control::Space: x += face(x, SDL_GAMEPAD_BUTTON_NORTH) + gap; break;
+         case Control::Delete:
+-            if (pad) x += draw_face(draw, {x, at.y}, back) + gap;
++            if (pad) x += face(x, back) + gap;
+             else cap("Backspace");
+             break;
+-        case Control::Shift: x += draw_face(draw, {x, at.y}, SDL_GAMEPAD_BUTTON_WEST) + gap; break;
++        case Control::Shift: x += face(x, SDL_GAMEPAD_BUTTON_WEST) + gap; break;
+         case Control::Symbols: cap(select_name()); break;
+         case Control::Cursor:
+             if (pad) {
+@@ -699,11 +714,41 @@ void hints(std::initializer_list<Hint> list) {
+             }
+             break;
+         }
+-        draw->AddText({x + px(2.0f), at.y}, colors::kTextDim, hint.text);
++        if (draw != nullptr) draw->AddText({x + px(2.0f), at.y}, style.text, hint.text);
+         at.x = x + ImGui::CalcTextSize(hint.text).x + px(26.0f);
+     }
++    return std::max(0.0f, at.x - start.x - px(24.0f));
++}
++
++} // namespace
++
++void hints(std::initializer_list<Hint> list) { hints(list, HintStyle{}); }
++
++void hints(std::initializer_list<Hint> list, const HintStyle &style) {
++    const float width = lay_out_hints(ImGui::GetWindowDrawList(), ImGui::GetCursorScreenPos(), list, style);
+     // Room for what was drawn, so a window around the hints can fit them.
+-    ImGui::Dummy({std::max(0.0f, at.x - start.x - px(24.0f)), font()});
++    ImGui::Dummy({width, font()});
++}
++
++float hints_width(std::initializer_list<Hint> list) { return lay_out_hints(nullptr, {}, list, HintStyle{}); }
++
++void draw_band(ImDrawList *draw, float top, float bottom) {
++    const float width = ImGui::GetIO().DisplaySize.x;
++    draw->AddRectFilledMultiColor({0.0f, top}, {width, bottom}, band::kTop, band::kTop, band::kBottom,
++                                  band::kBottom);
++    // A thin rule at each edge, with a fainter one just inside it.
++    const float line = std::max(1.0f, px(1.0f));
++    draw->AddRectFilled({0.0f, top}, {width, top + line}, band::kRule);
++    draw->AddRectFilled({0.0f, top + line}, {width, top + 3.0f * line}, band::kRuleGlow);
++    draw->AddRectFilled({0.0f, bottom - line}, {width, bottom}, band::kRule);
++    draw->AddRectFilled({0.0f, bottom - 3.0f * line}, {width, bottom - line}, band::kRuleGlow);
++}
++
++void draw_choice(ImDrawList *draw, ImVec2 min, ImVec2 max, bool selected) {
++    if (!selected) return;
++    const float rounding = (max.y - min.y) * 0.5f;
++    draw->AddRectFilled(min, max, band::kSelect, rounding);
++    draw->AddRect(min, max, band::kSelectEdge, rounding, 0, std::max(1.0f, px(1.0f)));
+ }
+ 
+ } // namespace portablekit::ui
+diff --git a/host/ui/widgets.hpp b/host/ui/widgets.hpp
+index a573f33..7986937 100644
+--- a/host/ui/widgets.hpp
++++ b/host/ui/widgets.hpp
+@@ -28,6 +28,24 @@ inline constexpr ImU32 kGood = IM_COL32(150, 196, 120, 255);
+ inline constexpr ImU32 kTrack = IM_COL32(255, 240, 210, 36);
+ } // namespace colors
+ 
++// The system dialogs a game opens over itself (the message and save-data
++// dialogs) are not the port's menus: they are drawn as a translucent band
++// across the running game, white text centred in it, a soft highlight on the
++// selected choice and the button hints at its lower right, in the spirit of
++// the handheld's own dialogs. Original colours; no console assets.
++namespace band {
++inline constexpr ImU32 kDim = IM_COL32(0, 0, 0, 72);  // over the whole game
++inline constexpr ImU32 kTop = IM_COL32(6, 8, 14, 200);
++inline constexpr ImU32 kBottom = IM_COL32(6, 8, 14, 160);
++inline constexpr ImU32 kRule = IM_COL32(255, 255, 255, 170);
++inline constexpr ImU32 kRuleGlow = IM_COL32(255, 255, 255, 34);
++inline constexpr ImU32 kText = IM_COL32(255, 255, 255, 255);
++inline constexpr ImU32 kTextDim = IM_COL32(205, 210, 220, 210);
++inline constexpr ImU32 kTextFaint = IM_COL32(205, 210, 220, 120);
++inline constexpr ImU32 kSelect = IM_COL32(255, 255, 255, 44);
++inline constexpr ImU32 kSelectEdge = IM_COL32(255, 255, 255, 150);
++} // namespace band
++
+ ImGuiStyle make_style(float scale, float font_size);
+ 
+ // The panel every screen sits in, centred in the window: title and optional
+@@ -110,6 +128,24 @@ struct Hint {
+     Control control;
+     const char *text;
+ };
++// The colours hints are drawn in; the default is the menus' look.
++struct HintStyle {
++    ImU32 text{colors::kTextDim};
++    ImU32 face{colors::kAccent};      // a face button's disc
++    ImU32 face_ink{colors::kPanel};   // and the shape or letter on it
++    ImU32 cap_edge{colors::kTextDim}; // a key or shoulder button's outline
++    ImU32 cap_text{colors::kText};
++};
++inline constexpr HintStyle kBandHints{band::kTextDim, IM_COL32(235, 238, 245, 235), IM_COL32(20, 24, 32, 255),
++                                      band::kTextDim, band::kText};
+ void hints(std::initializer_list<Hint> list);
++void hints(std::initializer_list<Hint> list, const HintStyle &style);
++// How wide hints(list) draws, to place them before drawing.
++[[nodiscard]] float hints_width(std::initializer_list<Hint> list);
++
++// The band of a system dialog across the whole display, from `top` to
++// `bottom` (band:: colours), and the highlight behind its selected choice.
++void draw_band(ImDrawList *draw, float top, float bottom);
++void draw_choice(ImDrawList *draw, ImVec2 min, ImVec2 max, bool selected);
+ 
+ } // namespace portablekit::ui
+-- 
+2.53.0.windows.1
+

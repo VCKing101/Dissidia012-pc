@@ -1,0 +1,962 @@
+{
+  "schema_version": 1,
+  "review": {
+    "filename_table": "0x089D85C4",
+    "initialize_table": "0x089D85D0",
+    "shutdown_table": "0x089D85DC",
+    "selectors": {
+      "filename": {
+        "high_pc": "0x08933A8C",
+        "low_pc": "0x08933A94",
+        "index_pc": "0x08933A90",
+        "add_pc": "0x08933A98",
+        "load_pc": "0x08933A9C"
+      },
+      "initialize": {
+        "high_pc": "0x08933B18",
+        "low_pc": "0x08933B20",
+        "index_pc": "0x08933B1C",
+        "add_pc": "0x08933B28",
+        "load_pc": "0x08933B2C",
+        "indirect_call_pc": "0x08933B30"
+      },
+      "shutdown": {
+        "high_pc": "0x08933B70",
+        "low_pc": "0x08933B78",
+        "index_pc": "0x08933B74",
+        "add_pc": "0x08933B7C",
+        "load_pc": "0x08933B80",
+        "indirect_call_pc": "0x08933B84"
+      }
+    },
+    "lifecycle_calls": [
+      {
+        "pc": "0x08933B00",
+        "target": "0x08933A80"
+      },
+      {
+        "pc": "0x08933B0C",
+        "target": "0x089331FC"
+      },
+      {
+        "pc": "0x08933B9C",
+        "target": "0x0893335C"
+      }
+    ],
+    "slots": [
+      {
+        "index": 0,
+        "module": "menu",
+        "filename": "ovl_menu_app.elf",
+        "initialize": "0x0887801C",
+        "shutdown": "0x0887974C",
+        "payload_start": "0x089DD4C0",
+        "payload_end": "0x08B59258"
+      },
+      {
+        "index": 1,
+        "module": "battle",
+        "filename": "ovl_battle_app.elf",
+        "initialize": "0x08878DE0",
+        "shutdown": "0x088798A0",
+        "payload_start": "0x089DD4C0",
+        "payload_end": "0x08B62F70"
+      },
+      {
+        "index": 2,
+        "module": "extra",
+        "filename": "ovl_extra_app.elf",
+        "initialize": "0x088796AC",
+        "shutdown": "0x088799DC",
+        "payload_start": "0x089DD4C0",
+        "payload_end": "0x089E33B8"
+      }
+    ]
+  },
+  "modules": {
+    "main": {
+      "reference_sha256": "0bc8e779aad2814a3d1bd77346f69ca5e16665845ed053cd0ad44a9cbfaefe6d",
+      "entries": [
+        {
+          "address": "0x0887974C",
+          "table_slot": "0x089D85DC",
+          "dispatch_index": 0,
+          "active_module": "menu"
+        },
+        {
+          "address": "0x088798A0",
+          "table_slot": "0x089D85E0",
+          "dispatch_index": 1,
+          "active_module": "battle"
+        },
+        {
+          "address": "0x088799DC",
+          "table_slot": "0x089D85E4",
+          "dispatch_index": 2,
+          "active_module": "extra"
+        }
+      ]
+    },
+    "menu": {
+      "reference_sha256": "f021f96fa05da5907563a28c232966aa8a344526d6b8bdee728053ec75224d0a",
+      "entries": [
+        {
+          "address": "0x089DD4D0",
+          "caller": "main:0x0887801C",
+          "call_pc": "0x08878250",
+          "dispatch_index": 0
+        },
+        {
+          "address": "0x089E0B0C",
+          "caller": "main:0x0887801C",
+          "call_pc": "0x0887827C",
+          "dispatch_index": 0
+        },
+        {
+          "address": "0x089E7678",
+          "caller": "main:0x0887801C",
+          "call_pc": "0x0887865C",
+          "dispatch_index": 0
+        },
+        {
+          "address": "0x089FE524",
+          "caller": "main:0x0887801C",
+          "call_pc": "0x088785C0",
+          "dispatch_index": 0
+        },
+        {
+          "address": "0x08A1D364",
+          "caller": "main:0x0887801C",
+          "call_pc": "0x08878628",
+          "dispatch_index": 0
+        },
+        {
+          "address": "0x08A2BCE4",
+          "caller": "main:0x0887801C",
+          "call_pc": "0x088785F4",
+          "dispatch_index": 0
+        },
+        {
+          "address": "0x08A323E4",
+          "caller": "main:0x0887801C",
+          "call_pc": "0x0887858C",
+          "dispatch_index": 0
+        },
+        {
+          "address": "0x08A42C1C",
+          "caller": "main:0x0887801C",
+          "call_pc": "0x08878524",
+          "dispatch_index": 0
+        },
+        {
+          "address": "0x08A436C0",
+          "caller": "main:0x0887801C",
+          "call_pc": "0x08878558",
+          "dispatch_index": 0
+        },
+        {
+          "address": "0x08A4ABFC",
+          "caller": "main:0x0887801C",
+          "call_pc": "0x08878684",
+          "dispatch_index": 0
+        },
+        {
+          "address": "0x08A4D4DC",
+          "caller": "main:0x0887801C",
+          "call_pc": "0x088786B8",
+          "dispatch_index": 0
+        },
+        {
+          "address": "0x08A500A8",
+          "caller": "main:0x0887801C",
+          "call_pc": "0x088786EC",
+          "dispatch_index": 0
+        },
+        {
+          "address": "0x08A6CBFC",
+          "caller": "main:0x0887801C",
+          "call_pc": "0x08878754",
+          "dispatch_index": 0
+        },
+        {
+          "address": "0x08A6D7CC",
+          "caller": "main:0x0887801C",
+          "call_pc": "0x08878788",
+          "dispatch_index": 0
+        },
+        {
+          "address": "0x08A87428",
+          "caller": "main:0x0887801C",
+          "call_pc": "0x088787E4",
+          "dispatch_index": 0
+        },
+        {
+          "address": "0x08A8A194",
+          "caller": "main:0x0887801C",
+          "call_pc": "0x088787B0",
+          "dispatch_index": 0
+        },
+        {
+          "address": "0x08A969CC",
+          "caller": "main:0x0887801C",
+          "call_pc": "0x08878840",
+          "dispatch_index": 0
+        },
+        {
+          "address": "0x08A9CBDC",
+          "caller": "main:0x0887801C",
+          "call_pc": "0x08878720",
+          "dispatch_index": 0
+        },
+        {
+          "address": "0x08AB9C18",
+          "caller": "main:0x0887801C",
+          "call_pc": "0x08878454",
+          "dispatch_index": 0
+        },
+        {
+          "address": "0x08ABF6F8",
+          "caller": "main:0x0887801C",
+          "call_pc": "0x088783B8",
+          "dispatch_index": 0
+        },
+        {
+          "address": "0x08AC65A0",
+          "caller": "main:0x0887801C",
+          "call_pc": "0x08878318",
+          "dispatch_index": 0
+        },
+        {
+          "address": "0x08AF2C30",
+          "caller": "main:0x0887801C",
+          "call_pc": "0x08878350",
+          "dispatch_index": 0
+        },
+        {
+          "address": "0x08B0C00C",
+          "caller": "main:0x0887801C",
+          "call_pc": "0x08878420",
+          "dispatch_index": 0
+        },
+        {
+          "address": "0x08B1F0BC",
+          "caller": "main:0x0887801C",
+          "call_pc": "0x088783EC",
+          "dispatch_index": 0
+        },
+        {
+          "address": "0x08B238F8",
+          "caller": "main:0x0887801C",
+          "call_pc": "0x08878384",
+          "dispatch_index": 0
+        },
+        {
+          "address": "0x08B24A0C",
+          "caller": "main:0x0887801C",
+          "call_pc": "0x08878488",
+          "dispatch_index": 0
+        },
+        {
+          "address": "0x08B296E8",
+          "caller": "main:0x0887801C",
+          "call_pc": "0x088784BC",
+          "dispatch_index": 0
+        },
+        {
+          "address": "0x08B326F8",
+          "caller": "main:0x0887801C",
+          "call_pc": "0x088784F0",
+          "dispatch_index": 0
+        },
+        {
+          "address": "0x08B34C18",
+          "caller": "main:0x0887801C",
+          "call_pc": "0x08878868",
+          "dispatch_index": 0
+        },
+        {
+          "address": "0x08B41F00",
+          "caller": "main:0x0887801C",
+          "call_pc": "0x08878890",
+          "dispatch_index": 0
+        },
+        {
+          "address": "0x08B42234",
+          "caller": "main:0x0887801C",
+          "call_pc": "0x088788E0",
+          "dispatch_index": 0
+        },
+        {
+          "address": "0x08B42368",
+          "caller": "main:0x0887801C",
+          "call_pc": "0x088789A0",
+          "dispatch_index": 0
+        },
+        {
+          "address": "0x08B42A04",
+          "caller": "main:0x0887801C",
+          "call_pc": "0x088789D0",
+          "dispatch_index": 0
+        },
+        {
+          "address": "0x08B42AA0",
+          "caller": "main:0x0887801C",
+          "call_pc": "0x088788B8",
+          "dispatch_index": 0
+        },
+        {
+          "address": "0x08B43620",
+          "caller": "main:0x0887801C",
+          "call_pc": "0x08878970",
+          "dispatch_index": 0
+        },
+        {
+          "address": "0x08B44750",
+          "caller": "main:0x0887801C",
+          "call_pc": "0x08878910",
+          "dispatch_index": 0
+        },
+        {
+          "address": "0x08B45444",
+          "caller": "main:0x0887801C",
+          "call_pc": "0x08878940",
+          "dispatch_index": 0
+        },
+        {
+          "address": "0x08B53B88",
+          "caller": "main:0x0887801C",
+          "call_pc": "0x08878818",
+          "dispatch_index": 0
+        },
+        {
+          "address": "0x08B54060",
+          "caller": "main:0x0887801C",
+          "call_pc": "0x08878A00",
+          "dispatch_index": 0
+        },
+        {
+          "address": "0x08B58B30",
+          "caller": "main:0x0887801C",
+          "call_pc": "0x08878A24",
+          "dispatch_index": 0
+        }
+      ]
+    },
+    "battle": {
+      "reference_sha256": "1f96cfb3be771ff6e94741ae3916fab340df74e36ede07ca39545d015f4c49dc",
+      "entries": [
+        {
+          "address": "0x089DD4D0",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888D0B0",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        },
+        {
+          "address": "0x089DD67C",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888D09C",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        },
+        {
+          "address": "0x089DD6B4",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888DA20",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        },
+        {
+          "address": "0x089DDA98",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888DBC4",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        },
+        {
+          "address": "0x089DDA98",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888DBF0",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        },
+        {
+          "address": "0x089DDA98",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888DC04",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        },
+        {
+          "address": "0x08A21F48",
+          "caller": "main:0x08878DE0",
+          "call_pc": "0x088791E8",
+          "dispatch_index": 1
+        },
+        {
+          "address": "0x08A22044",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888D9B4",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        },
+        {
+          "address": "0x08A22AB8",
+          "caller": "main:0x08878DE0",
+          "call_pc": "0x08879180",
+          "dispatch_index": 1
+        },
+        {
+          "address": "0x08A22B74",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888C90C",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        },
+        {
+          "address": "0x08A3D7E8",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888CB90",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        },
+        {
+          "address": "0x08A3E874",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888CD30",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        },
+        {
+          "address": "0x08A4FD00",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888CB9C",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        },
+        {
+          "address": "0x08A5D2D0",
+          "caller": "main:0x08878DE0",
+          "call_pc": "0x0887906C",
+          "dispatch_index": 1
+        },
+        {
+          "address": "0x08A61F10",
+          "caller": "main:0x08878DE0",
+          "call_pc": "0x08879570",
+          "dispatch_index": 1
+        },
+        {
+          "address": "0x08A61FC8",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888D070",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        },
+        {
+          "address": "0x08A800A0",
+          "caller": "main:0x08878DE0",
+          "call_pc": "0x088794A8",
+          "dispatch_index": 1
+        },
+        {
+          "address": "0x08A80188",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888D910",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        },
+        {
+          "address": "0x08AA5628",
+          "caller": "main:0x08878DE0",
+          "call_pc": "0x088794DC",
+          "dispatch_index": 1
+        },
+        {
+          "address": "0x08AA7788",
+          "caller": "main:0x08878DE0",
+          "call_pc": "0x08879510",
+          "dispatch_index": 1
+        },
+        {
+          "address": "0x08AB3CB8",
+          "caller": "main:0x08878DE0",
+          "call_pc": "0x088790F0",
+          "dispatch_index": 1
+        },
+        {
+          "address": "0x08AB54C0",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888D7E0",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        },
+        {
+          "address": "0x08AB55E8",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888D3DC",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        },
+        {
+          "address": "0x08AB7F18",
+          "caller": "main:0x08878DE0",
+          "call_pc": "0x088790C8",
+          "dispatch_index": 1
+        },
+        {
+          "address": "0x08ABACA8",
+          "caller": "main:0x08878DE0",
+          "call_pc": "0x08879474",
+          "dispatch_index": 1
+        },
+        {
+          "address": "0x08ABB114",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888D990",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        },
+        {
+          "address": "0x08ABB3C4",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888DB90",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        },
+        {
+          "address": "0x08ABB5BC",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888D99C",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        },
+        {
+          "address": "0x08ABB7FC",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888CFE8",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        },
+        {
+          "address": "0x08AC6098",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888CBB4",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        },
+        {
+          "address": "0x08AC8F00",
+          "caller": "main:0x08878DE0",
+          "call_pc": "0x08879540",
+          "dispatch_index": 1
+        },
+        {
+          "address": "0x08AC8FE4",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888D080",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        },
+        {
+          "address": "0x08ACABFC",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888D8B4",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        },
+        {
+          "address": "0x08ACCD78",
+          "caller": "main:0x08878DE0",
+          "call_pc": "0x088795D0",
+          "dispatch_index": 1
+        },
+        {
+          "address": "0x08ACD0F0",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888DD40",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        },
+        {
+          "address": "0x08ACD9B4",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888D618",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        },
+        {
+          "address": "0x08ACEE28",
+          "caller": "main:0x08878DE0",
+          "call_pc": "0x088795A0",
+          "dispatch_index": 1
+        },
+        {
+          "address": "0x08ACEEC4",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888D08C",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        },
+        {
+          "address": "0x08AD0810",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888D7F0",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        },
+        {
+          "address": "0x08AEAF9C",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888D918",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        },
+        {
+          "address": "0x08AEF05C",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888DA2C",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        },
+        {
+          "address": "0x08AF2C10",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888C9A0",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        },
+        {
+          "address": "0x08AF2CBC",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888CB64",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        },
+        {
+          "address": "0x08AF2D08",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888DC34",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        },
+        {
+          "address": "0x08AF8720",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888CE8C",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        },
+        {
+          "address": "0x08AFBDD8",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888C9AC",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        },
+        {
+          "address": "0x08AFBE40",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888C9D4",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        },
+        {
+          "address": "0x08AFBE4C",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888CEA8",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        },
+        {
+          "address": "0x08B014D8",
+          "caller": "main:0x08878DE0",
+          "call_pc": "0x08879354",
+          "dispatch_index": 1
+        },
+        {
+          "address": "0x08B015F8",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888D9C0",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        },
+        {
+          "address": "0x08B04BA8",
+          "caller": "main:0x08878DE0",
+          "call_pc": "0x08879388",
+          "dispatch_index": 1
+        },
+        {
+          "address": "0x08B04D4C",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888D1B8",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        },
+        {
+          "address": "0x08B05BF8",
+          "caller": "main:0x08878DE0",
+          "call_pc": "0x088793BC",
+          "dispatch_index": 1
+        },
+        {
+          "address": "0x08B05CCC",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888DA00",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        },
+        {
+          "address": "0x08B0D9DC",
+          "caller": "main:0x08878DE0",
+          "call_pc": "0x088793E4",
+          "dispatch_index": 1
+        },
+        {
+          "address": "0x08B0DB10",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888DC50",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        },
+        {
+          "address": "0x08B11988",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888D9F4",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        },
+        {
+          "address": "0x08B12CF4",
+          "caller": "main:0x08878DE0",
+          "call_pc": "0x0887914C",
+          "dispatch_index": 1
+        },
+        {
+          "address": "0x08B13234",
+          "caller": "main:0x08878DE0",
+          "call_pc": "0x08879418",
+          "dispatch_index": 1
+        },
+        {
+          "address": "0x08B132A0",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888DD24",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        },
+        {
+          "address": "0x08B13B70",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888CFF8",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        },
+        {
+          "address": "0x08B13C34",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888D044",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        },
+        {
+          "address": "0x08B177B4",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888D0D0",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        },
+        {
+          "address": "0x08B177FC",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888D0C8",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        },
+        {
+          "address": "0x08B184F0",
+          "caller": "main:0x08878DE0",
+          "call_pc": "0x08879440",
+          "dispatch_index": 1
+        },
+        {
+          "address": "0x08B185D0",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888D2EC",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        },
+        {
+          "address": "0x08B1CD68",
+          "caller": "main:0x08878DE0",
+          "call_pc": "0x088791B4",
+          "dispatch_index": 1
+        },
+        {
+          "address": "0x08B1D8A8",
+          "caller": "main:0x08878DE0",
+          "call_pc": "0x0887921C",
+          "dispatch_index": 1
+        },
+        {
+          "address": "0x08B1D99C",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888D15C",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        },
+        {
+          "address": "0x08B1E5DC",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888DCA4",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        },
+        {
+          "address": "0x08B20A88",
+          "caller": "main:0x08878DE0",
+          "call_pc": "0x08879250",
+          "dispatch_index": 1
+        },
+        {
+          "address": "0x08B20BC8",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888D194",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        },
+        {
+          "address": "0x08B20D28",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888DCBC",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        },
+        {
+          "address": "0x08B212F0",
+          "caller": "main:0x08878DE0",
+          "call_pc": "0x08879284",
+          "dispatch_index": 1
+        },
+        {
+          "address": "0x08B21AB8",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888CFCC",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        },
+        {
+          "address": "0x08B2368C",
+          "caller": "main:0x08878DE0",
+          "call_pc": "0x088792B8",
+          "dispatch_index": 1
+        },
+        {
+          "address": "0x08B236EC",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888DE74",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        },
+        {
+          "address": "0x08B27998",
+          "caller": "main:0x08878DE0",
+          "call_pc": "0x088792EC",
+          "dispatch_index": 1
+        },
+        {
+          "address": "0x08B27B1C",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888DEBC",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        },
+        {
+          "address": "0x08B27C58",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888DF08",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        },
+        {
+          "address": "0x08B2CCD0",
+          "caller": "main:0x08878DE0",
+          "call_pc": "0x08879320",
+          "dispatch_index": 1
+        },
+        {
+          "address": "0x08B2CD60",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888DF24",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        },
+        {
+          "address": "0x08B3B9C4",
+          "caller": "main:0x08878DE0",
+          "call_pc": "0x08879630",
+          "dispatch_index": 1
+        },
+        {
+          "address": "0x08B3BA40",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888D3CC",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        },
+        {
+          "address": "0x08B3C45C",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888D3C0",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        },
+        {
+          "address": "0x08B4885C",
+          "caller": "main:0x08878DE0",
+          "call_pc": "0x08879600",
+          "dispatch_index": 1
+        },
+        {
+          "address": "0x08B53254",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888D0D8",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        },
+        {
+          "address": "0x08B532FC",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888D970",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        },
+        {
+          "address": "0x08B53890",
+          "caller": "main:0x0888C4C8",
+          "call_pc": "0x0888CFD8",
+          "dispatch_index": 1,
+          "context": "explicit battle ensure in deferred setup"
+        }
+      ]
+    },
+    "extra": {
+      "reference_sha256": "f6b7be5e15c28774985417f1ec2c64f6655e79cc3c9dce7600fa7f6bacabca01",
+      "entries": [
+        {
+          "address": "0x089DE668",
+          "caller": "main:0x088796AC",
+          "call_pc": "0x088796E8",
+          "dispatch_index": 2
+        },
+        {
+          "address": "0x089E0D94",
+          "caller": "main:0x088796AC",
+          "call_pc": "0x08879718",
+          "dispatch_index": 2
+        }
+      ]
+    }
+  }
+}

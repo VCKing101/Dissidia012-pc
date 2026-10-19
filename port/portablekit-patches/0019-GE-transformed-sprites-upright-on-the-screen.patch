@@ -1,0 +1,220 @@
+From f591c67667db5c9d2af9a380874ad2a6749400c1 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Sun, 18 Oct 2026 22:00:56 +1030
+Subject: [PATCH 19/27] GE: transformed sprites upright on the screen
+
+A sprite drawn through the transform is still a screen rectangle on the
+GE: both corners are transformed and the rectangle between them is drawn
+upright on the screen at the second corner's depth, whatever way the
+model faces. That is what makes sprites in a 3D scene billboards. The
+renderer expanded the rectangle in model space, in the model's x-y plane,
+before the transform: a particle or a puff of dust became a card that
+turned with its world matrix and showed edge-on from the side.
+
+The two corners it adds are now placed in model space where the draw's
+transform puts them on the screen rectangle (screen_sprite_corners: the
+projected corners, unprojected at the second corner's clip depth through
+the inverse of projection x view x world). The draw keeps its transform,
+so lighting, fog and frame interpolation are unchanged. A corner behind
+the eye or a transform with no inverse falls back to the old expansion.
+<prefix>_TRACE_SPRITES now also lists the frame's transformed sprites
+with the size of the screen rectangle and of the flat one.
+<prefix>_NO_SCREEN_SPRITES expands in model space, as before.
+
+Verified on Windows (Vulkan, AMD) with one game: dust puffs and
+particles in its battles face the camera instead of showing edge-on;
+the trace lists sprites whose flat rectangle was up to six times wider
+than the screen rectangle. Not verified: other games' transformed sprites,
+sprites crossing the near plane.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/gpu/vulkan_renderer.cpp | 144 ++++++++++++++++++++++++++++++++++-
+ 1 file changed, 143 insertions(+), 1 deletion(-)
+
+diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
+index 1987b13..b297555 100644
+--- a/host/gpu/vulkan_renderer.cpp
++++ b/host/gpu/vulkan_renderer.cpp
+@@ -488,6 +488,91 @@ std::array<float, 16> multiply(const std::array<float, 16> &a, const std::array<
+     return result;
+ }
+ 
++// A transformed sprite as the GE draws it: its two corners are transformed,
++// and the rectangle between them is drawn upright on the screen at the
++// second corner's depth, whatever way the model faces. That is what makes a
++// sprite in a 3D scene a billboard. The renderer draws the rectangle as two
++// triangles through the draw's own transform, so the corners it adds are put
++// where that transform takes them onto the screen rectangle: `transform` is
++// projection times view times world, and on success `top_right` and
++// `bottom_left` receive the model-space positions of the corners (b.x, a.y)
++// and (a.x, b.y) of the screen rectangle, and `first` that of corner a moved
++// to b's depth. False (nothing written) when a corner is behind the eye or
++// the transform has no inverse; the caller then expands in model space.
++bool screen_sprite_corners(const std::array<float, 16> &transform, const std::array<float, 3> &a,
++                           const std::array<float, 3> &b, std::array<float, 3> &first,
++                           std::array<float, 3> &top_right, std::array<float, 3> &bottom_left) {
++    std::array<double, 16> m{};
++    for (std::size_t i = 0; i < 16u; ++i) m[i] = transform[i];
++    const auto clip = [&](const std::array<float, 3> &p) {
++        std::array<double, 4> out{};
++        for (std::uint32_t row = 0; row < 4u; ++row)
++            out[row] = m[row] * p[0] + m[4u + row] * p[1] + m[8u + row] * p[2] + m[12u + row];
++        return out;
++    };
++    const std::array<double, 4> ca = clip(a);
++    const std::array<double, 4> cb = clip(b);
++    constexpr double kNear = 1e-6;
++    if (!(ca[3] > kNear) || !(cb[3] > kNear)) return false;
++
++    // The inverse of m by cofactors (column-major, as the GE's matrices).
++    std::array<double, 16> inv{};
++    inv[0] = m[5] * m[10] * m[15] - m[5] * m[11] * m[14] - m[9] * m[6] * m[15] + m[9] * m[7] * m[14] +
++             m[13] * m[6] * m[11] - m[13] * m[7] * m[10];
++    inv[4] = -m[4] * m[10] * m[15] + m[4] * m[11] * m[14] + m[8] * m[6] * m[15] - m[8] * m[7] * m[14] -
++             m[12] * m[6] * m[11] + m[12] * m[7] * m[10];
++    inv[8] = m[4] * m[9] * m[15] - m[4] * m[11] * m[13] - m[8] * m[5] * m[15] + m[8] * m[7] * m[13] +
++             m[12] * m[5] * m[11] - m[12] * m[7] * m[9];
++    inv[12] = -m[4] * m[9] * m[14] + m[4] * m[10] * m[13] + m[8] * m[5] * m[14] - m[8] * m[6] * m[13] -
++              m[12] * m[5] * m[10] + m[12] * m[6] * m[9];
++    inv[1] = -m[1] * m[10] * m[15] + m[1] * m[11] * m[14] + m[9] * m[2] * m[15] - m[9] * m[3] * m[14] -
++             m[13] * m[2] * m[11] + m[13] * m[3] * m[10];
++    inv[5] = m[0] * m[10] * m[15] - m[0] * m[11] * m[14] - m[8] * m[2] * m[15] + m[8] * m[3] * m[14] +
++             m[12] * m[2] * m[11] - m[12] * m[3] * m[10];
++    inv[9] = -m[0] * m[9] * m[15] + m[0] * m[11] * m[13] + m[8] * m[1] * m[15] - m[8] * m[3] * m[13] -
++             m[12] * m[1] * m[11] + m[12] * m[3] * m[9];
++    inv[13] = m[0] * m[9] * m[14] - m[0] * m[10] * m[13] - m[8] * m[1] * m[14] + m[8] * m[2] * m[13] +
++              m[12] * m[1] * m[10] - m[12] * m[2] * m[9];
++    inv[2] = m[1] * m[6] * m[15] - m[1] * m[7] * m[14] - m[5] * m[2] * m[15] + m[5] * m[3] * m[14] +
++             m[13] * m[2] * m[7] - m[13] * m[3] * m[6];
++    inv[6] = -m[0] * m[6] * m[15] + m[0] * m[7] * m[14] + m[4] * m[2] * m[15] - m[4] * m[3] * m[14] -
++             m[12] * m[2] * m[7] + m[12] * m[3] * m[6];
++    inv[10] = m[0] * m[5] * m[15] - m[0] * m[7] * m[13] - m[4] * m[1] * m[15] + m[4] * m[3] * m[13] +
++              m[12] * m[1] * m[7] - m[12] * m[3] * m[5];
++    inv[14] = -m[0] * m[5] * m[14] + m[0] * m[6] * m[13] + m[4] * m[1] * m[14] - m[4] * m[2] * m[13] -
++              m[12] * m[1] * m[6] + m[12] * m[2] * m[5];
++    inv[3] = -m[1] * m[6] * m[11] + m[1] * m[7] * m[10] + m[5] * m[2] * m[11] - m[5] * m[3] * m[10] -
++             m[9] * m[2] * m[7] + m[9] * m[3] * m[6];
++    inv[7] = m[0] * m[6] * m[11] - m[0] * m[7] * m[10] - m[4] * m[2] * m[11] + m[4] * m[3] * m[10] +
++             m[8] * m[2] * m[7] - m[8] * m[3] * m[6];
++    inv[11] = -m[0] * m[5] * m[11] + m[0] * m[7] * m[9] + m[4] * m[1] * m[11] - m[4] * m[3] * m[9] -
++              m[8] * m[1] * m[7] + m[8] * m[3] * m[5];
++    inv[15] = m[0] * m[5] * m[10] - m[0] * m[6] * m[9] - m[4] * m[1] * m[10] + m[4] * m[2] * m[9] +
++              m[8] * m[1] * m[6] - m[8] * m[2] * m[5];
++    const double determinant = m[0] * inv[0] + m[1] * inv[4] + m[2] * inv[8] + m[3] * inv[12];
++    if (!(std::fabs(determinant) > 1e-30)) return false;
++
++    // A point on the screen at b's depth: clip coordinates with b's z and w.
++    const auto unproject = [&](double ndc_x, double ndc_y, std::array<float, 3> &out) {
++        const std::array<double, 4> c{ndc_x * cb[3], ndc_y * cb[3], cb[2], cb[3]};
++        std::array<double, 4> p{};
++        for (std::uint32_t row = 0; row < 4u; ++row)
++            p[row] = (inv[row] * c[0] + inv[4u + row] * c[1] + inv[8u + row] * c[2] + inv[12u + row] * c[3]) /
++                     determinant;
++        if (!(std::fabs(p[3]) > 1e-30)) return false;
++        for (std::uint32_t i = 0; i < 3u; ++i) out[i] = static_cast<float>(p[i] / p[3]);
++        return std::isfinite(out[0]) && std::isfinite(out[1]) && std::isfinite(out[2]);
++    };
++    const double ax = ca[0] / ca[3], ay = ca[1] / ca[3];
++    const double bx = cb[0] / cb[3], by = cb[1] / cb[3];
++    std::array<float, 3> moved{}, right{}, left{};
++    if (!unproject(ax, ay, moved) || !unproject(bx, ay, right) || !unproject(ax, by, left)) return false;
++    first = moved;
++    top_right = right;
++    bottom_left = left;
++    return true;
++}
++
+ // How far a projection turns the picture, in degrees anticlockwise as clip
+ // space (y up) sees it. A projection that turns a 2D world is a scale times a
+ // turn: its first two rows are (sx cos, -sx sin) and (sy sin, sy cos), each
+@@ -6359,7 +6444,14 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+                 push_vertex(vertex_at(i + 1u));
+             }
+             break;
+-        case PrimitiveType::Sprites:
++        case PrimitiveType::Sprites: {
++            // A transformed sprite is upright on the screen (screen_sprite_corners);
++            // <prefix>_NO_SCREEN_SPRITES expands it in model space, as before,
++            // which lays it flat in the model's x-y plane.
++            static const bool no_screen_sprites = portablekit::env("NO_SCREEN_SPRITES") != nullptr;
++            const bool screen_sprites = !call.through && !call.clear_mode && !no_screen_sprites;
++            const std::array<float, 16> sprite_transform =
++                screen_sprites ? multiply(call.projection, multiply(call.view, call.world)) : std::array<float, 16>{};
+             // Vertex pairs describe the opposite corners of a rectangle.
+             for (std::size_t i = 0; i + 1u < count; i += 2u) {
+                 Vertex a = vertex_at(i);
+@@ -6376,6 +6468,17 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+                 Vertex bottom_left = a;
+                 bottom_left.position[1] = b.position[1];
+                 bottom_left.texcoord[1] = b.texcoord[1];
++                std::array<float, 3> first{}, right{}, left{};
++                if (screen_sprites &&
++                    screen_sprite_corners(sprite_transform,
++                                          {vertex_at(i).position[0], vertex_at(i).position[1], vertex_at(i).position[2]},
++                                          {b.position[0], b.position[1], b.position[2]}, first, right, left)) {
++                    for (std::size_t k = 0; k < 3u; ++k) {
++                        a.position[k] = first[k];
++                        top_right.position[k] = right[k];
++                        bottom_left.position[k] = left[k];
++                    }
++                }
+                 push_vertex(a);
+                 push_vertex(top_right);
+                 push_vertex(b);
+@@ -6384,6 +6487,7 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+                 push_vertex(bottom_left);
+             }
+             break;
++        }
+         default:
+             return false;  // points and lines are not drawn yet
+         }
+@@ -6482,6 +6586,44 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+                   << call.texture.height << " fmt=" << static_cast<int>(call.texture.format)
+                   << " filter=" << call.texture.min_filter << "/" << call.texture.mag_filter << "\n";
+     }
++    if (!call.through && call.primitive == PrimitiveType::Sprites && impl.frames == trace_sprites_frame) {
++        // Transformed sprites: the screen rectangle the GE draws between the
++        // projected corners, and the screen box of the rectangle laid flat in
++        // the model's x-y plane, which is what <prefix>_NO_SCREEN_SPRITES draws.
++        const std::array<float, 16> m = multiply(call.projection, multiply(call.view, call.world));
++        const auto screen = [&](float x, float y, float z, float &sx, float &sy) {
++            const float cx = m[0] * x + m[4] * y + m[8] * z + m[12];
++            const float cy = m[1] * x + m[5] * y + m[9] * z + m[13];
++            const float cw = m[3] * x + m[7] * y + m[11] * z + m[15];
++            if (cw <= 1e-6f) return false;
++            sx = (cx / cw * 0.5f + 0.5f) * static_cast<float>(kPspWidth);
++            sy = (0.5f - cy / cw * 0.5f) * static_cast<float>(kPspHeight);
++            return true;
++        };
++        for (std::size_t i = 0; i + 1u < count; i += 2u) {
++            const Vertex &a = vertex_at(i);
++            const Vertex &b = vertex_at(i + 1u);
++            float ax = 0, ay = 0, bx = 0, by = 0;
++            if (!screen(a.position[0], a.position[1], a.position[2], ax, ay) ||
++                !screen(b.position[0], b.position[1], b.position[2], bx, by))
++                continue;
++            float x0 = 1e9f, y0 = 1e9f, x1 = -1e9f, y1 = -1e9f;
++            const float corners[4][2] = {{a.position[0], a.position[1]},
++                                         {b.position[0], a.position[1]},
++                                         {b.position[0], b.position[1]},
++                                         {a.position[0], b.position[1]}};
++            for (const auto &corner : corners) {
++                float sx = 0, sy = 0;
++                if (!screen(corner[0], corner[1], b.position[2], sx, sy)) continue;
++                x0 = std::min(x0, sx); x1 = std::max(x1, sx);
++                y0 = std::min(y0, sy); y1 = std::max(y1, sy);
++            }
++            std::cout << "[sprite] 3d tex 0x" << std::hex << call.texture.address << std::dec << " "
++                      << call.texture.width << "x" << call.texture.height << " screen "
++                      << std::abs(bx - ax) << "x" << std::abs(by - ay) << " at (" << std::min(ax, bx) << ","
++                      << std::min(ay, by) << "); laid flat " << (x1 - x0) << "x" << (y1 - y0) << "\n";
++        }
++    }
+     if (call.through && call.primitive == PrimitiveType::Sprites && impl.frames == trace_sprites_frame) {
+         for (std::size_t i = 0; i + 1u < count; i += 2u) {
+             const Vertex &a = vertex_at(i);
+-- 
+2.53.0.windows.1
+

@@ -1,0 +1,11 @@
+{
+  "version": "ULUS10566",
+  "module": "main",
+  "path": "analysis/ULUS10566/main/EBOOT.ELF",
+  "sha256": "0bc8e779aad2814a3d1bd77346f69ca5e16665845ed053cd0ad44a9cbfaefe6d",
+  "file_bytes": 4640948,
+  "load_segments": [
+    {"index": 0, "address": "0x08804040", "file_offset": 4120, "file_bytes": 1938304, "memory_bytes": 1938304},
+    {"index": 1, "address": "0x08B63170", "file_offset": 1945600, "file_bytes": 256, "memory_bytes": 16833424}
+  ]
+}

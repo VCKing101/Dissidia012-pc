@@ -1,0 +1,29 @@
+#include "main_task_iteration.hpp"
+typedef __typeof__(sizeof(0)) TaskQueueAddress;
+typedef char TaskQueueAddressWidthCheck[(sizeof(TaskQueueAddress) == sizeof(MainTask *)) ? 1 : -1];
+extern "C" void func_088822E0(MainTask *);
+
+struct MainTaskUnlinkOperations {
+    static TaskQueueAddress following_offset() { MainTask layout; return reinterpret_cast<TaskQueueAddress>(&layout.field_0034) - reinterpret_cast<TaskQueueAddress>(&layout); }
+    static TaskQueueAddress previous_offset() { MainTask layout; return reinterpret_cast<TaskQueueAddress>(&layout.field_0038) - reinterpret_cast<TaskQueueAddress>(&layout); }
+    static MainTask **following_slot(MainTask *task) { return reinterpret_cast<MainTask **>(reinterpret_cast<TaskQueueAddress>(task) + following_offset()); }
+    static MainTask **previous_slot(MainTask *task) { return reinterpret_cast<MainTask **>(reinterpret_cast<TaskQueueAddress>(task) + previous_offset()); }
+    static void unlink(MainTaskOwner *owner, MainTask *task) {
+        MainTask *previous_task = task->field_0038;
+        MainTask *next_task = task->field_0034;
+        if (!previous_task) owner->field_0004 = next_task;
+        else *following_slot(previous_task) = next_task;
+        previous_task = task->field_0038;
+        next_task = task->field_0034;
+        if (!next_task) owner->field_0008 = previous_task;
+        else *previous_slot(next_task) = previous_task;
+        task->field_0038 = 0;
+        task->field_0034 = 0;
+        owner->field_000C--;
+    }
+};
+extern "C" void func_088828BC(MainTaskOwner *owner, MainTask *task) {
+    if (task == owner->field_0014) owner->field_0014 = MainTaskIteration::next(owner,task);
+    MainTaskUnlinkOperations::unlink(owner,task);
+    func_088822E0(task);
+}

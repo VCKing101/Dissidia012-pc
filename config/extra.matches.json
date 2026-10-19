@@ -1,0 +1,98 @@
+{
+  "compiler": "tools/compilers/pspsnc_1.2.7503.0/pspsnc.exe",
+  "flags": ["-O2", "-g"],
+  "units": [
+    {
+      "name": "data_install_lifecycle",
+      "source": "src/extra/data_install_lifecycle.c",
+      "functions": [
+        {"name": "func_089DD4D0", "address": "0x089DD4D0", "size": 180},
+        {"name": "func_089DD584", "address": "0x089DD584", "size": 116}
+      ]
+    },
+    {
+      "name": "data_install",
+      "source": "src/extra/data_install.c",
+      "functions": [
+        {"name": "func_089DD5F8", "address": "0x089DD5F8", "size": 52},
+        {"name": "func_089DD62C", "address": "0x089DD62C", "size": 28},
+        {"name": "func_089DD648", "address": "0x089DD648", "size": 20},
+        {"name": "func_089DD65C", "address": "0x089DD65C", "size": 20},
+        {"name": "func_089DD670", "address": "0x089DD670", "size": 100},
+        {"name": "func_089DD6D4", "address": "0x089DD6D4", "size": 128}
+      ]
+    },
+    {
+      "name": "data_install_status",
+      "source": "src/extra/data_install_status.c",
+      "functions": [
+        {"name": "func_089DDB88", "address": "0x089DDB88", "size": 136},
+        {"name": "func_089DDC10", "address": "0x089DDC10", "size": 136},
+        {"name": "func_089DDC98", "address": "0x089DDC98", "size": 76},
+        {"name": "func_089DDCE4", "address": "0x089DDCE4", "size": 132},
+        {"name": "func_089DDD68", "address": "0x089DDD68", "size": 168}
+      ]
+    },
+    {
+      "name": "data_install_notifications",
+      "source": "src/extra/data_install_notifications.c",
+      "functions": [
+        {"name": "func_089DDE10", "address": "0x089DDE10", "size": 16},
+        {"name": "func_089DDE20", "address": "0x089DDE20", "size": 16}
+      ]
+    },
+    {
+      "name": "data_install_transfer",
+      "source": "src/extra/data_install_transfer.c",
+      "functions": [
+        {"name": "func_089DDF24", "address": "0x089DDF24", "size": 72},
+        {"name": "func_089DDF6C", "address": "0x089DDF6C", "size": 180},
+        {"name": "func_089DE020", "address": "0x089DE020", "size": 152},
+        {"name": "func_089DE0B8", "address": "0x089DE0B8", "size": 172},
+        {"name": "func_089DE164", "address": "0x089DE164", "size": 48}
+      ]
+    },
+    {
+      "name": "data_install_callback_wrappers",
+      "source": "src/extra/data_install_callback_wrappers.c",
+      "functions": [
+        {"name": "func_089DE69C", "address": "0x089DE69C", "size": 44},
+        {"name": "func_089DE6C8", "address": "0x089DE6C8", "size": 44},
+        {"name": "func_089DE6F4", "address": "0x089DE6F4", "size": 40},
+        {"name": "func_089DE71C", "address": "0x089DE71C", "size": 40}
+      ]
+    }
+  ],
+  "symbols": {
+    "D_089DE750": "0x089DE750",
+    "D_089DE758": "0x089DE758",
+    "D_089DE76C": "0x089DE76C",
+    "D_089D5FB4": "0x089D5FB4",
+    "D_089D5FC0": "0x089D5FC0",
+    "D_089D5FC4": "0x089D5FC4",
+    "D_089DE788": "0x089DE788",
+    "D_089DE798": "0x089DE798",
+    "D_089DE79C": "0x089DE79C",
+    "func_886F378": "0x0886F378",
+    "func_886F3C0": "0x0886F3C0",
+    "func_886F5D4": "0x0886F5D4",
+    "func_886FA1C": "0x0886FA1C",
+    "func_886FA78": "0x0886FA78",
+    "func_886FA84": "0x0886FA84",
+    "func_886FF7C": "0x0886FF7C",
+    "func_8870000": "0x08870000",
+    "func_8935524": "0x08935524",
+    "func_8935828": "0x08935828",
+    "func_089DD99C": "0x089DD99C",
+    "func_89A5490": "0x089A5490",
+    "func_89C5D10": "0x089C5D10",
+    "func_89C5D28": "0x089C5D28",
+    "func_89C5D40": "0x089C5D40",
+    "func_89C57F8": "0x089C57F8",
+    "func_89C5810": "0x089C5810",
+    "func_89C5F80": "0x089C5F80",
+    "func_89C5F90": "0x089C5F90",
+    "func_89C5E20": "0x089C5E20"
+  },
+  "status": "Verified compiler for these functions; original whole-game toolchain remains unconfirmed"
+}

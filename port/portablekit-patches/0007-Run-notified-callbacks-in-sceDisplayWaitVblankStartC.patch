@@ -1,0 +1,60 @@
+From a9568cb9233a55ee32e7428bc4a97fdb9b417de3 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Sun, 18 Oct 2026 18:51:20 +1030
+Subject: [PATCH 07/27] Run notified callbacks in sceDisplayWaitVblankStartCB
+
+The CB forms of the vblank wait did not run the thread's notified
+callbacks; the comment said the kernel would run them at the next
+scheduling point anyway, but the kernel runs callbacks only in the *CB
+waits that deliver them. A game whose only such wait is this one, once a
+frame on its main thread, never saw a callback: one set an asynchronous
+I/O callback, called sceIoLseekAsync and waited for the callback for good
+on a white screen. Its power and UMD callbacks were never run either.
+
+sceDisplayWaitVblankStartCB and ...MultiCB now deliver the callbacks
+first, as sceKernelDelayThreadCB, sceKernelWaitSemaCB and the others do.
+<prefix>_NO_VBLANK_CALLBACKS=1 waits without running them, as before.
+
+Verified on Windows with <prefix>_TRACE_KERNEL (the seek callback is
+delivered) and a game that now goes on to read the file and play its
+opening movie.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/hle/hle_media.cpp | 15 ++++++++++++---
+ 1 file changed, 12 insertions(+), 3 deletions(-)
+
+diff --git a/host/hle/hle_media.cpp b/host/hle/hle_media.cpp
+index d983fe6..4697ec4 100644
+--- a/host/hle/hle_media.cpp
++++ b/host/hle/hle_media.cpp
+@@ -648,14 +648,23 @@ void register_vblank_waits(HleRegistrar &hle) {
+         kernel().block(ctx, wait, 0u);
+     };
+     hle.add("sceDisplay", "sceDisplayWaitVblankStart", wait_for_vblank);
+-    // The CB forms also run the thread's pending callbacks. The kernel runs
+-    // them at the next scheduling point either way, so they wait the same.
+-    hle.add("sceDisplay", "sceDisplayWaitVblankStartCB", wait_for_vblank);
++    // The CB forms also run the thread's notified callbacks first, as every
++    // other *CB wait does: the kernel runs callbacks only there. A game whose
++    // only such wait is this one, once a frame on its main thread, otherwise
++    // never sees its callbacks: one waited for good on its asynchronous-seek
++    // callback after sceIoLseekAsync. <prefix>_NO_VBLANK_CALLBACKS=1 waits
++    // without running them, as before.
++    static const bool no_vblank_callbacks = portablekit::env("NO_VBLANK_CALLBACKS") != nullptr;
++    hle.add("sceDisplay", "sceDisplayWaitVblankStartCB", [wait_for_vblank](Runtime &rt, AllegrexContext &ctx) {
++        if (!no_vblank_callbacks) (void)kernel().deliver_callbacks();
++        wait_for_vblank(rt, ctx);
++    });
+     // MultiCB waits for that many vblanks: the wait's object counts them
+     // down (Kernel::on_vblank). Tenkawa waits two at a time while it loads a
+     // fight.
+     hle.add("sceDisplay", "sceDisplayWaitVblankStartMultiCB", [](Runtime &, AllegrexContext &ctx) {
+         trace_pacing("sceDisplayWaitVblankStartMultiCB", arg(ctx, 0));
++        if (!no_vblank_callbacks) (void)kernel().deliver_callbacks();
+         WaitState wait{};
+         wait.type = WaitType::VBlank;
+         wait.object = static_cast<SceUID>(std::max<std::uint32_t>(arg(ctx, 0), 1u));
+-- 
+2.53.0.windows.1
+

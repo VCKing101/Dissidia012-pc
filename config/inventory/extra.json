@@ -1,0 +1,2670 @@
+{
+  "schema_version": 1,
+  "module": "extra",
+  "reference_sha256": "f6b7be5e15c28774985417f1ec2c64f6655e79cc3c9dce7600fa7f6bacabca01",
+  "inventory_source_sha256": "c960e7cdd2b38289aaf57beab89955770160e776e9f380f82398b46df1c8cbd0",
+  "analysis_project": null,
+  "language": "Allegrex:LE:32:default",
+  "audited": true,
+  "ranges_end_exclusive": true,
+  "classification": "reviewed-boundaries-and-layout",
+  "sections": [
+    {
+      "index": 1,
+      "name": ".ovl_extra_app",
+      "start": "0x089DD4C0",
+      "end": "0x089E33B8",
+      "file_offset": 84,
+      "bytes": 24312,
+      "executable": true
+    }
+  ],
+  "layout_audit": {
+    "scope": "Function boundaries and CPU-code/data/zero-fill partition; not behavior, ownership, or source recovery",
+    "descriptor": {
+      "tag": 3,
+      "initializer_count": 0,
+      "cleanup_count": 0,
+      "initializer_table": "0x00000000",
+      "cleanup_table": "0x00000000"
+    },
+    "validated_data_regions": [
+      {
+        "start": "0x089DD4C0",
+        "end": "0x089DD4D0",
+        "kind": "overlay_descriptor"
+      },
+      {
+        "start": "0x089DE748",
+        "end": "0x089DE74D",
+        "kind": "ascii_string"
+      },
+      {
+        "start": "0x089DE750",
+        "end": "0x089DE758",
+        "kind": "ascii_string"
+      },
+      {
+        "start": "0x089DE758",
+        "end": "0x089DE76B",
+        "kind": "ascii_string"
+      },
+      {
+        "start": "0x089DE76C",
+        "end": "0x089DE77D",
+        "kind": "ascii_string"
+      },
+      {
+        "start": "0x089DE788",
+        "end": "0x089DE7A0",
+        "kind": "static_globals"
+      },
+      {
+        "start": "0x089E2E38",
+        "end": "0x089E2E57",
+        "kind": "ascii_string"
+      },
+      {
+        "start": "0x089E2E58",
+        "end": "0x089E2E6A",
+        "kind": "ascii_string"
+      },
+      {
+        "start": "0x089E2E6C",
+        "end": "0x089E2F11",
+        "kind": "ascii_pool"
+      },
+      {
+        "start": "0x089E2F12",
+        "end": "0x089E2FCA",
+        "kind": "binary_configuration"
+      },
+      {
+        "start": "0x089E2FCA",
+        "end": "0x089E3242",
+        "kind": "halfword_records"
+      },
+      {
+        "start": "0x089E3244",
+        "end": "0x089E324B",
+        "kind": "ascii_string"
+      },
+      {
+        "start": "0x089E324C",
+        "end": "0x089E3252",
+        "kind": "utf16_string"
+      },
+      {
+        "start": "0x089E3258",
+        "end": "0x089E3260",
+        "kind": "static_globals"
+      },
+      {
+        "start": "0x089E3260",
+        "end": "0x089E3267",
+        "kind": "ascii_string"
+      },
+      {
+        "start": "0x089E3268",
+        "end": "0x089E3280",
+        "kind": "static_globals"
+      },
+      {
+        "start": "0x089E3280",
+        "end": "0x089E328D",
+        "kind": "ascii_string"
+      },
+      {
+        "start": "0x089E3290",
+        "end": "0x089E32A8",
+        "kind": "static_globals"
+      },
+      {
+        "start": "0x089E32A8",
+        "end": "0x089E32C4",
+        "kind": "jump_table"
+      },
+      {
+        "start": "0x089E32C8",
+        "end": "0x089E32F8",
+        "kind": "string_pointer_records"
+      },
+      {
+        "start": "0x089E32F8",
+        "end": "0x089E330C",
+        "kind": "binary_configuration"
+      },
+      {
+        "start": "0x089E330C",
+        "end": "0x089E3310",
+        "kind": "static_globals"
+      },
+      {
+        "start": "0x089E3310",
+        "end": "0x089E33B8",
+        "kind": "member_dispatch_table"
+      }
+    ],
+    "independent_disassembly_sha256": "bf649e71963dcfac75c98e23588179510733d6dd29def87395a3548a9e51cd7f"
+  },
+  "hook_audit": null,
+  "data_island_audit": null,
+  "ghidra_function_count": 97,
+  "elf_declared_imports_added": 0,
+  "reviewed_functions_added": 3,
+  "non_function_reviews": [
+    {
+      "start": "0x089DD4C0",
+      "end": "0x089DD4D0",
+      "evidence": "Leading word 3 and zero fill; spimdisasm labels the first four bytes as a function without a return. Prefix role remains unclassified; do not credit it as a function."
+    }
+  ],
+  "function_count": 100,
+  "functions": [
+    {
+      "id": "extra:0x089DD4D0",
+      "name": "FUN_089dd4d0",
+      "address": "0x089DD4D0",
+      "body_bytes": 180,
+      "ranges": [
+        {
+          "start": "0x089DD4D0",
+          "end": "0x089DD584"
+        }
+      ],
+      "thunk": false,
+      "confidence": "exact-source-match-boundary",
+      "direct_call_targets": [
+        "08935828",
+        "089c57f8",
+        "089c5e20",
+        "089c5f80"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "data_install",
+      "matched_c": true,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DD584",
+      "name": "FUN_089dd584",
+      "address": "0x089DD584",
+      "body_bytes": 116,
+      "ranges": [
+        {
+          "start": "0x089DD584",
+          "end": "0x089DD5F8"
+        }
+      ],
+      "thunk": false,
+      "confidence": "exact-source-match-boundary",
+      "direct_call_targets": [
+        "089c5810",
+        "089c5e20",
+        "089c5f90"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "data_install",
+      "matched_c": true,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DD5F8",
+      "name": "FUN_089dd5f8",
+      "address": "0x089DD5F8",
+      "body_bytes": 52,
+      "ranges": [
+        {
+          "start": "0x089DD5F8",
+          "end": "0x089DD62C"
+        }
+      ],
+      "thunk": false,
+      "confidence": "exact-source-match-boundary",
+      "direct_call_targets": [],
+      "unresolved_call_sites": 0,
+      "primary_owner": "data_install",
+      "matched_c": true,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DD62C",
+      "name": "FUN_089dd62c",
+      "address": "0x089DD62C",
+      "body_bytes": 28,
+      "ranges": [
+        {
+          "start": "0x089DD62C",
+          "end": "0x089DD648"
+        }
+      ],
+      "thunk": false,
+      "confidence": "exact-source-match-boundary",
+      "direct_call_targets": [],
+      "unresolved_call_sites": 0,
+      "primary_owner": "data_install",
+      "matched_c": true,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DD648",
+      "name": "FUN_089dd648",
+      "address": "0x089DD648",
+      "body_bytes": 20,
+      "ranges": [
+        {
+          "start": "0x089DD648",
+          "end": "0x089DD65C"
+        }
+      ],
+      "thunk": false,
+      "confidence": "exact-source-match-boundary",
+      "direct_call_targets": [],
+      "unresolved_call_sites": 0,
+      "primary_owner": "data_install",
+      "matched_c": true,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DD65C",
+      "name": "FUN_089dd65c",
+      "address": "0x089DD65C",
+      "body_bytes": 20,
+      "ranges": [
+        {
+          "start": "0x089DD65C",
+          "end": "0x089DD670"
+        }
+      ],
+      "thunk": false,
+      "confidence": "exact-source-match-boundary",
+      "direct_call_targets": [],
+      "unresolved_call_sites": 0,
+      "primary_owner": "data_install",
+      "matched_c": true,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DD670",
+      "name": "FUN_089dd670",
+      "address": "0x089DD670",
+      "body_bytes": 100,
+      "ranges": [
+        {
+          "start": "0x089DD670",
+          "end": "0x089DD6D4"
+        }
+      ],
+      "thunk": false,
+      "confidence": "exact-source-match-boundary",
+      "direct_call_targets": [
+        "089a5490"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "data_install",
+      "matched_c": true,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DD6D4",
+      "name": "FUN_089dd6d4",
+      "address": "0x089DD6D4",
+      "body_bytes": 128,
+      "ranges": [
+        {
+          "start": "0x089DD6D4",
+          "end": "0x089DD754"
+        }
+      ],
+      "thunk": false,
+      "confidence": "exact-source-match-boundary",
+      "direct_call_targets": [
+        "0886f378"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "data_install",
+      "matched_c": true,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DD754",
+      "name": "FUN_089dd754",
+      "address": "0x089DD754",
+      "body_bytes": 584,
+      "ranges": [
+        {
+          "start": "0x089DD754",
+          "end": "0x089DD99C"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "0886fa84",
+        "0886fa90",
+        "0886fcdc",
+        "08871674",
+        "08871684"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DD99C",
+      "name": "FUN_089dd99c",
+      "address": "0x089DD99C",
+      "body_bytes": 492,
+      "ranges": [
+        {
+          "start": "0x089DD99C",
+          "end": "0x089DDB88"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "0886fa1c",
+        "0886fa84",
+        "0886faa0",
+        "0886fac0",
+        "0886fcdc",
+        "08871674",
+        "08871684",
+        "088716c8",
+        "08935828"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DDB88",
+      "name": "FUN_089ddb88",
+      "address": "0x089DDB88",
+      "body_bytes": 136,
+      "ranges": [
+        {
+          "start": "0x089DDB88",
+          "end": "0x089DDC10"
+        }
+      ],
+      "thunk": false,
+      "confidence": "exact-source-match-boundary",
+      "direct_call_targets": [
+        "089c5d28",
+        "089dd99c"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "data_install",
+      "matched_c": true,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DDC10",
+      "name": "FUN_089ddc10",
+      "address": "0x089DDC10",
+      "body_bytes": 136,
+      "ranges": [
+        {
+          "start": "0x089DDC10",
+          "end": "0x089DDC98"
+        }
+      ],
+      "thunk": false,
+      "confidence": "exact-source-match-boundary",
+      "direct_call_targets": [
+        "089c5d10"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "data_install",
+      "matched_c": true,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DDC98",
+      "name": "FUN_089ddc98",
+      "address": "0x089DDC98",
+      "body_bytes": 76,
+      "ranges": [
+        {
+          "start": "0x089DDC98",
+          "end": "0x089DDCE4"
+        }
+      ],
+      "thunk": false,
+      "confidence": "exact-source-match-boundary",
+      "direct_call_targets": [
+        "089c5d40"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "data_install",
+      "matched_c": true,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DDCE4",
+      "name": "FUN_089ddce4",
+      "address": "0x089DDCE4",
+      "body_bytes": 132,
+      "ranges": [
+        {
+          "start": "0x089DDCE4",
+          "end": "0x089DDD68"
+        }
+      ],
+      "thunk": false,
+      "confidence": "exact-source-match-boundary",
+      "direct_call_targets": [
+        "0886f3c0",
+        "0886fa1c"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "data_install",
+      "matched_c": true,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DDD68",
+      "name": "FUN_089ddd68",
+      "address": "0x089DDD68",
+      "body_bytes": 168,
+      "ranges": [
+        {
+          "start": "0x089DDD68",
+          "end": "0x089DDE10"
+        }
+      ],
+      "thunk": false,
+      "confidence": "exact-source-match-boundary",
+      "direct_call_targets": [
+        "0886f5d4",
+        "0886fa78",
+        "0886fa84",
+        "08935524",
+        "08935828"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "data_install",
+      "matched_c": true,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DDE10",
+      "name": "FUN_089dde10",
+      "address": "0x089DDE10",
+      "body_bytes": 16,
+      "ranges": [
+        {
+          "start": "0x089DDE10",
+          "end": "0x089DDE20"
+        }
+      ],
+      "thunk": false,
+      "confidence": "exact-source-match-boundary",
+      "direct_call_targets": [],
+      "unresolved_call_sites": 0,
+      "primary_owner": "data_install",
+      "matched_c": true,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DDE20",
+      "name": "FUN_089dde20",
+      "address": "0x089DDE20",
+      "body_bytes": 16,
+      "ranges": [
+        {
+          "start": "0x089DDE20",
+          "end": "0x089DDE30"
+        }
+      ],
+      "thunk": false,
+      "confidence": "exact-source-match-boundary",
+      "direct_call_targets": [],
+      "unresolved_call_sites": 0,
+      "primary_owner": "data_install",
+      "matched_c": true,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DDE30",
+      "name": "FUN_089dde30",
+      "address": "0x089DDE30",
+      "body_bytes": 244,
+      "ranges": [
+        {
+          "start": "0x089DDE30",
+          "end": "0x089DDF24"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "08862a9c",
+        "08862cb0"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DDF24",
+      "name": "FUN_089ddf24",
+      "address": "0x089DDF24",
+      "body_bytes": 72,
+      "ranges": [
+        {
+          "start": "0x089DDF24",
+          "end": "0x089DDF6C"
+        }
+      ],
+      "thunk": false,
+      "confidence": "exact-source-match-boundary",
+      "direct_call_targets": [],
+      "unresolved_call_sites": 0,
+      "primary_owner": "data_install",
+      "matched_c": true,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DDF6C",
+      "name": "FUN_089ddf6c",
+      "address": "0x089DDF6C",
+      "body_bytes": 180,
+      "ranges": [
+        {
+          "start": "0x089DDF6C",
+          "end": "0x089DE020"
+        }
+      ],
+      "thunk": false,
+      "confidence": "exact-source-match-boundary",
+      "direct_call_targets": [
+        "0886ff7c"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "data_install",
+      "matched_c": true,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DE020",
+      "name": "FUN_089de020",
+      "address": "0x089DE020",
+      "body_bytes": 152,
+      "ranges": [
+        {
+          "start": "0x089DE020",
+          "end": "0x089DE0B8"
+        }
+      ],
+      "thunk": false,
+      "confidence": "exact-source-match-boundary",
+      "direct_call_targets": [
+        "08870000"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "data_install",
+      "matched_c": true,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DE0B8",
+      "name": "FUN_089de0b8",
+      "address": "0x089DE0B8",
+      "body_bytes": 172,
+      "ranges": [
+        {
+          "start": "0x089DE0B8",
+          "end": "0x089DE164"
+        }
+      ],
+      "thunk": false,
+      "confidence": "exact-source-match-boundary",
+      "direct_call_targets": [],
+      "unresolved_call_sites": 0,
+      "primary_owner": "data_install",
+      "matched_c": true,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DE164",
+      "name": "FUN_089de164",
+      "address": "0x089DE164",
+      "body_bytes": 48,
+      "ranges": [
+        {
+          "start": "0x089DE164",
+          "end": "0x089DE194"
+        }
+      ],
+      "thunk": false,
+      "confidence": "exact-source-match-boundary",
+      "direct_call_targets": [],
+      "unresolved_call_sites": 0,
+      "primary_owner": "data_install",
+      "matched_c": true,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DE194",
+      "name": "FUN_089de194",
+      "address": "0x089DE194",
+      "body_bytes": 424,
+      "ranges": [
+        {
+          "start": "0x089DE194",
+          "end": "0x089DE33C"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "088729c0",
+        "088b1194",
+        "088b1230",
+        "088b16fc"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DE33C",
+      "name": "FUN_089de33c",
+      "address": "0x089DE33C",
+      "body_bytes": 124,
+      "ranges": [
+        {
+          "start": "0x089DE33C",
+          "end": "0x089DE3B8"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "08872a18",
+        "088b1440",
+        "088b1764"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DE3B8",
+      "name": "FUN_089de3b8",
+      "address": "0x089DE3B8",
+      "body_bytes": 92,
+      "ranges": [
+        {
+          "start": "0x089DE3B8",
+          "end": "0x089DE414"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "088b168c",
+        "088fe9e8",
+        "08935828"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DE414",
+      "name": "FUN_089de414",
+      "address": "0x089DE414",
+      "body_bytes": 176,
+      "ranges": [
+        {
+          "start": "0x089DE414",
+          "end": "0x089DE4C4"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "088729c0",
+        "088b16fc",
+        "089c5858",
+        "089de3b8"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DE4C4",
+      "name": "FUN_089de4c4",
+      "address": "0x089DE4C4",
+      "body_bytes": 372,
+      "ranges": [
+        {
+          "start": "0x089DE4C4",
+          "end": "0x089DE638"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "08872a18",
+        "088b1764",
+        "089a0190",
+        "089c5868",
+        "089c5878",
+        "089c5898"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DE638",
+      "name": "FUN_089de638",
+      "address": "0x089DE638",
+      "body_bytes": 16,
+      "ranges": [
+        {
+          "start": "0x089DE638",
+          "end": "0x089DE648"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DE648",
+      "name": "FUN_089de648",
+      "address": "0x089DE648",
+      "body_bytes": 32,
+      "ranges": [
+        {
+          "start": "0x089DE648",
+          "end": "0x089DE668"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "0886fa1c"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DE668",
+      "name": "func_089DE668",
+      "address": "0x089DE668",
+      "body_bytes": 8,
+      "ranges": [
+        {
+          "start": "0x089DE668",
+          "end": "0x089DE670"
+        }
+      ],
+      "thunk": false,
+      "confidence": "reviewed-leaf-boundary",
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "direct_call_targets": [],
+      "unresolved_call_sites": 0,
+      "review_evidence": "spimdisasm boundary plus manual control-flow review: returns the first argument through a jr-ra delay slot.",
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement",
+      "dispatch_entry_review": [
+        {
+          "caller": "main:0x088796AC",
+          "call_pc": "0x088796E8",
+          "dispatch_index": 2
+        }
+      ],
+      "dispatch_reachability": {
+        "id": "extra:0x089DE668",
+        "root": "extra:0x089DE668",
+        "evidence": "dispatch table or selected main initializer call"
+      }
+    },
+    {
+      "id": "extra:0x089DE670",
+      "name": "FUN_089de670",
+      "address": "0x089DE670",
+      "body_bytes": 44,
+      "ranges": [
+        {
+          "start": "0x089DE670",
+          "end": "0x089DE69C"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "08992f04"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DE69C",
+      "name": "FUN_089de69c",
+      "address": "0x089DE69C",
+      "body_bytes": 44,
+      "ranges": [
+        {
+          "start": "0x089DE69C",
+          "end": "0x089DE6C8"
+        }
+      ],
+      "thunk": false,
+      "confidence": "exact-source-match-boundary",
+      "direct_call_targets": [
+        "089dd5f8"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "data_install",
+      "matched_c": true,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DE6C8",
+      "name": "FUN_089de6c8",
+      "address": "0x089DE6C8",
+      "body_bytes": 44,
+      "ranges": [
+        {
+          "start": "0x089DE6C8",
+          "end": "0x089DE6F4"
+        }
+      ],
+      "thunk": false,
+      "confidence": "exact-source-match-boundary",
+      "direct_call_targets": [
+        "089dd62c"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "data_install",
+      "matched_c": true,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DE6F4",
+      "name": "FUN_089de6f4",
+      "address": "0x089DE6F4",
+      "body_bytes": 40,
+      "ranges": [
+        {
+          "start": "0x089DE6F4",
+          "end": "0x089DE71C"
+        }
+      ],
+      "thunk": false,
+      "confidence": "exact-source-match-boundary",
+      "direct_call_targets": [
+        "089dde10"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "data_install",
+      "matched_c": true,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DE71C",
+      "name": "FUN_089de71c",
+      "address": "0x089DE71C",
+      "body_bytes": 40,
+      "ranges": [
+        {
+          "start": "0x089DE71C",
+          "end": "0x089DE744"
+        }
+      ],
+      "thunk": false,
+      "confidence": "exact-source-match-boundary",
+      "direct_call_targets": [
+        "089dde20"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "data_install",
+      "matched_c": true,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DE7A0",
+      "name": "FUN_089de7a0",
+      "address": "0x089DE7A0",
+      "body_bytes": 628,
+      "ranges": [
+        {
+          "start": "0x089DE7A0",
+          "end": "0x089DEA14"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "08844588",
+        "0885c6cc",
+        "08860e3c",
+        "08862854",
+        "08862c40",
+        "08865088",
+        "0887a61c",
+        "0887ac24",
+        "0887b080",
+        "0887e630",
+        "08883f64",
+        "08883f78",
+        "088850ec",
+        "08885340",
+        "088d00fc",
+        "088d38f0",
+        "088d3b5c",
+        "088d52ac",
+        "088d5318",
+        "089dec6c",
+        "089df0a8",
+        "089e0ca4"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DEA14",
+      "name": "FUN_089dea14",
+      "address": "0x089DEA14",
+      "body_bytes": 236,
+      "ranges": [
+        {
+          "start": "0x089DEA14",
+          "end": "0x089DEB00"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "0885c538",
+        "08860e78",
+        "0889f2b8",
+        "0889f340",
+        "088d0370",
+        "088d5528",
+        "08933db0",
+        "089e0cfc"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DEB00",
+      "name": "FUN_089deb00",
+      "address": "0x089DEB00",
+      "body_bytes": 132,
+      "ranges": [
+        {
+          "start": "0x089DEB00",
+          "end": "0x089DEB84"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "08935524"
+      ],
+      "unresolved_call_sites": 1,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DEB84",
+      "name": "FUN_089deb84",
+      "address": "0x089DEB84",
+      "body_bytes": 88,
+      "ranges": [
+        {
+          "start": "0x089DEB84",
+          "end": "0x089DEBDC"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "0886503c",
+        "0886504c"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DEBDC",
+      "name": "FUN_089debdc",
+      "address": "0x089DEBDC",
+      "body_bytes": 44,
+      "ranges": [
+        {
+          "start": "0x089DEBDC",
+          "end": "0x089DEC08"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "088650a4",
+        "089deb84"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DEC08",
+      "name": "FUN_089dec08",
+      "address": "0x089DEC08",
+      "body_bytes": 24,
+      "ranges": [
+        {
+          "start": "0x089DEC08",
+          "end": "0x089DEC20"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DEC20",
+      "name": "FUN_089dec20",
+      "address": "0x089DEC20",
+      "body_bytes": 76,
+      "ranges": [
+        {
+          "start": "0x089DEC20",
+          "end": "0x089DEC6C"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "08873d34",
+        "08873dec",
+        "088d4c5c"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DEC6C",
+      "name": "FUN_089dec6c",
+      "address": "0x089DEC6C",
+      "body_bytes": 80,
+      "ranges": [
+        {
+          "start": "0x089DEC6C",
+          "end": "0x089DECBC"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "08873d34",
+        "08873dec",
+        "088d4c5c"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DECBC",
+      "name": "FUN_089decbc",
+      "address": "0x089DECBC",
+      "body_bytes": 52,
+      "ranges": [
+        {
+          "start": "0x089DECBC",
+          "end": "0x089DECF0"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "0887ad78"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DECF0",
+      "name": "FUN_089decf0",
+      "address": "0x089DECF0",
+      "body_bytes": 120,
+      "ranges": [
+        {
+          "start": "0x089DECF0",
+          "end": "0x089DED68"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "089347e8"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DED68",
+      "name": "FUN_089ded68",
+      "address": "0x089DED68",
+      "body_bytes": 108,
+      "ranges": [
+        {
+          "start": "0x089DED68",
+          "end": "0x089DEDD4"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "0887ba5c"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DEDD4",
+      "name": "FUN_089dedd4",
+      "address": "0x089DEDD4",
+      "body_bytes": 228,
+      "ranges": [
+        {
+          "start": "0x089DEDD4",
+          "end": "0x089DEEB8"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "089decbc",
+        "089ded68"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DEEB8",
+      "name": "FUN_089deeb8",
+      "address": "0x089DEEB8",
+      "body_bytes": 396,
+      "ranges": [
+        {
+          "start": "0x089DEEB8",
+          "end": "0x089DF044"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "0887ba5c",
+        "0887e534",
+        "089347e8",
+        "089decbc"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DF044",
+      "name": "FUN_089df044",
+      "address": "0x089DF044",
+      "body_bytes": 100,
+      "ranges": [
+        {
+          "start": "0x089DF044",
+          "end": "0x089DF0A8"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "088d9f5c"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DF0A8",
+      "name": "FUN_089df0a8",
+      "address": "0x089DF0A8",
+      "body_bytes": 192,
+      "ranges": [
+        {
+          "start": "0x089DF0A8",
+          "end": "0x089DF168"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "0885c6cc",
+        "08862854",
+        "08862c40",
+        "0889f3e4",
+        "0893476c"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DF168",
+      "name": "FUN_089df168",
+      "address": "0x089DF168",
+      "body_bytes": 312,
+      "ranges": [
+        {
+          "start": "0x089DF168",
+          "end": "0x089DF2A0"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "0887b924",
+        "0887b944",
+        "0887ba5c",
+        "0889f340",
+        "088d3cf0",
+        "088d428c",
+        "088d9d24",
+        "088d9f5c",
+        "089decbc",
+        "089e1140"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DF2A0",
+      "name": "FUN_089df2a0",
+      "address": "0x089DF2A0",
+      "body_bytes": 308,
+      "ranges": [
+        {
+          "start": "0x089DF2A0",
+          "end": "0x089DF3D4"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "0889f290",
+        "0889f2d4",
+        "088d5458",
+        "088d5528",
+        "088d9cfc",
+        "088d9f5c",
+        "089e1140"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DF3D4",
+      "name": "FUN_089df3d4",
+      "address": "0x089DF3D4",
+      "body_bytes": 80,
+      "ranges": [
+        {
+          "start": "0x089DF3D4",
+          "end": "0x089DF424"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DF424",
+      "name": "FUN_089df424",
+      "address": "0x089DF424",
+      "body_bytes": 72,
+      "ranges": [
+        {
+          "start": "0x089DF424",
+          "end": "0x089DF46C"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DF46C",
+      "name": "FUN_089df46c",
+      "address": "0x089DF46C",
+      "body_bytes": 212,
+      "ranges": [
+        {
+          "start": "0x089DF46C",
+          "end": "0x089DF540"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "088d3cf0",
+        "088d428c",
+        "088d46e4",
+        "088d9f5c",
+        "089df044"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DF540",
+      "name": "FUN_089df540",
+      "address": "0x089DF540",
+      "body_bytes": 716,
+      "ranges": [
+        {
+          "start": "0x089DF540",
+          "end": "0x089DF80C"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "088729a0",
+        "088d3ae8",
+        "088d3ea0",
+        "088d3f00",
+        "088d44ec",
+        "088d4664",
+        "088d4bf4",
+        "088d688c",
+        "088d9f5c",
+        "089df044"
+      ],
+      "unresolved_call_sites": 2,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DF80C",
+      "name": "FUN_089df80c",
+      "address": "0x089DF80C",
+      "body_bytes": 52,
+      "ranges": [
+        {
+          "start": "0x089DF80C",
+          "end": "0x089DF840"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DF840",
+      "name": "FUN_089df840",
+      "address": "0x089DF840",
+      "body_bytes": 136,
+      "ranges": [
+        {
+          "start": "0x089DF840",
+          "end": "0x089DF8C8"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "088d9aec",
+        "088d9cd8"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DF8C8",
+      "name": "FUN_089df8c8",
+      "address": "0x089DF8C8",
+      "body_bytes": 56,
+      "ranges": [
+        {
+          "start": "0x089DF8C8",
+          "end": "0x089DF900"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DF900",
+      "name": "FUN_089df900",
+      "address": "0x089DF900",
+      "body_bytes": 204,
+      "ranges": [
+        {
+          "start": "0x089DF900",
+          "end": "0x089DF9CC"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "089ddc98",
+        "089de194",
+        "089de33c",
+        "089de648",
+        "089dec20"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DF9CC",
+      "name": "FUN_089df9cc",
+      "address": "0x089DF9CC",
+      "body_bytes": 80,
+      "ranges": [
+        {
+          "start": "0x089DF9CC",
+          "end": "0x089DFA1C"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "089ddc98",
+        "089de648"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DFA1C",
+      "name": "FUN_089dfa1c",
+      "address": "0x089DFA1C",
+      "body_bytes": 448,
+      "ranges": [
+        {
+          "start": "0x089DFA1C",
+          "end": "0x089DFBDC"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "0885c6cc",
+        "08862854",
+        "08862c40",
+        "0887afbc",
+        "088d3910",
+        "088d3b88",
+        "089dd4d0",
+        "089dd648",
+        "089dd65c",
+        "089de164"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DFBDC",
+      "name": "FUN_089dfbdc",
+      "address": "0x089DFBDC",
+      "body_bytes": 268,
+      "ranges": [
+        {
+          "start": "0x089DFBDC",
+          "end": "0x089DFCE8"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "0885c538",
+        "0887a644",
+        "0887ba5c",
+        "08885220",
+        "088d3a04",
+        "089dd584"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DFCE8",
+      "name": "FUN_089dfce8",
+      "address": "0x089DFCE8",
+      "body_bytes": 108,
+      "ranges": [
+        {
+          "start": "0x089DFCE8",
+          "end": "0x089DFD54"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "089dec20"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DFD54",
+      "name": "FUN_089dfd54",
+      "address": "0x089DFD54",
+      "body_bytes": 100,
+      "ranges": [
+        {
+          "start": "0x089DFD54",
+          "end": "0x089DFDB8"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "0885c538",
+        "08865158",
+        "0887e684",
+        "0887e718"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DFDB8",
+      "name": "FUN_089dfdb8",
+      "address": "0x089DFDB8",
+      "body_bytes": 572,
+      "ranges": [
+        {
+          "start": "0x089DFDB8",
+          "end": "0x089DFFF4"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "08935828",
+        "089dd670",
+        "089dd6d4",
+        "089dd754"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089DFFF4",
+      "name": "FUN_089dfff4",
+      "address": "0x089DFFF4",
+      "body_bytes": 148,
+      "ranges": [
+        {
+          "start": "0x089DFFF4",
+          "end": "0x089E0088"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "08935828",
+        "089de194",
+        "089de33c"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089E0088",
+      "name": "FUN_089e0088",
+      "address": "0x089E0088",
+      "body_bytes": 332,
+      "ranges": [
+        {
+          "start": "0x089E0088",
+          "end": "0x089E01D4"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "0887ba5c",
+        "088d3b88",
+        "088d3c24",
+        "089dec6c",
+        "089decbc",
+        "089dedd4"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089E01D4",
+      "name": "FUN_089e01d4",
+      "address": "0x089E01D4",
+      "body_bytes": 208,
+      "ranges": [
+        {
+          "start": "0x089E01D4",
+          "end": "0x089E02A4"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "0887b944",
+        "088d3cf0",
+        "088d428c",
+        "088d53bc",
+        "089df840",
+        "089e0e34"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089E02A4",
+      "name": "FUN_089e02a4",
+      "address": "0x089E02A4",
+      "body_bytes": 168,
+      "ranges": [
+        {
+          "start": "0x089E02A4",
+          "end": "0x089E034C"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "088d3cf0",
+        "088d428c",
+        "089decf0",
+        "089dedd4"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089E034C",
+      "name": "FUN_089e034c",
+      "address": "0x089E034C",
+      "body_bytes": 688,
+      "ranges": [
+        {
+          "start": "0x089E034C",
+          "end": "0x089E05FC"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "088729a0",
+        "088d3ea0",
+        "088d3f00",
+        "088d44ec",
+        "088d4664",
+        "088d4bf4",
+        "088d9f5c",
+        "089ded68"
+      ],
+      "unresolved_call_sites": 2,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089E05FC",
+      "name": "FUN_089e05fc",
+      "address": "0x089E05FC",
+      "body_bytes": 500,
+      "ranges": [
+        {
+          "start": "0x089E05FC",
+          "end": "0x089E07F0"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "088d3cf0",
+        "088d428c",
+        "088d46e4",
+        "088d9f5c",
+        "089dec08",
+        "089decf0",
+        "089dedd4",
+        "089deeb8",
+        "089df8c8",
+        "089e1174"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089E07F0",
+      "name": "FUN_089e07f0",
+      "address": "0x089E07F0",
+      "body_bytes": 420,
+      "ranges": [
+        {
+          "start": "0x089E07F0",
+          "end": "0x089E0994"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "088d3cf0",
+        "088d428c",
+        "088d46e4",
+        "088d9f5c",
+        "089decf0",
+        "089dedd4",
+        "089df044"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089E0994",
+      "name": "FUN_089e0994",
+      "address": "0x089E0994",
+      "body_bytes": 248,
+      "ranges": [
+        {
+          "start": "0x089E0994",
+          "end": "0x089E0A8C"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "088d3cf0",
+        "088d428c",
+        "088d46e4",
+        "088d9f5c",
+        "089decf0",
+        "089dedd4",
+        "089df044"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089E0A8C",
+      "name": "FUN_089e0a8c",
+      "address": "0x089E0A8C",
+      "body_bytes": 376,
+      "ranges": [
+        {
+          "start": "0x089E0A8C",
+          "end": "0x089E0C04"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "088d3cf0",
+        "088d428c",
+        "088d46e4",
+        "088d9f5c",
+        "089decf0",
+        "089dedd4",
+        "089df044"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089E0C04",
+      "name": "FUN_089e0c04",
+      "address": "0x089E0C04",
+      "body_bytes": 64,
+      "ranges": [
+        {
+          "start": "0x089E0C04",
+          "end": "0x089E0C44"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "089de414"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089E0C44",
+      "name": "FUN_089e0c44",
+      "address": "0x089E0C44",
+      "body_bytes": 96,
+      "ranges": [
+        {
+          "start": "0x089E0C44",
+          "end": "0x089E0CA4"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "089de4c4",
+        "089dfdb8"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089E0CA4",
+      "name": "FUN_089e0ca4",
+      "address": "0x089E0CA4",
+      "body_bytes": 88,
+      "ranges": [
+        {
+          "start": "0x089E0CA4",
+          "end": "0x089E0CFC"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "0885c40c",
+        "0888204c"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089E0CFC",
+      "name": "FUN_089e0cfc",
+      "address": "0x089E0CFC",
+      "body_bytes": 56,
+      "ranges": [
+        {
+          "start": "0x089E0CFC",
+          "end": "0x089E0D34"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "0885c488",
+        "0888208c"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089E0D34",
+      "name": "FUN_089e0d34",
+      "address": "0x089E0D34",
+      "body_bytes": 32,
+      "ranges": [
+        {
+          "start": "0x089E0D34",
+          "end": "0x089E0D54"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "089de7a0"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089E0D54",
+      "name": "FUN_089e0d54",
+      "address": "0x089E0D54",
+      "body_bytes": 32,
+      "ranges": [
+        {
+          "start": "0x089E0D54",
+          "end": "0x089E0D74"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "089dea14"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089E0D74",
+      "name": "FUN_089e0d74",
+      "address": "0x089E0D74",
+      "body_bytes": 32,
+      "ranges": [
+        {
+          "start": "0x089E0D74",
+          "end": "0x089E0D94"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "089deb00"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089E0D94",
+      "name": "FUN_089e0d94",
+      "address": "0x089E0D94",
+      "body_bytes": 60,
+      "ranges": [
+        {
+          "start": "0x089E0D94",
+          "end": "0x089E0DD0"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "08864ff0"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement",
+      "dispatch_entry_review": [
+        {
+          "caller": "main:0x088796AC",
+          "call_pc": "0x08879718",
+          "dispatch_index": 2
+        }
+      ],
+      "dispatch_reachability": {
+        "id": "extra:0x089E0D94",
+        "root": "extra:0x089E0D94",
+        "evidence": "dispatch table or selected main initializer call"
+      }
+    },
+    {
+      "id": "extra:0x089E0DD0",
+      "name": "FUN_089e0dd0",
+      "address": "0x089E0DD0",
+      "body_bytes": 44,
+      "ranges": [
+        {
+          "start": "0x089E0DD0",
+          "end": "0x089E0DFC"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "08992f04"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089E0DFC",
+      "name": "func_089E0DFC",
+      "address": "0x089E0DFC",
+      "body_bytes": 28,
+      "ranges": [
+        {
+          "start": "0x089E0DFC",
+          "end": "0x089E0E18"
+        }
+      ],
+      "thunk": false,
+      "confidence": "reviewed-leaf-boundary",
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "direct_call_targets": [],
+      "unresolved_call_sites": 0,
+      "review_evidence": "spimdisasm boundary plus manual review: global pointer chain, flag update, jr-ra and store delay slot; no interior branch.",
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089E0E18",
+      "name": "func_089E0E18",
+      "address": "0x089E0E18",
+      "body_bytes": 28,
+      "ranges": [
+        {
+          "start": "0x089E0E18",
+          "end": "0x089E0E34"
+        }
+      ],
+      "thunk": false,
+      "confidence": "reviewed-leaf-boundary",
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "direct_call_targets": [],
+      "unresolved_call_sites": 0,
+      "review_evidence": "Adjacent independent flag-update leaf with its own jr-ra and store delay slot, ending at the next mapped function.",
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089E0E34",
+      "name": "FUN_089e0e34",
+      "address": "0x089E0E34",
+      "body_bytes": 204,
+      "ranges": [
+        {
+          "start": "0x089E0E34",
+          "end": "0x089E0F00"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "088d9cfc",
+        "089c5fb8"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089E0F00",
+      "name": "FUN_089e0f00",
+      "address": "0x089E0F00",
+      "body_bytes": 172,
+      "ranges": [
+        {
+          "start": "0x089E0F00",
+          "end": "0x089E0FAC"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "0893486c"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089E0FAC",
+      "name": "FUN_089e0fac",
+      "address": "0x089E0FAC",
+      "body_bytes": 356,
+      "ranges": [
+        {
+          "start": "0x089E0FAC",
+          "end": "0x089E1110"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "088d9cd8",
+        "088d9f5c"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089E1110",
+      "name": "FUN_089e1110",
+      "address": "0x089E1110",
+      "body_bytes": 48,
+      "ranges": [
+        {
+          "start": "0x089E1110",
+          "end": "0x089E1140"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089E1140",
+      "name": "FUN_089e1140",
+      "address": "0x089E1140",
+      "body_bytes": 52,
+      "ranges": [
+        {
+          "start": "0x089E1140",
+          "end": "0x089E1174"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089E1174",
+      "name": "FUN_089e1174",
+      "address": "0x089E1174",
+      "body_bytes": 516,
+      "ranges": [
+        {
+          "start": "0x089E1174",
+          "end": "0x089E1378"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "088d428c",
+        "088d4664",
+        "088d9f5c",
+        "089dec08"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089E1378",
+      "name": "FUN_089e1378",
+      "address": "0x089E1378",
+      "body_bytes": 804,
+      "ranges": [
+        {
+          "start": "0x089E1378",
+          "end": "0x089E169C"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "089c6088",
+        "089ddb88",
+        "089ddc10",
+        "089ddd68",
+        "089dde30",
+        "089ddf24",
+        "089ddf6c",
+        "089de020",
+        "089de0b8",
+        "089de638"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089E169C",
+      "name": "FUN_089e169c",
+      "address": "0x089E169C",
+      "body_bytes": 1648,
+      "ranges": [
+        {
+          "start": "0x089E169C",
+          "end": "0x089E1D0C"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "088729a0",
+        "088d3ae8",
+        "088d3ea0",
+        "088d3f00",
+        "088d44ec",
+        "088d4664",
+        "088d4bf4",
+        "088d541c",
+        "088d54a4",
+        "089dec20",
+        "089df168",
+        "089df2a0",
+        "089df3d4",
+        "089df424",
+        "089df46c",
+        "089df540",
+        "089df80c",
+        "089df840",
+        "089df900",
+        "089df9cc",
+        "089e0f00",
+        "089e0fac",
+        "089e1110",
+        "089e1378",
+        "089e2c3c"
+      ],
+      "unresolved_call_sites": 5,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089E1D0C",
+      "name": "FUN_089e1d0c",
+      "address": "0x089E1D0C",
+      "body_bytes": 924,
+      "ranges": [
+        {
+          "start": "0x089E1D0C",
+          "end": "0x089E20A8"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "088729a0",
+        "088d3ae8",
+        "088d3ea0",
+        "088d3f00",
+        "088d44ec",
+        "088d4664",
+        "088d4bf4",
+        "088d688c",
+        "088d9f5c",
+        "089e1174"
+      ],
+      "unresolved_call_sites": 2,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089E20A8",
+      "name": "FUN_089e20a8",
+      "address": "0x089E20A8",
+      "body_bytes": 1048,
+      "ranges": [
+        {
+          "start": "0x089E20A8",
+          "end": "0x089E24C0"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "088729a0",
+        "088d3ae8",
+        "088d3ea0",
+        "088d3f00",
+        "088d44ec",
+        "088d4664",
+        "088d4bf4",
+        "088d688c",
+        "088d9f5c",
+        "089dec20",
+        "089df044"
+      ],
+      "unresolved_call_sites": 2,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089E24C0",
+      "name": "FUN_089e24c0",
+      "address": "0x089E24C0",
+      "body_bytes": 1120,
+      "ranges": [
+        {
+          "start": "0x089E24C0",
+          "end": "0x089E2920"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "088729a0",
+        "088d3ae8",
+        "088d3ea0",
+        "088d3f00",
+        "088d44ec",
+        "088d4664",
+        "088d4bf4",
+        "088d688c",
+        "088d9f5c",
+        "089dd6d4",
+        "089ddce4",
+        "089dec20",
+        "089df044"
+      ],
+      "unresolved_call_sites": 2,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089E2920",
+      "name": "FUN_089e2920",
+      "address": "0x089E2920",
+      "body_bytes": 796,
+      "ranges": [
+        {
+          "start": "0x089E2920",
+          "end": "0x089E2C3C"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "088729a0",
+        "088d3ae8",
+        "088d3ea0",
+        "088d3f00",
+        "088d44ec",
+        "088d4664",
+        "088d4bf4",
+        "088d688c",
+        "088d9f5c",
+        "089df044"
+      ],
+      "unresolved_call_sites": 2,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    },
+    {
+      "id": "extra:0x089E2C3C",
+      "name": "FUN_089e2c3c",
+      "address": "0x089E2C3C",
+      "body_bytes": 508,
+      "ranges": [
+        {
+          "start": "0x089E2C3C",
+          "end": "0x089E2E38"
+        }
+      ],
+      "thunk": false,
+      "confidence": "automatic-provisional",
+      "direct_call_targets": [
+        "088d3ae8",
+        "088d9c60",
+        "088d9cfc"
+      ],
+      "unresolved_call_sites": 0,
+      "primary_owner": "unclassified",
+      "matched_c": false,
+      "boundary_review": "Ghidra/reviewed leaf and spimdisasm agreement"
+    }
+  ],
+  "quarantined_functions": [],
+  "instruction_ranges": [
+    {
+      "start": "0x089DD4D0",
+      "end": "0x089DE744"
+    },
+    {
+      "start": "0x089DE7A0",
+      "end": "0x089E2E38"
+    }
+  ],
+  "defined_data_ranges": [
+    {
+      "start": "0x089DD4C0",
+      "end": "0x089DD4D0"
+    },
+    {
+      "start": "0x089DE748",
+      "end": "0x089DE74D"
+    },
+    {
+      "start": "0x089DE750",
+      "end": "0x089DE76B"
+    },
+    {
+      "start": "0x089DE76C",
+      "end": "0x089DE77D"
+    },
+    {
+      "start": "0x089DE788",
+      "end": "0x089DE7A0"
+    },
+    {
+      "start": "0x089E2E38",
+      "end": "0x089E2E57"
+    },
+    {
+      "start": "0x089E2E58",
+      "end": "0x089E2E6A"
+    },
+    {
+      "start": "0x089E2E6C",
+      "end": "0x089E2F11"
+    },
+    {
+      "start": "0x089E2F12",
+      "end": "0x089E3242"
+    },
+    {
+      "start": "0x089E3244",
+      "end": "0x089E324B"
+    },
+    {
+      "start": "0x089E324C",
+      "end": "0x089E3252"
+    },
+    {
+      "start": "0x089E3258",
+      "end": "0x089E3267"
+    },
+    {
+      "start": "0x089E3268",
+      "end": "0x089E328D"
+    },
+    {
+      "start": "0x089E3290",
+      "end": "0x089E32C4"
+    },
+    {
+      "start": "0x089E32C8",
+      "end": "0x089E33B8"
+    }
+  ],
+  "padding_or_zero_fill_ranges": [
+    {
+      "start": "0x089DE744",
+      "end": "0x089DE748"
+    },
+    {
+      "start": "0x089DE74D",
+      "end": "0x089DE750"
+    },
+    {
+      "start": "0x089DE76B",
+      "end": "0x089DE76C"
+    },
+    {
+      "start": "0x089DE77D",
+      "end": "0x089DE788"
+    },
+    {
+      "start": "0x089E2E57",
+      "end": "0x089E2E58"
+    },
+    {
+      "start": "0x089E2E6A",
+      "end": "0x089E2E6C"
+    },
+    {
+      "start": "0x089E2F11",
+      "end": "0x089E2F12"
+    },
+    {
+      "start": "0x089E3242",
+      "end": "0x089E3244"
+    },
+    {
+      "start": "0x089E324B",
+      "end": "0x089E324C"
+    },
+    {
+      "start": "0x089E3252",
+      "end": "0x089E3258"
+    },
+    {
+      "start": "0x089E3267",
+      "end": "0x089E3268"
+    },
+    {
+      "start": "0x089E328D",
+      "end": "0x089E3290"
+    },
+    {
+      "start": "0x089E32C4",
+      "end": "0x089E32C8"
+    }
+  ],
+  "unclassified_executable_ranges": [],
+  "function_body_ranges": [
+    {
+      "start": "0x089DD4D0",
+      "end": "0x089DE744"
+    },
+    {
+      "start": "0x089DE7A0",
+      "end": "0x089E2E38"
+    }
+  ],
+  "summary": {
+    "executable_section_bytes": 24312,
+    "decoded_instruction_bytes": 22796,
+    "defined_data_bytes_in_executable_sections": 1476,
+    "padding_or_zero_fill_bytes": 40,
+    "unclassified_executable_bytes": 0,
+    "function_body_bytes_union": 22796,
+    "overlapping_function_body_bytes": 0,
+    "function_body_bytes_not_decoded": 0,
+    "decoded_instruction_bytes_outside_functions": 0,
+    "platform_import_functions": 0,
+    "matched_c_functions": 24
+  }
+}

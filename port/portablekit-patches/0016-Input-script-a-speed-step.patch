@@ -1,0 +1,59 @@
+From 2005ae552b0e021fd0cd1e574bb18b1caec90881 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Sun, 18 Oct 2026 22:00:55 +1030
+Subject: [PATCH 16/27] Input script: a speed step
+
+`speed unlimited` and `speed normal` switch the game speed as the menu's
+Game speed option does, without saving it, so a scripted run can reach a
+scene quickly and then watch it at real time. A test tool; no behaviour
+changes unless a script uses it.
+
+Verified on Windows with one game: a run reached a battle unlimited and
+watched it at real time after `speed normal`.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/ui/input_script.cpp | 5 +++++
+ host/ui/input_script.hpp | 3 +++
+ 2 files changed, 8 insertions(+)
+
+diff --git a/host/ui/input_script.cpp b/host/ui/input_script.cpp
+index 2b174f2..23bde16 100644
+--- a/host/ui/input_script.cpp
++++ b/host/ui/input_script.cpp
+@@ -4,6 +4,7 @@
+ #include "ui/layer.hpp"
+ 
+ #include "gpu/vulkan_renderer.hpp"
++#include "settings/settings.hpp"
+ 
+ #include <SDL3/SDL.h>
+ 
+@@ -208,6 +209,10 @@ void run(const Step &step) {
+         const std::string name = step.argument.empty() ? "frame_" + std::to_string(s.frame) : step.argument;
+         Layer::get().renderer().capture_window((dir != nullptr ? std::string(dir) : std::string(".")) + "/" + name +
+                                                ".bmp");
++    } else if (step.action == "speed") {
++        // Not saved: the run's settings.ini keeps the player's choice.
++        settings::current().unthrottled = step.argument == "unlimited";
++        std::cout << "[script] game speed " << (settings::current().unthrottled ? "unlimited" : "normal") << std::endl;
+     } else if (step.action == "quit") {
+         SDL_Event event{};
+         event.type = SDL_EVENT_QUIT;
+diff --git a/host/ui/input_script.hpp b/host/ui/input_script.hpp
+index b7be24d..3801e24 100644
+--- a/host/ui/input_script.hpp
++++ b/host/ui/input_script.hpp
+@@ -28,6 +28,9 @@
+ //   text STRING       type text
+ //   drop PATH         drop a file onto the window
+ //   shot NAME         write the window image to <prefix>_SCREENSHOT_DIR/NAME.bmp
++//   speed unlimited|normal  run the game as fast as it can or at real time from
++//                     here on, as the Game speed option does, without saving
++//                     it: a run can reach a scene fast and then watch it
+ //   quit              close the window
+ //
+ // For example: <prefix>_INPUT_SCRIPT="300:key Escape;330:shot menu;360:pad leftstick+rightstick"
+-- 
+2.53.0.windows.1
+

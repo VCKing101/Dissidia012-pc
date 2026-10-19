@@ -1,0 +1,468 @@
+From 525956489145d4e252ef81d7a1be3cbfcac4ec5b Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Mon, 19 Oct 2026 09:29:28 +1030
+Subject: [PATCH 26/27] Input: extra buttons, the controls a PSP lacks, for a
+ port to use
+
+A modern pad has L2, R2, L3 and R3; a PSP has none of them, so a game
+never reads them, and the triggers only copied L and R. A port that wants
+to give them a meaning of its own (a hint, a menu of the port's, a mode
+switch) now can:
+
+- GameProfile::extra_buttons names the ones the port uses (input::kExtraL2,
+  kExtraR2, kExtraL3, kExtraR3). With L2 or R2 named, the analog triggers
+  press L2 and R2 instead of copies of L and R, unless the player picked a
+  trigger profile; with neither, nothing changes.
+- hle_extension::extra_buttons() (interface version 5) gives the bits held
+  when the game last read its pad. They are never written to the game's
+  pad data.
+- The keyboard binds them like any control: actions L2, R2, L3 and R3,
+  input.bind.l2 and so on in settings.ini, listed in the menu only for the
+  buttons the profile names. 1 and 3 are L2 and R2 by default (the number
+  keys above Q and E, free in the default and the classic layouts); L3 and
+  R3 have no key by default. The stick clicks are L3 and R3 on a pad.
+- <prefix>_NO_EXTRA_BUTTONS=1 treats the profile's list as empty: the
+  triggers press L and R again.
+
+The input tests check the new defaults, that the keys press extra bits and
+no PSP button, and the actions' bits.
+
+Verified: the framework's 21 tests pass and portablekit_host_check builds
+(Windows, MSVC); in the Dissidia 012 port, the keyboard's 1 and 3 and a
+virtual pad's triggers reach the port as L2 and R2, and its loading screen
+page did not see L or R from the triggers.
+Not verified: other games, a real gamepad's triggers and stick clicks,
+macOS and Linux builds.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ docs/HLE_EXTENSIONS.md                |  1 +
+ docs/PROFILE_GUIDE.md                 |  2 ++
+ host/gpu/vulkan_renderer.cpp          | 28 +++++++++++++++++++++++----
+ host/gpu/vulkan_renderer.hpp          |  3 +++
+ host/hle/hle_common.hpp               |  3 +++
+ host/hle/hle_extension_host.cpp       |  4 ++++
+ host/hle/hle_media.cpp                |  9 +++++++++
+ host/input/bindings.cpp               | 27 ++++++++++++++++++++++++--
+ host/input/bindings.hpp               | 17 ++++++++++++++++
+ host/profile.cpp                      |  5 +++++
+ host/profile.hpp                      | 10 ++++++++++
+ host/ui/menu.cpp                      |  4 ++++
+ include/portablekit/hle_extension.hpp | 15 +++++++++++++-
+ tests/input_tests.cpp                 | 12 ++++++++++++
+ 14 files changed, 133 insertions(+), 7 deletions(-)
+
+diff --git a/docs/HLE_EXTENSIONS.md b/docs/HLE_EXTENSIONS.md
+index 91225a0..333b114 100644
+--- a/docs/HLE_EXTENSIONS.md
++++ b/docs/HLE_EXTENSIONS.md
+@@ -76,6 +76,7 @@ Everything a module may rely on is in `include/portablekit/hle_extension.hpp`. `
+ | `read_open_file(fd, offset, bytes)` | The raw bytes of an open guest file, without moving its position. |
+ | `set_file_filter(fd, filter)` | What the game reads from an open file instead of its bytes (see [Filtered files](#filtered-files)). |
+ | `add_file_provider(provider)` | A file the host serves at a guest path, in place of the file there or where there is none (see [Served files](#served-files)). Since interface version 4. |
++| `extra_buttons()` | The extra buttons (`kExtraL2`, `kExtraR2`, `kExtraL3`, `kExtraR3`: the triggers and stick clicks a PSP lacks, or the keys bound to them) held when the game last read its pad. The game never sees them; a port names the ones it uses in `GameProfile::extra_buttons` and gives them a meaning of its own. Since interface version 5. |
+ 
+ Handlers run on the emulation thread, one at a time. A module may include PortableKit's `host/` headers to reach further than this, but those change without notice; a need that comes up twice belongs in the header instead.
+ 
+diff --git a/docs/PROFILE_GUIDE.md b/docs/PROFILE_GUIDE.md
+index 78b2443..45f6c7f 100644
+--- a/docs/PROFILE_GUIDE.md
++++ b/docs/PROFILE_GUIDE.md
+@@ -63,6 +63,8 @@ Two more are for a port that goes further than the PSP did, and both are null un
+ 
+ `trigger_profiles` are for how a game is played rather than how it is run: what the triggers may press instead of L and R, each with the key settings.ini keeps and the label the menu shows. Yakumo offers Bows (R on L2 to hold the aim, △ on R2 to shoot) and Bowguns (R and ○). Without any, the triggers press L and R and the menu has no row for them.
+ 
++`extra_buttons` names the buttons a modern pad has and a PSP lacks (`input::kExtraL2`, `kExtraR2`, `kExtraL3`, `kExtraR3`) that the port itself gives a meaning, reading them with `hle_extension::extra_buttons()`; the game never sees them. With L2 or R2 named, the triggers press those instead of copies of L and R (a trigger profile the player picks still wins), and Keyboard and mouse lists bindings for the buttons named (`input.bind.l2` and so on; 1 and 3 are L2 and R2 by default). `<prefix>_NO_EXTRA_BUTTONS=1` treats it as empty. Without it the triggers press L and R and the menu lists none of them.
++
+ `tilt` is for a game played by tilting its world, as LocoRoco is with L and R: the buttons that tilt left and right, whether the game eases its tilt towards the held side (then a small roll of the device presses the button for part of the frames and tilts the world part of the way), and a sentence for the menu. With it, Controls gets a Tilt controls section, off by default, and the motion sensors of a gamepad (DualShock 4, DualSense, Switch Pro, a Steam Deck seen through SDL's own driver) or of the phone itself press those buttons (`host/input/tilt.hpp` for the arithmetic, `host/input/motion.hpp` for the sensors). Find the buttons and the easing with the game's pad trace before filling it in. Without it, nothing opens a sensor and the menu has no such section.
+ 
+ `player_name_label` and `default_player_name` are what the interface calls the name a game asks for and what it answers before the player sets one: "Player name" and "Player" unless a profile says otherwise. Yakumo says "Hunter name" and "Hunter".
+diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
+index b297555..c36a600 100644
+--- a/host/gpu/vulkan_renderer.cpp
++++ b/host/gpu/vulkan_renderer.cpp
+@@ -701,6 +701,10 @@ void read_gamepad(SDL_Gamepad *device, PadState &pad, int &analog_x, int &analog
+         if (button == jump) return;
+         if (SDL_GetGamepadButton(device, button)) buttons |= bit;
+     };
++    // The stick clicks are extra buttons: a PSP has neither.
++    if (jump != SDL_GAMEPAD_BUTTON_LEFT_STICK && SDL_GetGamepadButton(device, SDL_GAMEPAD_BUTTON_LEFT_STICK))
++        pad.extra |= input::kExtraL3;
++    if (SDL_GetGamepadButton(device, SDL_GAMEPAD_BUTTON_RIGHT_STICK)) pad.extra |= input::kExtraR3;
+     if (jump != SDL_GAMEPAD_BUTTON_INVALID && SDL_GetGamepadButton(device, jump)) buttons |= tilt->left | tilt->right;
+     held(SDL_GAMEPAD_BUTTON_DPAD_UP, 0x0010u);
+     held(SDL_GAMEPAD_BUTTON_DPAD_RIGHT, 0x0020u);
+@@ -736,8 +740,18 @@ void read_gamepad(SDL_Gamepad *device, PadState &pad, int &analog_x, int &analog
+         left_trigger = profiles[tuning.triggers - 1u].left;
+         right_trigger = profiles[tuning.triggers - 1u].right;
+     }
+-    if (axis(SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > tuning.trigger) buttons |= left_trigger;
+-    if (axis(SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > tuning.trigger) buttons |= right_trigger;
++    // A port that reads L2 and R2 as extra buttons (GameProfile::extra_buttons)
++    // gets the triggers as those instead, unless the player chose a profile.
++    const std::uint32_t extras = portablekit::active_extra_buttons();
++    const bool profiled = tuning.triggers != 0u && tuning.triggers <= profiles.size();
++    if (axis(SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > tuning.trigger) {
++        pad.extra |= input::kExtraL2;
++        if (profiled || (extras & input::kExtraL2) == 0u) buttons |= left_trigger;
++    }
++    if (axis(SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > tuning.trigger) {
++        pad.extra |= input::kExtraR2;
++        if (profiled || (extras & input::kExtraR2) == 0u) buttons |= right_trigger;
++    }
+ 
+     const float right_x = axis(SDL_GAMEPAD_AXIS_RIGHTX);
+     const float right_y = axis(SDL_GAMEPAD_AXIS_RIGHTY);
+@@ -1135,6 +1149,7 @@ struct VulkanRenderer::Impl {
+     bool game_input{true};
+     bool suppress_held{};
+     std::uint32_t suppressed_buttons{};
++    std::uint32_t suppressed_extra{};
+     // Keyboard and mouse (input/bindings.hpp). Mouse buttons are followed
+     // through their events, so a scripted click counts like a real one.
+     bool pointer_free{};
+@@ -5614,6 +5629,7 @@ void VulkanRenderer::Impl::sample_pad(bool focused) {
+     });
+     PadState pad{};
+     pad.buttons = typed.buttons;
++    pad.extra = typed.extra;
+     int analog_x = typed.stick_x;
+     int analog_y = typed.stick_y;
+     // Camera keys push the second stick fully, as a right stick would: in
+@@ -5670,14 +5686,18 @@ void VulkanRenderer::Impl::sample_pad(bool focused) {
+     // they are released.
+     if (impl_->suppress_held) {
+         impl_->suppressed_buttons = pad.buttons;
++        impl_->suppressed_extra = pad.extra;
+         impl_->suppress_held = false;
+     }
+     impl_->suppressed_buttons &= pad.buttons;
+     pad.buttons &= ~impl_->suppressed_buttons;
+-    if (pad_tuning().trace && (pad.buttons != impl_->pad.buttons || pad.analog_x != impl_->pad.analog_x ||
++    impl_->suppressed_extra &= pad.extra;
++    pad.extra &= ~impl_->suppressed_extra;
++    if (pad_tuning().trace && (pad.buttons != impl_->pad.buttons || pad.extra != impl_->pad.extra ||
++                               pad.analog_x != impl_->pad.analog_x ||
+                                pad.analog_y != impl_->pad.analog_y || pad.right_x != impl_->pad.right_x ||
+                                pad.right_y != impl_->pad.right_y)) {
+-        std::cout << "[pad] buttons 0x" << std::hex << pad.buttons << std::dec << " analog "
++        std::cout << "[pad] buttons 0x" << std::hex << pad.buttons << " extra 0x" << pad.extra << std::dec << " analog "
+                   << static_cast<int>(pad.analog_x) << "," << static_cast<int>(pad.analog_y) << " right "
+                   << static_cast<int>(pad.right_x) << "," << static_cast<int>(pad.right_y) << std::endl;
+     }
+diff --git a/host/gpu/vulkan_renderer.hpp b/host/gpu/vulkan_renderer.hpp
+index d9e1803..4ba50ee 100644
+--- a/host/gpu/vulkan_renderer.hpp
++++ b/host/gpu/vulkan_renderer.hpp
+@@ -33,6 +33,9 @@ struct PadState {
+     // skips its camera path entirely only when both bytes are exactly centred.
+     std::uint8_t right_x{0x80u};
+     std::uint8_t right_y{0x80u};
++    // The extra buttons held (input::kExtra*): never written to the game's
++    // pad data, read by the port through hle_extension::extra_buttons().
++    std::uint32_t extra{};
+ };
+ 
+ // The mouse the input script's events come from. With scripted input on,
+diff --git a/host/hle/hle_common.hpp b/host/hle/hle_common.hpp
+index 25b4951..7c603ed 100644
+--- a/host/hle/hle_common.hpp
++++ b/host/hle/hle_common.hpp
+@@ -76,6 +76,9 @@ void add_file_provider(FileProvider provider);
+ // the game seeing a descriptor. Returns the number of bytes read, or the
+ // negative error sceIoOpen would have returned.
+ std::int64_t read_guest_file(const std::string &path, std::uint64_t offset, std::uint8_t *output, std::size_t size);
++// The extra buttons (input::kExtra*) held when the game last read its pad, 0
++// before it first does (see hle_extension::extra_buttons).
++[[nodiscard]] std::uint32_t pad_extra_buttons();
+ 
+ // True when <prefix>_TRACE_SYNC is set: logs kernel object activity.
+ [[nodiscard]] bool trace_sync();
+diff --git a/host/hle/hle_extension_host.cpp b/host/hle/hle_extension_host.cpp
+index f2fb12c..d242df0 100644
+--- a/host/hle/hle_extension_host.cpp
++++ b/host/hle/hle_extension_host.cpp
+@@ -111,6 +111,10 @@ bool set_file_filter(std::uint32_t fd, std::shared_ptr<FileFilter> filter) {
+ 
+ void add_file_provider(FileProvider provider) { ::portablekit::add_file_provider(std::move(provider)); }
+ 
++static_assert(kExtraL2 == input::kExtraL2 && kExtraR2 == input::kExtraR2 && kExtraL3 == input::kExtraL3 &&
++              kExtraR3 == input::kExtraR3);
++std::uint32_t extra_buttons() { return ::portablekit::pad_extra_buttons(); }
++
+ } // namespace hle_extension
+ 
+ HleExtensionReport install_linked_hle_extensions(Runtime &runtime, HleRegistrar &hle) {
+diff --git a/host/hle/hle_media.cpp b/host/hle/hle_media.cpp
+index 4697ec4..b130657 100644
+--- a/host/hle/hle_media.cpp
++++ b/host/hle/hle_media.cpp
+@@ -391,6 +391,12 @@ struct CtrlSample {
+     std::uint8_t right_y = 0x80u;
+ };
+ 
++// The extra buttons of the last sample the game took.
++std::uint32_t &sampled_extra() {
++    static std::uint32_t extra = 0u;
++    return extra;
++}
++
+ CtrlSample sample_ctrl() {
+     CtrlSample sample;
+ #if defined(PORTABLEKIT_HAS_RENDERER)
+@@ -401,6 +407,7 @@ CtrlSample sample_ctrl() {
+         if (!at_flip) media().renderer->sample_pad();
+         const gpu::PadState pad = media().renderer->pad();
+         sample.buttons = pad.buttons;
++        sampled_extra() = pad.extra;
+         stall_watchdog::note_pad(sample.buttons);
+         fast_loading::note_buttons(sample.buttons != 0u);
+         sample.analog_x = pad.analog_x;
+@@ -1115,6 +1122,8 @@ void register_audio(HleRegistrar &hle) {
+ 
+ } // namespace
+ 
++std::uint32_t pad_extra_buttons() { return sampled_extra(); }
++
+ void initialize_renderer() {
+ #if defined(PORTABLEKIT_HAS_RENDERER)
+     (void)ensure_renderer();
+diff --git a/host/input/bindings.cpp b/host/input/bindings.cpp
+index cccfe2a..91cd8d8 100644
+--- a/host/input/bindings.cpp
++++ b/host/input/bindings.cpp
+@@ -13,6 +13,7 @@ namespace {
+ namespace hid {
+ constexpr std::uint16_t A = 4, D = 7, E = 8, F = 9, I = 12, J = 13, K = 14, L = 15, Q = 20, S = 22, W = 26;
+ constexpr std::uint16_t X = 27, Z = 29;
++constexpr std::uint16_t One = 30, Three = 32;
+ constexpr std::uint16_t Return = 40, Backspace = 42, Tab = 43, Space = 44;
+ constexpr std::uint16_t Right = 79, Left = 80, Down = 81, Up = 82;
+ constexpr std::uint16_t LeftShift = 225, RightShift = 229;
+@@ -54,13 +55,17 @@ constexpr ActionInfo kInfo[kActions] = {
+     {"dpad_up", "D-pad up"},       {"dpad_left", "D-pad left"},    {"dpad_down", "D-pad down"},
+     {"dpad_right", "D-pad right"}, {"camera_up", "Camera up"},     {"camera_left", "Camera left"},
+     {"camera_down", "Camera down"}, {"camera_right", "Camera right"}, {"jump", "Jump (L and R together)"},
++    {"l2", "L2"},                  {"r2", "R2"},                   {"l3", "L3 (left stick click)"},
++    {"r3", "R3 (right stick click)"},
+ };
+ 
+ // SceCtrlButtons for the actions that are buttons.
+ constexpr std::uint32_t kButtonBits[kActions] = {
+     0u, 0u, 0u, 0u, 0x1000u, 0x2000u, 0x4000u, 0x8000u, 0x0100u, 0x0200u, 0x0008u, 0x0001u,
+-    0x0010u, 0x0080u, 0x0040u, 0x0020u, 0u, 0u, 0u, 0u, 0u,
++    0x0010u, 0x0080u, 0x0040u, 0x0020u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u,
+ };
++static_assert(sizeof kButtonBits / sizeof kButtonBits[0] == kActions);
++static_assert(sizeof kInfo / sizeof kInfo[0] == kActions);
+ 
+ Bindings make_default() {
+     Bindings b{};
+@@ -91,6 +96,9 @@ Bindings make_default() {
+     set(Action::CameraLeft, key(hid::J));
+     set(Action::CameraDown, key(hid::K));
+     set(Action::CameraRight, key(hid::L));
++    // A port that reads L2 and R2: the number keys above L (Q) and □ (E).
++    set(Action::L2, key(hid::One));
++    set(Action::R2, key(hid::Three));
+     return b;
+ }
+ 
+@@ -115,6 +123,8 @@ Bindings make_classic() {
+     set(Action::Left, key(hid::Left));
+     set(Action::Down, key(hid::Down));
+     set(Action::Right, key(hid::Right));
++    set(Action::L2, key(hid::One));
++    set(Action::R2, key(hid::Three));
+     return b;
+ }
+ 
+@@ -160,6 +170,16 @@ const Bindings &classic_bindings() {
+ 
+ const ActionInfo &info(Action action) { return kInfo[static_cast<std::size_t>(action)]; }
+ 
++std::uint32_t extra_bit(Action action) {
++    switch (action) {
++    case Action::L2: return kExtraL2;
++    case Action::R2: return kExtraR2;
++    case Action::L3: return kExtraL3;
++    case Action::R3: return kExtraR3;
++    default: return 0u;
++    }
++}
++
+ std::string name(Binding binding) {
+     if (const int button = mouse_button_of(binding)) return kMouseNames[button - 1];
+     const int position = key_position(binding);
+@@ -239,7 +259,10 @@ PadInput read(const Bindings &bindings, const std::function<bool(Binding)> &held
+     bool on[kActions]{};
+     for (std::size_t i = 0; i < kActions; ++i) {
+         for (const Binding binding : bindings[i]) on[i] = on[i] || (binding != kNone && held(binding));
+-        if (on[i]) pad.buttons |= kButtonBits[i];
++        if (on[i]) {
++            pad.buttons |= kButtonBits[i];
++            pad.extra |= extra_bit(static_cast<Action>(i));
++        }
+     }
+     const auto axis = [&](Action negative, Action positive) {
+         return (on[static_cast<std::size_t>(positive)] ? 127 : 0) - (on[static_cast<std::size_t>(negative)] ? 127 : 0);
+diff --git a/host/input/bindings.hpp b/host/input/bindings.hpp
+index 6fdb98c..1588863 100644
+--- a/host/input/bindings.hpp
++++ b/host/input/bindings.hpp
+@@ -41,6 +41,12 @@ enum class Action : std::uint8_t {
+     // A game that tilts (GameProfile::tilt): both tilt buttons at once, which
+     // is LocoRoco's jump. Only listed for such a game.
+     Jump,
++    // Buttons a PSP does not have (the extra buttons below), for a port that
++    // reads them (GameProfile::extra_buttons). Only listed for such a game.
++    L2,
++    R2,
++    L3,
++    R3,
+     Count
+ };
+ inline constexpr std::size_t kActions = static_cast<std::size_t>(Action::Count);
+@@ -64,6 +70,16 @@ inline constexpr std::uint16_t kKeyPositions = 512u;
+     return binding > kMouse && binding <= kMouse + 5u ? binding - kMouse : 0;
+ }
+ 
++// The extra buttons: controls a modern pad has and a PSP lacks. The game
++// never sees them; a port reads them (hle_extension::extra_buttons) to give
++// them a meaning of its own. Bits of PadInput::extra and gpu::PadState::extra.
++inline constexpr std::uint32_t kExtraL2 = 1u << 0u;
++inline constexpr std::uint32_t kExtraR2 = 1u << 1u;
++inline constexpr std::uint32_t kExtraL3 = 1u << 2u;
++inline constexpr std::uint32_t kExtraR3 = 1u << 3u;
++// The extra button an action presses, or 0.
++[[nodiscard]] std::uint32_t extra_bit(Action action);
++
+ using Slots = std::array<Binding, kSlots>;
+ using Bindings = std::array<Slots, kActions>;
+ 
+@@ -106,6 +122,7 @@ struct PadInput {
+     int camera_x{};           // the second stick
+     int camera_y{};
+     bool jump{};              // Action::Jump held
++    std::uint32_t extra{};    // kExtra* bits of the extra buttons held
+ };
+ [[nodiscard]] PadInput read(const Bindings &bindings, const std::function<bool(Binding)> &held);
+ 
+diff --git a/host/profile.cpp b/host/profile.cpp
+index 1231cc3..5a603c6 100644
+--- a/host/profile.cpp
++++ b/host/profile.cpp
+@@ -19,6 +19,11 @@ bool env_set(const char *name) { return env(name) != nullptr; }
+ 
+ std::string env_name(const char *name) { return std::string(game().env_prefix) + '_' + name; }
+ 
++std::uint32_t active_extra_buttons() {
++    static const bool off = env_set("NO_EXTRA_BUTTONS");
++    return off ? 0u : game().extra_buttons;
++}
++
+ namespace {
+ const ProfileVariant *g_active_variant = nullptr;
+ }
+diff --git a/host/profile.hpp b/host/profile.hpp
+index 09322ed..ddcf7eb 100644
+--- a/host/profile.hpp
++++ b/host/profile.hpp
+@@ -229,6 +229,14 @@ struct GameProfile {
+     // changes what it needs. Only what settings.ini does not hold is taken
+     // from here, so a player's own bindings stay. Null: the framework's.
+     void (*keyboard_defaults)(input::Bindings &bindings, bool &mouse) = nullptr;
++    // The extra buttons (input::kExtraL2 ... kExtraR3: controls a PSP lacks)
++    // that this port gives a meaning of its own, reading them through
++    // hle_extension::extra_buttons(); the game itself never sees them. With
++    // L2 or R2 named, the analog triggers press L2 and R2 instead of copies
++    // of L and R (unless the player picks a trigger profile), and the menu
++    // lists keyboard bindings for the buttons named. 0: none, and the
++    // triggers press L and R. <prefix>_NO_EXTRA_BUTTONS=1 treats it as 0.
++    std::uint32_t extra_buttons = 0u;
+ 
+     // --- Hooks -------------------------------------------------------------
+     // Called after the framework has registered its own HLE, so a game can add
+@@ -308,6 +316,8 @@ using PatchImageHook = void (*)(psprecomp::Runtime &, const psprecomp::Elf32Imag
+ [[nodiscard]] ExtraHleHook active_register_extra_hle();
+ [[nodiscard]] PatchImageHook active_patch_loaded_image();
+ [[nodiscard]] std::span<const std::uint32_t> active_overlay_slots();
++// GameProfile::extra_buttons, or 0 with <prefix>_NO_EXTRA_BUTTONS set.
++[[nodiscard]] std::uint32_t active_extra_buttons();
+ 
+ // getenv("<env_prefix>_" + name), so host code names the variable without the
+ // game's prefix: env("TRACE_GE") reads <prefix>_TRACE_GE in Yakumo.
+diff --git a/host/ui/menu.cpp b/host/ui/menu.cpp
+index e7a03d4..3670dfb 100644
+--- a/host/ui/menu.cpp
++++ b/host/ui/menu.cpp
+@@ -910,6 +910,10 @@ void Menu::controls() {
+     for (std::size_t i = 0; i < input::kActions; ++i) {
+         const auto action = static_cast<input::Action>(i);
+         if (action == input::Action::Jump && portablekit::game().tilt == nullptr) continue;
++        // The extra buttons only for a port that reads them.
++        if (const std::uint32_t extra = input::extra_bit(action);
++            extra != 0u && (portablekit::active_extra_buttons() & extra) == 0u)
++            continue;
+         std::string value = input::format(s.bindings[i]);
+         if (binding_ == action) value = "Press a key or a mouse button";
+         else if (value.empty()) value = "None";
+diff --git a/include/portablekit/hle_extension.hpp b/include/portablekit/hle_extension.hpp
+index 937a725..7db053f 100644
+--- a/include/portablekit/hle_extension.hpp
++++ b/include/portablekit/hle_extension.hpp
+@@ -39,7 +39,8 @@
+ // built against. 2: Registry::override_chained.
+ // 3: Registry::declare_key, key lookup, read_open_file, set_file_filter.
+ // 4: add_file_provider.
+-#define PORTABLEKIT_HLE_EXTENSION_INTERFACE 4
++// 5: extra_buttons.
++#define PORTABLEKIT_HLE_EXTENSION_INTERFACE 5
+ 
+ namespace portablekit::hle_extension {
+ 
+@@ -276,6 +277,18 @@ bool set_file_filter(std::uint32_t fd, std::shared_ptr<FileFilter> filter);
+ using FileProvider = std::function<std::shared_ptr<FileFilter>(std::string_view path, std::uint32_t fd)>;
+ void add_file_provider(FileProvider provider);
+ 
++// The extra buttons: controls a modern pad or keyboard has and a PSP lacks,
++// which the game never sees. A port that gives them a meaning of its own
++// names them in GameProfile::extra_buttons and reads them here: the bits of
++// those held when the game last read its pad (sceCtrl), 0 before it first
++// does. The triggers are L2 and R2, the stick clicks L3 and R3; the keyboard
++// binds them in the menu (input.bind.l2 and so on in settings.ini).
++inline constexpr std::uint32_t kExtraL2 = 1u << 0u;
++inline constexpr std::uint32_t kExtraR2 = 1u << 1u;
++inline constexpr std::uint32_t kExtraL3 = 1u << 2u;
++inline constexpr std::uint32_t kExtraR3 = 1u << 3u;
++[[nodiscard]] std::uint32_t extra_buttons();
++
+ } // namespace portablekit::hle_extension
+ 
+ // Defines a module's entry function. `name` is the module's name as its
+diff --git a/tests/input_tests.cpp b/tests/input_tests.cpp
+index f581396..7875ea0 100644
+--- a/tests/input_tests.cpp
++++ b/tests/input_tests.cpp
+@@ -117,6 +117,18 @@ void test_read() {
+     with_jump[static_cast<std::size_t>(Action::Jump)] = {from_name("V"), kNone};
+     pad = read(with_jump, [&](Binding b) { return b == from_name("V"); });
+     check(pad.jump && pad.buttons == 0u, "Jump is reported as itself, the tilt buttons are the renderer's to add");
++    held = {from_name("1"), from_name("3")};
++    pad = read_held();
++    check(pad.extra == (kExtraL2 | kExtraR2) && pad.buttons == 0u,
++          "1 and 3 press the extra buttons L2 and R2, and nothing the PSP has");
++    check(d[static_cast<std::size_t>(Action::L3)][0] == kNone && d[static_cast<std::size_t>(Action::R3)][0] == kNone,
++          "L3 and R3 are unbound on the keyboard by default");
++    check(extra_bit(Action::L2) == kExtraL2 && extra_bit(Action::R3) == kExtraR3 && extra_bit(Action::Cross) == 0u &&
++              extra_bit(Action::Jump) == 0u,
++          "only the extra buttons' actions press extra bits");
++    held = {from_name("Space"), from_name("1")};
++    pad = read_held();
++    check(pad.buttons == 0x4000u && pad.extra == kExtraL2, "PSP and extra buttons together");
+ }
+ 
+ void test_mouse_turn() {
+-- 
+2.53.0.windows.1
+

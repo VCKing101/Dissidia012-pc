@@ -1,0 +1,86 @@
+From e4c9be77880276f031300cc3b22ea7e864ce0a35 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Sun, 18 Oct 2026 18:51:20 +1030
+Subject: [PATCH 08/27] sceKernelCancelSema
+
+Was a logging stub. Wakes every waiting thread with WAIT_CANCEL
+(0x800201A9), sets the count (a negative count restores the initial one,
+now kept in Semaphore::initial_count), and writes how many were waiting to
+the third argument if given. Unknown semaphore and a count above the
+maximum fail as the other semaphore calls do.
+
+Verified on Windows: a game's movie player cancels its semaphore with -1
+when the movie ends and goes on.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/hle/hle_threadman.cpp | 25 ++++++++++++++++++++++++-
+ host/kernel/kernel.hpp     |  2 ++
+ 2 files changed, 26 insertions(+), 1 deletion(-)
+
+diff --git a/host/hle/hle_threadman.cpp b/host/hle/hle_threadman.cpp
+index f4ec4b2..7a42a27 100644
+--- a/host/hle/hle_threadman.cpp
++++ b/host/hle/hle_threadman.cpp
+@@ -330,7 +330,8 @@ void register_semaphores(HleRegistrar &hle) {
+             return;
+         }
+         const SceUID uid = kernel().allocate_uid();
+-        kernel().semaphores[uid] = Semaphore{read_cstring(rt.memory(), arg(ctx, 0), 32u), arg(ctx, 1), initial, maximum, {}};
++        kernel().semaphores[uid] =
++            Semaphore{read_cstring(rt.memory(), arg(ctx, 0), 32u), arg(ctx, 1), initial, maximum, {}, initial};
+         kernel().finish(ctx, as_unsigned(uid));
+     });
+     hle.add("ThreadManForUser", "sceKernelDeleteSema", [](Runtime &, AllegrexContext &ctx) {
+@@ -343,6 +344,28 @@ void register_semaphores(HleRegistrar &hle) {
+         kernel().semaphores.erase(found);
+         kernel().finish(ctx, 0u);
+     });
++    // sceKernelCancelSema(semaid, count, *waiting): every waiting thread
++    // wakes with WAIT_CANCEL, the count becomes `count` (a negative count
++    // restores the initial one) and *waiting, if given, gets how many were
++    // waiting. A game's movie player cancels its semaphore so, with -1, when
++    // the movie ends.
++    hle.add("ThreadManForUser", "sceKernelCancelSema", [](Runtime &rt, AllegrexContext &ctx) {
++        auto found = kernel().semaphores.find(as_signed(arg(ctx, 0)));
++        if (found == kernel().semaphores.end()) {
++            kernel().finish(ctx, error::kUnknownSemid);
++            return;
++        }
++        Semaphore &sema = found->second;
++        const auto count = as_signed(arg(ctx, 1));
++        if (count > sema.max_count) {
++            kernel().finish(ctx, error::kIllegalCount);
++            return;
++        }
++        if (arg(ctx, 2) != 0u) rt.memory().store32(arg(ctx, 2), static_cast<std::uint32_t>(sema.waiters.size()));
++        kernel().cancel_waiters(sema.waiters, error::kWaitCancel);
++        sema.count = count < 0 ? sema.initial_count : count;
++        kernel().finish(ctx, 0u);
++    });
+     hle.add("ThreadManForUser", "sceKernelSignalSema", [](Runtime &, AllegrexContext &ctx) {
+         const SceUID uid = as_signed(arg(ctx, 0));
+         auto found = kernel().semaphores.find(uid);
+diff --git a/host/kernel/kernel.hpp b/host/kernel/kernel.hpp
+index d49fecc..d542b73 100644
+--- a/host/kernel/kernel.hpp
++++ b/host/kernel/kernel.hpp
+@@ -50,6 +50,7 @@ inline constexpr std::uint32_t kDormant = 0x800201A2u;
+ inline constexpr std::uint32_t kNotDormant = 0x800201A4u;
+ inline constexpr std::uint32_t kCanNotWait = 0x800201A7u;
+ inline constexpr std::uint32_t kWaitTimeout = 0x800201A8u;
++inline constexpr std::uint32_t kWaitCancel = 0x800201A9u;
+ inline constexpr std::uint32_t kSemaZero = 0x800201ADu;
+ inline constexpr std::uint32_t kSemaOverflow = 0x800201AEu;
+ inline constexpr std::uint32_t kEvfCond = 0x800201AFu;
+@@ -148,6 +149,7 @@ struct Semaphore {
+     std::int32_t count{};
+     std::int32_t max_count{};
+     std::deque<SceUID> waiters;
++    std::int32_t initial_count{};  // what sceKernelCancelSema restores
+ };
+ 
+ struct EventFlag {
+-- 
+2.53.0.windows.1
+

@@ -1,0 +1,27 @@
+{
+  "slot_capacity": 20,
+  "name_list_records": 21,
+  "slot_record_bytes": 72,
+  "request_bytes": 1536,
+  "payload_offset": 3536,
+  "payload_capacity": 257224,
+  "cached_timestamp_offset": 260760,
+  "observed_allocation_bytes": 260784,
+  "sdk_bindings": [
+    {
+      "address": "0x089C5858",
+      "library": "sceUtility",
+      "nid": "0x50C4CD57",
+      "api": "sceUtilitySavedataInitStart"
+    },
+    {
+      "address": "0x089C5D78",
+      "library": "sceRtc",
+      "nid": "0x6FF40ACC",
+      "api": "sceRtcGetTick"
+    }
+  ],
+  "source_matching_not_assessed": true,
+  "runtime_verified": false,
+  "scope": "Static savedata listing and latest-entry load request mapping; serialization format, full save/profile ownership and runtime validation remain incomplete."
+}

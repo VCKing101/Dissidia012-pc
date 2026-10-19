@@ -1,0 +1,50 @@
+{
+  "format": 1,
+  "id": "example-tones",
+  "name": "Example test tones",
+  "version": "1.0.0",
+  "author": "Dissidia 012 native port",
+  "description": "Generated sine tones that show each part of the format. Run make_tones.py in this folder first.",
+  "music": {
+    "series": [
+      {
+        "key": "tones",
+        "name": "TEST TONES",
+        "order": 0,
+        "tracks": [
+          {
+            "key": "intro-loop",
+            "title": "Intro, then a loop",
+            "file": "music/intro_loop.wav",
+            "loop": { "start": 88200, "end": 264600 }
+          },
+          {
+            "key": "chord",
+            "title": "Chord, whole file looped",
+            "file": "music/chord_48k_mono.wav",
+            "loop": "whole"
+          },
+          {
+            "key": "seconds",
+            "title": "Loop given in seconds",
+            "file": "music/steps.wav",
+            "loop": { "start_seconds": 1.0, "end_seconds": 3.0 }
+          }
+        ]
+      },
+      {
+        "key": "sweeps",
+        "name": "TEST SWEEPS",
+        "order": 10,
+        "tracks": [
+          {
+            "key": "sweep-once",
+            "title": "Sweep, played once",
+            "file": "music/sweep.wav",
+            "loop": "none"
+          }
+        ]
+      }
+    ]
+  }
+}

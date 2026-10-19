@@ -1,0 +1,110 @@
+{
+  "schema_version": 1,
+  "recorded_utc": "2026-10-11T06:06:38.786080+00:00",
+  "target": "ULUS10566 v1.00",
+  "ppsspp": "1.20.4 Windows x64",
+  "isolation": {
+    "administrator_setup_succeeded": true,
+    "active_rules_verified_at_setup": true,
+    "rule_count": 6,
+    "protected_cases": [
+      "retail",
+      "original",
+      "rebuilt"
+    ],
+    "normal_user_emulator": true,
+    "loopback_api": "passed over ::1",
+    "wsl_guest_probe": {
+      "host_gateway": "172.26.240.1",
+      "port": 58102,
+      "connect_errno": 11,
+      "connected": false
+    },
+    "global_firewall_defaults_changed": false,
+    "rules_retained_for_reuse": true
+  },
+  "rebuilt_scenarios": {
+    "title_and_profile_setup": "passed",
+    "initial_profile_save_load_after_process_restart": "passed",
+    "beginner_battle_demonstration": "Initial tutorial battle playback; earlier AI classification withdrawn",
+    "interactive_battle": "not-yet-verified",
+    "battle_completion": "not-yet-verified"
+  },
+  "retail_original_deeper_scenarios": "not-run",
+  "captures": [
+    {
+      "checkpoint": "title-menu",
+      "path": "build/ULUS10566/runtime/sessions/rebuilt/debugger-baseline-v1/evidence/startup-logos-finished.png",
+      "sha256": "7c74ed61e03c7376915096f727dfcb4842e9da33f71ef418e63dcf08a837b302",
+      "width": 960,
+      "height": 544,
+      "method": "recorded-video-last-complete-frame"
+    },
+    {
+      "checkpoint": "data-configuration-menu",
+      "path": "build/ULUS10566/runtime/sessions/rebuilt/debugger-baseline-v1/evidence/new-game-prompt.png",
+      "sha256": "bc1077590fabfd60798090df5f03955a3c6931b9be2c92b86061b13389d8496d",
+      "width": 960,
+      "height": 544,
+      "method": "recorded-video-last-complete-frame"
+    },
+    {
+      "checkpoint": "initial-profile-save-completed",
+      "path": "build/ULUS10566/runtime/sessions/rebuilt/debugger-baseline-v1/evidence/save-new-slot.png",
+      "sha256": "c3629707b8d883f4fef63e5432532389ffd82ec9070c21f4e10401adc8255126",
+      "width": 960,
+      "height": 544,
+      "method": "recorded-video-last-complete-frame"
+    },
+    {
+      "checkpoint": "beginner-battle-demonstration",
+      "path": "build/ULUS10566/runtime/sessions/rebuilt/debugger-baseline-v1/evidence/tutorial-battle-loaded.png",
+      "sha256": "5ff3d93edb70b82608d66721b00633e06809a479fccb3f91f9b0a7975e53da0a",
+      "width": 960,
+      "height": 544,
+      "method": "recorded-video-last-complete-frame"
+    },
+    {
+      "checkpoint": "profile-load-completed-after-restart",
+      "path": "build/ULUS10566/runtime/sessions/rebuilt/debugger-baseline-v1/evidence/saved-profile-loaded.png",
+      "sha256": "ebedb2d0add0922f97d1274f8f3238dbd69e058c089a43e7628b72be0d125ff6",
+      "width": 960,
+      "height": 544,
+      "method": "recorded-video-last-complete-frame"
+    },
+    {
+      "checkpoint": "opening-scene-resumed-after-load",
+      "path": "build/ULUS10566/runtime/sessions/rebuilt/debugger-baseline-v1/evidence/loaded-profile-menu.png",
+      "sha256": "882b13f8ef7fa68cd7cb8c09a06cf596010a9de79c83a70a12af4b45cd0c1c58",
+      "width": 960,
+      "height": 544,
+      "method": "recorded-video-last-complete-frame"
+    }
+  ],
+  "save": {
+    "files": [
+      {
+        "path": "memstick/PSP/SAVEDATA/ULUS10566GameData00/DISSIDIA.BIN",
+        "bytes": 257240,
+        "sha256": "bc0f027cf4f25119bf03416187f62c4df4bbe366596ecdeec51c380753bdd3b7"
+      },
+      {
+        "path": "memstick/PSP/SAVEDATA/ULUS10566GameData00/ICON0.PNG",
+        "bytes": 20867,
+        "sha256": "9e43a784c419fd2c695e6cb16fb4021a924d51f204f8f90a2610825af18f59d1"
+      },
+      {
+        "path": "memstick/PSP/SAVEDATA/ULUS10566GameData00/PARAM.SFO",
+        "bytes": 4912,
+        "sha256": "07070ea53d53df241d19ec1d7c47d9c147848a73e831b7ec07d5f42ed795a0d0"
+      }
+    ],
+    "bytes_unchanged_after_load": true
+  },
+  "tests_passed": 108,
+  "full_runtime_baseline_complete": false,
+  "matching_c_changed": false,
+  "emulator_stopped": true,
+  "correction": "COM label does not establish computer control; see runtime-comparison.json",
+  "superseded_by": "runtime-comparison.json"
+}

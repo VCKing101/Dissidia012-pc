@@ -1,0 +1,165 @@
+From 5717536e652e2c9fcb67f3d85d4e7c767da7e03a Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Sun, 18 Oct 2026 19:03:34 +1030
+Subject: [PATCH 11/27] GE: honour the pixel mask (0xE8, 0xE9) for whole
+ channels
+
+The pixel mask registers were ignored, so a draw meant to touch only some
+frame-buffer bits wrote all of them. A game draws stencil shadow volumes
+into a 5551 buffer with the colour mask 0x007FFF and alpha mask 0 to change
+only the alpha (stencil) bit; drawn in colour, they filled that buffer, which
+the game then composites over the whole screen: its battles showed a blue
+screen with the scene visible only through a diamond in the middle.
+
+The mask now becomes the pipeline's colour write mask: a channel is left
+alone when all its bits are masked. In the 16-bit formats the colour mask is
+read as the 16-bit pixel (0x7FFF in 5551 leaves exactly the alpha bit); in
+8888 as red, green and blue bytes with the alpha byte in 0xE9. Partial
+channel masks still write the channel. <prefix>_NO_PIXEL_MASK restores the
+old behaviour.
+
+Verified on Windows (Vulkan, AMD) with captures of the same battle frames
+before and after (the stage, characters and interface now draw). Not
+verified: the 16-bit reading against hardware beyond that one game's
+effect; 4444 and 5650; partial masks. Stencil itself is still not
+emulated, so the shadow volumes show as dark shafts.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/gpu/ge_state.cpp        |  7 +++++
+ host/gpu/ge_state.hpp        |  4 +++
+ host/gpu/vulkan_renderer.cpp | 50 ++++++++++++++++++++++++++++++++++++
+ 3 files changed, 61 insertions(+)
+
+diff --git a/host/gpu/ge_state.cpp b/host/gpu/ge_state.cpp
+index 5277695..af8d351 100644
+--- a/host/gpu/ge_state.cpp
++++ b/host/gpu/ge_state.cpp
+@@ -129,6 +129,8 @@ enum Command : std::uint32_t {
+     kBlendFixedA = 0xE0,
+     kBlendFixedB = 0xE1,
+     kDepthWriteDisable = 0xE7,
++    kPixelMaskColor = 0xE8,
++    kPixelMaskAlpha = 0xE9,
+     // Block transfer registers, read off a trace of the quest reward screen,
+     // which copies the 16-bit framebuffer at 0x04000000 (512 pixels a row) to
+     // 0x093E7EF0 in main memory and then textures from there as 512x512 5650
+@@ -665,6 +667,9 @@ void GeState::handle_command(const GuestMemory &memory, std::uint32_t command, s
+             resolve_ge_address((target_.depth_address & 0x00FFFFFFu) | ((data << 8u) & 0xFF000000u));
+         break;
+     case kFrameBufferPixelFormat: target_.color_format = data & 3u; break;
++    // Bits that draws leave alone in the frame buffer (set: not written).
++    case kPixelMaskColor: pixel_mask_color_ = data; break;
++    case kPixelMaskAlpha: pixel_mask_alpha_ = data & 0xFFu; break;
+ 
+     case kTextureAddress0: texture_.address = resolve_ge_address((texture_.address & 0xFF000000u) | data); break;
+     case kTextureBufferWidth0:
+@@ -977,6 +982,8 @@ void GeState::fill_draw_state(DrawCall &call) const {
+     call.cull_clockwise = cull_clockwise_;
+     call.clear_mode = clear_mode_;
+     call.clear_flags = clear_flags_;
++    call.pixel_mask_color = pixel_mask_color_;
++    call.pixel_mask_alpha = pixel_mask_alpha_;
+     call.vertex_type = vertex_type_;
+     call.vertex_address = vertex_address_;
+     call.material_color = material_color_;
+diff --git a/host/gpu/ge_state.hpp b/host/gpu/ge_state.hpp
+index f91da5c..b8a040b 100644
+--- a/host/gpu/ge_state.hpp
++++ b/host/gpu/ge_state.hpp
+@@ -172,6 +172,8 @@ struct DrawCall {
+     bool cull_clockwise{};
+     bool clear_mode{};                   // CLEARMODE is active for this draw
+     std::uint32_t clear_flags{};         // CLEARMODE bits 8..10: color, alpha/stencil, depth
++    std::uint32_t pixel_mask_color{};    // 0xE8: frame-buffer bits not written (see pixel_write_mask)
++    std::uint32_t pixel_mask_alpha{};    // 0xE9
+     std::uint32_t vertex_type{};
+     // Where the vertices and indices were read from and how many the prim
+     // consumed: what recognises the same draw in the next frame.
+@@ -297,6 +299,8 @@ private:
+     bool cull_clockwise_{};
+     bool clear_mode_{};
+     std::uint32_t clear_flags_{};
++    std::uint32_t pixel_mask_color_{};
++    std::uint32_t pixel_mask_alpha_{};
+     std::uint32_t material_color_{0xFFFFFFFFu};
+     bool lighting_enabled_{};
+     LightingState lighting_{};
+diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
+index a7327ea..73b3da0 100644
+--- a/host/gpu/vulkan_renderer.cpp
++++ b/host/gpu/vulkan_renderer.cpp
+@@ -45,6 +45,7 @@
+ #include <filesystem>
+ #include <fstream>
+ #include <iomanip>
++#include <initializer_list>
+ #include <iostream>
+ #include <map>
+ #include <memory>
+@@ -280,6 +281,54 @@ struct PipelineKey {
+     auto operator<=>(const PipelineKey &) const = default;
+ };
+ 
++// The colour channels a draw may write, from the GE's pixel mask (0xE8 colour,
++// 0xE9 alpha; a set bit is a bit the draw leaves alone). Vulkan masks whole
++// channels, so a channel is left alone only when every one of its bits is
++// masked. In the 16-bit formats the colour mask is read as the 16-bit pixel:
++// a game draws its stencil-only shadow-volume passes into a 5551 buffer with
++// 0x007FFF and 0, which leaves exactly the alpha (stencil) bit, where reading
++// it as 8-bit channels would write blue. In 8888 it is red, green and blue
++// bytes, with the alpha byte in 0xE9. <prefix>_NO_PIXEL_MASK writes every
++// channel, as before.
++std::uint32_t pixel_write_mask(std::uint32_t format, std::uint32_t color_mask, std::uint32_t alpha_mask) {
++    static const bool ignore = portablekit::env("NO_PIXEL_MASK") != nullptr;
++    constexpr std::uint32_t kAll =
++        VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
++    if (ignore || (color_mask == 0u && alpha_mask == 0u)) return kAll;
++    struct Channel {
++        std::uint32_t bits;
++        std::uint32_t component;
++    };
++    const auto keep = [](std::uint32_t mask, std::initializer_list<Channel> channels) {
++        std::uint32_t write = 0u;
++        for (const Channel &channel : channels)
++            if ((mask & channel.bits) != channel.bits) write |= channel.component;
++        return write;
++    };
++    switch (format) {
++    case 0u:  // 5650: no alpha in the buffer
++        return keep(color_mask, {{0x001Fu, VK_COLOR_COMPONENT_R_BIT},
++                                 {0x07E0u, VK_COLOR_COMPONENT_G_BIT},
++                                 {0xF800u, VK_COLOR_COMPONENT_B_BIT}}) |
++               VK_COLOR_COMPONENT_A_BIT;
++    case 1u:  // 5551
++        return keep(color_mask, {{0x001Fu, VK_COLOR_COMPONENT_R_BIT},
++                                 {0x03E0u, VK_COLOR_COMPONENT_G_BIT},
++                                 {0x7C00u, VK_COLOR_COMPONENT_B_BIT},
++                                 {0x8000u, VK_COLOR_COMPONENT_A_BIT}});
++    case 2u:  // 4444
++        return keep(color_mask, {{0x000Fu, VK_COLOR_COMPONENT_R_BIT},
++                                 {0x00F0u, VK_COLOR_COMPONENT_G_BIT},
++                                 {0x0F00u, VK_COLOR_COMPONENT_B_BIT},
++                                 {0xF000u, VK_COLOR_COMPONENT_A_BIT}});
++    default:  // 8888
++        return keep(color_mask, {{0x0000FFu, VK_COLOR_COMPONENT_R_BIT},
++                                 {0x00FF00u, VK_COLOR_COMPONENT_G_BIT},
++                                 {0xFF0000u, VK_COLOR_COMPONENT_B_BIT}}) |
++               keep(alpha_mask, {{0xFFu, VK_COLOR_COMPONENT_A_BIT}});
++    }
++}
++
+ // GU_FIX takes its factor from a colour register rather than from the source or
+ // destination pixel. Vulkan offers a single blend constant per attachment, so a
+ // fixed factor collapses to ONE or ZERO when the colour is white or black, and
+@@ -6408,6 +6457,7 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+         key.cull = call.culling_enabled && !call.through && call.primitive != PrimitiveType::Sprites;
+         key.cull_clockwise = call.cull_clockwise;
+     }
++    key.color_mask &= pixel_write_mask(call.target.color_format, call.pixel_mask_color, call.pixel_mask_alpha);
+     // Matches texture_params.w below: without an alpha test the pipeline's
+     // shader has no discard. <prefix>_NO_ALPHA_VARIANTS keeps the one shader
+     // that tests alpha for every draw, as before.
+-- 
+2.53.0.windows.1
+

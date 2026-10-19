@@ -1,0 +1,125 @@
+{
+  "schema_version": 1,
+  "main_reference_sha256": "0bc8e779aad2814a3d1bd77346f69ca5e16665845ed053cd0ad44a9cbfaefe6d",
+  "menu_reference_sha256": "f021f96fa05da5907563a28c232966aa8a344526d6b8bdee728053ec75224d0a",
+  "imports": [
+    {
+      "address": "0x089C5858",
+      "library": "sceUtility",
+      "nid": "0x50C4CD57",
+      "api": "sceUtilitySavedataInitStart"
+    },
+    {
+      "address": "0x089C5D78",
+      "library": "sceRtc",
+      "nid": "0x6FF40ACC",
+      "api": "sceRtcGetTick"
+    }
+  ],
+  "calls": [
+    {
+      "pc": "0x089DD8F0",
+      "target": "0x089C5858"
+    },
+    {
+      "pc": "0x089DDB10",
+      "target": "0x089C5858"
+    },
+    {
+      "pc": "0x089DDA4C",
+      "target": "0x089C5D78"
+    },
+    {
+      "pc": "0x089DE430",
+      "target": "0x0885C6CC"
+    }
+  ],
+  "materialized_constants": [
+    {
+      "name": "savedata_capacity",
+      "high_pc": "0x089DD87C",
+      "low_pc": "0x089DD880",
+      "register": 5,
+      "value": 257224
+    },
+    {
+      "name": "execution_allocation",
+      "high_pc": "0x089DE418",
+      "low_pc": "0x089DE434",
+      "register": 5,
+      "value": 260784
+    }
+  ],
+  "instruction_checks": [
+    {
+      "pc": "0x089DD7C8",
+      "word": "0x2A840014",
+      "meaning": "twenty_name_loop_limit"
+    },
+    {
+      "pc": "0x089DD7E4",
+      "word": "0x34060600",
+      "meaning": "request_clear_600"
+    },
+    {
+      "pc": "0x089DD808",
+      "word": "0x3405000B",
+      "meaning": "list_mode_11"
+    },
+    {
+      "pc": "0x089DDB00",
+      "word": "0xAC8000AC",
+      "meaning": "autoload_mode_0"
+    },
+    {
+      "pc": "0x089DDAEC",
+      "word": "0x2A850014",
+      "meaning": "twenty_slot_loop_limit"
+    },
+    {
+      "pc": "0x089DDAF4",
+      "word": "0x26730048",
+      "meaning": "slot_stride_48"
+    },
+    {
+      "pc": "0x089DE4B4",
+      "word": "0x340601A4",
+      "meaning": "name_list_clear_1a4"
+    },
+    {
+      "pc": "0x089DE4CC",
+      "word": "0x3406000C",
+      "meaning": "slot_list_clear_c"
+    },
+    {
+      "pc": "0x089DE4E4",
+      "word": "0x340605A0",
+      "meaning": "slot_entries_clear_5a0"
+    }
+  ],
+  "strings": [
+    {
+      "address": "0x089E0704",
+      "value": "%s%02d"
+    },
+    {
+      "address": "0x089E070C",
+      "value": "GameData"
+    },
+    {
+      "address": "0x089E0718",
+      "value": "GameData*"
+    },
+    {
+      "address": "0x089E0724",
+      "value": "DISSIDIA.BIN"
+    }
+  ],
+  "sdk_sources": [
+    "https://github.com/pspdev/pspsdk/blob/master/src/utility/sceUtility.S",
+    "https://github.com/pspdev/pspsdk/blob/master/src/utility/psputility_savedata.h",
+    "https://github.com/pspdev/pspsdk/blob/master/src/rtc/sceRtc.S",
+    "https://github.com/pspdev/pspsdk/blob/master/src/rtc/psprtc.h"
+  ],
+  "scope": "Static savedata listing and latest-entry load request mapping; serialization format, full save/profile ownership and runtime validation remain incomplete."
+}

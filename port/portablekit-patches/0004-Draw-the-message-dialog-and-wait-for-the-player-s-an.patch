@@ -1,0 +1,720 @@
+From 9b671490a6d282260ea4d4d9700276d7df8a9d24 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Sun, 18 Oct 2026 18:32:27 +1030
+Subject: [PATCH 04/27] Draw the message dialog and wait for the player's
+ answer
+
+sceUtilityMsgDialog answered every message at once without drawing it:
+"OK" to a notice and "Yes" to every question, so a game could be told "yes"
+to a save or overwrite prompt that nobody saw. The dialog is now drawn by
+the interface over the running game (host/ui/message_dialog.*): the text
+between two rules across the screen, OK for a notice or Yes and No for a
+question, and the button hints. It stays VISIBLE until the player answers
+with the pad, the keyboard or the mouse; the game reads a neutral pad
+meanwhile. The answer (yes 1, no 2, back 3) goes into the parameter block.
+A question opens on No when the game asks for that (option 0x100), and
+back does nothing when the game turns cancelling off (0x80).
+
+For tests and runs without a window, <prefix>_MSGDIALOG_ANSWERS=ok,no,...
+answers the next dialogs in order. <prefix>_MSGDIALOG_INSTANT=1 is the old
+instant behaviour except that questions are answered No, so nothing is ever
+confirmed without a person. With no window and no scripted answer the
+dialog waits and says so once. sceUtilityMsgDialogAbort is implemented.
+
+Verified on Windows (Vulkan, AMD) with a game's autosave notice (options
+0xA3): drawn, answered with the scripted virtual pad, and the game went on
+to its title screen. Not verified: a yes/no question from a game, the error
+mode's text, the mouse.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ cmake/PortableKit.cmake    |   1 +
+ host/hle/hle_utility.cpp   | 267 +++++++++++++++++++++++++++++++------
+ host/ui/menu.cpp           |  10 +-
+ host/ui/message_dialog.cpp | 250 ++++++++++++++++++++++++++++++++++
+ host/ui/message_dialog.hpp |  43 ++++++
+ 5 files changed, 531 insertions(+), 40 deletions(-)
+ create mode 100644 host/ui/message_dialog.cpp
+ create mode 100644 host/ui/message_dialog.hpp
+
+diff --git a/cmake/PortableKit.cmake b/cmake/PortableKit.cmake
+index de3c457..90a601f 100644
+--- a/cmake/PortableKit.cmake
++++ b/cmake/PortableKit.cmake
+@@ -104,6 +104,7 @@ set(PORTABLEKIT_RENDERER_SOURCES
+     host/ui/input_script.cpp
+     host/ui/layer.cpp
+     host/ui/menu.cpp
++    host/ui/message_dialog.cpp
+     host/ui/save_screen.cpp
+     host/ui/setup_screens.cpp
+     host/ui/text_input.cpp
+diff --git a/host/hle/hle_utility.cpp b/host/hle/hle_utility.cpp
+index 74e3b60..59780e2 100644
+--- a/host/hle/hle_utility.cpp
++++ b/host/hle/hle_utility.cpp
+@@ -1,7 +1,7 @@
+ // sceUtility dialogs: the on-screen keyboard and the message dialog. The
+-// save-data dialog is in hle_savedata.cpp. The keyboard opens the port's own
+-// (host/ui/text_input.hpp); the message dialog draws nothing yet and answers
+-// the way a player confirming it would.
++// save-data dialog is in hle_savedata.cpp. Both open the port's own
++// (host/ui/text_input.hpp, host/ui/message_dialog.hpp) and wait for the
++// player's answer.
+ #include "../profile.hpp"
+ #include "hle_common.hpp"
+ #include "utility_dialog.hpp"
+@@ -9,12 +9,14 @@
+ #include "settings/settings.hpp"
+ 
+ #if defined(PORTABLEKIT_HAS_RENDERER)
++#include "ui/message_dialog.hpp"
+ #include "ui/text_input.hpp"
+ #endif
+ 
+ #include "psprecomp/common.hpp"
+ 
+ #include <algorithm>
++#include <cctype>
+ #include <cstdlib>
+ #include <iostream>
+ #include <optional>
+@@ -312,28 +314,6 @@ void register_osk(HleRegistrar &hle) {
+     });
+ }
+ 
+-// SceUtilityMsgDialogParams, after the common dialog header.
+-namespace msg {
+-constexpr std::uint32_t kMode = 0x34u;         // 0: error code, 1: text
+-constexpr std::uint32_t kErrorValue = 0x38u;
+-constexpr std::uint32_t kMessage = 0x3Cu;      // char[512], UTF-8
+-constexpr std::uint32_t kOptions = 0x23Cu;
+-constexpr std::uint32_t kButtonPressed = 0x240u;
+-constexpr std::uint32_t kMinimumSize = 0x244u;
+-
+-constexpr std::uint32_t kModeError = 0u;
+-constexpr std::uint32_t kOptionYesNo = 0x10u;
+-constexpr std::uint32_t kOptionDefaultNo = 0x100u;
+-constexpr std::uint32_t kPressedYes = 1u;
+-} // namespace msg
+-
+-DialogLifecycle &msg_dialog() {
+-    static DialogLifecycle dialog;
+-    return dialog;
+-}
+-
+-// With no dialog UI, every message is answered at once as if the player
+-// pressed confirm: "OK" for a notice, "Yes" for a question. The text is
+ // The shell's game-data install dialog.
+ //
+ // On a PSP this copies data from the disc to the memory stick while showing a
+@@ -393,43 +373,252 @@ void register_gamedata_install(HleRegistrar &hle) {
+     });
+ }
+ 
+-// logged so the conversation can be followed.
++// SceUtilityMsgDialogParams, after the common dialog header.
++namespace msg {
++constexpr std::uint32_t kMode = 0x34u;         // 0: error code, 1: text
++constexpr std::uint32_t kErrorValue = 0x38u;
++constexpr std::uint32_t kMessage = 0x3Cu;      // char[512], UTF-8
++constexpr std::uint32_t kOptions = 0x23Cu;
++constexpr std::uint32_t kButtonPressed = 0x240u;
++constexpr std::uint32_t kMinimumSize = 0x244u;
++
++constexpr std::uint32_t kModeError = 0u;
++// Option bits. A game's notice reads 0xA3: text, no sound, an OK button and
++// no cancelling.
++constexpr std::uint32_t kOptionYesNo = 0x10u;
++constexpr std::uint32_t kOptionNoCancel = 0x80u;
++constexpr std::uint32_t kOptionDefaultNo = 0x100u;
++constexpr std::uint32_t kPressedYes = 1u;  // also what a notice's OK reports
++constexpr std::uint32_t kPressedNo = 2u;
++constexpr std::uint32_t kPressedBack = 3u;
++} // namespace msg
++
++// The message dialog. It is drawn by the port's interface over the running
++// game (host/ui/message_dialog.hpp) and stays VISIBLE until the player
++// answers; the answer, OK, Yes, No or Back, is what the game reads.
++//
++//   <prefix>_MSGDIALOG_ANSWERS=ok,no,yes,back
++//       answers the next dialogs in order, without drawing them: for tests,
++//       and for runs without a window. Each dialog takes the next answer.
++//   <prefix>_MSGDIALOG_INSTANT=1
++//       close to the old behaviour: nothing drawn and every dialog answered
++//       at once, OK to a notice but No to a question, so that nothing such
++//       as a save or an overwrite is ever confirmed without a person.
++//
++// With no window and no scripted answer left the dialog waits, as the PSP's
++// would with nobody at the controls, and says so once.
++struct MsgDialogState {
++    std::uint32_t params{};
++    std::uint32_t status{dialog_status::kNone};
++    std::optional<std::uint32_t> answer;  // the button code to deliver
++    bool question{};
++    unsigned serial{};
++};
++
++MsgDialogState &msg_state() {
++    static MsgDialogState state;
++    return state;
++}
++
++const char *pressed_name(std::uint32_t pressed, bool question) {
++    switch (pressed) {
++    case msg::kPressedYes: return question ? "yes" : "ok";
++    case msg::kPressedNo: return "no";
++    case msg::kPressedBack: return "back";
++    default: return "?";
++    }
++}
++
++bool msgdialog_instant() {
++    static const bool instant = [] {
++        const char *text = portablekit::env("MSGDIALOG_INSTANT");
++        return text != nullptr && *text != '\0' && *text != '0';
++    }();
++    return instant;
++}
++
++// The answers <prefix>_MSGDIALOG_ANSWERS still holds, the next one last.
++std::vector<std::uint32_t> &scripted_answers() {
++    static std::vector<std::uint32_t> answers = [] {
++        std::vector<std::uint32_t> list;
++        const char *text = portablekit::env("MSGDIALOG_ANSWERS");
++        if (text == nullptr) return list;
++        std::string item;
++        const std::string all = std::string(text) + ",";
++        for (const char c : all) {
++            if (c != ',' && c != ';' && c != ' ') {
++                item.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
++                continue;
++            }
++            if (item.empty()) continue;
++            if (item == "ok" || item == "yes") list.push_back(msg::kPressedYes);
++            else if (item == "no") list.push_back(msg::kPressedNo);
++            else if (item == "back") list.push_back(msg::kPressedBack);
++            else std::cerr << "[msgdialog] MSGDIALOG_ANSWERS: \"" << item << "\" is not ok, yes, no or back\n";
++            item.clear();
++        }
++        std::reverse(list.begin(), list.end());
++        return list;
++    }();
++    return answers;
++}
++
++void msg_set_answer(std::uint32_t pressed, const char *by) {
++    MsgDialogState &state = msg_state();
++    state.answer = pressed;
++    std::cerr << "[msgdialog] #" << state.serial << " -> " << pressed_name(pressed, state.question) << " (" << by
++              << ")" << std::endl;
++}
++
++// Hands the answer to the game and reports QUIT.
++void msg_deliver(psprecomp::GuestMemory &memory) {
++    MsgDialogState &state = msg_state();
++    const std::uint32_t pressed = *state.answer;
++    state.answer.reset();
++    if (state.params != 0u) {
++        if (memory.load32(state.params + dialog_common::kSizeOffset) >= msg::kMinimumSize)
++            memory.store32(state.params + msg::kButtonPressed, pressed);
++        memory.store32(state.params + dialog_common::kResultOffset, 0u);
++    }
++    state.status = dialog_status::kQuit;
++}
++
++// One poll (GetStatus or Update): the status to report, then the next step.
++std::uint32_t msg_poll(psprecomp::GuestMemory &memory) {
++    MsgDialogState &state = msg_state();
++    const std::uint32_t reported = state.status;
++    switch (state.status) {
++    case dialog_status::kInit: state.status = dialog_status::kVisible; break;
++    case dialog_status::kVisible:
++        if (state.answer) msg_deliver(memory);
++        break;
++    case dialog_status::kFinished:
++        state.status = dialog_status::kNone;
++        state.params = 0u;
++        break;
++    default: break;
++    }
++    return reported;
++}
++
++void msg_close_ui() {
++#if defined(PORTABLEKIT_HAS_RENDERER)
++    if (ui::game_message_open()) ui::close_game_message();
++#endif
++}
++
++// Where the answer comes from: the instant answer, the script, the player,
++// or nobody yet.
++void msg_ask(const std::string &text, bool question, bool default_no, bool allow_back) {
++    MsgDialogState &state = msg_state();
++    if (msgdialog_instant()) {
++        msg_set_answer(question ? msg::kPressedNo : msg::kPressedYes, "MSGDIALOG_INSTANT");
++        return;
++    }
++    if (std::vector<std::uint32_t> &script = scripted_answers(); !script.empty()) {
++        const std::uint32_t pressed = script.back();
++        script.pop_back();
++        msg_set_answer(pressed, "MSGDIALOG_ANSWERS");
++        return;
++    }
++#if defined(PORTABLEKIT_HAS_RENDERER)
++    ui::MessageRequest request;
++    request.text = text;
++    request.question = question;
++    request.default_no = default_no;
++    request.allow_back = allow_back;
++    const unsigned serial = state.serial;
++    const bool opened = ui::open_game_message(std::move(request), [serial](ui::MessageAnswer answer) {
++        if (msg_state().serial != serial || msg_state().status == dialog_status::kNone) return;
++        msg_set_answer(answer == ui::MessageAnswer::Yes  ? msg::kPressedYes
++                       : answer == ui::MessageAnswer::No ? msg::kPressedNo
++                                                         : msg::kPressedBack,
++                       "player");
++    });
++    if (opened) return;
++#else
++    (void)text;
++    (void)question;
++    (void)default_no;
++    (void)allow_back;
++    (void)state;
++#endif
++    log_once("msgdialog-waiting",
++             "[msgdialog] no window to draw the dialog in and no answer scripted; the game waits for an answer "
++             "(<prefix>_MSGDIALOG_ANSWERS answers dialogs in order)");
++}
++
+ void register_msg_dialog(HleRegistrar &hle) {
+     hle.add("sceUtility", "sceUtilityMsgDialogInitStart", [](Runtime &rt, AllegrexContext &ctx) {
+         auto &memory = rt.memory();
++        MsgDialogState &state = msg_state();
+         const std::uint32_t params = arg(ctx, 0);
++        if (state.status != dialog_status::kNone || params == 0u) {
++            std::cerr << "[msgdialog] InitStart while a dialog is active (status " << state.status << ")\n";
++            kernel().finish(ctx, kErrorUtilityInvalidStatus);
++            return;
++        }
+         const std::uint32_t size = memory.load32(params + dialog_common::kSizeOffset);
+         const std::uint32_t mode = memory.load32(params + msg::kMode);
+         const std::uint32_t options = size >= msg::kMinimumSize ? memory.load32(params + msg::kOptions) : 0u;
++        const bool question = (options & msg::kOptionYesNo) != 0u;
++        const bool default_no = (options & msg::kOptionDefaultNo) != 0u;
++        std::string text;
+         if (mode == msg::kModeError) {
+-            std::cerr << "[msgdialog] error " << psprecomp::hex32(memory.load32(params + msg::kErrorValue)) << "\n";
++            const std::uint32_t code = memory.load32(params + msg::kErrorValue);
++            text = "An error has occurred.\n(" + psprecomp::hex32(code) + ")";
+         } else {
+-            std::cerr << "[msgdialog] \"" << read_cstring(memory, params + msg::kMessage, 512u) << "\""
+-                      << ((options & msg::kOptionYesNo) != 0u ? " [yes/no]" : "")
+-                      << ((options & msg::kOptionDefaultNo) != 0u ? " [default no]" : "") << " -> "
+-                      << ((options & msg::kOptionYesNo) != 0u ? "yes" : "ok") << "\n";
++            text = read_cstring(memory, params + msg::kMessage, 512u);
+         }
+-        if (size >= msg::kMinimumSize) memory.store32(params + msg::kButtonPressed, msg::kPressedYes);
++        const unsigned serial = state.serial + 1u;
++        state = MsgDialogState{};
++        state.params = params;
++        state.status = dialog_status::kInit;
++        state.question = question;
++        state.serial = serial;
++        std::cerr << "[msgdialog] #" << serial << " \"" << text << "\"" << (mode == msg::kModeError ? " [error]" : "")
++                  << (question ? " [yes/no]" : "") << (default_no ? " [default no]" : "")
++                  << ((options & msg::kOptionNoCancel) != 0u ? " [no cancel]" : "")
++                  << " options=" << psprecomp::hex32(options) << "\n";
+         memory.store32(params + dialog_common::kResultOffset, 0u);
+-        msg_dialog().start();
++        msg_ask(text, question, default_no, (options & msg::kOptionNoCancel) == 0u);
+         kernel().finish(ctx, 0u);
+     });
+ 
+-    hle.add("sceUtility", "sceUtilityMsgDialogUpdate", [](Runtime &, AllegrexContext &ctx) {
+-        (void)msg_dialog().poll();
++    hle.add("sceUtility", "sceUtilityMsgDialogUpdate", [](Runtime &rt, AllegrexContext &ctx) {
++        (void)msg_poll(rt.memory());
+         kernel().finish(ctx, 0u);
+     });
+ 
+-    hle.add("sceUtility", "sceUtilityMsgDialogGetStatus", [](Runtime &, AllegrexContext &ctx) {
+-        kernel().finish(ctx, msg_dialog().poll());
++    hle.add("sceUtility", "sceUtilityMsgDialogGetStatus", [](Runtime &rt, AllegrexContext &ctx) {
++        kernel().finish(ctx, msg_poll(rt.memory()));
+     });
+ 
+     hle.add("sceUtility", "sceUtilityMsgDialogShutdownStart", [](Runtime &, AllegrexContext &ctx) {
+-        if (!msg_dialog().active()) {
++        MsgDialogState &state = msg_state();
++        if (state.status == dialog_status::kNone) {
+             kernel().finish(ctx, kErrorUtilityInvalidStatus);
+             return;
+         }
+-        if (!msg_dialog().shutdown()) std::cerr << "[msgdialog] ShutdownStart before the dialog finished\n";
++        if (state.status != dialog_status::kQuit)
++            std::cerr << "[msgdialog] #" << state.serial << " shut down before it was answered\n";
++        msg_close_ui();
++        state.answer.reset();
++        state.status = dialog_status::kFinished;
++        kernel().finish(ctx, 0u);
++    });
++
++    // The game takes the dialog down itself: it quits with no answer.
++    hle.add("sceUtility", "sceUtilityMsgDialogAbort", [](Runtime &, AllegrexContext &ctx) {
++        MsgDialogState &state = msg_state();
++        if (state.status != dialog_status::kVisible && state.status != dialog_status::kInit) {
++            kernel().finish(ctx, kErrorUtilityInvalidStatus);
++            return;
++        }
++        std::cerr << "[msgdialog] #" << state.serial << " aborted by the game\n";
++        msg_close_ui();
++        state.answer.reset();
++        state.status = dialog_status::kQuit;
+         kernel().finish(ctx, 0u);
+     });
+ }
+diff --git a/host/ui/menu.cpp b/host/ui/menu.cpp
+index e422107..42cd4d6 100644
+--- a/host/ui/menu.cpp
++++ b/host/ui/menu.cpp
+@@ -8,6 +8,7 @@
+ #include "ui/font_menu.hpp"
+ #include "ui/input_script.hpp"
+ #include "ui/layer.hpp"
++#include "ui/message_dialog.hpp"
+ #include "ui/save_screen.hpp"
+ #include "ui/texture_pack_screen.hpp"
+ #include "ui/text_input.hpp"
+@@ -1559,6 +1560,13 @@ void draw_over_game() {
+         layer.end_frame();
+         return;
+     }
++    // The game's message dialog, the same way.
++    if (game_message_open() && !menu) {
++        layer.begin_frame();
++        game_message_frame();
++        layer.end_frame();
++        return;
++    }
+     const double hint_left = menu || settings::current().menu_hint_seen ? -1.0 : hint_seconds_left();
+     const bool overlay = network_overlay();
+     const bool touch = !menu && layer.renderer().touch_controls_visible();
+@@ -1601,7 +1609,7 @@ bool take_quit_request() { return std::exchange(quit_requested(), false); }
+ 
+ bool menu_requested() {
+     Layer &layer = Layer::get();
+-    if (!layer.attached() || text_input_open()) return false;
++    if (!layer.attached() || text_input_open() || game_message_open()) return false;
+     // The on-screen menu button, then Esc or L3+R3.
+     const bool touched = layer.renderer().take_touch_menu();
+     return layer.take_menu_toggle() || touched;
+diff --git a/host/ui/message_dialog.cpp b/host/ui/message_dialog.cpp
+new file mode 100644
+index 0000000..2a22131
+--- /dev/null
++++ b/host/ui/message_dialog.cpp
+@@ -0,0 +1,250 @@
++#include "ui/message_dialog.hpp"
++
++#include "ui/layer.hpp"
++#include "ui/widgets.hpp"
++
++#include "gpu/vulkan_renderer.hpp"
++
++#include "imgui.h"
++
++#include <algorithm>
++#include <cmath>
++#include <initializer_list>
++#include <string>
++#include <utility>
++#include <vector>
++
++namespace portablekit::ui {
++namespace {
++
++struct Dialog {
++    bool open{};
++    MessageRequest request;
++    MessageDone on_done;
++    bool no_selected{};  // a question: which button is selected
++};
++
++Dialog &dialog() {
++    static Dialog value;
++    return value;
++}
++
++float font() { return Layer::get().font_size(); }
++float px(float value) { return std::round(value * Layer::get().scale()); }
++
++void release_game() {
++    Layer &layer = Layer::get();
++    layer.set_interactive(false);
++    layer.renderer().set_game_input(true);
++}
++
++void answer(MessageAnswer value) {
++    Dialog &d = dialog();
++    if (!d.open) return;
++    d.open = false;
++    release_game();
++    MessageDone done = std::move(d.on_done);
++    d.on_done = nullptr;
++    if (done) done(value);
++}
++
++void choose() {
++    const Dialog &d = dialog();
++    answer(d.request.question && d.no_selected ? MessageAnswer::No : MessageAnswer::Yes);
++}
++
++// The message broken into lines no wider than `width`: at the game's own
++// line breaks, and between words where a line is too long.
++std::vector<std::string> wrap(const std::string &text, float width) {
++    std::vector<std::string> lines;
++    std::size_t start = 0u;
++    for (;;) {
++        const std::size_t end = text.find('\n', start);
++        const std::string paragraph = text.substr(start, end == std::string::npos ? std::string::npos : end - start);
++        std::string line;
++        std::size_t at = 0u;
++        while (at <= paragraph.size()) {
++            const std::size_t space = paragraph.find(' ', at);
++            const std::string word = paragraph.substr(at, space == std::string::npos ? std::string::npos : space - at);
++            const std::string candidate = line.empty() ? word : line + " " + word;
++            if (!line.empty() && ImGui::CalcTextSize(candidate.c_str()).x > width) {
++                lines.push_back(line);
++                line = word;
++            } else {
++                line = candidate;
++            }
++            if (space == std::string::npos) break;
++            at = space + 1u;
++        }
++        lines.push_back(line);
++        if (end == std::string::npos) break;
++        start = end + 1u;
++    }
++    // A trailing line break draws nothing.
++    while (lines.size() > 1u && lines.back().empty()) lines.pop_back();
++    return lines;
++}
++
++void handle_input() {
++    Dialog &d = dialog();
++    Layer &layer = Layer::get();
++    // The menu does not open over the dialog.
++    (void)layer.take_menu_toggle();
++    const bool back_pressed = layer.take_back();
++
++    if (d.request.question) {
++        if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow, true) || ImGui::IsKeyPressed(ImGuiKey_UpArrow, true))
++            d.no_selected = false;
++        if (ImGui::IsKeyPressed(ImGuiKey_RightArrow, true) || ImGui::IsKeyPressed(ImGuiKey_DownArrow, true))
++            d.no_selected = true;
++        if (back_pressed && d.request.allow_back) {
++            answer(MessageAnswer::Back);
++            return;
++        }
++    }
++    if (ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false)) {
++        choose();
++        return;
++    }
++
++    // A button held when the dialog opened, such as the one that led to it,
++    // does nothing until it is released.
++    if (!layer.gamepad_armed()) return;
++    const bool south = layer.confirm_south();
++    const ImGuiKey confirm = south ? ImGuiKey_GamepadFaceDown : ImGuiKey_GamepadFaceRight;
++    const ImGuiKey back = south ? ImGuiKey_GamepadFaceRight : ImGuiKey_GamepadFaceDown;
++    const auto pressed = [](std::initializer_list<ImGuiKey> keys) {
++        for (const ImGuiKey key : keys)
++            if (ImGui::IsKeyPressed(key, true)) return true;
++        return false;
++    };
++    if (d.request.question) {
++        if (pressed({ImGuiKey_GamepadDpadLeft, ImGuiKey_GamepadLStickLeft, ImGuiKey_GamepadDpadUp,
++                     ImGuiKey_GamepadLStickUp}))
++            d.no_selected = false;
++        if (pressed({ImGuiKey_GamepadDpadRight, ImGuiKey_GamepadLStickRight, ImGuiKey_GamepadDpadDown,
++                     ImGuiKey_GamepadLStickDown}))
++            d.no_selected = true;
++        if (ImGui::IsKeyPressed(back, false) && d.request.allow_back) {
++            answer(MessageAnswer::Back);
++            return;
++        }
++    }
++    if (ImGui::IsKeyPressed(confirm, false)) choose();
++}
++
++// One button; true when clicked. Hovering a question's button selects it.
++bool button(const char *label, ImVec2 min, ImVec2 size, bool selected, bool &hovered) {
++    ImGui::SetCursorScreenPos(min);
++    ImGui::PushID(label);
++    const bool clicked = ImGui::InvisibleButton("##button", size);
++    hovered = ImGui::IsItemHovered();
++    ImGui::PopID();
++    ImDrawList *draw = ImGui::GetWindowDrawList();
++    const ImVec2 max{min.x + size.x, min.y + size.y};
++    const float rounding = px(6.0f);
++    draw->AddRectFilled(min, max, selected ? colors::kAccent : colors::kTrack, rounding);
++    if (selected)
++        draw->AddRect({min.x - px(2.0f), min.y - px(2.0f)}, {max.x + px(2.0f), max.y + px(2.0f)},
++                      colors::kAccentBright, rounding + px(2.0f), 0, px(2.0f));
++    const ImVec2 text = ImGui::CalcTextSize(label);
++    draw->AddText({min.x + (size.x - text.x) * 0.5f, min.y + (size.y - text.y) * 0.5f},
++                  selected ? colors::kPanel : colors::kText, label);
++    return clicked;
++}
++
++} // namespace
++
++bool open_game_message(MessageRequest request, MessageDone on_done) {
++    Layer &layer = Layer::get();
++    if (!layer.attached()) return false;
++    if (dialog().open) close_game_message();
++    Dialog &d = dialog();
++    d = Dialog{};
++    d.open = true;
++    d.no_selected = request.question && request.default_no;
++    d.request = std::move(request);
++    d.on_done = std::move(on_done);
++    layer.renderer().set_game_input(false);
++    layer.set_interactive(true);
++    return true;
++}
++
++bool game_message_open() { return dialog().open; }
++
++void close_game_message() {
++    Dialog &d = dialog();
++    if (!d.open) return;
++    d.open = false;
++    d.on_done = nullptr;
++    release_game();
++}
++
++void game_message_frame() {
++    Dialog &d = dialog();
++    if (!d.open) return;
++    handle_input();
++    if (!d.open) return;
++
++    const ImGuiIO &io = ImGui::GetIO();
++    ImGui::GetBackgroundDrawList()->AddRectFilled({0, 0}, io.DisplaySize, IM_COL32(0, 0, 0, 120));
++    ImGui::SetNextWindowPos({0, 0}, ImGuiCond_Always);
++    ImGui::SetNextWindowSize(io.DisplaySize, ImGuiCond_Always);
++    ImGui::Begin("##message", nullptr,
++                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
++                     ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoBackground);
++    ImDrawList *draw = ImGui::GetWindowDrawList();
++
++    ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * 1.1f);
++    const float width = std::min(io.DisplaySize.x * 0.8f, font() * 36.0f);
++    const std::vector<std::string> lines = wrap(d.request.text, width);
++    const float line_height = ImGui::GetTextLineHeightWithSpacing();
++    const float text_height = line_height * static_cast<float>(lines.size());
++    const ImVec2 button_size{std::round(font() * 6.0f), std::round(font() * 1.9f)};
++    const float gap = std::round(font() * 1.2f);
++    const float block = text_height + gap + button_size.y;
++    const float top = std::round((io.DisplaySize.y - block) * 0.5f);
++
++    // The band: two rules across the whole screen, a little outside the
++    // text and the buttons, and a darker strip between them.
++    const float margin = std::round(font() * 1.1f);
++    const float rule_top = top - margin;
++    const float rule_bottom = top + block + margin;
++    draw->AddRectFilled({0, rule_top}, {io.DisplaySize.x, rule_bottom}, IM_COL32(0, 0, 0, 110));
++    draw->AddLine({0, rule_top}, {io.DisplaySize.x, rule_top}, IM_COL32(255, 255, 255, 200), px(1.5f));
++    draw->AddLine({0, rule_bottom}, {io.DisplaySize.x, rule_bottom}, IM_COL32(255, 255, 255, 200), px(1.5f));
++
++    float y = top;
++    for (const std::string &line : lines) {
++        const ImVec2 size = ImGui::CalcTextSize(line.c_str());
++        draw->AddText({std::round((io.DisplaySize.x - size.x) * 0.5f), y}, IM_COL32(255, 255, 255, 255), line.c_str());
++        y += line_height;
++    }
++    ImGui::PopFont();
++
++    const float buttons_y = top + text_height + gap;
++    bool hovered = false;
++    if (d.request.question) {
++        const float spacing = std::round(font() * 1.5f);
++        const float left = std::round((io.DisplaySize.x - button_size.x * 2.0f - spacing) * 0.5f);
++        const bool yes = button("Yes", {left, buttons_y}, button_size, !d.no_selected, hovered);
++        if (hovered && io.MouseDelta.x * io.MouseDelta.x + io.MouseDelta.y * io.MouseDelta.y > 0.0f) d.no_selected = false;
++        const bool no = button("No", {left + button_size.x + spacing, buttons_y}, button_size, d.no_selected, hovered);
++        if (hovered && io.MouseDelta.x * io.MouseDelta.x + io.MouseDelta.y * io.MouseDelta.y > 0.0f) d.no_selected = true;
++        if (yes) {
++            answer(MessageAnswer::Yes);
++        } else if (no) {
++            answer(MessageAnswer::No);
++        }
++    } else {
++        const float left = std::round((io.DisplaySize.x - button_size.x) * 0.5f);
++        if (button("OK", {left, buttons_y}, button_size, true, hovered)) answer(MessageAnswer::Yes);
++    }
++
++    ImGui::SetCursorScreenPos({std::round((io.DisplaySize.x - width) * 0.5f), rule_bottom + px(10.0f)});
++    if (d.request.question && d.request.allow_back) hints({{Control::Confirm, "Enter"}, {Control::Back, "Back"}});
++    else hints({{Control::Confirm, d.request.question ? "Enter" : "OK"}});
++    ImGui::End();
++}
++
++} // namespace portablekit::ui
+diff --git a/host/ui/message_dialog.hpp b/host/ui/message_dialog.hpp
+new file mode 100644
+index 0000000..4a6dda8
+--- /dev/null
++++ b/host/ui/message_dialog.hpp
+@@ -0,0 +1,43 @@
++#pragma once
++
++#include <functional>
++#include <string>
++
++// The game's message dialog (sceUtilityMsgDialog), drawn by the interface
++// layer over the running game: the message, centred between two rules across
++// the screen, and an OK button for a notice or Yes and No for a question, with
++// the button hints underneath.
++//
++// Gamepad: left/right (D-pad or left stick) moves between Yes and No, confirm
++// chooses, back answers a question with Back unless the game turned that off.
++// Keyboard: the arrow keys, Enter, Esc. The mouse clicks the buttons. Confirm
++// is the face button the menu's "Confirm button" setting names. A notice
++// closes only with confirm.
++//
++// The game keeps running behind it, as it does behind the PSP's dialog, but
++// reads a neutral pad until the dialog closes.
++namespace portablekit::ui {
++
++struct MessageRequest {
++    std::string text;      // UTF-8; '\n' breaks lines
++    bool question{};       // Yes and No; otherwise a notice with OK
++    bool default_no{};     // a question opens with No selected
++    bool allow_back{true}; // back answers a question with Back
++};
++
++enum class MessageAnswer { Yes, No, Back };
++
++// Called once when the player answers. A notice answers Yes.
++using MessageDone = std::function<void(MessageAnswer)>;
++
++// Opens the dialog over the running game. False when there is no interface
++// to draw it in.
++bool open_game_message(MessageRequest request, MessageDone on_done);
++[[nodiscard]] bool game_message_open();
++// Closes an open dialog without an answer (the game shut it down itself).
++void close_game_message();
++// Builds this frame of the dialog and handles its input. Called inside an
++// interface frame by draw_over_game().
++void game_message_frame();
++
++} // namespace portablekit::ui
+-- 
+2.53.0.windows.1
+

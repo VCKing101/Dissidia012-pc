@@ -1,0 +1,191 @@
+From 6c0f01c41cd4f503b15a78da97a574ceac3807f2 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Sun, 18 Oct 2026 20:11:33 +1030
+Subject: [PATCH 15/27] GE: share a depth buffer between the colour buffers
+ that name it
+
+Each render target had its own depth image, and the depth buffer address
+a draw names (0x9E, 0x9F) was ignored. A game draws its scene into one
+colour buffer and then shadow volumes into another, depth-tested against
+the scene's depth buffer at the same address; those tests ran against an
+empty depth image, so the stencil marked the wrong pixels.
+
+Every picture of a depth buffer is now numbered by the target whose depth
+image holds it. A draw that tests or writes a depth buffer whose newest
+picture is in another target's depth image first copies that picture's
+depth aspect into its own (the stencil stays: it belongs to the colour
+buffer's alpha). Nothing is copied for a clear of the whole screen, when
+the row lengths differ, or when the copy would overwrite the target's
+own newest picture of another depth buffer. Depth images get transfer
+usage for it. <prefix>_TRACE_FB_TEXTURES logs each copy;
+<prefix>_NO_SHARED_DEPTH keeps every target's depth to itself, as before.
+
+Verified on Windows (Vulkan, AMD) in one game's battle: one depth copy a
+frame, and the shadow volumes now mark the floor around the fighters'
+feet. Not verified: a game whose targets use one depth buffer with
+different row lengths, or texturing from a depth buffer.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/gpu/vulkan_renderer.cpp | 101 ++++++++++++++++++++++++++++++++++-
+ 1 file changed, 99 insertions(+), 2 deletions(-)
+
+diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
+index 6ebe0b6..bf26317 100644
+--- a/host/gpu/vulkan_renderer.cpp
++++ b/host/gpu/vulkan_renderer.cpp
+@@ -1248,8 +1248,32 @@ struct VulkanRenderer::Impl {
+         // a draw tests or writes the stencil). A new target starts with alpha.
+         enum class StencilSync : std::uint8_t { Same, StencilNewer, AlphaNewer };
+         StencilSync stencil_sync{StencilSync::AlphaNewer};
++        // The guest depth buffer, and which picture of it, the depth image
++        // holds (DepthPicture); 0: none in particular.
++        std::uint32_t depth_address{};
++        std::uint64_t depth_version{};
+     };
+     std::map<std::uint32_t, Target> targets;
++    // Depth buffers by guest address. Each target has its own depth image,
++    // but the GE tests against the depth buffer the draw names, which
++    // several colour buffers may share: a game draws its scene into one
++    // buffer and its shadow volumes into another, testing against the
++    // scene's depth. Each picture of a depth buffer is numbered, and a draw
++    // that uses a depth buffer whose newest picture another target holds
++    // copies it into its own depth image first. <prefix>_NO_SHARED_DEPTH
++    // keeps each target's depth to itself, as before.
++    struct DepthPicture {
++        std::uint32_t holder{};    // the target whose depth image has it
++        std::uint64_t version{};
++        std::uint32_t stride{};    // the depth buffer's row length
++        bool copied{};             // another target took a copy of it
++    };
++    std::map<std::uint32_t, DepthPicture> depth_pictures;
++    std::uint64_t depth_versions{};
++    bool shared_depth{};
++    // Brings `target`'s depth image up to date with the depth buffer at
++    // `address`, ending the pass in progress if it copies.
++    void share_depth(Target &target, std::uint32_t address, std::uint32_t stride);
+     // Write-back of the displayed framebuffer to guest VRAM (write_back_frame):
+     // present() scales the target to 480x272 and copies it into a mapped
+     // buffer; begin_frame(), after the frame fence, takes the pixels; the next
+@@ -2526,6 +2550,13 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
+     attachments[1] = attachments[0];
+     impl.choose_depth_format();
+     attachments[1].format = impl.depth_format;
++    if (portablekit::env("NO_SHARED_DEPTH") == nullptr) {
++        VkFormatProperties properties{};
++        vkGetPhysicalDeviceFormatProperties(impl.physical_device, impl.depth_format, &properties);
++        constexpr VkFormatFeatureFlags kCopy = VK_FORMAT_FEATURE_TRANSFER_SRC_BIT | VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
++        impl.shared_depth = (properties.optimalTilingFeatures & kCopy) == kCopy;
++        if (!impl.shared_depth) std::cout << "[render] depth images cannot be copied; depth buffers are not shared\n";
++    }
+     // The stencil is the guest's alpha bits: kept from pass to pass, like the
+     // colour, whichever way the depth is loaded.
+     if (impl.stencil) {
+@@ -3970,8 +4001,9 @@ bool VulkanRenderer::Impl::create_target(Target &target, std::string &error) {
+                       target.color_memory, target.color_view, VK_IMAGE_ASPECT_COLOR_BIT, error))
+         return false;
+     if (!create_image(target_extent.width, target_extent.height, depth_format,
+-                      VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, target.depth, target.depth_memory,
+-                      target.depth_view, depth_aspect(), error))
++                      VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
++                          (shared_depth ? VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT : 0u),
++                      target.depth, target.depth_memory, target.depth_view, depth_aspect(), error))
+         return false;
+     const std::array<VkImageView, 2> views{target.color_view, target.depth_view};
+     VkFramebufferCreateInfo info{VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
+@@ -4985,6 +5017,49 @@ void VulkanRenderer::Impl::copy_alpha_to_stencil(Target &target) {
+     perf::count_stencil_copy();
+ }
+ 
++void VulkanRenderer::Impl::share_depth(Target &target, std::uint32_t address, std::uint32_t stride) {
++    const auto found = depth_pictures.find(address);
++    if (found == depth_pictures.end()) return;
++    DepthPicture &picture = found->second;
++    if (picture.holder == target.address ||
++        (target.depth_address == address && target.depth_version == picture.version))
++        return;
++    // Another row length puts the same addresses at other pixels.
++    if (picture.stride != stride) return;
++    // The target's own newest picture of another depth buffer would be lost.
++    if (target.depth_address != 0u && target.depth_address != address) {
++        const auto mine = depth_pictures.find(target.depth_address);
++        if (mine != depth_pictures.end() && mine->second.holder == target.address) return;
++    }
++    const auto holder = targets.find(picture.holder);
++    if (holder == targets.end() || !holder->second.initialized) return;
++    end_pass();
++    initialize_layouts(command_buffer, target);
++    transition(command_buffer, holder->second.depth, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
++               VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, depth_aspect());
++    transition(command_buffer, target.depth, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
++               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, depth_aspect());
++    // Only the depth: the stencil belongs to the colour buffer's alpha.
++    VkImageCopy region{};
++    region.srcSubresource = {VK_IMAGE_ASPECT_DEPTH_BIT, 0u, 0u, 1u};
++    region.dstSubresource = region.srcSubresource;
++    region.extent = {target_extent.width, target_extent.height, 1u};
++    vkCmdCopyImage(command_buffer, holder->second.depth, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, target.depth,
++                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1u, &region);
++    transition(command_buffer, target.depth, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
++               VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, depth_aspect());
++    transition(command_buffer, holder->second.depth, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
++               VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, depth_aspect());
++    perf::count_target_copy();
++    picture.copied = true;
++    target.depth_address = address;
++    target.depth_version = picture.version;
++    static const bool trace = portablekit::env("TRACE_FB_TEXTURES") != nullptr;
++    if (trace)
++        std::cout << "[fbtex] frame " << frames << " depth 0x" << std::hex << address << " copied from target 0x"
++                  << picture.holder << " to 0x" << target.address << std::dec << "\n";
++}
++
+ void VulkanRenderer::Impl::bring_alpha_up_to_date(Target &target) {
+     if (target.stencil_sync != Target::StencilSync::StencilNewer || !target.initialized) return;
+     const std::uint32_t last_drawn = last_drawn_target;
+@@ -5707,6 +5782,7 @@ void VulkanRenderer::Impl::resize_targets(VkExtent2D extent) {
+     }
+     std::map<std::uint32_t, Target> old_targets = std::move(targets);
+     targets.clear();
++    depth_pictures.clear();
+     const VkExtent2D old_extent = target_extent;
+     target_extent = extent;
+     std::vector<std::pair<Target *, const Target *>> copies;
+@@ -6954,6 +7030,16 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+         }
+         return left <= 0.0f && top <= 0.0f && right >= screen_w && bottom >= screen_h && area >= screen_w * screen_h;
+     }();
++    // A draw that tests or writes a depth buffer whose newest picture is in
++    // another target's depth image takes a copy of it first; a clear of the
++    // whole screen needs nothing loaded.
++    const bool reads_depth = key.depth_test && key.depth_function != 1u;
++    const bool writes_depth = key.depth_test && key.depth_write;
++    if (impl.shared_depth && (reads_depth || (writes_depth && !clear_covers))) {
++        std::string error;
++        if (Impl::Target *target = impl.target_for(call.target.color_address, error); target != nullptr)
++            impl.share_depth(*target, call.target.depth_address, call.target.depth_stride);
++    }
+     // A draw that tests or writes the stencil after the alpha was written
+     // needs the stencil brought up to date first (Target::stencil_sync).
+     if (stencil_target && (reads_stencil || writes_stencil)) {
+@@ -6987,6 +7073,17 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+             impl.snapshot_guest_words(memory, call.target.color_address, drawn);
+         drawn.last_drawn_frame = impl.frames;
+         drawn.draw_serial = ++impl.target_draw_counter;
++        if (impl.shared_depth && writes_depth) {
++            // This target's depth image now has the newest picture of the
++            // depth buffer; a new number once others have copied the last.
++            Impl::DepthPicture &picture = impl.depth_pictures[call.target.depth_address];
++            if (picture.holder != call.target.color_address || picture.copied || picture.version == 0u ||
++                drawn.depth_version != picture.version) {
++                picture = {call.target.color_address, ++impl.depth_versions, call.target.depth_stride, false};
++                drawn.depth_address = call.target.depth_address;
++                drawn.depth_version = picture.version;
++            }
++        }
+         if (stencil_target) {
+             // A draw that writes alpha, or blends with the destination's,
+             // after the stencil changed needs the alpha brought up to date.
+-- 
+2.53.0.windows.1
+

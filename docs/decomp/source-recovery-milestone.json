@@ -1,0 +1,474 @@
+{
+  "schema_version": 1,
+  "recorded_utc": "2026-10-11T10:53:57.473476+00:00",
+  "target": "ULUS10566 v1.00",
+  "milestone": "Matching C expansion across runtime, battle and menu lifecycle paths",
+  "before": {
+    "functions": 60,
+    "code_bytes": 3244
+  },
+  "after": {
+    "functions": 102,
+    "code_bytes": 5228
+  },
+  "added": {
+    "functions": 42,
+    "code_bytes": 1984
+  },
+  "modules": [
+    {
+      "module": "main",
+      "before_functions": 15,
+      "before_bytes": 836,
+      "after_functions": 27,
+      "after_bytes": 1360,
+      "added_functions": 12,
+      "added_bytes": 524,
+      "reference_sha256": "0bc8e779aad2814a3d1bd77346f69ca5e16665845ed053cd0ad44a9cbfaefe6d",
+      "file_bytes": 4640948,
+      "whole_file_byte_identical": true,
+      "proof": "build/ULUS10566/main.verify.json",
+      "new_functions": [
+        {
+          "name": "func_08864F78",
+          "address": "0x08864F78",
+          "size": 40,
+          "module_qualified_id": "main:0x08864F78",
+          "source": "src/main/callback_runners.c",
+          "unit": "main_callback_runners",
+          "inventory_confidence": "exact-source-match-boundary"
+        },
+        {
+          "name": "func_08864FA0",
+          "address": "0x08864FA0",
+          "size": 40,
+          "module_qualified_id": "main:0x08864FA0",
+          "source": "src/main/callback_runners.c",
+          "unit": "main_callback_runners",
+          "inventory_confidence": "exact-source-match-boundary"
+        },
+        {
+          "name": "func_08864FC8",
+          "address": "0x08864FC8",
+          "size": 40,
+          "module_qualified_id": "main:0x08864FC8",
+          "source": "src/main/callback_runners.c",
+          "unit": "main_callback_runners",
+          "inventory_confidence": "exact-source-match-boundary"
+        },
+        {
+          "name": "func_08864FF0",
+          "address": "0x08864FF0",
+          "size": 76,
+          "module_qualified_id": "main:0x08864FF0",
+          "source": "src/main/callback_construct.c",
+          "unit": "main_callback_construct",
+          "inventory_confidence": "exact-source-match-boundary"
+        },
+        {
+          "name": "func_08933C00",
+          "address": "0x08933C00",
+          "size": 40,
+          "module_qualified_id": "main:0x08933C00",
+          "source": "src/main/overlay_mode_ensure.c",
+          "unit": "main_overlay_mode_ensure",
+          "inventory_confidence": "exact-source-match-boundary"
+        },
+        {
+          "name": "func_08933C28",
+          "address": "0x08933C28",
+          "size": 44,
+          "module_qualified_id": "main:0x08933C28",
+          "source": "src/main/overlay_mode_ensure.c",
+          "unit": "main_overlay_mode_ensure",
+          "inventory_confidence": "exact-source-match-boundary"
+        },
+        {
+          "name": "func_08933C54",
+          "address": "0x08933C54",
+          "size": 44,
+          "module_qualified_id": "main:0x08933C54",
+          "source": "src/main/overlay_mode_ensure.c",
+          "unit": "main_overlay_mode_ensure",
+          "inventory_confidence": "exact-source-match-boundary"
+        },
+        {
+          "name": "func_08865158",
+          "address": "0x08865158",
+          "size": 44,
+          "module_qualified_id": "main:0x08865158",
+          "source": "src/main/state_end_request.c",
+          "unit": "main_state_end_request",
+          "inventory_confidence": "exact-source-match-boundary"
+        },
+        {
+          "name": "func_08889098",
+          "address": "0x08889098",
+          "size": 32,
+          "module_qualified_id": "main:0x08889098",
+          "source": "src/main/controller_phase_wrappers.c",
+          "unit": "main_controller_phase_wrappers",
+          "inventory_confidence": "exact-source-match-boundary"
+        },
+        {
+          "name": "func_088890B8",
+          "address": "0x088890B8",
+          "size": 32,
+          "module_qualified_id": "main:0x088890B8",
+          "source": "src/main/controller_phase_wrappers.c",
+          "unit": "main_controller_phase_wrappers",
+          "inventory_confidence": "exact-source-match-boundary"
+        },
+        {
+          "name": "func_088890D8",
+          "address": "0x088890D8",
+          "size": 32,
+          "module_qualified_id": "main:0x088890D8",
+          "source": "src/main/controller_phase_wrappers.c",
+          "unit": "main_controller_phase_wrappers",
+          "inventory_confidence": "exact-source-match-boundary"
+        },
+        {
+          "name": "func_0886504C",
+          "address": "0x0886504C",
+          "size": 60,
+          "module_qualified_id": "main:0x0886504C",
+          "source": "src/main/state_resource_acquire.c",
+          "unit": "main_state_resource_acquire",
+          "inventory_confidence": "exact-source-match-boundary"
+        }
+      ]
+    },
+    {
+      "module": "extra",
+      "before_functions": 24,
+      "before_bytes": 2116,
+      "after_functions": 24,
+      "after_bytes": 2116,
+      "added_functions": 0,
+      "added_bytes": 0,
+      "reference_sha256": "f6b7be5e15c28774985417f1ec2c64f6655e79cc3c9dce7600fa7f6bacabca01",
+      "file_bytes": 24544,
+      "whole_file_byte_identical": true,
+      "proof": "build/ULUS10566/extra.verify.json",
+      "new_functions": []
+    },
+    {
+      "module": "menu",
+      "before_functions": 11,
+      "before_bytes": 180,
+      "after_functions": 17,
+      "after_bytes": 580,
+      "added_functions": 6,
+      "added_bytes": 400,
+      "reference_sha256": "f021f96fa05da5907563a28c232966aa8a344526d6b8bdee728053ec75224d0a",
+      "file_bytes": 1556096,
+      "whole_file_byte_identical": true,
+      "proof": "build/ULUS10566/menu.verify.json",
+      "new_functions": [
+        {
+          "name": "func_089DD4D0",
+          "address": "0x089DD4D0",
+          "size": 152,
+          "module_qualified_id": "menu:0x089DD4D0",
+          "source": "src/menu/runtime_lifecycle.c",
+          "unit": "menu_runtime_lifecycle",
+          "inventory_confidence": "exact-source-match-boundary"
+        },
+        {
+          "name": "func_089DD568",
+          "address": "0x089DD568",
+          "size": 116,
+          "module_qualified_id": "menu:0x089DD568",
+          "source": "src/menu/runtime_lifecycle.c",
+          "unit": "menu_runtime_lifecycle",
+          "inventory_confidence": "exact-source-match-boundary"
+        },
+        {
+          "name": "func_08A93D84",
+          "address": "0x08A93D84",
+          "size": 40,
+          "module_qualified_id": "menu:0x08A93D84",
+          "source": "src/menu/configuration_accessors.c",
+          "unit": "menu_configuration_accessors",
+          "inventory_confidence": "exact-source-match-boundary"
+        },
+        {
+          "name": "func_08A93DAC",
+          "address": "0x08A93DAC",
+          "size": 24,
+          "module_qualified_id": "menu:0x08A93DAC",
+          "source": "src/menu/configuration_accessors.c",
+          "unit": "menu_configuration_accessors",
+          "inventory_confidence": "exact-source-match-boundary"
+        },
+        {
+          "name": "func_08AFFF54",
+          "address": "0x08AFFF54",
+          "size": 36,
+          "module_qualified_id": "menu:0x08AFFF54",
+          "source": "src/menu/initializer_runtime.c",
+          "unit": "menu_initializer_runtime",
+          "inventory_confidence": "exact-source-match-boundary"
+        },
+        {
+          "name": "func_08B44E70",
+          "address": "0x08B44E70",
+          "size": 32,
+          "module_qualified_id": "menu:0x08B44E70",
+          "source": "src/menu/initializer_float.c",
+          "unit": "menu_initializer_float",
+          "inventory_confidence": "exact-source-match-boundary"
+        }
+      ]
+    },
+    {
+      "module": "battle",
+      "before_functions": 10,
+      "before_bytes": 112,
+      "after_functions": 34,
+      "after_bytes": 1172,
+      "added_functions": 24,
+      "added_bytes": 1060,
+      "reference_sha256": "1f96cfb3be771ff6e94741ae3916fab340df74e36ede07ca39545d015f4c49dc",
+      "file_bytes": 1596312,
+      "whole_file_byte_identical": true,
+      "proof": "build/ULUS10566/battle.verify.json",
+      "new_functions": [
+        {
+          "name": "func_089DD4D0",
+          "address": "0x089DD4D0",
+          "size": 100,
+          "module_qualified_id": "battle:0x089DD4D0",
+          "source": "src/battle/controller_lifecycle_089dd4d0.c",
+          "unit": "controller_lifecycle_089dd4d0",
+          "inventory_confidence": "exact-source-match-boundary"
+        },
+        {
+          "name": "func_089DD7A8",
+          "address": "0x089DD7A8",
+          "size": 100,
+          "module_qualified_id": "battle:0x089DD7A8",
+          "source": "src/battle/controller_lifecycle_089dd7a8.c",
+          "unit": "controller_lifecycle_089dd7a8",
+          "inventory_confidence": "exact-source-match-boundary"
+        },
+        {
+          "name": "func_089DD854",
+          "address": "0x089DD854",
+          "size": 76,
+          "module_qualified_id": "battle:0x089DD854",
+          "source": "src/battle/controller_lifecycle_089dd854.c",
+          "unit": "controller_lifecycle_089dd854",
+          "inventory_confidence": "exact-source-match-boundary"
+        },
+        {
+          "name": "func_089DDAF0",
+          "address": "0x089DDAF0",
+          "size": 48,
+          "module_qualified_id": "battle:0x089DDAF0",
+          "source": "src/battle/controller_lifecycle_089ddaf0.c",
+          "unit": "controller_lifecycle_089ddaf0",
+          "inventory_confidence": "exact-source-match-boundary"
+        },
+        {
+          "name": "func_089DDB20",
+          "address": "0x089DDB20",
+          "size": 48,
+          "module_qualified_id": "battle:0x089DDB20",
+          "source": "src/battle/controller_lifecycle_089ddaf0.c",
+          "unit": "controller_lifecycle_089ddaf0",
+          "inventory_confidence": "exact-source-match-boundary"
+        },
+        {
+          "name": "func_089DDE4C",
+          "address": "0x089DDE4C",
+          "size": 48,
+          "module_qualified_id": "battle:0x089DDE4C",
+          "source": "src/battle/controller_lifecycle_089dde4c.c",
+          "unit": "controller_lifecycle_089dde4c",
+          "inventory_confidence": "exact-source-match-boundary"
+        },
+        {
+          "name": "func_089E5AA8",
+          "address": "0x089E5AA8",
+          "size": 40,
+          "module_qualified_id": "battle:0x089E5AA8",
+          "source": "src/battle/state_control_089e5aa8.c",
+          "unit": "state_control_089e5aa8",
+          "inventory_confidence": "exact-source-match-boundary"
+        },
+        {
+          "name": "func_089E5BDC",
+          "address": "0x089E5BDC",
+          "size": 76,
+          "module_qualified_id": "battle:0x089E5BDC",
+          "source": "src/battle/state_control_089e5bdc.c",
+          "unit": "state_control_089e5bdc",
+          "inventory_confidence": "exact-source-match-boundary"
+        },
+        {
+          "name": "func_089E5C28",
+          "address": "0x089E5C28",
+          "size": 56,
+          "module_qualified_id": "battle:0x089E5C28",
+          "source": "src/battle/state_control_089e5bdc.c",
+          "unit": "state_control_089e5bdc",
+          "inventory_confidence": "exact-source-match-boundary"
+        },
+        {
+          "name": "func_089E5C60",
+          "address": "0x089E5C60",
+          "size": 40,
+          "module_qualified_id": "battle:0x089E5C60",
+          "source": "src/battle/state_control_089e5bdc.c",
+          "unit": "state_control_089e5bdc",
+          "inventory_confidence": "exact-source-match-boundary"
+        },
+        {
+          "name": "func_089E5C88",
+          "address": "0x089E5C88",
+          "size": 36,
+          "module_qualified_id": "battle:0x089E5C88",
+          "source": "src/battle/state_control_089e5bdc.c",
+          "unit": "state_control_089e5bdc",
+          "inventory_confidence": "exact-source-match-boundary"
+        },
+        {
+          "name": "func_089DDA7C",
+          "address": "0x089DDA7C",
+          "size": 28,
+          "module_qualified_id": "battle:0x089DDA7C",
+          "source": "src/battle/subobject_cleanup_089dda7c.c",
+          "unit": "subobject_cleanup_089dda7c",
+          "inventory_confidence": "exact-source-match-boundary"
+        },
+        {
+          "name": "func_089DDB70",
+          "address": "0x089DDB70",
+          "size": 28,
+          "module_qualified_id": "battle:0x089DDB70",
+          "source": "src/battle/subobject_cleanup_089ddb70.c",
+          "unit": "subobject_cleanup_089ddb70",
+          "inventory_confidence": "exact-source-match-boundary"
+        },
+        {
+          "name": "func_089E5644",
+          "address": "0x089E5644",
+          "size": 28,
+          "module_qualified_id": "battle:0x089E5644",
+          "source": "src/battle/subobject_cleanup_089e5644.c",
+          "unit": "subobject_cleanup_089e5644",
+          "inventory_confidence": "exact-source-match-boundary"
+        },
+        {
+          "name": "func_089E5660",
+          "address": "0x089E5660",
+          "size": 28,
+          "module_qualified_id": "battle:0x089E5660",
+          "source": "src/battle/subobject_cleanup_089e5644.c",
+          "unit": "subobject_cleanup_089e5644",
+          "inventory_confidence": "exact-source-match-boundary"
+        },
+        {
+          "name": "func_089E567C",
+          "address": "0x089E567C",
+          "size": 28,
+          "module_qualified_id": "battle:0x089E567C",
+          "source": "src/battle/subobject_cleanup_089e5644.c",
+          "unit": "subobject_cleanup_089e5644",
+          "inventory_confidence": "exact-source-match-boundary"
+        },
+        {
+          "name": "func_089E5698",
+          "address": "0x089E5698",
+          "size": 28,
+          "module_qualified_id": "battle:0x089E5698",
+          "source": "src/battle/subobject_cleanup_089e5644.c",
+          "unit": "subobject_cleanup_089e5644",
+          "inventory_confidence": "exact-source-match-boundary"
+        },
+        {
+          "name": "func_089E56B4",
+          "address": "0x089E56B4",
+          "size": 28,
+          "module_qualified_id": "battle:0x089E56B4",
+          "source": "src/battle/subobject_cleanup_089e5644.c",
+          "unit": "subobject_cleanup_089e5644",
+          "inventory_confidence": "exact-source-match-boundary"
+        },
+        {
+          "name": "func_089E56D0",
+          "address": "0x089E56D0",
+          "size": 28,
+          "module_qualified_id": "battle:0x089E56D0",
+          "source": "src/battle/subobject_cleanup_089e5644.c",
+          "unit": "subobject_cleanup_089e5644",
+          "inventory_confidence": "exact-source-match-boundary"
+        },
+        {
+          "name": "func_089E6B30",
+          "address": "0x089E6B30",
+          "size": 28,
+          "module_qualified_id": "battle:0x089E6B30",
+          "source": "src/battle/subobject_cleanup_089e6b30.c",
+          "unit": "subobject_cleanup_089e6b30",
+          "inventory_confidence": "exact-source-match-boundary"
+        },
+        {
+          "name": "func_089E6B4C",
+          "address": "0x089E6B4C",
+          "size": 28,
+          "module_qualified_id": "battle:0x089E6B4C",
+          "source": "src/battle/subobject_cleanup_089e6b30.c",
+          "unit": "subobject_cleanup_089e6b30",
+          "inventory_confidence": "exact-source-match-boundary"
+        },
+        {
+          "name": "func_089E6CAC",
+          "address": "0x089E6CAC",
+          "size": 28,
+          "module_qualified_id": "battle:0x089E6CAC",
+          "source": "src/battle/subobject_cleanup_089e6cac.c",
+          "unit": "subobject_cleanup_089e6cac",
+          "inventory_confidence": "exact-source-match-boundary"
+        },
+        {
+          "name": "func_089E6CC8",
+          "address": "0x089E6CC8",
+          "size": 28,
+          "module_qualified_id": "battle:0x089E6CC8",
+          "source": "src/battle/subobject_cleanup_089e6cac.c",
+          "unit": "subobject_cleanup_089e6cac",
+          "inventory_confidence": "exact-source-match-boundary"
+        },
+        {
+          "name": "func_089E69C0",
+          "address": "0x089E69C0",
+          "size": 56,
+          "module_qualified_id": "battle:0x089E69C0",
+          "source": "src/battle/subobject_cleanup_089e69c0.c",
+          "unit": "subobject_cleanup_089e69c0",
+          "inventory_confidence": "exact-source-match-boundary"
+        }
+      ]
+    }
+  ],
+  "inventory_revision": 9,
+  "inventory_layout_changed": false,
+  "provisional_candidates": 21279,
+  "whole_game_audited_percent": null,
+  "feature_ranks_changed": false,
+  "tests_passed": 116,
+  "runtime_validation_performed_this_batch": false,
+  "data_install_validation": "deferred at user request",
+  "review_fixes": [
+    "Consistent recovered battle helper prototypes and shared state record",
+    "Typed menu callback-block member and shared-header provenance",
+    "Battle C-part range/unit attribution validation and three rejection tests"
+  ],
+  "compiler_profile": "SNC 1.2.7503.0 -O2 -g; raw relocation resolution and fixed-address linked-byte checks",
+  "current_build_proofs": true,
+  "runtime_package_build_inputs_current": false,
+  "next": "Continue source recovery through the called battle subobject constructors, controller/member dispatch and menu configuration consumers; keep runtime/data-install validation deferred."
+}

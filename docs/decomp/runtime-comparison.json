@@ -1,0 +1,371 @@
+{
+  "schema_version": 1,
+  "recorded_utc": "2026-10-11T10:24:57.664552+00:00",
+  "target": "ULUS10566 v1.00",
+  "ppsspp": "1.20.4 Windows x64",
+  "comparison_method": "Semantic route/checkpoint comparison; independently created saves and unsynchronized battle states",
+  "cases": [
+    {
+      "case": "retail",
+      "iso_sha256": "df94177d3e194e82800a574b50b61ee3c7be6caa877c8e82242a41af75d1ab6e",
+      "exe_sha256": "775a0ded7d0c0602f46c3aeed659228d629e98ed77d9e2bd3818c44eb30de85a",
+      "bootstrap_profile_save_load": "passed",
+      "live_input": "observed",
+      "save_check": {
+        "files": [
+          {
+            "path": "memstick/PSP/SAVEDATA/ULUS10566GameData00/DISSIDIA.BIN",
+            "bytes": 257240,
+            "sha256": "506fc96ad0dc53fa409f1b26060b18ee4034c1d7e9825deae5747de30ddfdd08"
+          },
+          {
+            "path": "memstick/PSP/SAVEDATA/ULUS10566GameData00/ICON0.PNG",
+            "bytes": 20867,
+            "sha256": "9e43a784c419fd2c695e6cb16fb4021a924d51f204f8f90a2610825af18f59d1"
+          },
+          {
+            "path": "memstick/PSP/SAVEDATA/ULUS10566GameData00/PARAM.SFO",
+            "bytes": 4912,
+            "sha256": "43780578bcf7e1ce33343418bd4f5c1e9b8622e6da846b07d77133195523d180"
+          }
+        ],
+        "bytes_unchanged_after_load": true
+      },
+      "reviewed_captures": [
+        {
+          "checkpoint": "title",
+          "path": "build/ULUS10566/runtime/sessions/retail/debugger-baseline-v1/evidence/cmp-title.png",
+          "sha256": "989863e86b4ae527eac7ca936c5652951210f2c9d23ea4fc7e2597e8a95241b4",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame"
+        },
+        {
+          "checkpoint": "profile_settings",
+          "path": "build/ULUS10566/runtime/sessions/retail/debugger-baseline-v1/evidence/cmp-settings-confirm.png",
+          "sha256": "f36104e39856b76846f70af2cb9fde91dbc3f628a0b5cd428d45356fb932f5e1",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame"
+        },
+        {
+          "checkpoint": "save_completed",
+          "path": "build/ULUS10566/runtime/sessions/retail/debugger-baseline-v1/evidence/cmp-save-completed.png",
+          "sha256": "5129b4b4ce3caa4733b4dc6fa3847816add2fc200f2e9ed7d9f02a2cc771cee3",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame"
+        },
+        {
+          "checkpoint": "load_completed",
+          "path": "build/ULUS10566/runtime/sessions/retail/debugger-baseline-v1/evidence/cmp-load-completed.png",
+          "sha256": "3bcf6f7927dde584a2e2f8a4f6b9740dddd4a0e32d8c923174b97ea47e4811cb",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame"
+        },
+        {
+          "checkpoint": "opening_after_load",
+          "path": "build/ULUS10566/runtime/sessions/retail/debugger-baseline-v1/evidence/cmp-opening-after-load.png",
+          "sha256": "3926ee79ff625c37c8e46d3fb2d08b884c4975bd740c3f8e4e1bae1471873c16",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame"
+        },
+        {
+          "checkpoint": "battle_playback",
+          "path": "build/ULUS10566/runtime/sessions/retail/debugger-baseline-v1/evidence/cmp-battle-demo.png",
+          "sha256": "4aa1e42b2b468439994fcef1728b1af04446b7fe1703e6eb182376fd8fb315ea",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame"
+        },
+        {
+          "checkpoint": "paradigm_control",
+          "path": "build/ULUS10566/runtime/sessions/retail/debugger-baseline-v1/evidence/cmp-retail-ravager.png",
+          "sha256": "67ab1cc3f0d66a736d7fcfb429f3752c255538f0ced547e7711831e515c22245",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame"
+        },
+        {
+          "checkpoint": "hp_attack_cast",
+          "path": "build/ULUS10566/runtime/sessions/retail/debugger-baseline-v1/evidence/cmp-medic-hp-sequence.png",
+          "sha256": "a3e54d7bdb6fa431d554d810ddb5d71ba3ae42606f34f7e4329bd02cd935ca88",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame"
+        },
+        {
+          "checkpoint": "pause_menu",
+          "path": "build/ULUS10566/runtime/sessions/retail/debugger-baseline-v1/evidence/cmp-retry-pause.png",
+          "sha256": "ab5e70a5064411691f56fbfe30cd5d3367dd3b84c3984d7e05a2805129b6ecb9",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame"
+        },
+        {
+          "checkpoint": "retry_reloads_encounter",
+          "path": "build/ULUS10566/runtime/sessions/retail/debugger-baseline-v1/evidence/cmp-retried-battle-ready.png",
+          "sha256": "97b47a7d5ec2e15e20c6b82019ccf0d0a84792eaf47a1e59bbc97c43baf9558c",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame"
+        }
+      ],
+      "emulator_stopped": true
+    },
+    {
+      "case": "original",
+      "iso_sha256": "59ca11719bc1ca40c1756abca3cac06a9c50643ee83f294dab5ca08b3285b4a1",
+      "exe_sha256": "775a0ded7d0c0602f46c3aeed659228d629e98ed77d9e2bd3818c44eb30de85a",
+      "bootstrap_profile_save_load": "passed",
+      "live_input": "observed",
+      "save_check": {
+        "files": [
+          {
+            "path": "memstick/PSP/SAVEDATA/ULUS10566GameData00/DISSIDIA.BIN",
+            "bytes": 257240,
+            "sha256": "cb34a0c060a0417f515a462aa756c26fdb276902d2f150f153ae0a87284ab114"
+          },
+          {
+            "path": "memstick/PSP/SAVEDATA/ULUS10566GameData00/ICON0.PNG",
+            "bytes": 20867,
+            "sha256": "9e43a784c419fd2c695e6cb16fb4021a924d51f204f8f90a2610825af18f59d1"
+          },
+          {
+            "path": "memstick/PSP/SAVEDATA/ULUS10566GameData00/PARAM.SFO",
+            "bytes": 4912,
+            "sha256": "bdf0a0b5b7404b10d845cce7091627fe9f166475635347f35c67c599c407746d"
+          }
+        ],
+        "bytes_unchanged_after_load": true
+      },
+      "reviewed_captures": [
+        {
+          "checkpoint": "title",
+          "path": "build/ULUS10566/runtime/sessions/original/debugger-baseline-v1/evidence/cmp-title.png",
+          "sha256": "7c74ed61e03c7376915096f727dfcb4842e9da33f71ef418e63dcf08a837b302",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame"
+        },
+        {
+          "checkpoint": "profile_settings",
+          "path": "build/ULUS10566/runtime/sessions/original/debugger-baseline-v1/evidence/cmp-settings-confirm.png",
+          "sha256": "f01f769da754a81e8e842bb294a64663e6a43ed81188153c4aa6f6966a93fc52",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame"
+        },
+        {
+          "checkpoint": "save_completed",
+          "path": "build/ULUS10566/runtime/sessions/original/debugger-baseline-v1/evidence/cmp-save-completed.png",
+          "sha256": "46e3e3c01de4e2f2dda1a6ba735dd396136f309207619d2a8f83dce5af4b9179",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame"
+        },
+        {
+          "checkpoint": "load_completed",
+          "path": "build/ULUS10566/runtime/sessions/original/debugger-baseline-v1/evidence/cmp-load-completed.png",
+          "sha256": "3bcf6f7927dde584a2e2f8a4f6b9740dddd4a0e32d8c923174b97ea47e4811cb",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame"
+        },
+        {
+          "checkpoint": "opening_after_load",
+          "path": "build/ULUS10566/runtime/sessions/original/debugger-baseline-v1/evidence/cmp-opening-after-load.png",
+          "sha256": "da1380d4c45fdffa6d1d73bb8b6aa1333c63ca290c8ffe5171068b6117714c97",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame"
+        },
+        {
+          "checkpoint": "battle_playback",
+          "path": "build/ULUS10566/runtime/sessions/original/debugger-baseline-v1/evidence/cmp-battle-demo.png",
+          "sha256": "dccbf35cb5f931ce5203c40717d1cc0293e68839be1cec53c15d4a2bf5abbe64",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame"
+        },
+        {
+          "checkpoint": "paradigm_control",
+          "path": "build/ULUS10566/runtime/sessions/original/debugger-baseline-v1/evidence/cmp-next-paradigm-ability.png",
+          "sha256": "33fa13c648307f034ef052a6f965383078b364c3165ce45d94a043dc3ac93732",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame"
+        },
+        {
+          "checkpoint": "hp_damage",
+          "path": "build/ULUS10566/runtime/sessions/original/debugger-baseline-v1/evidence/cmp-original-hp-input.png",
+          "sha256": "0811225118fb63dbe2c4843c6b0a7d676e1251cb55d008b3924d1c32c1719085",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame"
+        },
+        {
+          "checkpoint": "post_encounter_dialogue",
+          "path": "build/ULUS10566/runtime/sessions/original/debugger-baseline-v1/evidence/cmp-current-tutorial.png",
+          "sha256": "fc8bb4b662ae5c607da83c57c6b6cbb1d7fc5b9663c2ea7371ab74554c7168fc",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame"
+        },
+        {
+          "checkpoint": "additional_encounter",
+          "path": "build/ULUS10566/runtime/sessions/original/debugger-baseline-v1/evidence/cmp-second-battle-loaded.png",
+          "sha256": "a513e2c41fb4d2c4e38e175da3223808319b20c274cd8c9286b8a3fc06f29e3b",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame"
+        }
+      ],
+      "emulator_stopped": true
+    },
+    {
+      "case": "rebuilt",
+      "iso_sha256": "59ca11719bc1ca40c1756abca3cac06a9c50643ee83f294dab5ca08b3285b4a1",
+      "exe_sha256": "775a0ded7d0c0602f46c3aeed659228d629e98ed77d9e2bd3818c44eb30de85a",
+      "bootstrap_profile_save_load": "passed",
+      "live_input": "observed",
+      "save_check": {
+        "files": [
+          {
+            "path": "memstick/PSP/SAVEDATA/ULUS10566GameData00/DISSIDIA.BIN",
+            "bytes": 257240,
+            "sha256": "bc0f027cf4f25119bf03416187f62c4df4bbe366596ecdeec51c380753bdd3b7"
+          },
+          {
+            "path": "memstick/PSP/SAVEDATA/ULUS10566GameData00/ICON0.PNG",
+            "bytes": 20867,
+            "sha256": "9e43a784c419fd2c695e6cb16fb4021a924d51f204f8f90a2610825af18f59d1"
+          },
+          {
+            "path": "memstick/PSP/SAVEDATA/ULUS10566GameData00/PARAM.SFO",
+            "bytes": 4912,
+            "sha256": "07070ea53d53df241d19ec1d7c47d9c147848a73e831b7ec07d5f42ed795a0d0"
+          }
+        ],
+        "bytes_unchanged_after_load": true
+      },
+      "reviewed_captures": [
+        {
+          "checkpoint": "title",
+          "path": "build/ULUS10566/runtime/sessions/rebuilt/debugger-baseline-v1/evidence/startup-logos-finished.png",
+          "sha256": "7c74ed61e03c7376915096f727dfcb4842e9da33f71ef418e63dcf08a837b302",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame"
+        },
+        {
+          "checkpoint": "profile_settings",
+          "path": "build/ULUS10566/runtime/sessions/rebuilt/debugger-baseline-v1/evidence/story-standard-selected.png",
+          "sha256": "956472ffdfc5b483b9af2bb94c613a3c429937c46387a5e0cb7fd9ae5d9fc561",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame"
+        },
+        {
+          "checkpoint": "save_completed",
+          "path": "build/ULUS10566/runtime/sessions/rebuilt/debugger-baseline-v1/evidence/save-new-slot.png",
+          "sha256": "c3629707b8d883f4fef63e5432532389ffd82ec9070c21f4e10401adc8255126",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame"
+        },
+        {
+          "checkpoint": "load_completed",
+          "path": "build/ULUS10566/runtime/sessions/rebuilt/debugger-baseline-v1/evidence/cmp-load-completed.png",
+          "sha256": "ebedb2d0add0922f97d1274f8f3238dbd69e058c089a43e7628b72be0d125ff6",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame"
+        },
+        {
+          "checkpoint": "opening_after_load",
+          "path": "build/ULUS10566/runtime/sessions/rebuilt/debugger-baseline-v1/evidence/cmp-opening-after-load.png",
+          "sha256": "3926ee79ff625c37c8e46d3fb2d08b884c4975bd740c3f8e4e1bae1471873c16",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame"
+        },
+        {
+          "checkpoint": "battle_playback",
+          "path": "build/ULUS10566/runtime/sessions/rebuilt/debugger-baseline-v1/evidence/cmp-battle-demo.png",
+          "sha256": "bd54a303416afed0a83d83d6804cb3211e7e69701d97577813b4c588b594745e",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame"
+        },
+        {
+          "checkpoint": "paradigm_control",
+          "path": "build/ULUS10566/runtime/sessions/rebuilt/debugger-baseline-v1/evidence/cmp-paradigm-shift.png",
+          "sha256": "3b9532913ba8a61464c0671b3112955730c35bbe3a01f7bb856c284e146c4801",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame"
+        },
+        {
+          "checkpoint": "hp_damage",
+          "path": "build/ULUS10566/runtime/sessions/rebuilt/debugger-baseline-v1/evidence/cmp-hp-attack-held.png",
+          "sha256": "8f34db8948e10aa8a3d77f456b1616fc8c91ca386714f5d438e6105b1b8af6e0",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame"
+        },
+        {
+          "checkpoint": "pause_menu",
+          "path": "build/ULUS10566/runtime/sessions/rebuilt/debugger-baseline-v1/evidence/cmp-retry-pause.png",
+          "sha256": "4d387ccae6ae5b443c21a57def6c4bd0f1fdfe26ab41803643373ae2144f5950",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame"
+        },
+        {
+          "checkpoint": "retry_reloads_encounter",
+          "path": "build/ULUS10566/runtime/sessions/rebuilt/debugger-baseline-v1/evidence/cmp-retried-battle-ready.png",
+          "sha256": "5413d0d1159d20f3b63afa43c17490e11acdba5a0982abfb4c6b4915409394f1",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame"
+        }
+      ],
+      "emulator_stopped": true
+    }
+  ],
+  "three_case_bootstrap_matrix_complete": true,
+  "full_gameplay_baseline_complete": false,
+  "pending": [
+    "Actual story gateway entry and chapter progression",
+    "Quick Battle victory/result branches and deterministic assist/music selection",
+    "Saving and reloading new Battle/Story progress",
+    "Data-install success, cancellation, unavailable storage and suspend/resume"
+  ],
+  "correction": "COM on Lightning is the Commando paradigm; earlier AI/demo interpretation was unsupported",
+  "human_test": {
+    "session": "build/ULUS10566/runtime/sessions/rebuilt/human-combat-v1",
+    "prepared": true,
+    "started": true,
+    "reported_results": true,
+    "continuous_recording": false,
+    "remote_services": false,
+    "stopped": true,
+    "result": "docs/decomp/human-runtime-result.json",
+    "main_hub": "passed-user-report",
+    "control_graphics_audio": "passed-user-report",
+    "save_baseline": "build/ULUS10566/runtime/save-baselines/human-main-hub-20261011T084311737825Z",
+    "post_hub_restart_load": "passed-three-cases-agent-followup"
+  },
+  "matching_c_changed": false,
+  "post_tutorial_followup": {
+    "report": "docs/decomp/hub-runtime-validation.json",
+    "slot_loads_passed": 6,
+    "main_hub": "passed-three-cases",
+    "quick_battle_load_and_endpoints": "passed-three-cases",
+    "story_world_map_entry_movement": "passed-three-cases",
+    "whole_game_matrix_complete": false
+  }
+}

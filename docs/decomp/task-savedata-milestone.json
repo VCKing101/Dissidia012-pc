@@ -1,0 +1,617 @@
+{
+  "schema_version": 1,
+  "recorded_utc": "2026-10-12T10:44:40.177127+00:00",
+  "target": "ULUS10566 v1.00",
+  "before": {
+    "functions": 209,
+    "bytes": 14048
+  },
+  "after": {
+    "functions": 231,
+    "bytes": 16816
+  },
+  "added": {
+    "functions": 22,
+    "bytes": 2768
+  },
+  "modules": [
+    {
+      "module": "main",
+      "before_functions": 66,
+      "before_bytes": 3780,
+      "after_functions": 73,
+      "after_bytes": 4308,
+      "added_functions": 7,
+      "added_bytes": 528,
+      "sha256": "0bc8e779aad2814a3d1bd77346f69ca5e16665845ed053cd0ad44a9cbfaefe6d",
+      "byte_identical": true,
+      "inventory_sha256": "abd14f22fb70df8d26bde1247e84e4819cdb147740b73235b2c44920a5bf32e3",
+      "new_functions": [
+        {
+          "name": "func_088822BC",
+          "address": "0x088822BC",
+          "size": 36,
+          "source": "src/main/task_construct.c",
+          "unit": "main_task_construct",
+          "direct_callers": [
+            {
+              "module": "main",
+              "function": "0x088823C4",
+              "pc": "0x08882428"
+            }
+          ],
+          "primary_feature": "main_helpers",
+          "entry_provenance": "checked-direct-caller"
+        },
+        {
+          "name": "func_088822E0",
+          "address": "0x088822E0",
+          "size": 76,
+          "source": "src/main/task_finalize.c",
+          "unit": "main_task_finalize",
+          "direct_callers": [
+            {
+              "module": "main",
+              "function": "0x088828BC",
+              "pc": "0x0888293C"
+            }
+          ],
+          "primary_feature": "main_helpers",
+          "entry_provenance": "checked-direct-caller"
+        },
+        {
+          "name": "func_088825F0",
+          "address": "0x088825F0",
+          "size": 196,
+          "source": "src/main/task_remove_matching.cpp",
+          "unit": "main_task_remove_matching",
+          "direct_callers": [
+            {
+              "module": "main",
+              "function": "0x088826B4",
+              "pc": "0x088826C0"
+            }
+          ],
+          "primary_feature": "main_helpers",
+          "entry_provenance": "checked-direct-caller"
+        },
+        {
+          "name": "func_088826B4",
+          "address": "0x088826B4",
+          "size": 32,
+          "source": "src/main/task_remove_all.c",
+          "unit": "main_task_remove_all",
+          "direct_callers": [
+            {
+              "module": "main",
+              "function": "0x08865278",
+              "pc": "0x088653CC"
+            },
+            {
+              "module": "main",
+              "function": "0x08882704",
+              "pc": "0x08882714"
+            }
+          ],
+          "primary_feature": "main_helpers",
+          "entry_provenance": "checked-direct-caller"
+        },
+        {
+          "name": "func_088826D4",
+          "address": "0x088826D4",
+          "size": 48,
+          "source": "src/main/task_count.cpp",
+          "unit": "main_task_count",
+          "direct_callers": [
+            {
+              "module": "main",
+              "function": "0x08865278",
+              "pc": "0x088653F8"
+            }
+          ],
+          "primary_feature": "main_helpers",
+          "entry_provenance": "checked-direct-caller"
+        },
+        {
+          "name": "func_08882704",
+          "address": "0x08882704",
+          "size": 72,
+          "source": "src/main/task_owner_finalize.c",
+          "unit": "main_task_owner_finalize",
+          "direct_callers": [
+            {
+              "module": "main",
+              "function": "0x088417C8",
+              "pc": "0x088417DC"
+            },
+            {
+              "module": "main",
+              "function": "0x08865278",
+              "pc": "0x0886541C"
+            }
+          ],
+          "primary_feature": "main_helpers",
+          "entry_provenance": "checked-direct-caller"
+        },
+        {
+          "name": "func_0888274C",
+          "address": "0x0888274C",
+          "size": 68,
+          "source": "src/main/task_has_callback.cpp",
+          "unit": "main_task_has_callback",
+          "direct_callers": [
+            {
+              "module": "main",
+              "function": "0x0892ACAC",
+              "pc": "0x0892ACCC"
+            }
+          ],
+          "primary_feature": "main_helpers",
+          "entry_provenance": "checked-direct-caller"
+        }
+      ]
+    },
+    {
+      "module": "extra",
+      "before_functions": 24,
+      "before_bytes": 2116,
+      "after_functions": 24,
+      "after_bytes": 2116,
+      "added_functions": 0,
+      "added_bytes": 0,
+      "sha256": "f6b7be5e15c28774985417f1ec2c64f6655e79cc3c9dce7600fa7f6bacabca01",
+      "byte_identical": true,
+      "inventory_sha256": "4d00284fb9186943aec6cae678e9bc35d794c31d43e36b4e7e9ecd76fd36a127",
+      "new_functions": []
+    },
+    {
+      "module": "menu",
+      "before_functions": 40,
+      "before_bytes": 3104,
+      "after_functions": 42,
+      "after_bytes": 3964,
+      "added_functions": 2,
+      "added_bytes": 860,
+      "sha256": "f021f96fa05da5907563a28c232966aa8a344526d6b8bdee728053ec75224d0a",
+      "byte_identical": true,
+      "inventory_sha256": "6422841950b0e076d756a3278992fcf9bc99c7c16576ae530812bf522d624d2d",
+      "new_functions": [
+        {
+          "name": "func_089DD760",
+          "address": "0x089DD760",
+          "size": 464,
+          "source": "src/menu/savedata_list_setup.c",
+          "unit": "menu_savedata_list_setup",
+          "direct_callers": [],
+          "primary_feature": "save",
+          "member_record": "0x089E09F8",
+          "record_index": 2,
+          "entry_provenance": "checked-controller-member-record"
+        },
+        {
+          "name": "func_089DD9DC",
+          "address": "0x089DD9DC",
+          "size": 396,
+          "source": "src/menu/savedata_latest_slot.c",
+          "unit": "menu_savedata_latest_slot",
+          "direct_callers": [],
+          "primary_feature": "save",
+          "member_record": "0x089E0A08",
+          "record_index": 4,
+          "entry_provenance": "checked-controller-member-record"
+        }
+      ]
+    },
+    {
+      "module": "battle",
+      "before_functions": 79,
+      "before_bytes": 5048,
+      "after_functions": 92,
+      "after_bytes": 6428,
+      "added_functions": 13,
+      "added_bytes": 1380,
+      "sha256": "1f96cfb3be771ff6e94741ae3916fab340df74e36ede07ca39545d015f4c49dc",
+      "byte_identical": true,
+      "inventory_sha256": "5d801a26fd0743c6893a917ff73a23d0ba564a6f46ce48a3b82edb353af486ac",
+      "new_functions": [
+        {
+          "name": "func_089E0904",
+          "address": "0x089E0904",
+          "size": 112,
+          "source": "src/battle/flow_089e0904.c",
+          "unit": "flow_089e0904",
+          "direct_callers": [
+            {
+              "module": "battle",
+              "function": "0x089DD7A8",
+              "pc": "0x089DD7E8"
+            }
+          ],
+          "primary_feature": "battle_helpers",
+          "entry_provenance": "checked-direct-caller"
+        },
+        {
+          "name": "func_089E1FD0",
+          "address": "0x089E1FD0",
+          "size": 116,
+          "source": "src/battle/flow_089e1fd0.c",
+          "unit": "flow_089e1fd0",
+          "direct_callers": [
+            {
+              "module": "battle",
+              "function": "0x089E6A74",
+              "pc": "0x089E6A9C"
+            }
+          ],
+          "primary_feature": "battle_helpers",
+          "entry_provenance": "checked-direct-caller"
+        },
+        {
+          "name": "func_089E3618",
+          "address": "0x089E3618",
+          "size": 92,
+          "source": "src/battle/flow_089e3618.c",
+          "unit": "flow_089e3618",
+          "direct_callers": [
+            {
+              "module": "battle",
+              "function": "0x089DDA7C",
+              "pc": "0x089DDA84"
+            },
+            {
+              "module": "battle",
+              "function": "0x089E3414",
+              "pc": "0x089E3504"
+            }
+          ],
+          "primary_feature": "battle_helpers",
+          "entry_provenance": "checked-direct-caller"
+        },
+        {
+          "name": "func_089E3BF0",
+          "address": "0x089E3BF0",
+          "size": 76,
+          "source": "src/battle/flow_089e3bf0.c",
+          "unit": "flow_089e3bf0",
+          "direct_callers": [
+            {
+              "module": "battle",
+              "function": "0x089E3618",
+              "pc": "0x089E3644"
+            }
+          ],
+          "primary_feature": "battle_helpers",
+          "entry_provenance": "checked-direct-caller"
+        },
+        {
+          "name": "func_089E4A3C",
+          "address": "0x089E4A3C",
+          "size": 52,
+          "source": "src/battle/flow_089e4a3c.c",
+          "unit": "flow_089e4a3c",
+          "direct_callers": [
+            {
+              "module": "battle",
+              "function": "0x089E3BF0",
+              "pc": "0x089E3C10"
+            },
+            {
+              "module": "battle",
+              "function": "0x089E3BF0",
+              "pc": "0x089E3C18"
+            }
+          ],
+          "primary_feature": "battle_helpers",
+          "entry_provenance": "checked-direct-caller"
+        },
+        {
+          "name": "func_089E5B60",
+          "address": "0x089E5B60",
+          "size": 124,
+          "source": "src/battle/flow_089e5b60.c",
+          "unit": "flow_089e5b60",
+          "direct_callers": [
+            {
+              "module": "battle",
+              "function": "0x089E5988",
+              "pc": "0x089E59A0"
+            }
+          ],
+          "primary_feature": "battle_helpers",
+          "entry_provenance": "checked-direct-caller"
+        },
+        {
+          "name": "func_089E63D4",
+          "address": "0x089E63D4",
+          "size": 112,
+          "source": "src/battle/flow_089e63d4.c",
+          "unit": "flow_089e63d4",
+          "direct_callers": [
+            {
+              "module": "battle",
+              "function": "0x089E5988",
+              "pc": "0x089E5998"
+            }
+          ],
+          "primary_feature": "battle_helpers",
+          "entry_provenance": "checked-direct-caller"
+        },
+        {
+          "name": "func_089E7318",
+          "address": "0x089E7318",
+          "size": 116,
+          "source": "src/battle/flow_089e7318.c",
+          "unit": "flow_089e7318",
+          "direct_callers": [
+            {
+              "module": "battle",
+              "function": "0x089DD7A8",
+              "pc": "0x089DD7D8"
+            }
+          ],
+          "primary_feature": "battle_helpers",
+          "entry_provenance": "checked-direct-caller"
+        },
+        {
+          "name": "func_089E7450",
+          "address": "0x089E7450",
+          "size": 88,
+          "source": "src/battle/flow_089e7450.c",
+          "unit": "flow_089e7450",
+          "direct_callers": [
+            {
+              "module": "battle",
+              "function": "0x089E7200",
+              "pc": "0x089E7220"
+            },
+            {
+              "module": "battle",
+              "function": "0x089E73D8",
+              "pc": "0x089E7400"
+            },
+            {
+              "module": "battle",
+              "function": "0x089E74A8",
+              "pc": "0x089E74CC"
+            }
+          ],
+          "primary_feature": "battle_helpers",
+          "entry_provenance": "checked-direct-caller"
+        },
+        {
+          "name": "func_089E7F2C",
+          "address": "0x089E7F2C",
+          "size": 120,
+          "source": "src/battle/flow_089e7f2c.c",
+          "unit": "flow_089e7f2c",
+          "direct_callers": [
+            {
+              "module": "battle",
+              "function": "0x089DD854",
+              "pc": "0x089DD874"
+            }
+          ],
+          "primary_feature": "battle_helpers",
+          "entry_provenance": "checked-direct-caller"
+        },
+        {
+          "name": "func_089E95B0",
+          "address": "0x089E95B0",
+          "size": 48,
+          "source": "src/battle/flow_089e95b0.c",
+          "unit": "flow_089e95b0",
+          "direct_callers": [
+            {
+              "module": "battle",
+              "function": "0x089E0110",
+              "pc": "0x089E0160"
+            },
+            {
+              "module": "battle",
+              "function": "0x089E0110",
+              "pc": "0x089E016C"
+            },
+            {
+              "module": "battle",
+              "function": "0x089E2304",
+              "pc": "0x089E2348"
+            },
+            {
+              "module": "battle",
+              "function": "0x089E2418",
+              "pc": "0x089E24BC"
+            },
+            {
+              "module": "battle",
+              "function": "0x089E2BB4",
+              "pc": "0x089E2BD4"
+            },
+            {
+              "module": "battle",
+              "function": "0x089E4CC0",
+              "pc": "0x089E4D64"
+            },
+            {
+              "module": "battle",
+              "function": "0x089E4E34",
+              "pc": "0x089E4E3C"
+            },
+            {
+              "module": "battle",
+              "function": "0x089E4EE0",
+              "pc": "0x089E4FE0"
+            },
+            {
+              "module": "battle",
+              "function": "0x089E6594",
+              "pc": "0x089E670C"
+            },
+            {
+              "module": "battle",
+              "function": "0x089E75BC",
+              "pc": "0x089E75CC"
+            },
+            {
+              "module": "battle",
+              "function": "0x089E7628",
+              "pc": "0x089E7648"
+            },
+            {
+              "module": "battle",
+              "function": "0x089E77DC",
+              "pc": "0x089E7828"
+            },
+            {
+              "module": "battle",
+              "function": "0x089E7B9C",
+              "pc": "0x089E7C7C"
+            },
+            {
+              "module": "battle",
+              "function": "0x089E91D0",
+              "pc": "0x089E9218"
+            },
+            {
+              "module": "battle",
+              "function": "0x089E96DC",
+              "pc": "0x089E96FC"
+            },
+            {
+              "module": "battle",
+              "function": "0x089E973C",
+              "pc": "0x089E975C"
+            },
+            {
+              "module": "battle",
+              "function": "0x089E978C",
+              "pc": "0x089E97C8"
+            },
+            {
+              "module": "battle",
+              "function": "0x089E97FC",
+              "pc": "0x089E9804"
+            },
+            {
+              "module": "battle",
+              "function": "0x089E98F0",
+              "pc": "0x089E9904"
+            },
+            {
+              "module": "battle",
+              "function": "0x089E9964",
+              "pc": "0x089E997C"
+            },
+            {
+              "module": "battle",
+              "function": "0x089E99C0",
+              "pc": "0x089E99F4"
+            },
+            {
+              "module": "battle",
+              "function": "0x089E9A4C",
+              "pc": "0x089E9A64"
+            },
+            {
+              "module": "battle",
+              "function": "0x089E9AA8",
+              "pc": "0x089E9AC0"
+            },
+            {
+              "module": "battle",
+              "function": "0x089E9C24",
+              "pc": "0x089E9C2C"
+            },
+            {
+              "module": "battle",
+              "function": "0x089EDE48",
+              "pc": "0x089EDE68"
+            },
+            {
+              "module": "battle",
+              "function": "0x089EE014",
+              "pc": "0x089EE068"
+            }
+          ],
+          "primary_feature": "battle_helpers",
+          "entry_provenance": "checked-direct-caller"
+        },
+        {
+          "name": "func_089EA7B0",
+          "address": "0x089EA7B0",
+          "size": 188,
+          "source": "src/battle/flow_089ea7b0.c",
+          "unit": "flow_089ea7b0",
+          "direct_callers": [
+            {
+              "module": "battle",
+              "function": "0x089E9F74",
+              "pc": "0x089EA000"
+            }
+          ],
+          "primary_feature": "battle_helpers",
+          "entry_provenance": "checked-direct-caller"
+        },
+        {
+          "name": "func_089EB944",
+          "address": "0x089EB944",
+          "size": 136,
+          "source": "src/battle/flow_089eb944.c",
+          "unit": "flow_089eb944",
+          "direct_callers": [
+            {
+              "module": "battle",
+              "function": "0x089EA7B0",
+              "pc": "0x089EA80C"
+            }
+          ],
+          "primary_feature": "battle_helpers",
+          "entry_provenance": "checked-direct-caller"
+        }
+      ]
+    }
+  ],
+  "inventory_revision": 15,
+  "inventory_boundaries_changed": false,
+  "provisional_total_functions": 21280,
+  "provisional_function_body_bytes": 4717908,
+  "controller": {
+    "scope_id": "menu_controller_members",
+    "scope": "Only the twenty direct member callbacks copied by func_089DD5DC; dispatcher and dependencies are tracked separately. Not the whole menu or game.",
+    "reference_sha256": "f021f96fa05da5907563a28c232966aa8a344526d6b8bdee728053ec75224d0a",
+    "table": "0x089E09E8",
+    "dispatcher": "0x089DD5DC",
+    "dispatcher_matching_source": true,
+    "handler_count": 20,
+    "matching_handlers": 12,
+    "handler_count_percent": 60.0,
+    "reviewed_handler_bytes": 8188,
+    "matching_handler_bytes": 2332,
+    "handler_byte_percent": 28.4807,
+    "extent_checks": "Pinned direct table targets; contiguous inventory extents; terminal jr-ra/delay slot; next known entries; bounded relative branches; no overlaps.",
+    "dependencies_included": false,
+    "runtime_verified": false
+  },
+  "whole_game_audited_code_percent": null,
+  "runtime_verified_this_batch": false,
+  "iso_repacked_this_batch": false,
+  "emulator_launched_this_batch": false,
+  "regression_tests": {
+    "status": "passed",
+    "count": 156,
+    "command": ".venv/Scripts/python.exe -m unittest discover -s tools -p 'test_*.py'"
+  },
+  "uncredited_task_candidates": [
+    "0x088823C4",
+    "0x0888245C",
+    "0x08882790",
+    "0x088828BC"
+  ],
+  "uncredited_savedata_handlers": [
+    "0x089DD930",
+    "0x089DDB68"
+  ],
+  "existing_untraced_entries": [
+    "main:0x088D99B0",
+    "menu:0x089DEA74"
+  ]
+}

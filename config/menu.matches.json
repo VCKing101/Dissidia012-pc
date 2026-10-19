@@ -1,0 +1,520 @@
+{
+  "compiler": "tools/compilers/pspsnc_1.2.7503.0/pspsnc.exe",
+  "flags": [
+    "-O2",
+    "-g"
+  ],
+  "units": [
+    {
+      "name": "menu_runtime_lifecycle",
+      "source": "src/menu/runtime_lifecycle.c",
+      "functions": [
+        {
+          "name": "func_089DD4D0",
+          "address": "0x089DD4D0",
+          "size": 152
+        },
+        {
+          "name": "func_089DD568",
+          "address": "0x089DD568",
+          "size": 116
+        }
+      ]
+    },
+    {
+      "name": "menu_member_dispatch",
+      "source": "src/menu/member_dispatch.c",
+      "functions": [
+        {
+          "name": "func_089DD5DC",
+          "address": "0x089DD5DC",
+          "size": 152
+        }
+      ]
+    },
+    {
+      "name": "menu_execution_updates",
+      "source": "src/menu/execution_updates.c",
+      "functions": [
+        {
+          "name": "func_089DD674",
+          "address": "0x089DD674",
+          "size": 152
+        },
+        {
+          "name": "func_089DD70C",
+          "address": "0x089DD70C",
+          "size": 84
+        }
+      ]
+    },
+    {
+      "name": "menu_state_branch_select",
+      "source": "src/menu/state_branch_select.c",
+      "functions": [
+        {
+          "name": "func_089DDCC4",
+          "address": "0x089DDCC4",
+          "size": 84
+        }
+      ]
+    },
+    {
+      "name": "menu_resource_create",
+      "source": "src/menu/resource_create.c",
+      "functions": [
+        {
+          "name": "func_089DDD18",
+          "address": "0x089DDD18",
+          "size": 136
+        }
+      ]
+    },
+    {
+      "name": "menu_resource_create_optional",
+      "source": "src/menu/resource_create_optional.c",
+      "functions": [
+        {
+          "name": "func_089DDE58",
+          "address": "0x089DDE58",
+          "size": 204
+        }
+      ]
+    },
+    {
+      "name": "menu_resource_create_selected",
+      "source": "src/menu/resource_create_selected.c",
+      "functions": [
+        {
+          "name": "func_089DE008",
+          "address": "0x089DE008",
+          "size": 156
+        }
+      ]
+    },
+    {
+      "name": "menu_final_member_callback",
+      "source": "src/menu/final_member_callback.c",
+      "functions": [
+        {
+          "name": "func_089DE3A4",
+          "address": "0x089DE3A4",
+          "size": 8
+        }
+      ]
+    },
+    {
+      "name": "menu_initializer_flag_a",
+      "source": "src/menu/initializer_flag_a.c",
+      "functions": [
+        {
+          "name": "func_08A08EE8",
+          "address": "0x08A08EE8",
+          "size": 16
+        }
+      ]
+    },
+    {
+      "name": "menu_initializer_flag_b",
+      "source": "src/menu/initializer_flag_b.c",
+      "functions": [
+        {
+          "name": "func_08A47D7C",
+          "address": "0x08A47D7C",
+          "size": 16
+        }
+      ]
+    },
+    {
+      "name": "menu_initializer_flag_c",
+      "source": "src/menu/initializer_flag_c.c",
+      "functions": [
+        {
+          "name": "func_08A4FDF0",
+          "address": "0x08A4FDF0",
+          "size": 16
+        }
+      ]
+    },
+    {
+      "name": "menu_initializer_flag_d",
+      "source": "src/menu/initializer_flag_d.c",
+      "functions": [
+        {
+          "name": "func_08A85B48",
+          "address": "0x08A85B48",
+          "size": 16
+        }
+      ]
+    },
+    {
+      "name": "menu_configuration_owner_consumer",
+      "source": "src/menu/configuration_owner_consumer.c",
+      "functions": [
+        {
+          "name": "func_08A8D480",
+          "address": "0x08A8D480",
+          "size": 220
+        }
+      ]
+    },
+    {
+      "name": "menu_configuration_table_getter",
+      "source": "src/menu/configuration_table_getter.c",
+      "functions": [
+        {
+          "name": "func_08A93D78",
+          "address": "0x08A93D78",
+          "size": 12
+        }
+      ]
+    },
+    {
+      "name": "menu_configuration_accessors",
+      "source": "src/menu/configuration_accessors.c",
+      "functions": [
+        {
+          "name": "func_08A93D84",
+          "address": "0x08A93D84",
+          "size": 40
+        },
+        {
+          "name": "func_08A93DAC",
+          "address": "0x08A93DAC",
+          "size": 24
+        }
+      ]
+    },
+    {
+      "name": "menu_configuration_getters",
+      "source": "src/menu/configuration_getters.c",
+      "functions": [
+        {
+          "name": "func_08A93DC4",
+          "address": "0x08A93DC4",
+          "size": 12
+        },
+        {
+          "name": "func_08A93DD0",
+          "address": "0x08A93DD0",
+          "size": 12
+        },
+        {
+          "name": "func_08A93DDC",
+          "address": "0x08A93DDC",
+          "size": 12
+        },
+        {
+          "name": "func_08A93DE8",
+          "address": "0x08A93DE8",
+          "size": 12
+        }
+      ]
+    },
+    {
+      "name": "menu_configuration_initializer",
+      "source": "src/menu/configuration_initializer.c",
+      "functions": [
+        {
+          "name": "func_08A93DF4",
+          "address": "0x08A93DF4",
+          "size": 40
+        }
+      ]
+    },
+    {
+      "name": "menu_configuration_array_consumer",
+      "source": "src/menu/configuration_array_consumer.c",
+      "functions": [
+        {
+          "name": "func_08A951F4",
+          "address": "0x08A951F4",
+          "size": 204
+        }
+      ]
+    },
+    {
+      "name": "menu_initializer_flag_e",
+      "source": "src/menu/initializer_flag_e.c",
+      "functions": [
+        {
+          "name": "func_08AB2034",
+          "address": "0x08AB2034",
+          "size": 16
+        }
+      ]
+    },
+    {
+      "name": "menu_initializer_runtime",
+      "source": "src/menu/initializer_runtime.c",
+      "functions": [
+        {
+          "name": "func_08AFFF54",
+          "address": "0x08AFFF54",
+          "size": 36
+        }
+      ]
+    },
+    {
+      "name": "menu_initializer_float",
+      "source": "src/menu/initializer_float.c",
+      "functions": [
+        {
+          "name": "func_08B44E70",
+          "address": "0x08B44E70",
+          "size": 32
+        }
+      ]
+    },
+    {
+      "name": "menu_resource_wait",
+      "source": "src/menu/resource_wait.cpp",
+      "functions": [
+        {
+          "name": "func_089DDDA0",
+          "address": "0x089DDDA0",
+          "size": 184
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fRMenuResourceFlagsIhas_0020PC6QMenuResourceViewT"
+      ]
+    },
+    {
+      "name": "menu_resource_presentation",
+      "source": "src/menu/resource_presentation.cpp",
+      "functions": [
+        {
+          "name": "func_089DE0A4",
+          "address": "0x089DE0A4",
+          "size": 300
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fRMenuResourceFlagsIhas_0020PC6QMenuResourceViewT"
+      ]
+    },
+    {
+      "name": "menu_context_finish",
+      "source": "src/menu/context_finish.c",
+      "functions": [
+        {
+          "name": "func_089DDC20",
+          "address": "0x089DDC20",
+          "size": 164
+        }
+      ]
+    },
+    {
+      "name": "menu_execution_storage",
+      "source": "src/menu/execution_storage.c",
+      "functions": [
+        {
+          "name": "func_089DE870",
+          "address": "0x089DE870",
+          "size": 88
+        },
+        {
+          "name": "func_089DE8C8",
+          "address": "0x089DE8C8",
+          "size": 56
+        },
+        {
+          "name": "func_089DE900",
+          "address": "0x089DE900",
+          "size": 16
+        }
+      ]
+    },
+    {
+      "name": "menu_execution_callback_setup",
+      "source": "src/menu/execution_callback_setup.c",
+      "functions": [
+        {
+          "name": "func_089DE910",
+          "address": "0x089DE910",
+          "size": 60
+        },
+        {
+          "name": "func_089DE94C",
+          "address": "0x089DE94C",
+          "size": 68
+        }
+      ]
+    },
+    {
+      "name": "menu_execution_callback_entries",
+      "source": "src/menu/execution_callback_entries.c",
+      "functions": [
+        {
+          "name": "func_089DE9EC",
+          "address": "0x089DE9EC",
+          "size": 40
+        },
+        {
+          "name": "func_089DEA14",
+          "address": "0x089DEA14",
+          "size": 32
+        },
+        {
+          "name": "func_089DEA34",
+          "address": "0x089DEA34",
+          "size": 32
+        },
+        {
+          "name": "func_089DEA54",
+          "address": "0x089DEA54",
+          "size": 32
+        }
+      ]
+    },
+    {
+      "name": "menu_execution_resume",
+      "source": "src/menu/execution_resume.c",
+      "functions": [
+        {
+          "name": "func_089DEA74",
+          "address": "0x089DEA74",
+          "size": 52
+        }
+      ]
+    },
+    {
+      "name": "menu_savedata_list_setup",
+      "source": "src/menu/savedata_list_setup.c",
+      "functions": [
+        {
+          "name": "func_089DD760",
+          "address": "0x089DD760",
+          "size": 464
+        }
+      ]
+    },
+    {
+      "name": "menu_savedata_latest_slot",
+      "source": "src/menu/savedata_latest_slot.c",
+      "functions": [
+        {
+          "name": "func_089DD9DC",
+          "address": "0x089DD9DC",
+          "size": 396
+        }
+      ]
+    },
+    {
+      "name": "menu_savedata_list_poll",
+      "source": "src/menu/savedata_list_poll.c",
+      "functions": [
+        {
+          "name": "func_089DD930",
+          "address": "0x089DD930",
+          "size": 172
+        }
+      ]
+    },
+    {
+      "name": "menu_savedata_load_poll",
+      "source": "src/menu/savedata_load_poll.c",
+      "functions": [
+        {
+          "name": "func_089DDB68",
+          "address": "0x089DDB68",
+          "size": 184
+        }
+      ]
+    },
+    {
+      "name": "menu_presentation_complete",
+      "source": "src/menu/presentation_complete.c",
+      "functions": [
+        {
+          "name": "func_089DE9D4",
+          "address": "0x089DE9D4",
+          "size": 24
+        }
+      ]
+    }
+  ],
+  "symbols": {
+    "D_09B6DA54": "0x09B6DA54",
+    "D_09B6DABC": "0x09B6DABC",
+    "D_09B6DCE4": "0x09B6DCE4",
+    "D_09B6CD84": "0x09B6CD84",
+    "D_09B6F454": "0x09B6F454",
+    "D_08A93E24": "0x08A93E24",
+    "D_08A9443C": "0x08A9443C",
+    "D_08A94638": "0x08A94638",
+    "D_08A94670": "0x08A94670",
+    "D_08A94568": "0x08A94568",
+    "D_08A93E20": "0x08A93E20",
+    "func_08864FF0": "0x08864FF0",
+    "func_0889F63C": "0x0889F63C",
+    "func_0889F674": "0x0889F674",
+    "func_08992F04": "0x08992F04",
+    "func_08866AA8": "0x08866AA8",
+    "D_089C8E70": "0x089C8E70",
+    "D_089C8E88": "0x089C8E88",
+    "D_089C8EA0": "0x089C8EA0",
+    "D_08A9426C": "0x08A9426C",
+    "D_09B6CDA0": "0x09B6CDA0",
+    "func_088CB9E8": "0x088CB9E8",
+    "D_08B4BFD8": "0x08B4BFD8",
+    "D_09B6DCE0": "0x09B6DCE0",
+    "D_09B6C2C0": "0x09B6C2C0",
+    "D_089D5F1F": "0x089D5F1F",
+    "D_089D712C": "0x089D712C",
+    "func_088AC82C": "0x088AC82C",
+    "func_088AC890": "0x088AC890",
+    "func_088DA0A8": "0x088DA0A8",
+    "func_088D9B84": "0x088D9B84",
+    "func_088D9AF4": "0x088D9AF4",
+    "D_089E09E8": "0x089E09E8",
+    "D_089D5F20": "0x089D5F20",
+    "func_08935524": "0x08935524",
+    "func_08862450": "0x08862450",
+    "D_089D7830": "0x089D7830",
+    "func_088D0700": "0x088D0700",
+    "func_088DAA40": "0x088DAA40",
+    "func_089C5FB8": "0x089C5FB8",
+    "func_08867888": "0x08867888",
+    "func_0889F6A0": "0x0889F6A0",
+    "func_0889F750": "0x0889F750",
+    "func_088DAB44": "0x088DAB44",
+    "func_088D9F5C": "0x088D9F5C",
+    "func_088D4C5C": "0x088D4C5C",
+    "func_08873D34": "0x08873D34",
+    "func_08873DB0": "0x08873DB0",
+    "func_088AD524": "0x088AD524",
+    "func_08862444": "0x08862444",
+    "func_0888204C": "0x0888204C",
+    "func_0885C40C": "0x0885C40C",
+    "func_0885C488": "0x0885C488",
+    "func_0888208C": "0x0888208C",
+    "func_0886503C": "0x0886503C",
+    "func_0886504C": "0x0886504C",
+    "func_088650A4": "0x088650A4",
+    "func_08865158": "0x08865158",
+    "func_089DE3AC": "0x089DE3AC",
+    "func_089DE548": "0x089DE548",
+    "D_089E076C": "0x089E076C",
+    "D_089E09C0": "0x089E09C0",
+    "D_089E0704": "0x089E0704",
+    "D_089E070C": "0x089E070C",
+    "D_089E0718": "0x089E0718",
+    "D_089E0724": "0x089E0724",
+    "D_089E06F1": "0x089E06F1",
+    "D_089D6010": "0x089D6010",
+    "D_089D7280": "0x089D7280",
+    "func_0893476C": "0x0893476C",
+    "func_08935BB4": "0x08935BB4",
+    "func_08935828": "0x08935828",
+    "func_088B168C": "0x088B168C",
+    "func_089C5858": "0x089C5858",
+    "D_089E0738": "0x089E0738",
+    "func_089C5D78": "0x089C5D78",
+    "func_089C5868": "0x089C5868",
+    "func_089C5878": "0x089C5878",
+    "func_089C5898": "0x089C5898"
+  },
+  "status": "45 matching C/C++ functions / 4344 bytes; savedata callbacks and newly audited presentation completion callback. Controller table remains14/20; broader ownership incomplete."
+}

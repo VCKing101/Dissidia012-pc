@@ -1,0 +1,303 @@
+{
+  "inventory_revision": 6,
+  "baseline_name": "dispatch-baseline-v5",
+  "modules": [
+    {
+      "module": "main",
+      "reference_sha256": "0bc8e779aad2814a3d1bd77346f69ca5e16665845ed053cd0ad44a9cbfaefe6d",
+      "baseline_export_sha256": "9d79a87e767a2c221af815f0be68e8b7fc69b127719b1a1a376eee029a313b3d",
+      "current_inventory_sha256": "ebc39389a1dc50ada5adba482b068cacd9ae61e39702edf9fca1700c09425155",
+      "functions_added": 0,
+      "function_bytes_added": 0,
+      "matched_c_functions_among_additions": 0,
+      "matched_c_bytes_among_additions": 0,
+      "added_entries": [],
+      "untraced_entries": []
+    },
+    {
+      "module": "menu",
+      "reference_sha256": "f021f96fa05da5907563a28c232966aa8a344526d6b8bdee728053ec75224d0a",
+      "baseline_export_sha256": "970ffbbbffe840c7e25e4b242dcbee5e5b287923850be1f252284d59969760e5",
+      "current_inventory_sha256": "8265d5710510daf46cbd065a02a24d452f5e3801f67754c66714fd28cb61b743",
+      "functions_added": 0,
+      "function_bytes_added": 0,
+      "matched_c_functions_among_additions": 0,
+      "matched_c_bytes_among_additions": 0,
+      "added_entries": [],
+      "untraced_entries": []
+    },
+    {
+      "module": "battle",
+      "reference_sha256": "1f96cfb3be771ff6e94741ae3916fab340df74e36ede07ca39545d015f4c49dc",
+      "baseline_export_sha256": "1bcf9e823725d3e073f58c698d875d7a5afa9c2523b33fa59aaaeb622f39197a",
+      "current_inventory_sha256": "720f37fbad060c595dafe2c460cb795a11b11e18a3f2e37d8ab742928f007b5f",
+      "functions_added": 24,
+      "function_bytes_added": 1580,
+      "matched_c_functions_among_additions": 1,
+      "matched_c_bytes_among_additions": 12,
+      "added_entries": [
+        {
+          "id": "battle:0x089DD4D0",
+          "body_bytes": 100,
+          "reachability": {
+            "id": "battle:0x089DD4D0",
+            "root": "battle:0x089DD4D0",
+            "evidence": "explicit battle ensure in deferred setup"
+          },
+          "direct_dispatch_root": true
+        },
+        {
+          "id": "battle:0x089DDFC8",
+          "body_bytes": 216,
+          "reachability": {
+            "id": "battle:0x089DDFC8",
+            "root": "battle:0x089DD4D0",
+            "caller": "battle:0x089E79A8",
+            "call_pc": "0x089E79C4",
+            "evidence": "local direct JAL from a reached function"
+          },
+          "direct_dispatch_root": false
+        },
+        {
+          "id": "battle:0x089DF0B8",
+          "body_bytes": 56,
+          "reachability": {
+            "id": "battle:0x089DF0B8",
+            "root": "battle:0x089DD4D0",
+            "caller": "battle:0x089DDFC8",
+            "call_pc": "0x089DDFEC",
+            "evidence": "local direct JAL from a reached function"
+          },
+          "direct_dispatch_root": false
+        },
+        {
+          "id": "battle:0x089E06A8",
+          "body_bytes": 96,
+          "reachability": {
+            "id": "battle:0x089E06A8",
+            "root": "battle:0x089DD4D0",
+            "caller": "battle:0x089DD4D0",
+            "call_pc": "0x089DD508",
+            "evidence": "local direct JAL from a reached function"
+          },
+          "direct_dispatch_root": false
+        },
+        {
+          "id": "battle:0x089E0CB8",
+          "body_bytes": 56,
+          "reachability": {
+            "id": "battle:0x089E0CB8",
+            "root": "battle:0x089DD4D0",
+            "caller": "battle:0x089E06A8",
+            "call_pc": "0x089E06E4",
+            "evidence": "local direct JAL from a reached function"
+          },
+          "direct_dispatch_root": false
+        },
+        {
+          "id": "battle:0x089E3208",
+          "body_bytes": 80,
+          "reachability": {
+            "id": "battle:0x089E3208",
+            "root": "battle:0x089DD4D0",
+            "caller": "battle:0x089DD4D0",
+            "call_pc": "0x089DD4E8",
+            "evidence": "local direct JAL from a reached function"
+          },
+          "direct_dispatch_root": false
+        },
+        {
+          "id": "battle:0x089E68E0",
+          "body_bytes": 72,
+          "reachability": {
+            "id": "battle:0x089E68E0",
+            "root": "battle:0x089DD4D0",
+            "caller": "battle:0x089DD4D0",
+            "call_pc": "0x089DD500",
+            "evidence": "local direct JAL from a reached function"
+          },
+          "direct_dispatch_root": false
+        },
+        {
+          "id": "battle:0x089E6E60",
+          "body_bytes": 56,
+          "reachability": {
+            "id": "battle:0x089E6E60",
+            "root": "battle:0x089DD4D0",
+            "caller": "battle:0x089E79A8",
+            "call_pc": "0x089E79FC",
+            "evidence": "local direct JAL from a reached function"
+          },
+          "direct_dispatch_root": false
+        },
+        {
+          "id": "battle:0x089E7130",
+          "body_bytes": 80,
+          "reachability": {
+            "id": "battle:0x089E7130",
+            "root": "battle:0x089DD4D0",
+            "caller": "battle:0x089DD4D0",
+            "call_pc": "0x089DD4F8",
+            "evidence": "local direct JAL from a reached function"
+          },
+          "direct_dispatch_root": false
+        },
+        {
+          "id": "battle:0x089E79A8",
+          "body_bytes": 120,
+          "reachability": {
+            "id": "battle:0x089E79A8",
+            "root": "battle:0x089DD4D0",
+            "caller": "battle:0x089DD4D0",
+            "call_pc": "0x089DD4F0",
+            "evidence": "local direct JAL from a reached function"
+          },
+          "direct_dispatch_root": false
+        },
+        {
+          "id": "battle:0x089E8E70",
+          "body_bytes": 56,
+          "reachability": {
+            "id": "battle:0x089E8E70",
+            "root": "battle:0x089DD4D0",
+            "caller": "battle:0x089DD4D0",
+            "call_pc": "0x089DD4E0",
+            "evidence": "local direct JAL from a reached function"
+          },
+          "direct_dispatch_root": false
+        },
+        {
+          "id": "battle:0x089E8EDC",
+          "body_bytes": 12,
+          "reachability": {
+            "id": "battle:0x089E8EDC",
+            "root": "battle:0x089DD4D0",
+            "caller": "battle:0x089E8E70",
+            "call_pc": "0x089E8E8C",
+            "evidence": "local direct JAL from a reached function"
+          },
+          "direct_dispatch_root": false
+        },
+        {
+          "id": "battle:0x089ECF40",
+          "body_bytes": 56,
+          "reachability": {
+            "id": "battle:0x089ECF40",
+            "root": "battle:0x089DD4D0",
+            "caller": "battle:0x089DD4D0",
+            "call_pc": "0x089DD510",
+            "evidence": "local direct JAL from a reached function"
+          },
+          "direct_dispatch_root": false
+        },
+        {
+          "id": "battle:0x08A4FD00",
+          "body_bytes": 56,
+          "reachability": {
+            "id": "battle:0x08A4FD00",
+            "root": "battle:0x08A4FD00",
+            "evidence": "explicit battle ensure in deferred setup"
+          },
+          "direct_dispatch_root": true
+        },
+        {
+          "id": "battle:0x08ABB7FC",
+          "body_bytes": 12,
+          "reachability": {
+            "id": "battle:0x08ABB7FC",
+            "root": "battle:0x08ABB7FC",
+            "evidence": "explicit battle ensure in deferred setup"
+          },
+          "direct_dispatch_root": true
+        },
+        {
+          "id": "battle:0x08AC6098",
+          "body_bytes": 36,
+          "reachability": {
+            "id": "battle:0x08AC6098",
+            "root": "battle:0x08AC6098",
+            "evidence": "explicit battle ensure in deferred setup"
+          },
+          "direct_dispatch_root": true
+        },
+        {
+          "id": "battle:0x08ACD0F0",
+          "body_bytes": 16,
+          "reachability": {
+            "id": "battle:0x08ACD0F0",
+            "root": "battle:0x08ACD0F0",
+            "evidence": "explicit battle ensure in deferred setup"
+          },
+          "direct_dispatch_root": true
+        },
+        {
+          "id": "battle:0x08AF2D08",
+          "body_bytes": 16,
+          "reachability": {
+            "id": "battle:0x08AF2D08",
+            "root": "battle:0x08AF2D08",
+            "evidence": "explicit battle ensure in deferred setup"
+          },
+          "direct_dispatch_root": true
+        },
+        {
+          "id": "battle:0x08AFBDD8",
+          "body_bytes": 104,
+          "reachability": {
+            "id": "battle:0x08AFBDD8",
+            "root": "battle:0x08AFBDD8",
+            "evidence": "explicit battle ensure in deferred setup"
+          },
+          "direct_dispatch_root": true
+        },
+        {
+          "id": "battle:0x08AFBE40",
+          "body_bytes": 12,
+          "reachability": {
+            "id": "battle:0x08AFBE40",
+            "root": "battle:0x08AFBE40",
+            "evidence": "explicit battle ensure in deferred setup"
+          },
+          "direct_dispatch_root": true
+        },
+        {
+          "id": "battle:0x08B132A0",
+          "body_bytes": 116,
+          "reachability": {
+            "id": "battle:0x08B132A0",
+            "root": "battle:0x08B132A0",
+            "evidence": "explicit battle ensure in deferred setup"
+          },
+          "direct_dispatch_root": true
+        },
+        {
+          "id": "battle:0x08B13B70",
+          "body_bytes": 44,
+          "reachability": {
+            "id": "battle:0x08B13B70",
+            "root": "battle:0x08B13B70",
+            "evidence": "explicit battle ensure in deferred setup"
+          },
+          "direct_dispatch_root": true
+        }
+      ],
+      "untraced_entries": [
+        {
+          "id": "battle:0x089E3F08",
+          "body_bytes": 56,
+          "confidence": "automatic-provisional"
+        },
+        {
+          "id": "battle:0x089E44C0",
+          "body_bytes": 56,
+          "confidence": "automatic-provisional"
+        }
+      ]
+    }
+  ],
+  "functions_added": 24,
+  "function_bytes_added": 1580,
+  "untraced_functions_added": 2,
+  "matched_c_functions_among_additions": 1,
+  "matched_c_bytes_among_additions": 12
+}

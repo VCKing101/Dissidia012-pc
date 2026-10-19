@@ -1,0 +1,322 @@
+From b3764995a3be1434815d0b84097c6e0a086ce4ec Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Mon, 19 Oct 2026 07:16:23 +1030
+Subject: [PATCH 24/27] FFmpeg: libavformat and libswresample, for host audio
+ files
+
+Host audio files (MP3, Ogg Vorbis, Opus, FLAC, WAV) need a demuxer and a
+resampler besides libavcodec. The Windows build (BtbN's LGPL shared
+build) already ships avformat-61.dll and swresample-5.dll with every
+native decoder; avformat-61.dll is now copied next to the executable and
+both are linked. The source build for macOS, Linux and Android now
+builds libavformat and libswresample too, with only the wav, mp3, ogg
+and flac demuxers, the mpegaudio, vorbis, opus and flac parsers, and the
+mp3float, vorbis, opus, flac and PCM decoders added to the ATRAC and
+H.264 ones; no protocol (files are read through the host's own I/O), no
+filter, scaler, device or network code. Still LGPL-2.1-or-later only,
+which the build checks as before. The changed flags rebuild FFmpeg once.
+
+PORTABLEKIT_FFMPEG_HOST_AUDIO says whether the two libraries are there
+(PORTABLEKIT_HAS_HOST_AUDIO for the code). With PORTABLEKIT_FFMPEG=system
+they are optional: without them music and movies work as before and
+host audio files are not played.
+
+The packaging lists (Windows, macOS, Android), the desktop app's notices
+and SOURCE_PROVENANCE.md name the two libraries and the new flags. A
+port's own THIRD_PARTY_NOTICES.md must carry the new configure line for
+the release scripts' check.
+
+Verified on Windows (MSVC, the prebuilt build): two builds of one port
+link and run, and decode MP3, Vorbis, Opus, FLAC and WAV files. Not
+verified: the source build on macOS, Linux and Android (configure and
+make were not run), the system mode, the release scripts.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../packaging/THIRD_PARTY_NOTICES.md          |  8 +--
+ cmake/FFmpeg.cmake                            | 59 +++++++++++++------
+ docs/BUILDING.md                              |  2 +-
+ docs/DESKTOP_APP.md                           |  2 +-
+ docs/SOURCE_PROVENANCE.md                     |  2 +-
+ packaging/android/build_apk.sh                |  3 +-
+ scripts/package_desktop_windows.ps1           |  2 +-
+ scripts/release_macos.sh                      |  5 +-
+ 8 files changed, 54 insertions(+), 29 deletions(-)
+
+diff --git a/apps/portablekit/packaging/THIRD_PARTY_NOTICES.md b/apps/portablekit/packaging/THIRD_PARTY_NOTICES.md
+index 869ac76..61d876d 100644
+--- a/apps/portablekit/packaging/THIRD_PARTY_NOTICES.md
++++ b/apps/portablekit/packaging/THIRD_PARTY_NOTICES.md
+@@ -45,14 +45,14 @@ Window, input and audio output. Copyright (C) 1997-2026 Sam Lantinga. zlib Licen
+ 
+ ### FFmpeg 7.1.5
+ 
+-Decodes games' ATRAC3 and ATRAC3plus audio and their H.264 movies. FFmpeg is licensed under the GNU Lesser General Public License, version 2.1 or later: `FFmpeg-COPYING.LGPLv2.1.txt`, with the source and configuration also noted in `FFmpeg-SOURCE.txt`. This build contains only FFmpeg's LGPL parts and nothing non-free. <https://ffmpeg.org/>
++Decodes games' ATRAC3 and ATRAC3plus audio and their H.264 movies, and audio files (MP3, Ogg Vorbis, Opus, FLAC, WAV) a port plays in place of a track. FFmpeg is licensed under the GNU Lesser General Public License, version 2.1 or later: `FFmpeg-COPYING.LGPLv2.1.txt`, with the source and configuration also noted in `FFmpeg-SOURCE.txt`. This build contains only FFmpeg's LGPL parts and nothing non-free. <https://ffmpeg.org/>
+ 
+-- Libraries on macOS: `libavcodec.61.dylib` and `libavutil.59.dylib`
++- Libraries on macOS: `libavcodec.61.dylib`, `libavutil.59.dylib`, `libavformat.61.dylib` and `libswresample.5.dylib`
+ - Source: <https://ffmpeg.org/releases/ffmpeg-7.1.5.tar.xz> (SHA-256 `de668509caf9e35e3cd162473441fdb29538c6d96ed080292b3cf9e6fc5d558f`), not modified
+ - Configured with:
+ 
+   ```text
+-  ./configure --prefix=<prefix> --enable-shared --disable-static --disable-programs --disable-doc --disable-avdevice --disable-avformat --disable-avfilter --disable-swscale --disable-swresample --disable-network --disable-autodetect --disable-everything --enable-decoder=atrac3,atrac3p,h264 --disable-x86asm --disable-debug
++  ./configure --prefix=<prefix> --enable-shared --disable-static --disable-programs --disable-doc --disable-avdevice --disable-avfilter --disable-swscale --disable-network --disable-autodetect --disable-everything --enable-decoder=atrac3,atrac3p,h264,mp3float,vorbis,opus,flac,pcm_s16le,pcm_s24le,pcm_s32le,pcm_f32le,pcm_u8 --enable-demuxer=wav,mp3,ogg,flac --enable-parser=mpegaudio,vorbis,opus,flac --disable-x86asm --disable-debug
+   ```
+ 
+ - On macOS also with `--install-name-dir=@rpath`, which only sets where the libraries expect each other.
+@@ -86,7 +86,7 @@ A fallback for text on systems without a CJK font: `PortableKit.app/Contents/Res
+ 
+ The Windows build uses the unmodified prebuilt LGPL shared build of FFmpeg 7.1.5 (commit `7d0e842004`) from BtbN/FFmpeg-Builds, built from FFmpeg's LGPL parts only and with `--enable-version3`, so it is licensed under the GNU Lesser General Public License, version 3 or later: `FFmpeg-LICENSE.txt`, with the source location in `FFmpeg-SOURCE.txt`. You may replace these libraries with your own builds of a compatible version.
+ 
+-- Libraries: `avcodec-61.dll`, `avutil-59.dll` and `swresample-5.dll`
++- Libraries: `avcodec-61.dll`, `avutil-59.dll`, `avformat-61.dll` and `swresample-5.dll`
+ - Release: <https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-06-30-13-34/ffmpeg-n7.1.5-1-g7d0e842004-win64-lgpl-shared-7.1.zip> (SHA-256 `03a8003e245c08df4277d7b0adc50b93a97ddd4a3aaafea21943c4384df59895`), pinned in `cmake/FFmpeg.cmake`
+ - Source: <https://github.com/FFmpeg/FFmpeg/tree/7d0e842004>
+ 
+diff --git a/cmake/FFmpeg.cmake b/cmake/FFmpeg.cmake
+index e6cca7a..5fbfec5 100644
+--- a/cmake/FFmpeg.cmake
++++ b/cmake/FFmpeg.cmake
+@@ -1,5 +1,7 @@
+-# FFmpeg decodes the game's music (ATRAC3, ATRAC3plus) and its movies (H.264).
+-# Only libavcodec and libavutil are used, always as shared libraries.
++# FFmpeg decodes the game's music (ATRAC3, ATRAC3plus) and its movies (H.264),
++# with libavcodec and libavutil. libavformat and libswresample also read the
++# host's own audio files (MP3, Ogg Vorbis, Opus, FLAC, WAV) that a port plays in
++# place of a track (host/audio/host_audio.cpp). Always shared libraries.
+ #
+ # PORTABLEKIT_FFMPEG selects where they come from:
+ #   bundled  (default) On macOS and Linux, download the pinned FFmpeg release
+@@ -8,35 +10,42 @@
+ #            toolchain cannot run FFmpeg's configure, download the pinned
+ #            prebuilt LGPL shared build below instead. Either way the libraries
+ #            end up next to the executable, so it needs no FFmpeg on the system.
+-#   system   The libavcodec and libavutil that pkg-config finds.
++#   system   The libavcodec and libavutil that pkg-config finds, and
++#            libavformat and libswresample when it finds them too (without
++#            them, host audio files are not played).
+ #   OFF      No FFmpeg: the game has no music and skips its movies.
+ #
+-# Sets PORTABLEKIT_HAS_FFMPEG and defines portablekit_use_ffmpeg(<target>).
++# Sets PORTABLEKIT_HAS_FFMPEG and PORTABLEKIT_FFMPEG_HOST_AUDIO and defines
++# portablekit_use_ffmpeg(<target>).
+ 
+-# FFmpeg 7.1.5 (libavcodec 61, libavutil 59), the release the Linux packages use.
++# FFmpeg 7.1.5 (libavcodec 61, libavutil 59, libavformat 61, libswresample 5),
++# the release the Linux packages use.
+ set(PORTABLEKIT_FFMPEG_VERSION 7.1.5)
+ set(PORTABLEKIT_FFMPEG_URL "https://ffmpeg.org/releases/ffmpeg-${PORTABLEKIT_FFMPEG_VERSION}.tar.xz")
+ set(PORTABLEKIT_FFMPEG_SHA256 de668509caf9e35e3cd162473441fdb29538c6d96ed080292b3cf9e6fc5d558f)
+-set(PORTABLEKIT_FFMPEG_SOVERSIONS avcodec 61 avutil 59)
++set(PORTABLEKIT_FFMPEG_SOVERSIONS avcodec 61 avutil 59 avformat 61 swresample 5)
+ 
+-# Only what the game needs: the ATRAC3, ATRAC3plus and H.264 decoders. The host
+-# splits the movie streams into access units and converts pixels itself, so no
+-# demuxer, parser, scaler or resampler is built. No GPL or non-free parts: the
+-# result is LGPL-2.1-or-later, which the build checks.
++# Only what is needed: the ATRAC3, ATRAC3plus and H.264 decoders for the game,
++# whose movie streams the host splits into access units and whose pixels it
++# converts itself; and for host audio files the WAV, MP3, Ogg and FLAC
++# demuxers, their parsers, the MP3, Vorbis, Opus, FLAC and PCM decoders and the
++# resampler. Host files are read through the host's own I/O, so no protocol is
++# built. No scaler, filter, device or network code. No GPL or non-free parts:
++# the result is LGPL-2.1-or-later, which the build checks.
+ set(PORTABLEKIT_FFMPEG_CONFIGURE_FLAGS
+     --enable-shared
+     --disable-static
+     --disable-programs
+     --disable-doc
+     --disable-avdevice
+-    --disable-avformat
+     --disable-avfilter
+     --disable-swscale
+-    --disable-swresample
+     --disable-network
+     --disable-autodetect
+     --disable-everything
+-    --enable-decoder=atrac3,atrac3p,h264
++    --enable-decoder=atrac3,atrac3p,h264,mp3float,vorbis,opus,flac,pcm_s16le,pcm_s24le,pcm_s32le,pcm_f32le,pcm_u8
++    --enable-demuxer=wav,mp3,ogg,flac
++    --enable-parser=mpegaudio,vorbis,opus,flac
+     --disable-x86asm
+     --disable-debug)
+ 
+@@ -47,7 +56,7 @@ set(PORTABLEKIT_FFMPEG_CONFIGURE_FLAGS
+ set(PORTABLEKIT_FFMPEG_WINDOWS_URL
+     "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-06-30-13-34/ffmpeg-n7.1.5-1-g7d0e842004-win64-lgpl-shared-7.1.zip")
+ set(PORTABLEKIT_FFMPEG_WINDOWS_SHA256 03a8003e245c08df4277d7b0adc50b93a97ddd4a3aaafea21943c4384df59895)
+-set(PORTABLEKIT_FFMPEG_WINDOWS_DLLS avcodec-61 avutil-59 swresample-5)
++set(PORTABLEKIT_FFMPEG_WINDOWS_DLLS avcodec-61 avutil-59 avformat-61 swresample-5)
+ 
+ set(PORTABLEKIT_FFMPEG "bundled" CACHE STRING
+     "Where FFmpeg comes from: bundled (built with the project), system (pkg-config) or OFF (no music, no movies)")
+@@ -72,6 +81,8 @@ set(PORTABLEKIT_FFMPEG_DOWNLOAD_DIR "${CMAKE_BINARY_DIR}/_deps/downloads" CACHE
+     "Where the bundled FFmpeg archive is downloaded to, or found without downloading")
+ 
+ set(PORTABLEKIT_HAS_FFMPEG OFF)
++# libavformat and libswresample, for host audio files.
++set(PORTABLEKIT_FFMPEG_HOST_AUDIO OFF)
+ set(_portablekit_ffmpeg_root "${CMAKE_BINARY_DIR}/_deps/ffmpeg")
+ set(_portablekit_ffmpeg_bin "${CMAKE_BINARY_DIR}/bin")
+ 
+@@ -142,6 +153,13 @@ elseif(_portablekit_ffmpeg_mode STREQUAL "system")
+     target_link_libraries(portablekit_ffmpeg INTERFACE PkgConfig::PORTABLEKIT_LIBAV)
+     set(PORTABLEKIT_HAS_FFMPEG ON)
+     message(STATUS "portablekit: FFmpeg libavcodec ${PORTABLEKIT_LIBAV_libavcodec_VERSION} from the system; music and movies enabled")
++    pkg_check_modules(PORTABLEKIT_LIBAV_HOST_AUDIO QUIET IMPORTED_TARGET libavformat libswresample)
++    if(PORTABLEKIT_LIBAV_HOST_AUDIO_FOUND)
++        target_link_libraries(portablekit_ffmpeg INTERFACE PkgConfig::PORTABLEKIT_LIBAV_HOST_AUDIO)
++        set(PORTABLEKIT_FFMPEG_HOST_AUDIO ON)
++    else()
++        message(STATUS "portablekit: no libavformat and libswresample from the system; host audio files are not played")
++    endif()
+ 
+ elseif(WIN32)
+     if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8 OR CMAKE_SYSTEM_PROCESSOR MATCHES "ARM|arm|aarch")
+@@ -164,14 +182,14 @@ elseif(WIN32)
+     endforeach()
+     configure_file("${_portablekit_ffmpeg_prefix}/LICENSE.txt" "${_portablekit_ffmpeg_bin}/FFmpeg-LICENSE.txt" COPYONLY)
+     _portablekit_ffmpeg_write_notice("${_portablekit_ffmpeg_bin}"
+-        "The FFmpeg libraries here (avcodec, avutil, swresample) are an unmodified prebuilt\n"
++        "The FFmpeg libraries here (avcodec, avutil, avformat, swresample) are an unmodified prebuilt\n"
+         "LGPL shared build of FFmpeg ${PORTABLEKIT_FFMPEG_VERSION} from BtbN/FFmpeg-Builds, licensed under the\n"
+         "GNU LGPL version 3 or later (FFmpeg-LICENSE.txt). They are dynamically linked.\n\n"
+         "Build:  ${PORTABLEKIT_FFMPEG_WINDOWS_URL}\n"
+         "Source: https://github.com/FFmpeg/FFmpeg/tree/release/7.1 (the commit is in the file name)\n"
+         "Build scripts: https://github.com/BtbN/FFmpeg-Builds\n")
+     add_library(portablekit_ffmpeg INTERFACE)
+-    foreach(lib avcodec avutil)
++    foreach(lib avcodec avutil avformat swresample)
+         add_library(portablekit_ffmpeg_${lib} SHARED IMPORTED)
+         foreach(dll IN LISTS PORTABLEKIT_FFMPEG_WINDOWS_DLLS)
+             if(dll MATCHES "^${lib}-")
+@@ -185,6 +203,7 @@ elseif(WIN32)
+     endforeach()
+     target_include_directories(portablekit_ffmpeg INTERFACE "${_portablekit_ffmpeg_includes}")
+     set(PORTABLEKIT_HAS_FFMPEG ON)
++    set(PORTABLEKIT_FFMPEG_HOST_AUDIO ON)
+     message(STATUS "portablekit: bundled FFmpeg ${PORTABLEKIT_FFMPEG_VERSION} (prebuilt, LGPL); music and movies enabled")
+ 
+ else()
+@@ -295,7 +314,7 @@ else()
+     configure_file("${_portablekit_ffmpeg_src}/COPYING.LGPLv2.1" "${_portablekit_ffmpeg_lib}/FFmpeg-COPYING.LGPLv2.1.txt" COPYONLY)
+     string(REPLACE ";" " " _portablekit_ffmpeg_flag_text "${PORTABLEKIT_FFMPEG_CONFIGURE_FLAGS}")
+     _portablekit_ffmpeg_write_notice("${_portablekit_ffmpeg_lib}"
+-        "The FFmpeg libraries here (libavcodec, libavutil) are FFmpeg ${PORTABLEKIT_FFMPEG_VERSION},\n"
++        "The FFmpeg libraries here (libavcodec, libavutil, libavformat, libswresample) are FFmpeg ${PORTABLEKIT_FFMPEG_VERSION},\n"
+         "unmodified, licensed under the GNU LGPL version 2.1 or later\n"
+         "(FFmpeg-COPYING.LGPLv2.1.txt). They are dynamically linked.\n\n"
+         "Source: ${PORTABLEKIT_FFMPEG_URL}\n"
+@@ -306,7 +325,8 @@ else()
+         set(PORTABLEKIT_FFMPEG_RPATH "@loader_path/lib")
+     endif()
+     set(PORTABLEKIT_HAS_FFMPEG ON)
+-    message(STATUS "portablekit: bundled FFmpeg ${PORTABLEKIT_FFMPEG_VERSION} (LGPL, atrac3 atrac3p h264); music and movies enabled")
++    set(PORTABLEKIT_FFMPEG_HOST_AUDIO ON)
++    message(STATUS "portablekit: bundled FFmpeg ${PORTABLEKIT_FFMPEG_VERSION} (LGPL, atrac3 atrac3p h264, host audio files); music and movies enabled")
+ endif()
+ 
+ # Links <target> against FFmpeg and lets it find the bundled libraries.
+@@ -315,6 +335,9 @@ function(portablekit_use_ffmpeg target)
+         return()
+     endif()
+     target_compile_definitions(${target} PRIVATE PORTABLEKIT_HAS_FFMPEG=1)
++    if(PORTABLEKIT_FFMPEG_HOST_AUDIO)
++        target_compile_definitions(${target} PRIVATE PORTABLEKIT_HAS_HOST_AUDIO=1)
++    endif()
+     target_link_libraries(${target} PRIVATE portablekit_ffmpeg)
+     if(PORTABLEKIT_FFMPEG_RPATH)
+         set_property(TARGET ${target} APPEND PROPERTY BUILD_RPATH "${PORTABLEKIT_FFMPEG_RPATH}")
+diff --git a/docs/BUILDING.md b/docs/BUILDING.md
+index 7874d4a..931fada 100644
+--- a/docs/BUILDING.md
++++ b/docs/BUILDING.md
+@@ -66,7 +66,7 @@ Measured on an Apple M1 with 8 GB, from a fresh clone with an empty compiler cac
+ | `PSPRECOMP_GENERATED_OPT_LEVEL` | `2` | Optimisation level for generated units. `0` compiles much faster and runs much slower |
+ | `PSPRECOMP_GENERATED_JOBS` | memory / 4 GiB | How many generated units compile at once |
+ | `PORTABLEKIT_RENDERER` | `ON` | Build the Vulkan renderer. Off gives a headless build |
+-| `PORTABLEKIT_FFMPEG` | `bundled` | `bundled` builds FFmpeg with the project, `system` uses one found through pkg-config, `OFF` drops music and movies |
++| `PORTABLEKIT_FFMPEG` | `bundled` | `bundled` builds FFmpeg with the project, `system` uses one found through pkg-config (host audio files need its libavformat and libswresample too), `OFF` drops music and movies |
+ | `PORTABLEKIT_RELEASE` | `OFF` | Build for distribution: no paths into the checkout, libraries from `lib/` next to the executable |
+ | `PSPRECOMP_LTO` | `OFF` | Whole-program optimisation |
+ | `PORTABLEKIT_BUILD_LABEL` | empty | A name for the build, shown beside the version: in the window title, the menu's About section, the desktop app's library header and `portablekit --version`. For telling a build made with other components (see below) from the plain one without patching sources |
+diff --git a/docs/DESKTOP_APP.md b/docs/DESKTOP_APP.md
+index 565da7b..adcae86 100644
+--- a/docs/DESKTOP_APP.md
++++ b/docs/DESKTOP_APP.md
+@@ -261,7 +261,7 @@ Three ways were weighed:
+ ```
+ PortableKit\                          403 MB in all
+   portablekit.exe  psp_recomp.exe     the program and the recompiler
+-  SDL3.dll  avcodec-61.dll  avutil-59.dll  swresample-5.dll  libc++.dll  libunwind.dll
++  SDL3.dll  avcodec-61.dll  avutil-59.dll  avformat-61.dll  swresample-5.dll  libc++.dll  libunwind.dll
+   share\portablekit\include\          the two headers generated code includes
+   toolchain\                          the trimmed llvm-mingw the app compiles with
+   data\                               empty until the player adds a game
+diff --git a/docs/SOURCE_PROVENANCE.md b/docs/SOURCE_PROVENANCE.md
+index ae2c206..5e8651a 100644
+--- a/docs/SOURCE_PROVENANCE.md
++++ b/docs/SOURCE_PROVENANCE.md
+@@ -42,7 +42,7 @@ Third-party source, binary dependencies, shader code and notices stay beside the
+ | [stb_image](https://github.com/nothings/stb) 2.30 and stb_image_write 1.16 | texture pack images (PNG only) | MIT or public domain | Single headers from commit `2c980bb`, `third_party/stb_image.h` and `stb_image_write.h`, notices at their ends |
+ | [xxHash](https://github.com/Cyan4973/xxHash) 0.8.3 | texture pack keys | BSD-2-Clause | Unmodified `xxhash.h` of release v0.8.3 in `third_party/xxhash` with its `LICENSE` |
+ | [SDL3](https://www.libsdl.org/) | window, input, audio output | zlib | External dependency, linked dynamically; Linux releases ship an unmodified build in `lib/` |
+-| [FFmpeg](https://ffmpeg.org/) (`libavcodec`, `libavutil`) | ATRAC3 music and H.264/ATRAC3plus movie decoding (`host/audio/atrac_decoder.cpp`, `host/movie/avc_decoder.cpp`) | LGPL-2.1-or-later (the Windows build: LGPL-3.0-or-later) | Linked dynamically; no FFmpeg source is in the repository. By default the build downloads the unmodified [FFmpeg 7.1.5 release](https://ffmpeg.org/releases/ffmpeg-7.1.5.tar.xz) (SHA-256 `de668509caf9e35e3cd162473441fdb29538c6d96ed080292b3cf9e6fc5d558f`) and builds it with `--enable-shared --disable-static --disable-programs --disable-doc --disable-avdevice --disable-avformat --disable-avfilter --disable-swscale --disable-swresample --disable-network --disable-autodetect --disable-everything --enable-decoder=atrac3,atrac3p,h264 --disable-x86asm --disable-debug` (`cmake/FFmpeg.cmake`). On Windows it uses the unmodified prebuilt [LGPL shared build](https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-06-30-13-34/ffmpeg-n7.1.5-1-g7d0e842004-win64-lgpl-shared-7.1.zip) of FFmpeg 7.1.5 (commit `7d0e842004`) from [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds). The licence text and a note with the source location and configuration are copied next to the libraries. `-DPORTABLEKIT_FFMPEG=system` uses an FFmpeg found through `pkg-config` instead |
++| [FFmpeg](https://ffmpeg.org/) (`libavcodec`, `libavutil`, `libavformat`, `libswresample`) | ATRAC3 music and H.264/ATRAC3plus movie decoding (`host/audio/atrac_decoder.cpp`, `host/movie/avc_decoder.cpp`); host audio files played in place of a track (`host/audio/host_audio.cpp`) | LGPL-2.1-or-later (the Windows build: LGPL-3.0-or-later) | Linked dynamically; no FFmpeg source is in the repository. By default the build downloads the unmodified [FFmpeg 7.1.5 release](https://ffmpeg.org/releases/ffmpeg-7.1.5.tar.xz) (SHA-256 `de668509caf9e35e3cd162473441fdb29538c6d96ed080292b3cf9e6fc5d558f`) and builds it with `--enable-shared --disable-static --disable-programs --disable-doc --disable-avdevice --disable-avfilter --disable-swscale --disable-network --disable-autodetect --disable-everything --enable-decoder=atrac3,atrac3p,h264,mp3float,vorbis,opus,flac,pcm_s16le,pcm_s24le,pcm_s32le,pcm_f32le,pcm_u8 --enable-demuxer=wav,mp3,ogg,flac --enable-parser=mpegaudio,vorbis,opus,flac --disable-x86asm --disable-debug` (`cmake/FFmpeg.cmake`). On Windows it uses the unmodified prebuilt [LGPL shared build](https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-06-30-13-34/ffmpeg-n7.1.5-1-g7d0e842004-win64-lgpl-shared-7.1.zip) of FFmpeg 7.1.5 (commit `7d0e842004`) from [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds). The licence text and a note with the source location and configuration are copied next to the libraries. `-DPORTABLEKIT_FFMPEG=system` uses an FFmpeg found through `pkg-config` instead |
+ | [Noto Sans CJK JP](https://github.com/notofonts/noto-cjk) | a port's releases: fallback font for Japanese text | SIL Open Font License 1.1 | Downloaded by the release build, shipped in `fonts/`; not in the repository |
+ 
+ A port carries these notices in its own packaging, together with the license texts.
+diff --git a/packaging/android/build_apk.sh b/packaging/android/build_apk.sh
+index 755092f..1cae59e 100755
+--- a/packaging/android/build_apk.sh
++++ b/packaging/android/build_apk.sh
+@@ -101,7 +101,8 @@ echo "adding native libraries"
+ lib="$work/lib/arm64-v8a"
+ cp "$sdl_lib" "$lib/libSDL3.so"
+ cp "$build_dir/bin/libmain.so" "$lib/"
+-cp "$build_dir"/bin/lib/libavcodec.so "$build_dir"/bin/lib/libavutil.so "$lib/"
++cp "$build_dir"/bin/lib/libavcodec.so "$build_dir"/bin/lib/libavutil.so "$build_dir"/bin/lib/libavformat.so \
++   "$build_dir"/bin/lib/libswresample.so "$lib/"
+ shopt -s nullglob
+ overlays=("$build_dir"/bin/overlays/libovl*.so)
+ if [[ -n "$overlay_limit" ]]; then overlays=("${overlays[@]:0:$overlay_limit}"); fi
+diff --git a/scripts/package_desktop_windows.ps1 b/scripts/package_desktop_windows.ps1
+index 4be26e9..98f8312 100644
+--- a/scripts/package_desktop_windows.ps1
++++ b/scripts/package_desktop_windows.ps1
+@@ -79,7 +79,7 @@ $dist = Join-Path $Output 'dist'
+ # --- What the build must have made ------------------------------------------
+ Step "Checking $BuildDir"
+ $programFiles = @('portablekit.exe', 'psp_recomp.exe', 'SDL3.dll', 'avcodec-61.dll', 'avutil-59.dll',
+-                  'swresample-5.dll', 'FFmpeg-LICENSE.txt', 'FFmpeg-SOURCE.txt')
++                  'avformat-61.dll', 'swresample-5.dll', 'FFmpeg-LICENSE.txt', 'FFmpeg-SOURCE.txt')
+ foreach ($file in $programFiles) {
+     if (-not (Test-Path (Join-Path $bin $file))) { Fail "$bin\$file is missing; build the portablekit target" }
+ }
+diff --git a/scripts/release_macos.sh b/scripts/release_macos.sh
+index 6a99e12..4883827 100644
+--- a/scripts/release_macos.sh
++++ b/scripts/release_macos.sh
+@@ -280,7 +280,8 @@ overlay_count=0
+ [[ -d "$build_dir/bin/overlays" ]] && overlay_count="$(find "$build_dir/bin/overlays" -name '*.dylib' | wc -l | tr -d ' ')"
+ [[ "$overlay_count" -eq "$RELEASE_OVERLAYS" ]] ||
+     fail "expected $RELEASE_OVERLAYS overlay libraries in $build_dir/bin/overlays, found $overlay_count"
+-for file in "libavcodec.61.dylib" "libavutil.59.dylib" "FFmpeg-COPYING.LGPLv2.1.txt" "FFmpeg-SOURCE.txt"; do
++for file in "libavcodec.61.dylib" "libavutil.59.dylib" "libavformat.61.dylib" "libswresample.5.dylib" \
++            "FFmpeg-COPYING.LGPLv2.1.txt" "FFmpeg-SOURCE.txt"; do
+     [[ -e "$build_dir/bin/lib/$file" ]] || fail "$build_dir/bin/lib/$file is missing; configure with -DPORTABLEKIT_FFMPEG=bundled"
+ done
+ grep -qF -- "$FFMPEG_FLAGS" "$build_dir/bin/lib/FFmpeg-SOURCE.txt" ||
+@@ -378,7 +379,7 @@ for resource in $RELEASE_RESOURCES; do
+     ditto "$build_dir/bin/${resource%%=*}" "$resources/${resource#*=}"
+ done
+ [[ "$overlay_count" -eq 0 ]] || cp "$build_dir/bin/overlays/"*.dylib "$frameworks/overlays/"
+-for lib in libavcodec.61.dylib libavutil.59.dylib; do
++for lib in libavcodec.61.dylib libavutil.59.dylib libavformat.61.dylib libswresample.5.dylib; do
+     cp "$build_dir/bin/lib/$lib" "$frameworks/"
+ done
+ cp -L "$deps/lib/libSDL3.0.dylib" "$deps/lib/libvulkan.1.dylib" "$deps/lib/libMoltenVK.dylib" "$frameworks/"
+-- 
+2.53.0.windows.1
+

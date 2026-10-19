@@ -1,0 +1,89 @@
+{
+  "schema_version": 1,
+  "main_reference_sha256": "0bc8e779aad2814a3d1bd77346f69ca5e16665845ed053cd0ad44a9cbfaefe6d",
+  "menu_reference_sha256": "f021f96fa05da5907563a28c232966aa8a344526d6b8bdee728053ec75224d0a",
+  "imports": [
+    {
+      "address": "0x089C5868",
+      "library": "sceUtility",
+      "nid": "0x8874DBE0",
+      "api": "sceUtilitySavedataGetStatus"
+    },
+    {
+      "address": "0x089C5878",
+      "library": "sceUtility",
+      "nid": "0x9790B33C",
+      "api": "sceUtilitySavedataShutdownStart"
+    },
+    {
+      "address": "0x089C5898",
+      "library": "sceUtility",
+      "nid": "0xD4B95FFB",
+      "api": "sceUtilitySavedataUpdate"
+    }
+  ],
+  "handlers": [
+    {
+      "id": "menu:0x089DD930",
+      "bytes": 172,
+      "member_record": "0x089E0A00",
+      "checked_api_calls": [
+        {
+          "call_pc": "0x089DD93C",
+          "api": "sceUtilitySavedataGetStatus",
+          "target": "0x089C5868"
+        },
+        {
+          "call_pc": "0x089DD97C",
+          "api": "sceUtilitySavedataUpdate",
+          "target": "0x089C5898"
+        },
+        {
+          "call_pc": "0x089DD98C",
+          "api": "sceUtilitySavedataShutdownStart",
+          "target": "0x089C5878"
+        },
+        {
+          "call_pc": "0x089DD9B8",
+          "api": "sceUtilitySavedataShutdownStart",
+          "target": "0x089C5878"
+        }
+      ],
+      "matching_source": false
+    },
+    {
+      "id": "menu:0x089DDB68",
+      "bytes": 184,
+      "member_record": "0x089E0A10",
+      "checked_api_calls": [
+        {
+          "call_pc": "0x089DDB74",
+          "api": "sceUtilitySavedataGetStatus",
+          "target": "0x089C5868"
+        },
+        {
+          "call_pc": "0x089DDBB4",
+          "api": "sceUtilitySavedataUpdate",
+          "target": "0x089C5898"
+        },
+        {
+          "call_pc": "0x089DDBC4",
+          "api": "sceUtilitySavedataShutdownStart",
+          "target": "0x089C5878"
+        },
+        {
+          "call_pc": "0x089DDBFC",
+          "api": "sceUtilitySavedataShutdownStart",
+          "target": "0x089C5878"
+        }
+      ],
+      "matching_source": false
+    }
+  ],
+  "sdk_sources": [
+    "https://github.com/pspdev/pspsdk/blob/master/src/utility/sceUtility.S",
+    "https://github.com/pspdev/pspsdk/blob/master/src/utility/psputility_savedata.h"
+  ],
+  "scope": "SDK savedata-dialog polling/shutdown/update only; serialization format and complete save/profile ownership are unreviewed",
+  "source_credit": 0
+}

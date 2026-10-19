@@ -1,0 +1,89 @@
+From 86f054bbbf295b346911a93e1d11f3cc017568f8 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Sun, 18 Oct 2026 18:51:21 +1030
+Subject: [PATCH 09/27] PSPRECOMP_HLE_FIRST_CALLS: log each HLE function's
+ first call
+
+One line the first time each HLE function is called, numbered, with the
+caller's return address, so a run shows which system calls a game reached
+and in what order. Implies the histogram's counting.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ include/psprecomp/runtime.hpp |  4 ++++
+ src/runtime.cpp               | 16 ++++++++++++++++
+ 2 files changed, 20 insertions(+)
+
+diff --git a/include/psprecomp/runtime.hpp b/include/psprecomp/runtime.hpp
+index d922300..7bb829b 100644
+--- a/include/psprecomp/runtime.hpp
++++ b/include/psprecomp/runtime.hpp
+@@ -149,6 +149,8 @@ public:
+ private:
+     friend struct RuntimeCorpusHost;
+ 
++    void note_first_hle_call(std::string_view library, std::uint32_t nid, const AllegrexContext &ctx);
++
+     struct FunctionEntry {
+         RecompiledFunction function{};
+         std::string name;
+@@ -208,6 +210,8 @@ private:
+     bool stopped_{};
+     std::string stop_reason_;
+     bool hle_histogram_enabled_{};
++    bool hle_first_calls_{};
++    std::uint64_t hle_first_call_count_{};
+     std::unordered_map<std::string, std::uint64_t> hle_histogram_;
+ };
+ 
+diff --git a/src/runtime.cpp b/src/runtime.cpp
+index c3c33a6..93dad41 100644
+--- a/src/runtime.cpp
++++ b/src/runtime.cpp
+@@ -154,6 +154,11 @@ Runtime::Runtime(std::uint32_t ram_size)
+     // in the middle of guest execution; larger profiles can still grow it.
+     import_bindings_.resize(256u, nullptr);
+     hle_histogram_enabled_ = std::getenv("PSPRECOMP_HLE_HISTOGRAM") != nullptr;
++    // PSPRECOMP_HLE_FIRST_CALLS: one line the first time each HLE function is
++    // called, with the caller, so a run shows which system calls a game
++    // reached and in what order.
++    hle_first_calls_ = std::getenv("PSPRECOMP_HLE_FIRST_CALLS") != nullptr;
++    if (hle_first_calls_) hle_histogram_enabled_ = true;
+ #if defined(PSPRECOMP_AOT_PRODUCTION_FASTPATHS)
+     track_dispatch_counters_ = false;
+ #else
+@@ -1272,6 +1277,15 @@ void Runtime::invoke_native_fast_path(std::uint32_t address, AllegrexContext &ct
+     ctx.gpr[0] = 0u;
+ }
+ 
++// Called after the histogram has counted the call: its first time.
++void Runtime::note_first_hle_call(std::string_view library, std::uint32_t nid, const AllegrexContext &ctx) {
++    const auto found = hle_histogram_.find(hle_key(library, nid));
++    if (found == hle_histogram_.end() || found->second != 1u) return;
++    const std::string library_name(library);
++    std::cerr << "[hle-first] " << ++hle_first_call_count_ << " " << library_name << "::"
++              << nids_.resolve(library_name, nid).value_or(hex32(nid)) << " ra=" << hex32(ctx.gpr[31]) << std::endl;
++}
++
+ void Runtime::invoke_import_cached(std::uint32_t slot, std::string_view library,
+                                    std::uint32_t nid, AllegrexContext &ctx) {
+     if (hle_histogram_enabled_) ++hle_histogram_[hle_key(library, nid)];
+@@ -1292,6 +1306,7 @@ void Runtime::invoke_import_cached(std::uint32_t slot, std::string_view library,
+         import_bindings_[slot] = bound;
+     }
+ 
++    if (hle_first_calls_) note_first_hle_call(library, nid, ctx);
+     (*bound)(*this, ctx);
+     if (!stopped_ && g_post_import_hook != nullptr) g_post_import_hook(*this, ctx);
+ }
+@@ -1311,6 +1326,7 @@ void Runtime::invoke_import(std::string_view library, std::uint32_t nid, Allegre
+         stop("Missing HLE import " + library_name + "::" + name);
+         return;
+     }
++    if (hle_first_calls_) note_first_hle_call(library, nid, ctx);
+     function_it->second(*this, ctx);
+     if (!stopped_ && g_post_import_hook != nullptr) g_post_import_hook(*this, ctx);
+ }
+-- 
+2.53.0.windows.1
+

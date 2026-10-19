@@ -1,0 +1,35 @@
+From 0695afd0fb00db61fd0d277e8d568df4cb369a6d Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Sun, 18 Oct 2026 17:52:43 +1030
+Subject: [PATCH 02/27] Quote the NID embedding command so a profile's nids.csv
+ builds on Windows
+
+The two NID tables reach embed_nids.cmake joined by "|", which the Windows
+shell took for a pipe as soon as a profile had its own config/nids.csv
+("'G:' is not recognized as an internal or external command"). VERBATIM
+quotes it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ cmake/PortableKit.cmake | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/cmake/PortableKit.cmake b/cmake/PortableKit.cmake
+index 90147fb..de3c457 100644
+--- a/cmake/PortableKit.cmake
++++ b/cmake/PortableKit.cmake
+@@ -482,7 +482,10 @@ inline constexpr const char *kBuildLabel = \"${PORTABLEKIT_BUILD_LABEL}\";
+         COMMAND ${CMAKE_COMMAND} "-DINPUT=${nids_input}" -DOUTPUT=${nids_inc}
+                 -P "${PORTABLEKIT_ROOT}/tools/embed_nids.cmake"
+         DEPENDS ${nids_csv} "${PORTABLEKIT_ROOT}/tools/embed_nids.cmake"
+-        COMMENT "Embedding the NID table")
++        COMMENT "Embedding the NID table"
++        # The "|" between the framework's table and a profile's must reach
++        # CMake as it is; unquoted, the Windows shell takes it for a pipe.
++        VERBATIM)
+     target_sources(${target} PRIVATE "${nids_inc}")
+     target_include_directories(${target} PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated_nids")
+ 
+-- 
+2.53.0.windows.1
+

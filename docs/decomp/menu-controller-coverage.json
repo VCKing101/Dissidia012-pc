@@ -1,0 +1,199 @@
+{
+  "scope_id": "menu_controller_members",
+  "scope": "Only the twenty direct member callbacks copied by func_089DD5DC; dispatcher and dependencies are tracked separately. Not the whole menu or game.",
+  "reference_sha256": "f021f96fa05da5907563a28c232966aa8a344526d6b8bdee728053ec75224d0a",
+  "table": "0x089E09E8",
+  "dispatcher": "0x089DD5DC",
+  "dispatcher_matching_source": true,
+  "handler_count": 20,
+  "matching_handlers": 14,
+  "handler_count_percent": 70.0,
+  "reviewed_handler_bytes": 8188,
+  "matching_handler_bytes": 2688,
+  "handler_byte_percent": 32.8285,
+  "extent_checks": "Pinned direct table targets; contiguous inventory extents; terminal jr-ra/delay slot; next known entries; bounded relative branches; no overlaps.",
+  "dependencies_included": false,
+  "runtime_verified": false,
+  "entries": [
+    {
+      "record_index": 0,
+      "address": "0x089DD674",
+      "body_bytes": 152,
+      "next_function": "0x089DD70C",
+      "member_record": "0x089E09E8",
+      "matching_source": true,
+      "source": "src/menu/execution_updates.c"
+    },
+    {
+      "record_index": 1,
+      "address": "0x089DD70C",
+      "body_bytes": 84,
+      "next_function": "0x089DD760",
+      "member_record": "0x089E09F0",
+      "matching_source": true,
+      "source": "src/menu/execution_updates.c"
+    },
+    {
+      "record_index": 2,
+      "address": "0x089DD760",
+      "body_bytes": 464,
+      "next_function": "0x089DD930",
+      "member_record": "0x089E09F8",
+      "matching_source": true,
+      "source": "src/menu/savedata_list_setup.c"
+    },
+    {
+      "record_index": 3,
+      "address": "0x089DD930",
+      "body_bytes": 172,
+      "next_function": "0x089DD9DC",
+      "member_record": "0x089E0A00",
+      "matching_source": true,
+      "source": "src/menu/savedata_list_poll.c"
+    },
+    {
+      "record_index": 4,
+      "address": "0x089DD9DC",
+      "body_bytes": 396,
+      "next_function": "0x089DDB68",
+      "member_record": "0x089E0A08",
+      "matching_source": true,
+      "source": "src/menu/savedata_latest_slot.c"
+    },
+    {
+      "record_index": 5,
+      "address": "0x089DDB68",
+      "body_bytes": 184,
+      "next_function": "0x089DDC20",
+      "member_record": "0x089E0A10",
+      "matching_source": true,
+      "source": "src/menu/savedata_load_poll.c"
+    },
+    {
+      "record_index": 6,
+      "address": "0x089DEAA8",
+      "body_bytes": 968,
+      "next_function": "0x089DEE70",
+      "member_record": "0x089E0A18",
+      "matching_source": false,
+      "source": null
+    },
+    {
+      "record_index": 7,
+      "address": "0x089DDC20",
+      "body_bytes": 164,
+      "next_function": "0x089DDCC4",
+      "member_record": "0x089E0A20",
+      "matching_source": true,
+      "source": "src/menu/context_finish.c"
+    },
+    {
+      "record_index": 8,
+      "address": "0x089DDCC4",
+      "body_bytes": 84,
+      "next_function": "0x089DDD18",
+      "member_record": "0x089E0A28",
+      "matching_source": true,
+      "source": "src/menu/state_branch_select.c"
+    },
+    {
+      "record_index": 9,
+      "address": "0x089DDD18",
+      "body_bytes": 136,
+      "next_function": "0x089DDDA0",
+      "member_record": "0x089E0A30",
+      "matching_source": true,
+      "source": "src/menu/resource_create.c"
+    },
+    {
+      "record_index": 10,
+      "address": "0x089DDDA0",
+      "body_bytes": 184,
+      "next_function": "0x089DDE58",
+      "member_record": "0x089E0A38",
+      "matching_source": true,
+      "source": "src/menu/resource_wait.cpp"
+    },
+    {
+      "record_index": 11,
+      "address": "0x089DDE58",
+      "body_bytes": 204,
+      "next_function": "0x089DDF24",
+      "member_record": "0x089E0A40",
+      "matching_source": true,
+      "source": "src/menu/resource_create_optional.c"
+    },
+    {
+      "record_index": 12,
+      "address": "0x089DDF24",
+      "body_bytes": 228,
+      "next_function": "0x089DE008",
+      "member_record": "0x089E0A48",
+      "matching_source": false,
+      "source": null
+    },
+    {
+      "record_index": 13,
+      "address": "0x089DE008",
+      "body_bytes": 156,
+      "next_function": "0x089DE0A4",
+      "member_record": "0x089E0A50",
+      "matching_source": true,
+      "source": "src/menu/resource_create_selected.c"
+    },
+    {
+      "record_index": 14,
+      "address": "0x089DE0A4",
+      "body_bytes": 300,
+      "next_function": "0x089DE1D0",
+      "member_record": "0x089E0A58",
+      "matching_source": true,
+      "source": "src/menu/resource_presentation.cpp"
+    },
+    {
+      "record_index": 15,
+      "address": "0x089DEE70",
+      "body_bytes": 732,
+      "next_function": "0x089DF14C",
+      "member_record": "0x089E0A60",
+      "matching_source": false,
+      "source": null
+    },
+    {
+      "record_index": 16,
+      "address": "0x089DF14C",
+      "body_bytes": 2212,
+      "next_function": "0x089DF9F0",
+      "member_record": "0x089E0A68",
+      "matching_source": false,
+      "source": null
+    },
+    {
+      "record_index": 17,
+      "address": "0x089DE1D0",
+      "body_bytes": 468,
+      "next_function": "0x089DE3A4",
+      "member_record": "0x089E0A70",
+      "matching_source": false,
+      "source": null
+    },
+    {
+      "record_index": 18,
+      "address": "0x089DF9F0",
+      "body_bytes": 892,
+      "next_function": "0x089DFD6C",
+      "member_record": "0x089E0A78",
+      "matching_source": false,
+      "source": null
+    },
+    {
+      "record_index": 19,
+      "address": "0x089DE3A4",
+      "body_bytes": 8,
+      "next_function": "0x089DE3AC",
+      "member_record": "0x089E0A80",
+      "matching_source": true,
+      "source": "src/menu/final_member_callback.c"
+    }
+  ]
+}

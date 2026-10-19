@@ -1,0 +1,1058 @@
+{
+  "schema_version": 1,
+  "recorded_utc": "2026-10-11T11:15:03.221630+00:00",
+  "target": "ULUS10566 v1.00",
+  "before": {
+    "functions": 102,
+    "code_bytes": 5228
+  },
+  "after": {
+    "functions": 128,
+    "code_bytes": 7180
+  },
+  "added": {
+    "functions": 26,
+    "code_bytes": 1952
+  },
+  "modules": [
+    {
+      "module": "main",
+      "before_functions": 27,
+      "before_bytes": 1360,
+      "after_functions": 37,
+      "after_bytes": 1948,
+      "added_functions": 10,
+      "added_bytes": 588,
+      "file_bytes": 4640948,
+      "reference_sha256": "0bc8e779aad2814a3d1bd77346f69ca5e16665845ed053cd0ad44a9cbfaefe6d",
+      "whole_file_byte_identical": true,
+      "new_functions": [
+        {
+          "name": "func_0889F63C",
+          "address": "0x0889F63C",
+          "size": 56,
+          "source": "src/main/resource_handle_lifecycle.c",
+          "unit": "main_resource_handle_lifecycle",
+          "inventory_confidence": "exact-source-match-boundary",
+          "entry_evidence": {
+            "direct_callers": [
+              {
+                "function": "0x088966BC",
+                "call_pc": "0x088966E0"
+              },
+              {
+                "function": "0x0889F4F4",
+                "call_pc": "0x0889F518"
+              },
+              {
+                "function": "0x088A3E08",
+                "call_pc": "0x088A3E20"
+              }
+            ]
+          }
+        },
+        {
+          "name": "func_0889F674",
+          "address": "0x0889F674",
+          "size": 44,
+          "source": "src/main/resource_handle_lifecycle.c",
+          "unit": "main_resource_handle_lifecycle",
+          "inventory_confidence": "exact-source-match-boundary",
+          "entry_evidence": {
+            "direct_callers": [
+              {
+                "function": "0x08879D04",
+                "call_pc": "0x08879D24"
+              },
+              {
+                "function": "0x08879D54",
+                "call_pc": "0x08879D74"
+              },
+              {
+                "function": "0x088A40E0",
+                "call_pc": "0x088A4100"
+              }
+            ]
+          }
+        },
+        {
+          "name": "func_0889F6A0",
+          "address": "0x0889F6A0",
+          "size": 100,
+          "source": "src/main/resource_handle_lifecycle.c",
+          "unit": "main_resource_handle_lifecycle",
+          "inventory_confidence": "exact-source-match-boundary",
+          "entry_evidence": {
+            "direct_callers": [
+              {
+                "function": "0x08896240",
+                "call_pc": "0x08896284"
+              },
+              {
+                "function": "0x08896558",
+                "call_pc": "0x088965B0"
+              },
+              {
+                "function": "0x0889F290",
+                "call_pc": "0x0889F2A4"
+              },
+              {
+                "function": "0x088A3D30",
+                "call_pc": "0x088A3D9C"
+              }
+            ]
+          }
+        },
+        {
+          "name": "func_0889F704",
+          "address": "0x0889F704",
+          "size": 76,
+          "source": "src/main/resource_handle_lifecycle.c",
+          "unit": "main_resource_handle_lifecycle",
+          "inventory_confidence": "exact-source-match-boundary",
+          "entry_evidence": {
+            "direct_callers": [
+              {
+                "function": "0x08895F18",
+                "call_pc": "0x08895F30"
+              },
+              {
+                "function": "0x08896240",
+                "call_pc": "0x08896270"
+              },
+              {
+                "function": "0x08896558",
+                "call_pc": "0x08896598"
+              },
+              {
+                "function": "0x088967B4",
+                "call_pc": "0x088967C4"
+              },
+              {
+                "function": "0x0889F2B8",
+                "call_pc": "0x0889F2C0"
+              },
+              {
+                "function": "0x088A3E4C",
+                "call_pc": "0x088A3E80"
+              }
+            ]
+          }
+        },
+        {
+          "name": "func_0889F898",
+          "address": "0x0889F898",
+          "size": 60,
+          "source": "src/main/resource_handle_commands.c",
+          "unit": "main_resource_handle_commands",
+          "inventory_confidence": "exact-source-match-boundary",
+          "entry_evidence": {
+            "direct_callers": [
+              {
+                "function": "0x088965F4",
+                "call_pc": "0x08896608"
+              },
+              {
+                "function": "0x088A32FC",
+                "call_pc": "0x088A3310"
+              },
+              {
+                "function": "0x088A3F2C",
+                "call_pc": "0x088A3F60"
+              }
+            ]
+          }
+        },
+        {
+          "name": "func_0889F910",
+          "address": "0x0889F910",
+          "size": 56,
+          "source": "src/main/resource_handle_phase.c",
+          "unit": "main_resource_handle_phase",
+          "inventory_confidence": "exact-source-match-boundary",
+          "entry_evidence": {
+            "direct_callers": [
+              {
+                "function": "0x088963B8",
+                "call_pc": "0x088963D0"
+              }
+            ]
+          }
+        },
+        {
+          "name": "func_0889F948",
+          "address": "0x0889F948",
+          "size": 56,
+          "source": "src/main/resource_handle_phase.c",
+          "unit": "main_resource_handle_phase",
+          "inventory_confidence": "exact-source-match-boundary",
+          "entry_evidence": {
+            "direct_callers": [
+              {
+                "function": "0x088A3324",
+                "call_pc": "0x088A3340"
+              }
+            ]
+          }
+        },
+        {
+          "name": "func_088CB9E8",
+          "address": "0x088CB9E8",
+          "size": 40,
+          "source": "src/main/descriptor_lifecycle.c",
+          "unit": "main_descriptor_lifecycle",
+          "inventory_confidence": "exact-source-match-boundary",
+          "entry_evidence": {
+            "direct_callers": [
+              {
+                "function": "0x08835468",
+                "call_pc": "0x088354A0"
+              },
+              {
+                "function": "0x088355AC",
+                "call_pc": "0x088355DC"
+              },
+              {
+                "function": "0x08887558",
+                "call_pc": "0x08887594"
+              },
+              {
+                "function": "0x08888354",
+                "call_pc": "0x08888404"
+              },
+              {
+                "function": "0x0888C4C8",
+                "call_pc": "0x0888CB18"
+              },
+              {
+                "function": "0x0888C4C8",
+                "call_pc": "0x0888CB24"
+              },
+              {
+                "function": "0x088B3EDC",
+                "call_pc": "0x088B3F24"
+              },
+              {
+                "function": "0x088C823C",
+                "call_pc": "0x088C8248"
+              },
+              {
+                "function": "0x088CB164",
+                "call_pc": "0x088CB1C8"
+              },
+              {
+                "function": "0x088F9388",
+                "call_pc": "0x088F9394"
+              },
+              {
+                "function": "0x08902734",
+                "call_pc": "0x08902844"
+              },
+              {
+                "function": "0x08918E90",
+                "call_pc": "0x08918FE0"
+              },
+              {
+                "function": "0x08919500",
+                "call_pc": "0x089195F8"
+              },
+              {
+                "function": "0x0891C7E8",
+                "call_pc": "0x0891CD98"
+              },
+              {
+                "function": "0x0891CFC4",
+                "call_pc": "0x0891D2A8"
+              },
+              {
+                "function": "0x0891CFC4",
+                "call_pc": "0x0891D4CC"
+              }
+            ]
+          }
+        },
+        {
+          "name": "func_088CBA10",
+          "address": "0x088CBA10",
+          "size": 68,
+          "source": "src/main/descriptor_lifecycle.c",
+          "unit": "main_descriptor_lifecycle",
+          "inventory_confidence": "exact-source-match-boundary",
+          "entry_evidence": {
+            "direct_callers": [
+              {
+                "function": "0x08888354",
+                "call_pc": "0x08888410"
+              },
+              {
+                "function": "0x088B3B98",
+                "call_pc": "0x088B3CD4"
+              },
+              {
+                "function": "0x088B9E84",
+                "call_pc": "0x088B9EB4"
+              },
+              {
+                "function": "0x088BBAB4",
+                "call_pc": "0x088BBAF4"
+              },
+              {
+                "function": "0x088CB9E8",
+                "call_pc": "0x088CB9F4"
+              },
+              {
+                "function": "0x088CBBB4",
+                "call_pc": "0x088CBBD4"
+              },
+              {
+                "function": "0x088F8D34",
+                "call_pc": "0x088F8D48"
+              },
+              {
+                "function": "0x088FA5F4",
+                "call_pc": "0x088FA680"
+              },
+              {
+                "function": "0x08918E90",
+                "call_pc": "0x08918FE8"
+              },
+              {
+                "function": "0x08919500",
+                "call_pc": "0x08919604"
+              }
+            ]
+          }
+        },
+        {
+          "name": "func_088CBA54",
+          "address": "0x088CBA54",
+          "size": 32,
+          "source": "src/main/descriptor_lifecycle.c",
+          "unit": "main_descriptor_lifecycle",
+          "inventory_confidence": "exact-source-match-boundary",
+          "entry_evidence": {
+            "direct_callers": [
+              {
+                "function": "0x08888354",
+                "call_pc": "0x0888841C"
+              },
+              {
+                "function": "0x088B3B98",
+                "call_pc": "0x088B3CE0"
+              },
+              {
+                "function": "0x088B9E84",
+                "call_pc": "0x088B9EC0"
+              },
+              {
+                "function": "0x088BBAB4",
+                "call_pc": "0x088BBB00"
+              },
+              {
+                "function": "0x088CBBB4",
+                "call_pc": "0x088CBBE0"
+              },
+              {
+                "function": "0x088FA5F4",
+                "call_pc": "0x088FA68C"
+              },
+              {
+                "function": "0x08918E90",
+                "call_pc": "0x08918FF4"
+              },
+              {
+                "function": "0x08919500",
+                "call_pc": "0x08919610"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "module": "extra",
+      "before_functions": 24,
+      "before_bytes": 2116,
+      "after_functions": 24,
+      "after_bytes": 2116,
+      "added_functions": 0,
+      "added_bytes": 0,
+      "file_bytes": 24544,
+      "reference_sha256": "f6b7be5e15c28774985417f1ec2c64f6655e79cc3c9dce7600fa7f6bacabca01",
+      "whole_file_byte_identical": true,
+      "new_functions": []
+    },
+    {
+      "module": "menu",
+      "before_functions": 17,
+      "before_bytes": 580,
+      "after_functions": 21,
+      "after_bytes": 1240,
+      "added_functions": 4,
+      "added_bytes": 660,
+      "file_bytes": 1556096,
+      "reference_sha256": "f021f96fa05da5907563a28c232966aa8a344526d6b8bdee728053ec75224d0a",
+      "whole_file_byte_identical": true,
+      "new_functions": [
+        {
+          "name": "func_089DD674",
+          "address": "0x089DD674",
+          "size": 152,
+          "source": "src/menu/execution_updates.c",
+          "unit": "menu_execution_updates",
+          "inventory_confidence": "exact-source-match-boundary",
+          "entry_evidence": {
+            "direct_callers": [],
+            "member_table": {
+              "record": "0x089E09E8",
+              "adjustment": 0,
+              "flags": 0,
+              "callback": "0x089DD674",
+              "dispatcher": "0x089DD5DC"
+            }
+          }
+        },
+        {
+          "name": "func_089DD70C",
+          "address": "0x089DD70C",
+          "size": 84,
+          "source": "src/menu/execution_updates.c",
+          "unit": "menu_execution_updates",
+          "inventory_confidence": "exact-source-match-boundary",
+          "entry_evidence": {
+            "direct_callers": [],
+            "member_table": {
+              "record": "0x089E09F0",
+              "adjustment": 0,
+              "flags": 0,
+              "callback": "0x089DD70C",
+              "dispatcher": "0x089DD5DC"
+            }
+          }
+        },
+        {
+          "name": "func_08A8D480",
+          "address": "0x08A8D480",
+          "size": 220,
+          "source": "src/menu/configuration_owner_consumer.c",
+          "unit": "menu_configuration_owner_consumer",
+          "inventory_confidence": "exact-source-match-boundary",
+          "entry_evidence": {
+            "direct_callers": [
+              {
+                "function": "0x08A8BFD4",
+                "call_pc": "0x08A8BFEC"
+              },
+              {
+                "function": "0x08A8BFD4",
+                "call_pc": "0x08A8BFFC"
+              },
+              {
+                "function": "0x08A8BFD4",
+                "call_pc": "0x08A8C00C"
+              },
+              {
+                "function": "0x08A8BFD4",
+                "call_pc": "0x08A8C01C"
+              },
+              {
+                "function": "0x08A8BFD4",
+                "call_pc": "0x08A8C02C"
+              },
+              {
+                "function": "0x08A8BFD4",
+                "call_pc": "0x08A8C03C"
+              },
+              {
+                "function": "0x08A8BFD4",
+                "call_pc": "0x08A8C04C"
+              },
+              {
+                "function": "0x08A8BFD4",
+                "call_pc": "0x08A8C05C"
+              },
+              {
+                "function": "0x08A8BFD4",
+                "call_pc": "0x08A8C06C"
+              },
+              {
+                "function": "0x08A8BFD4",
+                "call_pc": "0x08A8C07C"
+              },
+              {
+                "function": "0x08A8BFD4",
+                "call_pc": "0x08A8C0A0"
+              },
+              {
+                "function": "0x08A8BFD4",
+                "call_pc": "0x08A8C0B0"
+              },
+              {
+                "function": "0x08A8BFD4",
+                "call_pc": "0x08A8C0C0"
+              },
+              {
+                "function": "0x08A8C0EC",
+                "call_pc": "0x08A8C100"
+              },
+              {
+                "function": "0x08A8C0EC",
+                "call_pc": "0x08A8C110"
+              },
+              {
+                "function": "0x08A8C0EC",
+                "call_pc": "0x08A8C120"
+              },
+              {
+                "function": "0x08A8C0EC",
+                "call_pc": "0x08A8C130"
+              },
+              {
+                "function": "0x08A8C0EC",
+                "call_pc": "0x08A8C140"
+              },
+              {
+                "function": "0x08A8C0EC",
+                "call_pc": "0x08A8C150"
+              },
+              {
+                "function": "0x08A8C0EC",
+                "call_pc": "0x08A8C160"
+              },
+              {
+                "function": "0x08A8C0EC",
+                "call_pc": "0x08A8C170"
+              },
+              {
+                "function": "0x08A8C0EC",
+                "call_pc": "0x08A8C180"
+              },
+              {
+                "function": "0x08A8C0EC",
+                "call_pc": "0x08A8C190"
+              },
+              {
+                "function": "0x08A8C0EC",
+                "call_pc": "0x08A8C1A0"
+              },
+              {
+                "function": "0x08A8C0EC",
+                "call_pc": "0x08A8C1B0"
+              },
+              {
+                "function": "0x08A8C0EC",
+                "call_pc": "0x08A8C1C0"
+              },
+              {
+                "function": "0x08A8C0EC",
+                "call_pc": "0x08A8C1D0"
+              },
+              {
+                "function": "0x08A8C0EC",
+                "call_pc": "0x08A8C1E0"
+              },
+              {
+                "function": "0x08A8C0EC",
+                "call_pc": "0x08A8C1F0"
+              },
+              {
+                "function": "0x08A8C0EC",
+                "call_pc": "0x08A8C200"
+              },
+              {
+                "function": "0x08A8C0EC",
+                "call_pc": "0x08A8C210"
+              },
+              {
+                "function": "0x08A8C0EC",
+                "call_pc": "0x08A8C220"
+              },
+              {
+                "function": "0x08A8C298",
+                "call_pc": "0x08A8C2B0"
+              },
+              {
+                "function": "0x08A8C298",
+                "call_pc": "0x08A8C2C0"
+              },
+              {
+                "function": "0x08A8C298",
+                "call_pc": "0x08A8C2D0"
+              },
+              {
+                "function": "0x08A8C298",
+                "call_pc": "0x08A8C2E0"
+              },
+              {
+                "function": "0x08A8C298",
+                "call_pc": "0x08A8C2F0"
+              },
+              {
+                "function": "0x08A8C298",
+                "call_pc": "0x08A8C300"
+              },
+              {
+                "function": "0x08A8C298",
+                "call_pc": "0x08A8C310"
+              },
+              {
+                "function": "0x08A8C298",
+                "call_pc": "0x08A8C324"
+              },
+              {
+                "function": "0x08A8C298",
+                "call_pc": "0x08A8C344"
+              },
+              {
+                "function": "0x08A8C298",
+                "call_pc": "0x08A8C354"
+              },
+              {
+                "function": "0x08A8C3A0",
+                "call_pc": "0x08A8C3B4"
+              },
+              {
+                "function": "0x08A8C3A0",
+                "call_pc": "0x08A8C3C4"
+              },
+              {
+                "function": "0x08A8C3A0",
+                "call_pc": "0x08A8C3D4"
+              },
+              {
+                "function": "0x08A8C3A0",
+                "call_pc": "0x08A8C3E4"
+              },
+              {
+                "function": "0x08A8C3A0",
+                "call_pc": "0x08A8C3F4"
+              },
+              {
+                "function": "0x08A8C3A0",
+                "call_pc": "0x08A8C404"
+              },
+              {
+                "function": "0x08A8C3A0",
+                "call_pc": "0x08A8C414"
+              },
+              {
+                "function": "0x08A8C46C",
+                "call_pc": "0x08A8C518"
+              },
+              {
+                "function": "0x08A8C46C",
+                "call_pc": "0x08A8C528"
+              },
+              {
+                "function": "0x08A8C540",
+                "call_pc": "0x08A8C574"
+              },
+              {
+                "function": "0x08A8C540",
+                "call_pc": "0x08A8C584"
+              },
+              {
+                "function": "0x08A8C540",
+                "call_pc": "0x08A8C5AC"
+              },
+              {
+                "function": "0x08A8C540",
+                "call_pc": "0x08A8C5BC"
+              },
+              {
+                "function": "0x08A8C540",
+                "call_pc": "0x08A8C5CC"
+              },
+              {
+                "function": "0x08A8C540",
+                "call_pc": "0x08A8C5DC"
+              },
+              {
+                "function": "0x08A8C540",
+                "call_pc": "0x08A8C5EC"
+              },
+              {
+                "function": "0x08A8C540",
+                "call_pc": "0x08A8C5FC"
+              },
+              {
+                "function": "0x08A8C540",
+                "call_pc": "0x08A8C60C"
+              },
+              {
+                "function": "0x08A8C540",
+                "call_pc": "0x08A8C61C"
+              },
+              {
+                "function": "0x08A8C644",
+                "call_pc": "0x08A8C678"
+              },
+              {
+                "function": "0x08A8C644",
+                "call_pc": "0x08A8C688"
+              },
+              {
+                "function": "0x08A8C644",
+                "call_pc": "0x08A8C6B0"
+              },
+              {
+                "function": "0x08A8C644",
+                "call_pc": "0x08A8C6C0"
+              },
+              {
+                "function": "0x08A8C644",
+                "call_pc": "0x08A8C6D0"
+              },
+              {
+                "function": "0x08A8C644",
+                "call_pc": "0x08A8C6E0"
+              },
+              {
+                "function": "0x08A8C644",
+                "call_pc": "0x08A8C6F0"
+              },
+              {
+                "function": "0x08A8C644",
+                "call_pc": "0x08A8C700"
+              },
+              {
+                "function": "0x08A90E04",
+                "call_pc": "0x08A90E38"
+              },
+              {
+                "function": "0x08A90E04",
+                "call_pc": "0x08A90E48"
+              },
+              {
+                "function": "0x08A90E04",
+                "call_pc": "0x08A90E58"
+              },
+              {
+                "function": "0x08A90E04",
+                "call_pc": "0x08A90E88"
+              },
+              {
+                "function": "0x08A90E04",
+                "call_pc": "0x08A90E98"
+              },
+              {
+                "function": "0x08A90E04",
+                "call_pc": "0x08A90F24"
+              },
+              {
+                "function": "0x08A90E04",
+                "call_pc": "0x08A90F38"
+              },
+              {
+                "function": "0x08A90E04",
+                "call_pc": "0x08A90F48"
+              },
+              {
+                "function": "0x08A90E04",
+                "call_pc": "0x08A90F74"
+              },
+              {
+                "function": "0x08A90E04",
+                "call_pc": "0x08A90FB4"
+              },
+              {
+                "function": "0x08A90E04",
+                "call_pc": "0x08A90FC4"
+              },
+              {
+                "function": "0x08A90E04",
+                "call_pc": "0x08A90FD4"
+              },
+              {
+                "function": "0x08A90E04",
+                "call_pc": "0x08A91004"
+              },
+              {
+                "function": "0x08A90E04",
+                "call_pc": "0x08A91058"
+              },
+              {
+                "function": "0x08A90E04",
+                "call_pc": "0x08A91068"
+              },
+              {
+                "function": "0x08A90E04",
+                "call_pc": "0x08A91078"
+              },
+              {
+                "function": "0x08A90E04",
+                "call_pc": "0x08A910A8"
+              },
+              {
+                "function": "0x08A9277C",
+                "call_pc": "0x08A92AE0"
+              },
+              {
+                "function": "0x08A9277C",
+                "call_pc": "0x08A92AF0"
+              }
+            ]
+          }
+        },
+        {
+          "name": "func_08A951F4",
+          "address": "0x08A951F4",
+          "size": 204,
+          "source": "src/menu/configuration_array_consumer.c",
+          "unit": "menu_configuration_array_consumer",
+          "inventory_confidence": "exact-source-match-boundary",
+          "entry_evidence": {
+            "direct_callers": [
+              {
+                "function": "0x08A9623C",
+                "call_pc": "0x08A96818"
+              },
+              {
+                "function": "0x08A9623C",
+                "call_pc": "0x08A96874"
+              },
+              {
+                "function": "0x08A9623C",
+                "call_pc": "0x08A96888"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "module": "battle",
+      "before_functions": 34,
+      "before_bytes": 1172,
+      "after_functions": 46,
+      "after_bytes": 1876,
+      "added_functions": 12,
+      "added_bytes": 704,
+      "file_bytes": 1596312,
+      "reference_sha256": "1f96cfb3be771ff6e94741ae3916fab340df74e36ede07ca39545d015f4c49dc",
+      "whole_file_byte_identical": true,
+      "new_functions": [
+        {
+          "name": "func_089E06A8",
+          "address": "0x089E06A8",
+          "size": 96,
+          "source": "src/battle/setup_089e06a8.c",
+          "unit": "setup_089e06a8",
+          "inventory_confidence": "exact-source-match-boundary",
+          "entry_evidence": {
+            "direct_callers": [
+              {
+                "function": "0x089DD4D0",
+                "call_pc": "0x089DD508"
+              }
+            ]
+          }
+        },
+        {
+          "name": "func_089E0CB8",
+          "address": "0x089E0CB8",
+          "size": 56,
+          "source": "src/battle/setup_089e0cb8.c",
+          "unit": "setup_089e0cb8",
+          "inventory_confidence": "exact-source-match-boundary",
+          "entry_evidence": {
+            "direct_callers": [
+              {
+                "function": "0x089E06A8",
+                "call_pc": "0x089E06E4"
+              }
+            ]
+          }
+        },
+        {
+          "name": "func_089E07A0",
+          "address": "0x089E07A0",
+          "size": 12,
+          "source": "src/battle/setup_089e07a0.c",
+          "unit": "setup_089e07a0",
+          "inventory_confidence": "exact-source-match-boundary",
+          "entry_evidence": {
+            "direct_callers": [
+              {
+                "function": "0x089E06A8",
+                "call_pc": "0x089E06EC"
+              },
+              {
+                "function": "0x089E07AC",
+                "call_pc": "0x089E080C"
+              }
+            ]
+          }
+        },
+        {
+          "name": "func_089E3208",
+          "address": "0x089E3208",
+          "size": 80,
+          "source": "src/battle/setup_089e3208.c",
+          "unit": "setup_089e3208",
+          "inventory_confidence": "exact-source-match-boundary",
+          "entry_evidence": {
+            "direct_callers": [
+              {
+                "function": "0x089DD4D0",
+                "call_pc": "0x089DD4E8"
+              }
+            ]
+          }
+        },
+        {
+          "name": "func_089E68E0",
+          "address": "0x089E68E0",
+          "size": 72,
+          "source": "src/battle/setup_089e68e0.c",
+          "unit": "setup_089e68e0",
+          "inventory_confidence": "exact-source-match-boundary",
+          "entry_evidence": {
+            "direct_callers": [
+              {
+                "function": "0x089DD4D0",
+                "call_pc": "0x089DD500"
+              }
+            ]
+          }
+        },
+        {
+          "name": "func_089E6E60",
+          "address": "0x089E6E60",
+          "size": 56,
+          "source": "src/battle/setup_089e6e60.c",
+          "unit": "setup_089e6e60",
+          "inventory_confidence": "exact-source-match-boundary",
+          "entry_evidence": {
+            "direct_callers": [
+              {
+                "function": "0x089E79A8",
+                "call_pc": "0x089E79FC"
+              }
+            ]
+          }
+        },
+        {
+          "name": "func_089E7130",
+          "address": "0x089E7130",
+          "size": 80,
+          "source": "src/battle/setup_089e7130.c",
+          "unit": "setup_089e7130",
+          "inventory_confidence": "exact-source-match-boundary",
+          "entry_evidence": {
+            "direct_callers": [
+              {
+                "function": "0x089DD4D0",
+                "call_pc": "0x089DD4F8"
+              }
+            ]
+          }
+        },
+        {
+          "name": "func_089E71F8",
+          "address": "0x089E71F8",
+          "size": 8,
+          "source": "src/battle/setup_089e71f8.c",
+          "unit": "setup_089e71f8",
+          "inventory_confidence": "exact-source-match-boundary",
+          "entry_evidence": {
+            "direct_callers": [
+              {
+                "function": "0x089E7130",
+                "call_pc": "0x089E7164"
+              },
+              {
+                "function": "0x089E7200",
+                "call_pc": "0x089E7238"
+              }
+            ]
+          }
+        },
+        {
+          "name": "func_089E79A8",
+          "address": "0x089E79A8",
+          "size": 120,
+          "source": "src/battle/setup_089e79a8.c",
+          "unit": "setup_089e79a8",
+          "inventory_confidence": "exact-source-match-boundary",
+          "entry_evidence": {
+            "direct_callers": [
+              {
+                "function": "0x089DD4D0",
+                "call_pc": "0x089DD4F0"
+              }
+            ]
+          }
+        },
+        {
+          "name": "func_089E8E70",
+          "address": "0x089E8E70",
+          "size": 56,
+          "source": "src/battle/setup_089e8e70.c",
+          "unit": "setup_089e8e70",
+          "inventory_confidence": "exact-source-match-boundary",
+          "entry_evidence": {
+            "direct_callers": [
+              {
+                "function": "0x089DD4D0",
+                "call_pc": "0x089DD4E0"
+              }
+            ]
+          }
+        },
+        {
+          "name": "func_089E8EDC",
+          "address": "0x089E8EDC",
+          "size": 12,
+          "source": "src/battle/setup_089e8edc.c",
+          "unit": "setup_089e8edc",
+          "inventory_confidence": "exact-source-match-boundary",
+          "entry_evidence": {
+            "direct_callers": [
+              {
+                "function": "0x089E8E70",
+                "call_pc": "0x089E8E8C"
+              }
+            ]
+          }
+        },
+        {
+          "name": "func_089ECF40",
+          "address": "0x089ECF40",
+          "size": 56,
+          "source": "src/battle/setup_089ecf40.c",
+          "unit": "setup_089ecf40",
+          "inventory_confidence": "exact-source-match-boundary",
+          "entry_evidence": {
+            "direct_callers": [
+              {
+                "function": "0x089DD4D0",
+                "call_pc": "0x089DD510"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "inventory_revision": 10,
+  "inventory_boundaries_changed": false,
+  "tests_passed": 116,
+  "all_four_files_byte_identical": true,
+  "current_build_proofs": true,
+  "emulator_run": false,
+  "data_install_validation": "deferred at user request",
+  "whole_game_audited_percent": null,
+  "feature_ranks_changed": false,
+  "review_fixes": [
+    "Menu resource slots use the recovered MainResourceHandlePrefix with four-byte trailing storage and 0x24 stride",
+    "Shared main resource header added to menu provenance",
+    "Menu descriptor-helper return declaration agrees with recovered main definition"
+  ],
+  "remaining": [
+    "Unrecovered calls behind constructors/resource services/configuration consumers",
+    "Four one-word battle loop mismatches and main clamp candidate remain uncredited",
+    "Feature/class ownership and full code/data audits"
+  ],
+  "runtime_package_provenance": "Earlier package manifest is unchanged; regenerate packages before future emulator work."
+}

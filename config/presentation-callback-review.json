@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "references": {
+    "main": "0bc8e779aad2814a3d1bd77346f69ca5e16665845ed053cd0ad44a9cbfaefe6d",
+    "menu": "f021f96fa05da5907563a28c232966aa8a344526d6b8bdee728053ec75224d0a"
+  },
+  "callbacks": [
+    {
+      "module": "main",
+      "address": "0x08873F78",
+      "size": 8,
+      "previous": "0x08873F54",
+      "previous_bytes": 36,
+      "next": "0x08873F80",
+      "next_bytes": 348,
+      "instruction_checks": {
+        "0x088739D0": "0xA7A00002",
+        "0x088739D4": "0x3C050887",
+        "0x088739D8": "0xA7A00000",
+        "0x088739DC": "0x24A53F78",
+        "0x088739E0": "0xAFA50004",
+        "0x08873A50": "0x00A0F809"
+      }
+    },
+    {
+      "module": "menu",
+      "address": "0x089DE9D4",
+      "size": 24,
+      "previous": "0x089DE990",
+      "previous_bytes": 68,
+      "next": "0x089DE9EC",
+      "next_bytes": 40,
+      "instruction_checks": {
+        "0x089DE13C": "0x3C05089E",
+        "0x089DE148": "0x00003025",
+        "0x089DE154": "0x0E21CF4D",
+        "0x089DE158": "0x24A5E9D4"
+      }
+    }
+  ],
+  "event_invocation": {
+    "0x08874060": "0x8E240014",
+    "0x0887406C": "0x00802825",
+    "0x08874070": "0x00A0F809",
+    "0x08874074": "0x8E240018"
+  }
+}

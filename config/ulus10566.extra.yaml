@@ -1,0 +1,39 @@
+# Initial disassembly only: GCC is a formatting preset, not a compiler finding.
+name: Dissidia 012 USA extra overlay
+sha1: 5708d319c7d0263f94bd8335831316ca510d6cb0
+options:
+  basename: ovl_extra_app
+  target_path: orig/ULUS10566/PSP_GAME/USRDIR/DATA/OVL_EXTRA_APP.ELF
+  base_path: ..
+  platform: psp
+  compiler: GCC
+  endianness: little
+  add_set_gp_64: false
+  generate_asm_macros_files: false
+  asm_path: asm/ULUS10566/extra
+  asset_path: assets/ULUS10566/extra
+  src_path: src/extra
+  ld_script_path: build/ULUS10566/extra.splat.ld
+  undefined_funcs_auto_path: build/ULUS10566/extra.undefined_funcs.txt
+  undefined_syms_auto_path: build/ULUS10566/extra.undefined_syms.txt
+  extensions_path: tools/splat_ext
+  find_file_boundaries: false
+  create_asm_dependencies: false
+  asm_inc_header: ''
+  asm_function_macro: glabel
+  asm_function_alt_macro: alabel
+  asm_jtbl_label_macro: jlabel
+  asm_data_macro: dlabel
+  asm_end_label: endlabel
+  asm_data_end_label: enddlabel
+  section_order: [.text, .data, .rodata, .bss]
+segments:
+  - [0x0, bin, header]
+  - name: extra
+    type: code
+    start: 0x54
+    vram: 0x089DD4C0
+    subsegments:
+      - [0x54, asm, ovl_extra_app]
+  - [0x5F4C, bin, elf_metadata]
+  - [0x5FE0]

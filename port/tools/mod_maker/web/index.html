@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mod maker</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header id="top">
+  <div class="brand">Mod maker <span class="sub">Dissidia 012 native port</span></div>
+  <label class="modpick">Mod
+    <select id="mod-select" title="Mods in the mods folder"></select>
+  </label>
+  <button id="new-mod" type="button">New mod</button>
+  <div class="spacer"></div>
+  <span id="status" role="status"></span>
+  <button id="save" type="button" class="primary" title="Write mod.json (Ctrl+S)">Save</button>
+</header>
+
+<div id="layout">
+  <aside id="side">
+    <section id="mod-panel" class="panel" hidden>
+      <h2>Mod</h2>
+      <div class="grid2">
+        <label>Id <input id="mod-id" data-path="mod.id" spellcheck="false" placeholder="my-music"></label>
+        <label>Version <input id="mod-version" data-path="mod.version" placeholder="1.0.0"></label>
+      </div>
+      <label>Name <input id="mod-name" data-path="mod.name" placeholder="Shown to the player"></label>
+      <label>Author <input id="mod-author" data-path="mod.author" placeholder="optional"></label>
+      <label>Description <textarea id="mod-description" data-path="mod.description" rows="2" placeholder="optional"></textarea></label>
+      <p class="hint" id="mod-folder-line"></p>
+    </section>
+
+    <section id="series-panel" class="panel" hidden>
+      <div class="panel-head">
+        <h2>Series and tracks</h2>
+        <button id="add-series" type="button" title="Add a series (a source game)">+ Series</button>
+      </div>
+      <p class="hint">In the game, mod series come after the game's own and before NO MUSIC, sorted by order. On the
+        loading screen: L2 or R2 (keyboard 1 or 3) for BGM focus, then left/right for the series, up/down for the track.</p>
+      <div id="series-list"></div>
+      <input id="file-input" type="file" multiple accept=".mp3,.ogg,.oga,.opus,.flac,.wav,audio/*" hidden>
+    </section>
+
+    <section id="welcome" class="panel">
+      <h2>Start</h2>
+      <p>Pick a mod above, or make a new one. A mod is a folder in the mods folder with a <code>mod.json</code>.</p>
+      <p class="hint" id="mods-dir-line"></p>
+      <p class="hint" id="ffmpeg-line"></p>
+    </section>
+  </aside>
+
+  <main id="editor">
+    <div id="no-track" class="empty">Select a track, or add audio files to a series (drag them onto it).</div>
+    <div id="track-editor" hidden>
+      <div id="track-head">
+        <label class="grow">Title <input id="track-title" maxlength="200" placeholder="Shown on the game's band"></label>
+        <label>Key <input id="track-key" spellcheck="false"></label>
+        <label>Series <select id="track-series"></select></label>
+      </div>
+      <div id="track-file" class="hint"></div>
+      <div id="track-errors" class="errors"></div>
+
+      <div id="loop-mode" role="radiogroup" aria-label="Loop">
+        <span class="label">Loop</span>
+        <label><input type="radio" name="loop-mode" value="custom"> Custom loop</label>
+        <label><input type="radio" name="loop-mode" value="whole"> Whole file</label>
+        <label><input type="radio" name="loop-mode" value="none"> None (plays once)</label>
+        <label><input type="radio" name="loop-mode" value="auto"> Auto <span id="auto-note" class="hint"></span></label>
+      </div>
+
+      <div id="wave-box">
+        <canvas id="wave" tabindex="0" aria-label="Waveform"></canvas>
+        <canvas id="overview" aria-label="Whole file"></canvas>
+        <div id="wave-busy" hidden>Decoding with the port's FFmpeg...</div>
+      </div>
+
+      <div id="transport">
+        <button id="play" type="button" title="Play / pause (Space)">Play</button>
+        <button id="play-start" type="button" title="Play from the start (Home)">From start</button>
+        <button id="audition" type="button" class="accent" title="Play the seam: a few seconds before the loop end, then the loop start (A)">Audition seam</button>
+        <label title="Seconds before the loop end">pre <select id="pre-roll"><option>1</option><option>2</option><option selected>3</option><option>5</option><option>8</option></select> s</label>
+        <label title="Seconds after the jump">post <select id="post-roll"><option>2</option><option selected>4</option><option>8</option></select> s</label>
+        <label><input type="checkbox" id="repeat"> repeat</label>
+        <span class="sep"></span>
+        <button id="zoom-fit" type="button" title="Whole file (F)">Fit</button>
+        <button id="zoom-loop" type="button" title="The loop">Loop</button>
+        <button id="zoom-start" type="button" title="Around the loop start">Start</button>
+        <button id="zoom-end" type="button" title="Around the loop end">End</button>
+        <button id="zoom-in" type="button" title="Zoom in (+)">+</button>
+        <button id="zoom-out" type="button" title="Zoom out (-)">-</button>
+        <span class="spacer"></span>
+        <span id="position" class="mono"></span>
+      </div>
+
+      <div id="markers">
+        <div class="marker-box" id="box-start" data-marker="start">
+          <div class="mhead"><span class="dot start"></span> Loop start <span class="hint">included</span></div>
+          <div class="mrow">
+            <label>samples <input id="start-samples" class="mono" inputmode="numeric"></label>
+            <label>time <input id="start-time" class="mono" placeholder="m:ss.mmm"></label>
+          </div>
+          <div class="mrow">
+            <button type="button" data-act="set" title="At the playhead or cursor (S)">Set (S)</button>
+            <button type="button" data-act="nudge" data-dir="-1" title="Earlier by the step (Left)">&#9664;</button>
+            <button type="button" data-act="nudge" data-dir="1" title="Later by the step (Right)">&#9654;</button>
+            <button type="button" data-act="zero" title="Nearest zero crossing (Z)">Zero</button>
+            <button type="button" data-act="go" title="Cursor here">Go</button>
+          </div>
+        </div>
+        <div class="marker-box" id="box-end" data-marker="end">
+          <div class="mhead"><span class="dot end"></span> Loop end <span class="hint">first sample after the loop</span></div>
+          <div class="mrow">
+            <label>samples <input id="end-samples" class="mono" inputmode="numeric"></label>
+            <label>time <input id="end-time" class="mono" placeholder="m:ss.mmm"></label>
+          </div>
+          <div class="mrow">
+            <button type="button" data-act="set" title="At the playhead or cursor (E)">Set (E)</button>
+            <button type="button" data-act="nudge" data-dir="-1" title="Earlier by the step (Left)">&#9664;</button>
+            <button type="button" data-act="nudge" data-dir="1" title="Later by the step (Right)">&#9654;</button>
+            <button type="button" data-act="zero" title="Nearest zero crossing (Z)">Zero</button>
+            <button type="button" data-act="go" title="Cursor here">Go</button>
+          </div>
+        </div>
+        <div class="marker-box" id="box-step">
+          <div class="mhead">Nudge step</div>
+          <div class="mrow">
+            <select id="step">
+              <option value="1">1 sample</option><option value="10">10 samples</option>
+              <option value="ms1" selected>1 ms</option><option value="ms10">10 ms</option>
+              <option value="beat">1 beat</option><option value="bar">1 bar (4 beats)</option>
+            </select>
+            <label>BPM <input id="bpm" class="mono" value="120" size="5"></label>
+          </div>
+          <div id="loop-length" class="hint mono"></div>
+        </div>
+      </div>
+
+      <div id="seam-box">
+        <div class="seam-head">
+          <span>Seam: the loop end (left) runs into the loop start (right); faint lines are what lies beyond each side</span>
+          <label>width <select id="seam-width"><option value="0.002">2 ms</option><option value="0.01" selected>10 ms</option><option value="0.05">50 ms</option><option value="0.25">250 ms</option><option value="1">1 s</option></select></label>
+        </div>
+        <canvas id="seam" aria-label="Seam"></canvas>
+        <div id="seam-info" class="hint mono"></div>
+      </div>
+
+      <div id="suggest-box" class="panel">
+        <div class="panel-head">
+          <h2>Suggested loops</h2>
+          <button id="suggest-any" type="button" title="Search the whole file for a start and end whose audio matches">Suggest loops</button>
+          <button id="suggest-end" type="button" title="Keep the loop end; find starts that match it">Starts for my end</button>
+          <label>min loop <input id="min-loop" class="mono" value="8" size="3"> s</label>
+          <span id="suggest-status" class="hint"></span>
+        </div>
+        <p class="hint">Suggestions only: audition each seam and choose by ear.</p>
+        <ol id="suggest-list"></ol>
+      </div>
+    </div>
+
+    <section id="problems-box" class="panel">
+      <h2>Problems <span id="problem-count" class="hint"></span></h2>
+      <ul id="problems"></ul>
+    </section>
+
+    <section id="port-box" class="panel">
+      <div class="panel-head"><h2>Check in the port</h2><button id="copy-command" type="button">Copy</button></div>
+      <p class="hint">The port reads mods when it starts: save, then start (or restart) the game. Run this yourself
+        <span id="port-where"></span>; the mod maker never starts the game.</p>
+      <pre id="port-command" class="mono"></pre>
+      <p class="hint">Problems the game finds are lines starting <code>[mods] error:</code> in its log.</p>
+    </section>
+
+    <section id="keys-box" class="panel">
+      <h2>Keys</h2>
+      <p class="hint keys">
+        <kbd>Space</kbd> play/pause &nbsp; <kbd>S</kbd>/<kbd>E</kbd> set start/end at the playhead &nbsp;
+        <kbd>A</kbd> audition seam &nbsp; <kbd>[</kbd>/<kbd>]</kbd> pick start/end marker &nbsp;
+        <kbd>&larr;</kbd>/<kbd>&rarr;</kbd> nudge it (<kbd>Shift</kbd> &times;10) &nbsp; <kbd>Z</kbd> snap to zero crossing &nbsp;
+        <kbd>+</kbd>/<kbd>-</kbd> zoom &nbsp; <kbd>F</kbd> fit &nbsp; <kbd>Home</kbd> play from start &nbsp; <kbd>Ctrl+S</kbd> save.
+        Waveform: click puts the cursor, drag pans, wheel zooms, <kbd>Shift</kbd>+click sets the start, right-click
+        sets the end, drag a marker's flag to move it.</p>
+    </section>
+  </main>
+</div>
+
+<dialog id="new-dialog">
+  <form method="dialog" id="new-form">
+    <h2>New mod</h2>
+    <label>Id <input name="id" spellcheck="false" required placeholder="my-music" autocomplete="off"></label>
+    <p class="hint">Lower-case letters, digits, . _ -, starting with a letter or digit. Keep it the same in every version.</p>
+    <label>Name <input name="name" required placeholder="My battle music" autocomplete="off"></label>
+    <div class="grid2">
+      <label>Version <input name="version" value="1.0.0" autocomplete="off"></label>
+      <label>Folder <input name="folder" placeholder="same as the id" spellcheck="false" autocomplete="off"></label>
+    </div>
+    <label>Author <input name="author" autocomplete="off"></label>
+    <label>Description <textarea name="description" rows="2"></textarea></label>
+    <ul id="new-problems" class="errors"></ul>
+    <div class="buttons">
+      <button value="cancel" type="button" id="new-cancel">Cancel</button>
+      <button value="ok" class="primary" id="new-ok">Create</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="/static/waveform.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

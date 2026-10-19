@@ -1,0 +1,10 @@
+# library,nid,name
+# NIDs Dissidia 012 (ULUS10566) imports that PortableKit's configs/nids.csv
+# does not name. Names from PPSSPP's NID tables (a fact, no code), as resolved
+# by tools/port/survey_imports.py; NIDs from the game's own import table.
+UtilsForUser,0x37FB5C42,sceKernelGetGPI
+sceAudio,0x647CEF33,sceAudioOutput2GetRestSample
+sceMpeg,0x8C1E027D,sceMpegGetPcmAu
+sceLibFont,0x681E61A7,sceFontFindFont
+sceLibFont,0xEE232411,sceFontSetAltCharacterCode
+sceNetAdhoc,0xC7C1FC57,sceNetAdhocGetPdpStat

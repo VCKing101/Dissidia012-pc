@@ -1,0 +1,422 @@
+{
+  "schema_version": 1,
+  "recorded_utc": "2026-10-12T06:23:39.935894+00:00",
+  "target": "ULUS10566 v1.00",
+  "before": {
+    "functions": 196,
+    "bytes": 13392
+  },
+  "after": {
+    "functions": 209,
+    "bytes": 14048
+  },
+  "added": {
+    "functions": 13,
+    "bytes": 656
+  },
+  "modules": [
+    {
+      "module": "main",
+      "before_functions": 63,
+      "before_bytes": 3600,
+      "after_functions": 66,
+      "after_bytes": 3780,
+      "added_functions": 3,
+      "added_bytes": 180,
+      "sha256": "0bc8e779aad2814a3d1bd77346f69ca5e16665845ed053cd0ad44a9cbfaefe6d",
+      "byte_identical": true,
+      "new_functions": [
+        {
+          "name": "func_08867B90",
+          "address": "0x08867B90",
+          "size": 32,
+          "source": "src/main/utility_dialog_settings.c",
+          "unit": "main_utility_dialog_settings",
+          "direct_callers": [
+            {
+              "module": "main",
+              "function": "0x088751E8",
+              "pc": "0x08875220"
+            },
+            {
+              "module": "main",
+              "function": "0x088B1628",
+              "pc": "0x088B1660"
+            },
+            {
+              "module": "main",
+              "function": "0x088B168C",
+              "pc": "0x088B16B4"
+            }
+          ],
+          "entry_provenance": "checked-caller-or-callback-pointer"
+        },
+        {
+          "name": "func_08867BB0",
+          "address": "0x08867BB0",
+          "size": 36,
+          "source": "src/main/utility_dialog_settings.c",
+          "unit": "main_utility_dialog_settings",
+          "direct_callers": [
+            {
+              "module": "main",
+              "function": "0x088751E8",
+              "pc": "0x08875228"
+            },
+            {
+              "module": "main",
+              "function": "0x088B1628",
+              "pc": "0x088B1668"
+            },
+            {
+              "module": "main",
+              "function": "0x088B168C",
+              "pc": "0x088B16BC"
+            }
+          ],
+          "entry_provenance": "checked-caller-or-callback-pointer"
+        },
+        {
+          "name": "func_088B168C",
+          "address": "0x088B168C",
+          "size": 112,
+          "source": "src/main/utility_dialog_common.c",
+          "unit": "main_utility_dialog_common",
+          "direct_callers": [
+            {
+              "module": "main",
+              "function": "0x088ADB10",
+              "pc": "0x088ADB30"
+            },
+            {
+              "module": "main",
+              "function": "0x088B1194",
+              "pc": "0x088B11F8"
+            },
+            {
+              "module": "main",
+              "function": "0x088B1230",
+              "pc": "0x088B1294"
+            },
+            {
+              "module": "extra",
+              "function": "0x089DE3B8",
+              "pc": "0x089DE3FC"
+            },
+            {
+              "module": "menu",
+              "function": "0x089DD760",
+              "pc": "0x089DD7FC"
+            },
+            {
+              "module": "menu",
+              "function": "0x08ABF7A0",
+              "pc": "0x08ABF8E0"
+            },
+            {
+              "module": "menu",
+              "function": "0x08B58C4C",
+              "pc": "0x08B58C9C"
+            }
+          ],
+          "entry_provenance": "checked-caller-or-callback-pointer"
+        }
+      ]
+    },
+    {
+      "module": "extra",
+      "before_functions": 24,
+      "before_bytes": 2116,
+      "after_functions": 24,
+      "after_bytes": 2116,
+      "added_functions": 0,
+      "added_bytes": 0,
+      "sha256": "f6b7be5e15c28774985417f1ec2c64f6655e79cc3c9dce7600fa7f6bacabca01",
+      "byte_identical": true,
+      "new_functions": []
+    },
+    {
+      "module": "menu",
+      "before_functions": 30,
+      "before_bytes": 2628,
+      "after_functions": 40,
+      "after_bytes": 3104,
+      "added_functions": 10,
+      "added_bytes": 476,
+      "sha256": "f021f96fa05da5907563a28c232966aa8a344526d6b8bdee728053ec75224d0a",
+      "byte_identical": true,
+      "new_functions": [
+        {
+          "name": "func_089DE870",
+          "address": "0x089DE870",
+          "size": 88,
+          "source": "src/menu/execution_storage.c",
+          "unit": "menu_execution_storage",
+          "direct_callers": [
+            {
+              "module": "menu",
+              "function": "0x089DE3AC",
+              "pc": "0x089DE3CC"
+            }
+          ],
+          "entry_provenance": "checked-caller-or-callback-pointer"
+        },
+        {
+          "name": "func_089DE8C8",
+          "address": "0x089DE8C8",
+          "size": 56,
+          "source": "src/menu/execution_storage.c",
+          "unit": "menu_execution_storage",
+          "direct_callers": [
+            {
+              "module": "menu",
+              "function": "0x089DE548",
+              "pc": "0x089DE6BC"
+            }
+          ],
+          "entry_provenance": "checked-caller-or-callback-pointer"
+        },
+        {
+          "name": "func_089DE900",
+          "address": "0x089DE900",
+          "size": 16,
+          "source": "src/menu/execution_storage.c",
+          "unit": "menu_execution_storage",
+          "direct_callers": [
+            {
+              "module": "menu",
+              "function": "0x089DE9EC",
+              "pc": "0x089DEA00"
+            }
+          ],
+          "entry_provenance": "checked-caller-or-callback-pointer"
+        },
+        {
+          "name": "func_089DE910",
+          "address": "0x089DE910",
+          "size": 60,
+          "source": "src/menu/execution_callback_setup.c",
+          "unit": "menu_execution_callback_setup",
+          "direct_callers": [
+            {
+              "module": "menu",
+              "function": "0x089DEA74",
+              "pc": "0x089DEA88"
+            },
+            {
+              "module": "menu",
+              "function": "0x089E0BDC",
+              "pc": "0x089E0C04"
+            },
+            {
+              "module": "menu",
+              "function": "0x089E0CEC",
+              "pc": "0x089E0DC8"
+            },
+            {
+              "module": "menu",
+              "function": "0x089E8DCC",
+              "pc": "0x089E8E40"
+            },
+            {
+              "module": "menu",
+              "function": "0x089E91F4",
+              "pc": "0x089E9258"
+            },
+            {
+              "module": "menu",
+              "function": "0x08ABBE74",
+              "pc": "0x08ABBFD8"
+            },
+            {
+              "module": "menu",
+              "function": "0x08ABBE74",
+              "pc": "0x08ABC044"
+            },
+            {
+              "module": "menu",
+              "function": "0x08B3D6EC",
+              "pc": "0x08B3D700"
+            }
+          ],
+          "entry_provenance": "checked-caller-or-callback-pointer"
+        },
+        {
+          "name": "func_089DE94C",
+          "address": "0x089DE94C",
+          "size": 68,
+          "source": "src/menu/execution_callback_setup.c",
+          "unit": "menu_execution_callback_setup",
+          "direct_callers": [
+            {
+              "module": "menu",
+              "function": "0x089DEA74",
+              "pc": "0x089DEA90"
+            },
+            {
+              "module": "menu",
+              "function": "0x089E0BDC",
+              "pc": "0x089E0C0C"
+            },
+            {
+              "module": "menu",
+              "function": "0x089E0CEC",
+              "pc": "0x089E0DD0"
+            },
+            {
+              "module": "menu",
+              "function": "0x089E8DCC",
+              "pc": "0x089E8E48"
+            },
+            {
+              "module": "menu",
+              "function": "0x089E91F4",
+              "pc": "0x089E9260"
+            },
+            {
+              "module": "menu",
+              "function": "0x08ABBE74",
+              "pc": "0x08ABBFE0"
+            },
+            {
+              "module": "menu",
+              "function": "0x08ABBE74",
+              "pc": "0x08ABC04C"
+            },
+            {
+              "module": "menu",
+              "function": "0x08B3D6EC",
+              "pc": "0x08B3D708"
+            }
+          ],
+          "entry_provenance": "checked-caller-or-callback-pointer"
+        },
+        {
+          "name": "func_089DE9EC",
+          "address": "0x089DE9EC",
+          "size": 40,
+          "source": "src/menu/execution_callback_entries.c",
+          "unit": "menu_execution_callback_entries",
+          "direct_callers": [],
+          "callback_pointer_evidence": {
+            "high_pc": "0x089DDC4C",
+            "low_pc": "0x089DDC58",
+            "address": "0x089DE9EC"
+          },
+          "entry_provenance": "checked-caller-or-callback-pointer"
+        },
+        {
+          "name": "func_089DEA14",
+          "address": "0x089DEA14",
+          "size": 32,
+          "source": "src/menu/execution_callback_entries.c",
+          "unit": "menu_execution_callback_entries",
+          "direct_callers": [],
+          "callback_pointer_evidence": {
+            "high_pc": "0x089DE920",
+            "low_pc": "0x089DE930",
+            "address": "0x089DEA14"
+          },
+          "entry_provenance": "checked-caller-or-callback-pointer"
+        },
+        {
+          "name": "func_089DEA34",
+          "address": "0x089DEA34",
+          "size": 32,
+          "source": "src/menu/execution_callback_entries.c",
+          "unit": "menu_execution_callback_entries",
+          "direct_callers": [],
+          "callback_pointer_evidence": {
+            "high_pc": "0x089DE924",
+            "low_pc": "0x089DE93C",
+            "address": "0x089DEA34"
+          },
+          "entry_provenance": "checked-caller-or-callback-pointer"
+        },
+        {
+          "name": "func_089DEA54",
+          "address": "0x089DEA54",
+          "size": 32,
+          "source": "src/menu/execution_callback_entries.c",
+          "unit": "menu_execution_callback_entries",
+          "direct_callers": [],
+          "callback_pointer_evidence": {
+            "high_pc": "0x089DE3DC",
+            "low_pc": "0x089DE3F0",
+            "address": "0x089DEA54"
+          },
+          "entry_provenance": "checked-caller-or-callback-pointer"
+        },
+        {
+          "name": "func_089DEA74",
+          "address": "0x089DEA74",
+          "size": 52,
+          "source": "src/menu/execution_resume.c",
+          "unit": "menu_execution_resume",
+          "direct_callers": [],
+          "entry_provenance": "untraced-existing-extent"
+        }
+      ]
+    },
+    {
+      "module": "battle",
+      "before_functions": 79,
+      "before_bytes": 5048,
+      "after_functions": 79,
+      "after_bytes": 5048,
+      "added_functions": 0,
+      "added_bytes": 0,
+      "sha256": "1f96cfb3be771ff6e94741ae3916fab340df74e36ede07ca39545d015f4c49dc",
+      "byte_identical": true,
+      "new_functions": []
+    }
+  ],
+  "source_corrections": [
+    {
+      "address": "0x08865088",
+      "bytes": 28,
+      "source": "src/main/state_release.c",
+      "change": "Native callback argument/return forwarding; the old one-argument void source omitted consumed a1-a3 inputs and return pointer. Corrected source retains exact bytes.",
+      "behavioral_regression": "tools/test_callback_interface.py"
+    },
+    {
+      "address": "0x0886503C",
+      "bytes": 16,
+      "change": "Shared callback function-pointer types; state-prefix alias unified with MainCallbackBlock."
+    },
+    {
+      "address": "0x089DDC20",
+      "bytes": 164,
+      "change": "The resource event callback address is typed as executable code instead of a data array."
+    }
+  ],
+  "inventory_revision": 14,
+  "inventory_entries": 21280,
+  "inventory_body_bytes": 4717908,
+  "inventory_change": "Source attribution and interface interpretation only; no new entries or changed extents/classification.",
+  "controller_members": {
+    "matching": 10,
+    "total": 20,
+    "matching_bytes": 1472,
+    "reviewed_bytes": 8188,
+    "new_matching_members": 0
+  },
+  "savedata_evidence": {
+    "rank": 2,
+    "rank_meaning": "Behavior explained in part",
+    "owned_scope_complete": false,
+    "matching_owned_handler_functions": 0,
+    "review": "config/menu-savedata-setup-review.json",
+    "layout": "include/menu/savedata_request.h",
+    "report": "docs/decomp/savedata-request-mapping.json"
+  },
+  "compiler_profile": "SNC 1.2.7503.0 -O2 -g unchanged",
+  "bounded_profile_experiment": {
+    "comparisons": 15,
+    "exact_matches": 0,
+    "production_flags_changed": false
+  },
+  "all_current_build_proofs": true,
+  "tests_passed": 152,
+  "runtime": "Deferred; no emulator, ISO or runtime package changes."
+}

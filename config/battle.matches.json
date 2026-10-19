@@ -1,0 +1,1298 @@
+{
+  "compiler": "tools/compilers/pspsnc_1.2.7503.0/pspsnc.exe",
+  "flags": [
+    "-O2",
+    "-g"
+  ],
+  "units": [
+    {
+      "name": "cleanup_group_a",
+      "source": "src/battle/cleanup_group_a.c",
+      "functions": [
+        {
+          "name": "func_08A48E78",
+          "address": "0x08A48E78",
+          "size": 8
+        },
+        {
+          "name": "func_08A48E80",
+          "address": "0x08A48E80",
+          "size": 8
+        }
+      ]
+    },
+    {
+      "name": "cleanup_group_b",
+      "source": "src/battle/cleanup_group_b.c",
+      "functions": [
+        {
+          "name": "func_08A4CCD8",
+          "address": "0x08A4CCD8",
+          "size": 8
+        },
+        {
+          "name": "func_08A4CCE0",
+          "address": "0x08A4CCE0",
+          "size": 8
+        }
+      ]
+    },
+    {
+      "name": "empty_initializer",
+      "source": "src/battle/empty_initializer.c",
+      "functions": [
+        {
+          "name": "func_08B542A4",
+          "address": "0x08B542A4",
+          "size": 8
+        }
+      ]
+    },
+    {
+      "name": "slot_setter",
+      "source": "src/battle/slot_setter.c",
+      "functions": [
+        {
+          "name": "func_08ABB7FC",
+          "address": "0x08ABB7FC",
+          "size": 12
+        }
+      ]
+    },
+    {
+      "name": "state_prefix_small",
+      "source": "src/battle/state_prefix_small.c",
+      "functions": [
+        {
+          "name": "func_08ABC0D0",
+          "address": "0x08ABC0D0",
+          "size": 12
+        }
+      ]
+    },
+    {
+      "name": "state_prefix_medium_a",
+      "source": "src/battle/state_prefix_medium_a.c",
+      "functions": [
+        {
+          "name": "func_08ABD660",
+          "address": "0x08ABD660",
+          "size": 16
+        }
+      ]
+    },
+    {
+      "name": "state_prefix_medium_b",
+      "source": "src/battle/state_prefix_medium_b.c",
+      "functions": [
+        {
+          "name": "func_08AC0B60",
+          "address": "0x08AC0B60",
+          "size": 16
+        }
+      ]
+    },
+    {
+      "name": "initializer_flag",
+      "source": "src/battle/initializer_flag.c",
+      "functions": [
+        {
+          "name": "func_08AC3EDC",
+          "address": "0x08AC3EDC",
+          "size": 16
+        }
+      ]
+    },
+    {
+      "name": "controller_lifecycle_089dd4d0",
+      "source": "src/battle/controller_lifecycle_089dd4d0.c",
+      "functions": [
+        {
+          "name": "func_089DD4D0",
+          "address": "0x089DD4D0",
+          "size": 100
+        }
+      ]
+    },
+    {
+      "name": "controller_lifecycle_089dd7a8",
+      "source": "src/battle/controller_lifecycle_089dd7a8.c",
+      "functions": [
+        {
+          "name": "func_089DD7A8",
+          "address": "0x089DD7A8",
+          "size": 100
+        }
+      ]
+    },
+    {
+      "name": "controller_lifecycle_089dd854",
+      "source": "src/battle/controller_lifecycle_089dd854.c",
+      "functions": [
+        {
+          "name": "func_089DD854",
+          "address": "0x089DD854",
+          "size": 76
+        }
+      ]
+    },
+    {
+      "name": "controller_lifecycle_089ddaf0",
+      "source": "src/battle/controller_lifecycle_089ddaf0.c",
+      "functions": [
+        {
+          "name": "func_089DDAF0",
+          "address": "0x089DDAF0",
+          "size": 48
+        },
+        {
+          "name": "func_089DDB20",
+          "address": "0x089DDB20",
+          "size": 48
+        }
+      ]
+    },
+    {
+      "name": "controller_lifecycle_089dde4c",
+      "source": "src/battle/controller_lifecycle_089dde4c.c",
+      "functions": [
+        {
+          "name": "func_089DDE4C",
+          "address": "0x089DDE4C",
+          "size": 48
+        }
+      ]
+    },
+    {
+      "name": "state_control_089e5aa8",
+      "source": "src/battle/state_control_089e5aa8.c",
+      "functions": [
+        {
+          "name": "func_089E5AA8",
+          "address": "0x089E5AA8",
+          "size": 40
+        }
+      ]
+    },
+    {
+      "name": "state_control_089e5bdc",
+      "source": "src/battle/state_control_089e5bdc.c",
+      "functions": [
+        {
+          "name": "func_089E5BDC",
+          "address": "0x089E5BDC",
+          "size": 76
+        },
+        {
+          "name": "func_089E5C28",
+          "address": "0x089E5C28",
+          "size": 56
+        },
+        {
+          "name": "func_089E5C60",
+          "address": "0x089E5C60",
+          "size": 40
+        },
+        {
+          "name": "func_089E5C88",
+          "address": "0x089E5C88",
+          "size": 36
+        }
+      ]
+    },
+    {
+      "name": "subobject_cleanup_089dda7c",
+      "source": "src/battle/subobject_cleanup_089dda7c.c",
+      "functions": [
+        {
+          "name": "func_089DDA7C",
+          "address": "0x089DDA7C",
+          "size": 28
+        }
+      ]
+    },
+    {
+      "name": "subobject_cleanup_089ddb70",
+      "source": "src/battle/subobject_cleanup_089ddb70.c",
+      "functions": [
+        {
+          "name": "func_089DDB70",
+          "address": "0x089DDB70",
+          "size": 28
+        }
+      ]
+    },
+    {
+      "name": "subobject_cleanup_089e5644",
+      "source": "src/battle/subobject_cleanup_089e5644.c",
+      "functions": [
+        {
+          "name": "func_089E5644",
+          "address": "0x089E5644",
+          "size": 28
+        },
+        {
+          "name": "func_089E5660",
+          "address": "0x089E5660",
+          "size": 28
+        },
+        {
+          "name": "func_089E567C",
+          "address": "0x089E567C",
+          "size": 28
+        },
+        {
+          "name": "func_089E5698",
+          "address": "0x089E5698",
+          "size": 28
+        },
+        {
+          "name": "func_089E56B4",
+          "address": "0x089E56B4",
+          "size": 28
+        },
+        {
+          "name": "func_089E56D0",
+          "address": "0x089E56D0",
+          "size": 28
+        }
+      ]
+    },
+    {
+      "name": "subobject_cleanup_089e6b30",
+      "source": "src/battle/subobject_cleanup_089e6b30.c",
+      "functions": [
+        {
+          "name": "func_089E6B30",
+          "address": "0x089E6B30",
+          "size": 28
+        },
+        {
+          "name": "func_089E6B4C",
+          "address": "0x089E6B4C",
+          "size": 28
+        }
+      ]
+    },
+    {
+      "name": "subobject_cleanup_089e6cac",
+      "source": "src/battle/subobject_cleanup_089e6cac.c",
+      "functions": [
+        {
+          "name": "func_089E6CAC",
+          "address": "0x089E6CAC",
+          "size": 28
+        },
+        {
+          "name": "func_089E6CC8",
+          "address": "0x089E6CC8",
+          "size": 28
+        }
+      ]
+    },
+    {
+      "name": "subobject_cleanup_089e69c0",
+      "source": "src/battle/subobject_cleanup_089e69c0.c",
+      "functions": [
+        {
+          "name": "func_089E69C0",
+          "address": "0x089E69C0",
+          "size": 56
+        }
+      ]
+    },
+    {
+      "name": "setup_089e06a8",
+      "source": "src/battle/setup_089e06a8.c",
+      "functions": [
+        {
+          "name": "func_089E06A8",
+          "address": "0x089E06A8",
+          "size": 96
+        }
+      ]
+    },
+    {
+      "name": "setup_089e0cb8",
+      "source": "src/battle/setup_089e0cb8.c",
+      "functions": [
+        {
+          "name": "func_089E0CB8",
+          "address": "0x089E0CB8",
+          "size": 56
+        }
+      ]
+    },
+    {
+      "name": "setup_089e07a0",
+      "source": "src/battle/setup_089e07a0.c",
+      "functions": [
+        {
+          "name": "func_089E07A0",
+          "address": "0x089E07A0",
+          "size": 12
+        }
+      ]
+    },
+    {
+      "name": "setup_089e3208",
+      "source": "src/battle/setup_089e3208.c",
+      "functions": [
+        {
+          "name": "func_089E3208",
+          "address": "0x089E3208",
+          "size": 80
+        }
+      ]
+    },
+    {
+      "name": "setup_089e68e0",
+      "source": "src/battle/setup_089e68e0.c",
+      "functions": [
+        {
+          "name": "func_089E68E0",
+          "address": "0x089E68E0",
+          "size": 72
+        }
+      ]
+    },
+    {
+      "name": "setup_089e6e60",
+      "source": "src/battle/setup_089e6e60.c",
+      "functions": [
+        {
+          "name": "func_089E6E60",
+          "address": "0x089E6E60",
+          "size": 56
+        }
+      ]
+    },
+    {
+      "name": "setup_089e7130",
+      "source": "src/battle/setup_089e7130.c",
+      "functions": [
+        {
+          "name": "func_089E7130",
+          "address": "0x089E7130",
+          "size": 80
+        }
+      ]
+    },
+    {
+      "name": "setup_089e71f8",
+      "source": "src/battle/setup_089e71f8.c",
+      "functions": [
+        {
+          "name": "func_089E71F8",
+          "address": "0x089E71F8",
+          "size": 8
+        }
+      ]
+    },
+    {
+      "name": "setup_089e79a8",
+      "source": "src/battle/setup_089e79a8.c",
+      "functions": [
+        {
+          "name": "func_089E79A8",
+          "address": "0x089E79A8",
+          "size": 120
+        }
+      ]
+    },
+    {
+      "name": "setup_089e8e70",
+      "source": "src/battle/setup_089e8e70.c",
+      "functions": [
+        {
+          "name": "func_089E8E70",
+          "address": "0x089E8E70",
+          "size": 56
+        }
+      ]
+    },
+    {
+      "name": "setup_089e8edc",
+      "source": "src/battle/setup_089e8edc.c",
+      "functions": [
+        {
+          "name": "func_089E8EDC",
+          "address": "0x089E8EDC",
+          "size": 12
+        }
+      ]
+    },
+    {
+      "name": "setup_089ecf40",
+      "source": "src/battle/setup_089ecf40.c",
+      "functions": [
+        {
+          "name": "func_089ECF40",
+          "address": "0x089ECF40",
+          "size": 56
+        }
+      ]
+    },
+    {
+      "name": "cleanup_089e0708",
+      "source": "src/battle/cleanup_089e0708.c",
+      "functions": [
+        {
+          "name": "func_089E0708",
+          "address": "0x089E0708",
+          "size": 152
+        }
+      ]
+    },
+    {
+      "name": "cleanup_089e07ac",
+      "source": "src/battle/cleanup_089e07ac.c",
+      "functions": [
+        {
+          "name": "func_089E07AC",
+          "address": "0x089E07AC",
+          "size": 128
+        }
+      ]
+    },
+    {
+      "name": "cleanup_089e3258",
+      "source": "src/battle/cleanup_089e3258.c",
+      "functions": [
+        {
+          "name": "func_089E3258",
+          "address": "0x089E3258",
+          "size": 120
+        }
+      ]
+    },
+    {
+      "name": "cleanup_089e6928",
+      "source": "src/battle/cleanup_089e6928.c",
+      "functions": [
+        {
+          "name": "func_089E6928",
+          "address": "0x089E6928",
+          "size": 112
+        }
+      ]
+    },
+    {
+      "name": "cleanup_089e7180",
+      "source": "src/battle/cleanup_089e7180.c",
+      "functions": [
+        {
+          "name": "func_089E7180",
+          "address": "0x089E7180",
+          "size": 120
+        }
+      ]
+    },
+    {
+      "name": "cleanup_089e7a20",
+      "source": "src/battle/cleanup_089e7a20.c",
+      "functions": [
+        {
+          "name": "func_089E7A20",
+          "address": "0x089E7A20",
+          "size": 176
+        }
+      ]
+    },
+    {
+      "name": "cleanup_089e6e98",
+      "source": "src/battle/cleanup_089e6e98.c",
+      "functions": [
+        {
+          "name": "func_089E6E98",
+          "address": "0x089E6E98",
+          "size": 88
+        }
+      ]
+    },
+    {
+      "name": "cleanup_089ecf78",
+      "source": "src/battle/cleanup_089ecf78.c",
+      "functions": [
+        {
+          "name": "func_089ECF78",
+          "address": "0x089ECF78",
+          "size": 88
+        }
+      ]
+    },
+    {
+      "name": "cleanup_089ed01c",
+      "source": "src/battle/cleanup_089ed01c.c",
+      "functions": [
+        {
+          "name": "func_089ED01C",
+          "address": "0x089ED01C",
+          "size": 72
+        }
+      ]
+    },
+    {
+      "name": "cleanup_089e6efc",
+      "source": "src/battle/cleanup_089e6efc.c",
+      "functions": [
+        {
+          "name": "func_089E6EFC",
+          "address": "0x089E6EFC",
+          "size": 64
+        }
+      ]
+    },
+    {
+      "name": "cleanup_089e0d48",
+      "source": "src/battle/cleanup_089e0d48.c",
+      "functions": [
+        {
+          "name": "func_089E0D48",
+          "address": "0x089E0D48",
+          "size": 12
+        }
+      ]
+    },
+    {
+      "name": "cleanup_089e6ef0",
+      "source": "src/battle/cleanup_089e6ef0.c",
+      "functions": [
+        {
+          "name": "func_089E6EF0",
+          "address": "0x089E6EF0",
+          "size": 12
+        }
+      ]
+    },
+    {
+      "name": "update_089de360",
+      "source": "src/battle/update_089de360.c",
+      "functions": [
+        {
+          "name": "func_089DE360",
+          "address": "0x089DE360",
+          "size": 76
+        }
+      ]
+    },
+    {
+      "name": "update_089e0b9c",
+      "source": "src/battle/update_089e0b9c.c",
+      "functions": [
+        {
+          "name": "func_089E0B9C",
+          "address": "0x089E0B9C",
+          "size": 76
+        }
+      ]
+    },
+    {
+      "name": "update_089e0dc0",
+      "source": "src/battle/update_089e0dc0.c",
+      "functions": [
+        {
+          "name": "func_089E0DC0",
+          "address": "0x089E0DC0",
+          "size": 32
+        }
+      ]
+    },
+    {
+      "name": "update_089e3768",
+      "source": "src/battle/update_089e3768.c",
+      "functions": [
+        {
+          "name": "func_089E3768",
+          "address": "0x089E3768",
+          "size": 88
+        },
+        {
+          "name": "func_089E37C0",
+          "address": "0x089E37C0",
+          "size": 92
+        }
+      ]
+    },
+    {
+      "name": "update_089e3b0c",
+      "source": "src/battle/update_089e3b0c.c",
+      "functions": [
+        {
+          "name": "func_089E3B0C",
+          "address": "0x089E3B0C",
+          "size": 84
+        }
+      ]
+    },
+    {
+      "name": "update_089e3c3c",
+      "source": "src/battle/update_089e3c3c.c",
+      "functions": [
+        {
+          "name": "func_089E3C3C",
+          "address": "0x089E3C3C",
+          "size": 52
+        }
+      ]
+    },
+    {
+      "name": "update_089e5598",
+      "source": "src/battle/update_089e5598.c",
+      "functions": [
+        {
+          "name": "func_089E5598",
+          "address": "0x089E5598",
+          "size": 124
+        }
+      ]
+    },
+    {
+      "name": "update_089e69f8",
+      "source": "src/battle/update_089e69f8.c",
+      "functions": [
+        {
+          "name": "func_089E69F8",
+          "address": "0x089E69F8",
+          "size": 124
+        },
+        {
+          "name": "func_089E6A74",
+          "address": "0x089E6A74",
+          "size": 76
+        }
+      ]
+    },
+    {
+      "name": "update_089ea064",
+      "source": "src/battle/update_089ea064.c",
+      "functions": [
+        {
+          "name": "func_089EA064",
+          "address": "0x089EA064",
+          "size": 72
+        }
+      ]
+    },
+    {
+      "name": "activate_089e1ec0",
+      "source": "src/battle/activate_089e1ec0.c",
+      "functions": [
+        {
+          "name": "func_089E1EC0",
+          "address": "0x089E1EC0",
+          "size": 272
+        }
+      ]
+    },
+    {
+      "name": "activate_089e20fc",
+      "source": "src/battle/activate_089e20fc.c",
+      "functions": [
+        {
+          "name": "func_089E20FC",
+          "address": "0x089E20FC",
+          "size": 104
+        },
+        {
+          "name": "func_089E2164",
+          "address": "0x089E2164",
+          "size": 108
+        }
+      ]
+    },
+    {
+      "name": "activate_089e2b48",
+      "source": "src/battle/activate_089e2b48.c",
+      "functions": [
+        {
+          "name": "func_089E2B48",
+          "address": "0x089E2B48",
+          "size": 108
+        }
+      ]
+    },
+    {
+      "name": "activate_089e4368",
+      "source": "src/battle/activate_089e4368.c",
+      "functions": [
+        {
+          "name": "func_089E4368",
+          "address": "0x089E4368",
+          "size": 52
+        }
+      ]
+    },
+    {
+      "name": "activate_089e5988",
+      "source": "src/battle/activate_089e5988.c",
+      "functions": [
+        {
+          "name": "func_089E5988",
+          "address": "0x089E5988",
+          "size": 68
+        }
+      ]
+    },
+    {
+      "name": "activate_089e9ef4",
+      "source": "src/battle/activate_089e9ef4.c",
+      "functions": [
+        {
+          "name": "func_089E9EF4",
+          "address": "0x089E9EF4",
+          "size": 16
+        }
+      ]
+    },
+    {
+      "name": "activate_089ea0ac",
+      "source": "src/battle/activate_089ea0ac.c",
+      "functions": [
+        {
+          "name": "func_089EA0AC",
+          "address": "0x089EA0AC",
+          "size": 112
+        },
+        {
+          "name": "func_089EA11C",
+          "address": "0x089EA11C",
+          "size": 76
+        }
+      ]
+    },
+    {
+      "name": "drawing_step",
+      "source": "src/battle/drawing_step.cpp",
+      "functions": [
+        {
+          "name": "func_089E56EC",
+          "address": "0x089E56EC",
+          "size": 216
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fUBattleDrawingFlagOpsKclear_flagP6XMainDrawingRecordPrefixUiT",
+        "__0fUBattleDrawingFlagOpsIhas_flagPC6XMainDrawingRecordPrefixUiT"
+      ]
+    },
+    {
+      "name": "flow_089e0904",
+      "source": "src/battle/flow_089e0904.c",
+      "functions": [
+        {
+          "name": "func_089E0904",
+          "address": "0x089E0904",
+          "size": 112
+        }
+      ]
+    },
+    {
+      "name": "flow_089e1fd0",
+      "source": "src/battle/flow_089e1fd0.c",
+      "functions": [
+        {
+          "name": "func_089E1FD0",
+          "address": "0x089E1FD0",
+          "size": 116
+        }
+      ]
+    },
+    {
+      "name": "flow_089e3618",
+      "source": "src/battle/flow_089e3618.c",
+      "functions": [
+        {
+          "name": "func_089E3618",
+          "address": "0x089E3618",
+          "size": 92
+        }
+      ]
+    },
+    {
+      "name": "flow_089e3bf0",
+      "source": "src/battle/flow_089e3bf0.c",
+      "functions": [
+        {
+          "name": "func_089E3BF0",
+          "address": "0x089E3BF0",
+          "size": 76
+        }
+      ]
+    },
+    {
+      "name": "flow_089e4a3c",
+      "source": "src/battle/flow_089e4a3c.c",
+      "functions": [
+        {
+          "name": "func_089E4A3C",
+          "address": "0x089E4A3C",
+          "size": 52
+        }
+      ]
+    },
+    {
+      "name": "flow_089e5b60",
+      "source": "src/battle/flow_089e5b60.c",
+      "functions": [
+        {
+          "name": "func_089E5B60",
+          "address": "0x089E5B60",
+          "size": 124
+        }
+      ]
+    },
+    {
+      "name": "flow_089e63d4",
+      "source": "src/battle/flow_089e63d4.c",
+      "functions": [
+        {
+          "name": "func_089E63D4",
+          "address": "0x089E63D4",
+          "size": 112
+        }
+      ]
+    },
+    {
+      "name": "flow_089e7318",
+      "source": "src/battle/flow_089e7318.c",
+      "functions": [
+        {
+          "name": "func_089E7318",
+          "address": "0x089E7318",
+          "size": 116
+        }
+      ]
+    },
+    {
+      "name": "flow_089e7450",
+      "source": "src/battle/flow_089e7450.c",
+      "functions": [
+        {
+          "name": "func_089E7450",
+          "address": "0x089E7450",
+          "size": 88
+        }
+      ]
+    },
+    {
+      "name": "flow_089e7f2c",
+      "source": "src/battle/flow_089e7f2c.c",
+      "functions": [
+        {
+          "name": "func_089E7F2C",
+          "address": "0x089E7F2C",
+          "size": 120
+        }
+      ]
+    },
+    {
+      "name": "flow_089e95b0",
+      "source": "src/battle/flow_089e95b0.c",
+      "functions": [
+        {
+          "name": "func_089E95B0",
+          "address": "0x089E95B0",
+          "size": 48
+        }
+      ]
+    },
+    {
+      "name": "flow_089ea7b0",
+      "source": "src/battle/flow_089ea7b0.c",
+      "functions": [
+        {
+          "name": "func_089EA7B0",
+          "address": "0x089EA7B0",
+          "size": 188
+        }
+      ]
+    },
+    {
+      "name": "flow_089eb944",
+      "source": "src/battle/flow_089eb944.c",
+      "functions": [
+        {
+          "name": "func_089EB944",
+          "address": "0x089EB944",
+          "size": 136
+        }
+      ]
+    },
+    {
+      "name": "oct13_089e6444",
+      "source": "src/battle/oct13_089e6444.cpp",
+      "functions": [
+        {
+          "name": "func_089E6444",
+          "address": "0x089E6444",
+          "size": 12
+        }
+      ]
+    },
+    {
+      "name": "oct13_089e6450",
+      "source": "src/battle/oct13_089e6450.cpp",
+      "functions": [
+        {
+          "name": "func_089E6450",
+          "address": "0x089E6450",
+          "size": 324
+        }
+      ]
+    },
+    {
+      "name": "oct13_089e9f04",
+      "source": "src/battle/oct13_089e9f04.cpp",
+      "functions": [
+        {
+          "name": "func_089E9F04",
+          "address": "0x089E9F04",
+          "size": 112
+        }
+      ]
+    },
+    {
+      "name": "oct13_089e39cc",
+      "source": "src/battle/oct13_089e39cc.cpp",
+      "functions": [
+        {
+          "name": "func_089E39CC",
+          "address": "0x089E39CC",
+          "size": 64
+        }
+      ]
+    },
+    {
+      "name": "oct13_089e1268",
+      "source": "src/battle/oct13_089e1268.cpp",
+      "functions": [
+        {
+          "name": "func_089E1268",
+          "address": "0x089E1268",
+          "size": 64
+        }
+      ]
+    },
+    {
+      "name": "oct13_089e1248",
+      "source": "src/battle/oct13_089e1248.c",
+      "functions": [
+        {
+          "name": "func_089E1248",
+          "address": "0x089E1248",
+          "size": 32
+        }
+      ]
+    },
+    {
+      "name": "oct13_089e399c",
+      "source": "src/battle/oct13_089e399c.c",
+      "functions": [
+        {
+          "name": "func_089E399C",
+          "address": "0x089E399C",
+          "size": 48
+        }
+      ]
+    },
+    {
+      "name": "oct13_089e3fe4",
+      "source": "src/battle/oct13_089e3fe4.c",
+      "functions": [
+        {
+          "name": "func_089E3FE4",
+          "address": "0x089E3FE4",
+          "size": 44
+        }
+      ]
+    },
+    {
+      "name": "oct13_089e4594",
+      "source": "src/battle/oct13_089e4594.c",
+      "functions": [
+        {
+          "name": "func_089E4594",
+          "address": "0x089E4594",
+          "size": 44
+        }
+      ]
+    },
+    {
+      "name": "oct13b_089e0be8",
+      "source": "src/battle/oct13b_089e0be8.c",
+      "functions": [
+        {
+          "name": "func_089E0BE8",
+          "address": "0x089E0BE8",
+          "size": 132
+        }
+      ]
+    },
+    {
+      "name": "oct13b_089e0c6c",
+      "source": "src/battle/oct13b_089e0c6c.c",
+      "functions": [
+        {
+          "name": "func_089E0C6C",
+          "address": "0x089E0C6C",
+          "size": 60
+        }
+      ]
+    },
+    {
+      "name": "oct13b_089e0d54",
+      "source": "src/battle/oct13b_089e0d54.c",
+      "functions": [
+        {
+          "name": "func_089E0D54",
+          "address": "0x089E0D54",
+          "size": 28
+        }
+      ]
+    },
+    {
+      "name": "oct13b_089e0d70",
+      "source": "src/battle/oct13b_089e0d70.c",
+      "functions": [
+        {
+          "name": "func_089E0D70",
+          "address": "0x089E0D70",
+          "size": 80
+        }
+      ]
+    },
+    {
+      "name": "oct13b_089e12a8",
+      "source": "src/battle/oct13b_089e12a8.c",
+      "functions": [
+        {
+          "name": "func_089E12A8",
+          "address": "0x089E12A8",
+          "size": 132
+        }
+      ]
+    },
+    {
+      "name": "oct13b_089e3358",
+      "source": "src/battle/oct13b_089e3358.c",
+      "functions": [
+        {
+          "name": "func_089E3358",
+          "address": "0x089E3358",
+          "size": 188
+        }
+      ]
+    },
+    {
+      "name": "oct13b_089e7258",
+      "source": "src/battle/oct13b_089e7258.c",
+      "functions": [
+        {
+          "name": "func_089E7258",
+          "address": "0x089E7258",
+          "size": 192
+        }
+      ]
+    },
+    {
+      "name": "oct13b_089e74a8",
+      "source": "src/battle/oct13b_089e74a8.c",
+      "functions": [
+        {
+          "name": "func_089E74A8",
+          "address": "0x089E74A8",
+          "size": 132
+        }
+      ]
+    },
+    {
+      "name": "oct13b_089e8ff8",
+      "source": "src/battle/oct13b_089e8ff8.c",
+      "functions": [
+        {
+          "name": "func_089E8FF8",
+          "address": "0x089E8FF8",
+          "size": 44
+        }
+      ]
+    },
+    {
+      "name": "oct13b_089e9024",
+      "source": "src/battle/oct13b_089e9024.c",
+      "functions": [
+        {
+          "name": "func_089E9024",
+          "address": "0x089E9024",
+          "size": 136
+        }
+      ]
+    },
+    {
+      "name": "oct13b_089ed064",
+      "source": "src/battle/oct13b_089ed064.c",
+      "functions": [
+        {
+          "name": "func_089ED064",
+          "address": "0x089ED064",
+          "size": 84
+        }
+      ]
+    }
+  ],
+  "symbols": {
+    "D_08ABBDFC": "0x08ABBDFC",
+    "D_09B6B824": "0x09B6B824",
+    "func_089DD5D4": "0x089DD5D4",
+    "func_089E06A8": "0x089E06A8",
+    "func_089E3208": "0x089E3208",
+    "func_089E68E0": "0x089E68E0",
+    "func_089E7130": "0x089E7130",
+    "func_089E79A8": "0x089E79A8",
+    "func_089E8E70": "0x089E8E70",
+    "func_089ECF40": "0x089ECF40",
+    "func_089E3414": "0x089E3414",
+    "func_089E7D60": "0x089E7D60",
+    "func_089E7318": "0x089E7318",
+    "func_089E6A74": "0x089E6A74",
+    "func_089E0904": "0x089E0904",
+    "func_089ED0B8": "0x089ED0B8",
+    "func_089E7F2C": "0x089E7F2C",
+    "func_089E6B4C": "0x089E6B4C",
+    "func_089ED3A0": "0x089ED3A0",
+    "func_089E8EF0": "0x089E8EF0",
+    "func_089E8F50": "0x089E8F50",
+    "func_089E0C6C": "0x089E0C6C",
+    "func_089E6CC8": "0x089E6CC8",
+    "func_089E3618": "0x089E3618",
+    "func_089E8028": "0x089E8028",
+    "func_089EDCD4": "0x089EDCD4",
+    "func_089E5CAC": "0x089E5CAC",
+    "func_089E5BDC": "0x089E5BDC",
+    "func_089E5C28": "0x089E5C28",
+    "func_089E5C60": "0x089E5C60",
+    "func_089E5C88": "0x089E5C88",
+    "func_089EA22C": "0x089EA22C",
+    "func_089E2044": "0x089E2044",
+    "func_089EA388": "0x089EA388",
+    "func_089EA40C": "0x089EA40C",
+    "func_089E9F04": "0x089E9F04",
+    "func_089E1E30": "0x089E1E30",
+    "func_089E6998": "0x089E6998",
+    "D_089E0CA8": "0x089E0CA8",
+    "D_089E11B8": "0x089E11B8",
+    "func_0887A61C": "0x0887A61C",
+    "func_08993560": "0x08993560",
+    "D_089E1060": "0x089E1060",
+    "func_089E0D48": "0x089E0D48",
+    "D_089E38C0": "0x089E38C0",
+    "D_089E38D0": "0x089E38D0",
+    "func_089E32D0": "0x089E32D0",
+    "D_089E6E50": "0x089E6E50",
+    "func_089E1D00": "0x089E1D00",
+    "func_089E9E10": "0x089E9E10",
+    "D_089E70D8": "0x089E70D8",
+    "func_089E6EF0": "0x089E6EF0",
+    "D_089E7390": "0x089E7390",
+    "D_089E73A0": "0x089E73A0",
+    "D_089E8228": "0x089E8228",
+    "D_089E5218": "0x089E5218",
+    "D_089E8F68": "0x089E8F68",
+    "func_089DDFC8": "0x089DDFC8",
+    "func_089E7AD0": "0x089E7AD0",
+    "D_089E8F58": "0x089E8F58",
+    "D_089ED850": "0x089ED850",
+    "func_089ECFD0": "0x089ECFD0",
+    "D_089E11F0": "0x089E11F0",
+    "func_08992F04": "0x08992F04",
+    "func_0899372C": "0x0899372C",
+    "func_0887A644": "0x0887A644",
+    "func_089E0CF0": "0x089E0CF0",
+    "D_089D7830": "0x089D7830",
+    "func_089E1268": "0x089E1268",
+    "func_089E0D54": "0x089E0D54",
+    "func_088D0A1C": "0x088D0A1C",
+    "D_089E3920": "0x089E3920",
+    "func_089E3300": "0x089E3300",
+    "func_089E9E68": "0x089E9E68",
+    "func_089E1D68": "0x089E1D68",
+    "D_089E73D8": "0x089E73D8",
+    "func_089E7200": "0x089E7200",
+    "D_089E5270": "0x089E5270",
+    "D_089E8FA0": "0x089E8FA0",
+    "func_089DE0A0": "0x089DE0A0",
+    "func_089E7AFC": "0x089E7AFC",
+    "func_088DA060": "0x088DA060",
+    "func_089DEDB0": "0x089DEDB0",
+    "func_089DEA48": "0x089DEA48",
+    "func_089DEB54": "0x089DEB54",
+    "func_0887AFB0": "0x0887AFB0",
+    "func_089E381C": "0x089E381C",
+    "func_089E3CDC": "0x089E3CDC",
+    "func_089E4674": "0x089E4674",
+    "func_089E4060": "0x089E4060",
+    "func_089E4368": "0x089E4368",
+    "func_089E56EC": "0x089E56EC",
+    "func_089E57C4": "0x089E57C4",
+    "func_089E5988": "0x089E5988",
+    "func_089E1EC0": "0x089E1EC0",
+    "func_089E9F74": "0x089E9F74",
+    "func_089E6CE4": "0x089E6CE4",
+    "func_089E1FD0": "0x089E1FD0",
+    "func_089EA11C": "0x089EA11C",
+    "func_089EA448": "0x089EA448",
+    "func_089EA450": "0x089EA450",
+    "D_089D6998": "0x089D6998",
+    "func_088D09D8": "0x088D09D8",
+    "func_0887E0CC": "0x0887E0CC",
+    "func_089E2304": "0x089E2304",
+    "func_089E21D0": "0x089E21D0",
+    "func_089E2B2C": "0x089E2B2C",
+    "func_089E439C": "0x089E439C",
+    "func_089E63D4": "0x089E63D4",
+    "func_089E5B60": "0x089E5B60",
+    "func_089E4EE0": "0x089E4EE0",
+    "func_089EE014": "0x089EE014",
+    "func_088D9CD8": "0x088D9CD8",
+    "func_088D9CFC": "0x088D9CFC",
+    "func_088D9AEC": "0x088D9AEC",
+    "func_088D9D24": "0x088D9D24",
+    "func_089EA8F8": "0x089EA8F8",
+    "func_089E96DC": "0x089E96DC",
+    "func_089E132C": "0x089E132C",
+    "func_089E2BB4": "0x089E2BB4",
+    "func_089E2418": "0x089E2418",
+    "func_089E4A94": "0x089E4A94",
+    "D_089D69E0": "0x089D69E0",
+    "D_089E6078": "0x089E6078",
+    "func_089E6450": "0x089E6450",
+    "func_089E6594": "0x089E6594",
+    "func_089E752C": "0x089E752C",
+    "func_089E7430": "0x089E7430",
+    "D_089D6A10": "0x089D6A10",
+    "func_089EA74C": "0x089EA74C",
+    "func_089EB904": "0x089EB904",
+    "func_088DAA40": "0x088DAA40",
+    "D_089E68B0": "0x089E68B0",
+    "D_089D5EAC": "0x089D5EAC",
+    "func_089E6444": "0x089E6444",
+    "func_089E973C": "0x089E973C",
+    "D_089E68B4": "0x089E68B4",
+    "func_089E9EF4": "0x089E9EF4",
+    "func_089E3FE4": "0x089E3FE4",
+    "func_089E4594": "0x089E4594",
+    "func_089E399C": "0x089E399C",
+    "func_0887BA5C": "0x0887BA5C",
+    "func_089E1248": "0x089E1248",
+    "func_08935828": "0x08935828",
+    "func_089E3F98": "0x089E3F98",
+    "func_089E4550": "0x089E4550",
+    "func_088908E0": "0x088908E0",
+    "func_0887AC70": "0x0887AC70",
+    "func_0887AD1C": "0x0887AD1C",
+    "func_089E3A0C": "0x089E3A0C",
+    "func_089E7450": "0x089E7450",
+    "func_089ED01C": "0x089ED01C"
+  },
+  "status": "112 matching C/C++ functions / 8380 bytes; connected curve controls, resource cleanup and second activation/cleanup group added. Broader combat ownership remains provisional."
+}

@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "target": "ULUS10566 v1.00",
+  "cases": [
+    "retail",
+    "original",
+    "rebuilt"
+  ],
+  "run_id": "hub-baseline-v1",
+  "seed_record": "docs/decomp/human-runtime-result.json",
+  "comparison_method": "Same saved profile and reviewed menu route; semantic checkpoints, not synchronized frames",
+  "scenarios": [
+    {
+      "id": "hub-load-slot-1",
+      "save_directory": "ULUS10566GameData00",
+      "requires_process_restart": true,
+      "acceptance": [
+        "PSP load completes",
+        "Start Menu hub reached without replaying tutorials",
+        "Mode selection responds"
+      ],
+      "status": "passed-three-cases"
+    },
+    {
+      "id": "hub-load-slot-2",
+      "save_directory": "ULUS10566GameData01",
+      "requires_process_restart": true,
+      "acceptance": [
+        "PSP load completes",
+        "Start Menu hub reached without replaying tutorials",
+        "Mode selection responds"
+      ],
+      "status": "passed-three-cases"
+    },
+    {
+      "id": "battle-mode-match",
+      "prerequisite": "hub-load-slot-2",
+      "acceptance": [
+        "Same selected matchup and stage across cases",
+        "Battle loads",
+        "Movement and attacks respond",
+        "Encounter ends and returns to menu"
+      ],
+      "matchup": "Lightning Lv1 versus Lightning Lv6; Maximum strength, Tactician; None rules",
+      "stage": "Old Chaos Shrine",
+      "status": "partial",
+      "verified": [
+        "Matching selected fighters/stage",
+        "Live battle loads",
+        "Post-fight menu and return to selection"
+      ],
+      "pending": [
+        "Independent attribution of each combat-input effect",
+        "Victory/result branch"
+      ],
+      "limits": [
+        "Automatic CPU assist and BGM selections differed across cases"
+      ]
+    },
+    {
+      "id": "story-mode-gateway",
+      "prerequisite": "hub-load-slot-2",
+      "route": "012: Treachery of the Gods / Prologue: Path to Sanctuary",
+      "acceptance": [
+        "Story selection responds",
+        "Story route loads",
+        "World-map/gateway onboarding can be entered"
+      ],
+      "status": "partial",
+      "verified": [
+        "Story route and cutscenes load",
+        "World-map onboarding loads",
+        "Movement and map overview respond"
+      ],
+      "pending": [
+        "Actual gateway entry"
+      ]
+    }
+  ],
+  "limits": [
+    "Do not overwrite the preserved human save baseline",
+    "User-reported control/audio results are separate from automated captures",
+    "Scenario success does not increase source-recovery percentage",
+    "Data-install coverage remains a separate pending matrix"
+  ],
+  "result_record": "docs/decomp/hub-runtime-validation.json"
+}

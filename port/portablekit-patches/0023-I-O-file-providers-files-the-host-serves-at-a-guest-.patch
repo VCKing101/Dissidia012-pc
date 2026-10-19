@@ -1,0 +1,347 @@
+From 27cdd504b0977ca464e477356fe3fdf42380c290 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Mon, 19 Oct 2026 06:55:12 +1030
+Subject: [PATCH 23/27] I/O: file providers, files the host serves at a guest
+ path
+
+hle_extension::add_file_provider (interface version 4) lets a port or a
+module serve a file at a guest path: in place of the file there, or where
+there is none. Every provider is asked, in order, at each sceIoOpen and
+sceIoOpenAsync that only reads, with "disc0:/" or "ms0:/" and the resolved
+path, and the descriptor the file there was opened as (0 when there is
+none). The first to return a file filter serves the file: the game reads
+what the filter gives, as with set_file_filter, and a path with no file
+opens as the filter's bytes alone. sceIoGetstat of a path with no file
+reports a served file's size. Opens for writing, the raw disc device,
+sce_lbn files, directories and the host's own reads (read_guest_file)
+are never asked about.
+
+With no provider added nothing changes: the open and getstat paths are
+as before.
+
+Verified: portablekit_io_filter_tests gains nine checks (a file served in
+place of one on the memory stick, a file served where there is none,
+getstat, no provider asked for a write, a path nobody serves still not
+found), on Windows. The disc device is not covered by the test; one game
+was run with a provider on its disc BGM files.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ docs/HLE_EXTENSIONS.md                |  5 ++
+ host/hle/hle_common.hpp               |  6 +++
+ host/hle/hle_extension_host.cpp       |  2 +
+ host/hle/hle_io.cpp                   | 76 +++++++++++++++++++++++++--
+ include/portablekit/hle_extension.hpp | 18 ++++++-
+ tests/hle_extension_test_host.cpp     |  1 +
+ tests/io_filter_tests.cpp             | 56 ++++++++++++++++++++
+ 7 files changed, 159 insertions(+), 5 deletions(-)
+
+diff --git a/docs/HLE_EXTENSIONS.md b/docs/HLE_EXTENSIONS.md
+index 9d6f7fb..91225a0 100644
+--- a/docs/HLE_EXTENSIONS.md
++++ b/docs/HLE_EXTENSIONS.md
+@@ -75,6 +75,7 @@ Everything a module may rely on is in `include/portablekit/hle_extension.hpp`. `
+ | `key(name)`, `key_bytes(name)`, `kirk_key(slot)` | The program's keys by their keys-file name: PortableKit's own and declared ones; empty when missing. |
+ | `read_open_file(fd, offset, bytes)` | The raw bytes of an open guest file, without moving its position. |
+ | `set_file_filter(fd, filter)` | What the game reads from an open file instead of its bytes (see [Filtered files](#filtered-files)). |
++| `add_file_provider(provider)` | A file the host serves at a guest path, in place of the file there or where there is none (see [Served files](#served-files)). Since interface version 4. |
+ 
+ Handlers run on the emulation thread, one at a time. A module may include PortableKit's `host/` headers to reach further than this, but those change without notice; a need that comes up twice belongs in the header instead.
+ 
+@@ -137,6 +138,10 @@ An entry function may be called more than once (the keys are collected before th
+ 
+ `set_file_filter(fd, filter)` puts a `FileFilter` (its `size()` and `read(offset, destination, length)`) between the game and an open file, such as the plain text of an encrypted container. While it is set, PortableKit's own `sceIoRead`, `sceIoReadAsync`, `sceIoLseek`, `sceIoLseek32` (and their Async forms) and the disc seek ioctl `0x01010005` work on what the filter gives: positions and sizes count its bytes, and asynchronous results come with `sceIoWaitAsync`/`sceIoPollAsync` as usual. The position is left where it was when the filter is set. The filter reads the file's own bytes with `read_open_file`, which a filter does not change. A null filter restores the file; closing it (`sceIoClose`, `sceIoCloseAsync`) drops the filter. The raw disc device (`umd0:` and `sce_lbn` sector files, which count sectors) and directories take no filter. Writing to a filtered file writes the file's own bytes.
+ 
++## Served files
++
++`add_file_provider(provider)` lets the host serve a file at a guest path. A provider is `std::shared_ptr<FileFilter>(std::string_view path, std::uint32_t fd)`. PortableKit asks every provider, in the order they were added, at each `sceIoOpen` and `sceIoOpenAsync` that only reads (no write, create, truncate or append flag) of a disc or memory stick path, and at `sceIoGetstat` of a path with no file. `path` is `disc0:/` or `ms0:/` and the path on that device, `/` separated, with `.` and `..` resolved, in the case the game wrote it (compare without case for the disc). `fd` is the descriptor the file at that path has just been opened as, so the provider can read its bytes with `read_open_file`, or 0 when there is no file there. The first provider to return a filter serves the file: the game reads what the filter gives, exactly as with `set_file_filter`, and a path with no file behind it opens as a file of the filter's bytes alone (`sceIoGetstat` reports its size). Returning null passes the path on. The raw disc device, `sce_lbn` sector files and directories are never asked about, and neither are PortableKit's own reads of the game's files.
++
+ ## What the log says
+ 
+ ```text
+diff --git a/host/hle/hle_common.hpp b/host/hle/hle_common.hpp
+index 5b0127c..25b4951 100644
+--- a/host/hle/hle_common.hpp
++++ b/host/hle/hle_common.hpp
+@@ -66,6 +66,12 @@ class FileFilter;
+ // hle_extension::set_file_filter); null restores them. False when `fd` is not
+ // a readable file of bytes.
+ bool set_open_file_filter(std::uint32_t fd, std::shared_ptr<hle_extension::FileFilter> filter);
++// A file the host serves at a guest path (see hle_extension::add_file_provider,
++// which this is): asked with "disc0:/<path>" or "ms0:/<path>" and the
++// descriptor of the file there, 0 when there is none; returns what the game
++// reads instead, or null.
++using FileProvider = std::function<std::shared_ptr<hle_extension::FileFilter>(std::string_view path, std::uint32_t fd)>;
++void add_file_provider(FileProvider provider);
+ // Opens a guest path for reading, reads from it and closes it again, without
+ // the game seeing a descriptor. Returns the number of bytes read, or the
+ // negative error sceIoOpen would have returned.
+diff --git a/host/hle/hle_extension_host.cpp b/host/hle/hle_extension_host.cpp
+index 4145555..f2fb12c 100644
+--- a/host/hle/hle_extension_host.cpp
++++ b/host/hle/hle_extension_host.cpp
+@@ -109,6 +109,8 @@ bool set_file_filter(std::uint32_t fd, std::shared_ptr<FileFilter> filter) {
+     return set_open_file_filter(fd, std::move(filter));
+ }
+ 
++void add_file_provider(FileProvider provider) { ::portablekit::add_file_provider(std::move(provider)); }
++
+ } // namespace hle_extension
+ 
+ HleExtensionReport install_linked_hle_extensions(Runtime &runtime, HleRegistrar &hle) {
+diff --git a/host/hle/hle_io.cpp b/host/hle/hle_io.cpp
+index 63173f8..263487d 100644
+--- a/host/hle/hle_io.cpp
++++ b/host/hle/hle_io.cpp
+@@ -128,6 +128,9 @@ struct IoState {
+     // sceIoChdir's directory ("device:/path"), which a path without a device
+     // is relative to; empty until a game sets one, and then the disc's root.
+     std::string current_directory;
++    // Files the host serves at guest paths (hle_extension::add_file_provider),
++    // asked in the order they were added.
++    std::vector<hle_extension::FileProvider> providers;
+ };
+ 
+ IoState &io() {
+@@ -222,10 +225,49 @@ bool trace_io() {
+     return enabled;
+ }
+ 
+-std::int64_t open_file(const std::string &full_path, std::uint32_t flags) {
++// The path a file provider is asked about: "disc0:/" or "ms0:/" and the path
++// on that device, '/' separated, in the game's own case.
++std::string provider_path(const SplitPath &split) {
++    return std::string(split.device == Device::Disc ? "disc0:/" : "ms0:/") + split.path;
++}
++
++// What the first provider that serves `split` gives for the open file `fd`
++// (0: there is no such file); null when none does.
++std::shared_ptr<hle_extension::FileFilter> provided_file(const SplitPath &split, std::uint32_t fd) {
++    if (io().providers.empty() || split.device == Device::Unknown || split.path.empty()) return nullptr;
++    const std::string path = provider_path(split);
++    for (const auto &provider : io().providers) {
++        if (auto filter = provider(path, fd)) return filter;
++    }
++    return nullptr;
++}
++
++// `consult_providers` is false for the host's own reads (read_guest_file),
++// which want the file's bytes.
++std::int64_t open_file(const std::string &full_path, std::uint32_t flags, bool consult_providers = true) {
+     const SplitPath split = split_path(full_path);
++    const bool read_only = (flags & (kOpenWrite | kOpenCreate | kOpenTruncate | kOpenAppend)) == 0u;
++    const bool ask_providers = consult_providers && read_only && !io().providers.empty();
+     OpenFile file;
+     file.path = full_path;
++    // A file that is not there may still be one the host serves: a handle of
++    // the filter's bytes alone.
++    const auto open_provided = [&]() -> std::int64_t {
++        if (!ask_providers) return static_cast<std::int32_t>(io_error::kFileNotFound);
++        auto filter = provided_file(split, 0u);
++        if (!filter) return static_cast<std::int32_t>(io_error::kFileNotFound);
++        OpenFile provided;
++        provided.path = full_path;
++        provided.kind = split.device == Device::Disc ? OpenFile::Kind::Disc : OpenFile::Kind::Host;
++        if (provided.kind == OpenFile::Kind::Host) provided.host = std::make_unique<std::fstream>();
++        provided.unfiltered_size = 0u;
++        provided.size = filter->size();
++        provided.filter = std::move(filter);
++        if (trace_io()) std::cerr << "[io] " << full_path << " is served by the host, " << provided.size << " bytes\n";
++        const std::uint32_t fd = io().next_fd++;
++        io().files.emplace(fd, std::move(provided));
++        return fd;
++    };
+     if (split.device == Device::Disc) {
+         if (!io().disc) return static_cast<std::int32_t>(io_error::kDeviceNotFound);
+         // Write access is not refused at the open: God of War (UCES00842)
+@@ -249,13 +291,13 @@ std::int64_t open_file(const std::string &full_path, std::uint32_t flags) {
+             file.disc_offset = static_cast<std::uint64_t>(entry->lba) * IsoImage::kSectorSize;
+             file.size = entry->size;
+         } else {
+-            return static_cast<std::int32_t>(io_error::kFileNotFound);
++            return open_provided();
+         }
+     } else if (split.device == Device::MemoryStick) {
+         const auto path = host_path(split.path);
+         std::error_code ec;
+         const bool exists = std::filesystem::exists(path, ec);
+-        if (!exists && (flags & kOpenCreate) == 0u) return static_cast<std::int32_t>(io_error::kFileNotFound);
++        if (!exists && (flags & kOpenCreate) == 0u) return open_provided();
+         std::ios::openmode mode = std::ios::binary | std::ios::in;
+         if ((flags & kOpenWrite) != 0u) {
+             std::filesystem::create_directories(path.parent_path(), ec);
+@@ -270,8 +312,23 @@ std::int64_t open_file(const std::string &full_path, std::uint32_t flags) {
+     } else {
+         return static_cast<std::int32_t>(io_error::kDeviceNotFound);
+     }
++    const bool may_be_provided = ask_providers && file.kind != OpenFile::Kind::Directory && !file.sector_units &&
++                                 !parse_lbn_path(split.path);
+     const std::uint32_t fd = io().next_fd++;
+     io().files.emplace(fd, std::move(file));
++    // A file that is there: a provider may serve something else in its
++    // place, reading the file's own bytes (read_open_file) if it wants them.
++    if (may_be_provided) {
++        if (auto filter = provided_file(split, fd)) {
++            OpenFile &opened = io().files.at(fd);
++            opened.unfiltered_size = opened.size;
++            opened.size = filter->size();
++            opened.filter = std::move(filter);
++            if (trace_io())
++                std::cerr << "[io] " << full_path << " is served by the host in place of the file, " << opened.size
++                          << " bytes\n";
++        }
++    }
+     return fd;
+ }
+ 
+@@ -328,6 +385,10 @@ std::size_t read_open_file(std::uint32_t fd, std::uint64_t offset, std::uint8_t
+     return 0u;
+ }
+ 
++void add_file_provider(hle_extension::FileProvider provider) {
++    if (provider) io().providers.push_back(std::move(provider));
++}
++
+ bool set_open_file_filter(std::uint32_t fd, std::shared_ptr<hle_extension::FileFilter> filter) {
+     const auto found = io().files.find(fd);
+     if (found == io().files.end()) return false;
+@@ -389,7 +450,7 @@ private:
+ };
+ 
+ std::int64_t read_guest_file(const std::string &path, std::uint64_t offset, std::uint8_t *output, std::size_t size) {
+-    const std::int64_t fd = open_file(path, kOpenRead);
++    const std::int64_t fd = open_file(path, kOpenRead, false);
+     if (fd < 0) return fd;
+     const std::size_t count = read_open_file(static_cast<std::uint32_t>(fd), offset, output, size);
+     io().files.erase(static_cast<std::uint32_t>(fd));
+@@ -810,6 +871,13 @@ void register_io(HleRegistrar &hle, const std::filesystem::path &disc_image, con
+                 result = 0u;
+             }
+         }
++        // A file only the host serves (hle_extension::add_file_provider).
++        if (result != 0u && (split.device == Device::MemoryStick || (split.device == Device::Disc && io().disc))) {
++            if (const auto filter = provided_file(split, 0u)) {
++                write_stat(rt.memory(), arg(ctx, 1), false, filter->size(), 0u);
++                result = 0u;
++            }
++        }
+         if (trace_io() || result != 0u)
+             std::cerr << "[io] getstat " << path << " -> " << psprecomp::hex32(result) << "\n";
+         kernel().finish(ctx, result);
+diff --git a/include/portablekit/hle_extension.hpp b/include/portablekit/hle_extension.hpp
+index 4b397d7..937a725 100644
+--- a/include/portablekit/hle_extension.hpp
++++ b/include/portablekit/hle_extension.hpp
+@@ -38,7 +38,8 @@
+ // Raised when this header changes, so a module can check what it is being
+ // built against. 2: Registry::override_chained.
+ // 3: Registry::declare_key, key lookup, read_open_file, set_file_filter.
+-#define PORTABLEKIT_HLE_EXTENSION_INTERFACE 3
++// 4: add_file_provider.
++#define PORTABLEKIT_HLE_EXTENSION_INTERFACE 4
+ 
+ namespace portablekit::hle_extension {
+ 
+@@ -260,6 +261,21 @@ public:
+ // sectors).
+ bool set_file_filter(std::uint32_t fd, std::shared_ptr<FileFilter> filter);
+ 
++// A file the host serves at a guest path, in place of the file there or where
++// there is none. PortableKit asks every provider, in the order they were
++// added, at each sceIoOpen and sceIoOpenAsync that only reads, and at
++// sceIoGetstat of a path that does not exist. `path` is "disc0:/" or "ms0:/"
++// followed by the path on that device, '/' separated, with "." and ".."
++// resolved, in the case the game wrote it. `fd` is the descriptor the file
++// there has just been opened as (its bytes are at hand through
++// read_open_file), or 0 when there is no file at that path. The first
++// provider that returns a filter serves the file: the game reads what the
++// filter gives, as with set_file_filter, and a path with no file behind it
++// opens as a file of the filter's bytes alone. Null passes the path on. Called
++// on the emulation thread; a provider that serves nothing must be quick.
++using FileProvider = std::function<std::shared_ptr<FileFilter>(std::string_view path, std::uint32_t fd)>;
++void add_file_provider(FileProvider provider);
++
+ } // namespace portablekit::hle_extension
+ 
+ // Defines a module's entry function. `name` is the module's name as its
+diff --git a/tests/hle_extension_test_host.cpp b/tests/hle_extension_test_host.cpp
+index c7c0757..18459d0 100644
+--- a/tests/hle_extension_test_host.cpp
++++ b/tests/hle_extension_test_host.cpp
+@@ -57,5 +57,6 @@ std::optional<Key16> key(std::string_view) { return std::nullopt; }
+ std::optional<Key16> kirk_key(std::uint8_t) { return std::nullopt; }
+ std::size_t read_open_file(std::uint32_t, std::uint64_t, std::span<std::uint8_t>) { return 0u; }
+ bool set_file_filter(std::uint32_t, std::shared_ptr<FileFilter>) { return false; }
++void add_file_provider(FileProvider) {}
+ 
+ } // namespace portablekit::hle_extension
+diff --git a/tests/io_filter_tests.cpp b/tests/io_filter_tests.cpp
+index 3021fa1..3a7de6e 100644
+--- a/tests/io_filter_tests.cpp
++++ b/tests/io_filter_tests.cpp
+@@ -173,6 +173,62 @@ int main(int, char **argv) {
+     check(static_cast<std::int32_t>(directory) > 0 && !ext::set_file_filter(directory, std::make_shared<XorFilter>(directory)),
+           "a directory takes no filter");
+ 
++    // File providers (hle_extension::add_file_provider): a file in place of
++    // one that is there, and one where there is none.
++    const auto store_path = [&](const std::string &text) {
++        for (std::size_t i = 0; i <= text.size(); ++i)
++            io.runtime.memory().store8(kPath + static_cast<std::uint32_t>(i),
++                                       i < text.size() ? static_cast<std::uint8_t>(text[i]) : 0u);
++    };
++    std::vector<std::string> asked;
++    ext::add_file_provider([&](std::string_view asked_path, std::uint32_t asked_fd) -> std::shared_ptr<ext::FileFilter> {
++        asked.emplace_back(asked_path);
++        if (asked_path == "ms0:/DATA/FILE.BIN" && asked_fd != 0u) return std::make_shared<XorFilter>(asked_fd);
++        if (asked_path == "ms0:/DATA/HOST.BIN" && asked_fd == 0u) {
++            class Counting final : public ext::FileFilter {
++            public:
++                std::uint64_t size() const override { return 300u; }
++                std::size_t read(std::uint64_t offset, std::uint8_t *destination, std::size_t length) override {
++                    std::size_t count = 0u;
++                    for (; count < length && offset + count < size(); ++count)
++                        destination[count] = static_cast<std::uint8_t>(offset + count);
++                    return count;
++                }
++            };
++            return std::make_shared<Counting>();
++        }
++        return nullptr;
++    });
++    store_path("ms0:/DATA/../DATA/FILE.BIN");
++    const std::uint32_t served = io.call("sceIoOpen", {kPath, 1u, 0u});
++    check(static_cast<std::int32_t>(served) > 0 && !asked.empty() && asked.back() == "ms0:/DATA/FILE.BIN",
++          "a provider is asked about a file the game opens, by its resolved path");
++    check(io.call("sceIoLseek", {served, 0u, 0u, 0u, 2u}) == kRawSize / 2u && io.v1 == 0u,
++          "and what it gives is what the game sees in place of the file");
++    io.call("sceIoLseek32", {served, 7u, 0u});
++    check(io.call("sceIoRead", {served, kBuffer, 10u}) == 10u && io.guest_bytes_are(7u, 10u),
++          "reads of a served file are the provider's bytes");
++    io.call("sceIoClose", {served});
++    asked.clear();
++    const std::uint32_t written = io.call("sceIoOpen", {kPath, 0x602u, 0u});
++    check(static_cast<std::int32_t>(written) > 0 && asked.empty(), "an open for writing asks no provider");
++    io.call("sceIoClose", {written});
++
++    store_path("ms0:/DATA/HOST.BIN");
++    const std::uint32_t host_only = io.call("sceIoOpen", {kPath, 1u, 0u});
++    check(static_cast<std::int32_t>(host_only) > 0, "a path with no file opens when a provider serves it");
++    io.call("sceIoLseek32", {host_only, 250u, 0u});
++    bool counted = io.call("sceIoRead", {host_only, kBuffer, 100u}) == 50u;
++    for (std::uint32_t i = 0; i < 50u; ++i)
++        counted = counted && io.runtime.memory().load8(kBuffer + i) == static_cast<std::uint8_t>(250u + i);
++    check(counted, "and reads give its bytes, up to its size");
++    check(io.call("sceIoGetstat", {kPath, kResult}) == 0u && io.runtime.memory().load32(kResult + 8u) == 300u,
++          "sceIoGetstat reports a served file's size");
++    io.call("sceIoClose", {host_only});
++    check(!std::filesystem::exists(stick / "DATA" / "HOST.BIN"), "nothing is written to the memory stick");
++    store_path("ms0:/DATA/NONE.BIN");
++    check(io.call("sceIoOpen", {kPath, 1u, 0u}) == 0x80010002u, "a path no provider serves is still not found");
++
+     std::filesystem::remove_all(stick);
+     if (g_failures != 0) std::printf("%d failed\n", g_failures);
+     return g_failures == 0 ? 0 : 1;
+-- 
+2.53.0.windows.1
+

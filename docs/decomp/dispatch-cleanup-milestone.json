@@ -1,0 +1,635 @@
+{
+  "schema_version": 1,
+  "recorded_utc": "2026-10-11T22:54:47.921752+00:00",
+  "target": "ULUS10566 v1.00",
+  "before": {
+    "functions": 128,
+    "code_bytes": 7180
+  },
+  "after": {
+    "functions": 156,
+    "code_bytes": 9632
+  },
+  "added": {
+    "functions": 28,
+    "code_bytes": 2452
+  },
+  "modules": [
+    {
+      "module": "main",
+      "before_functions": 37,
+      "before_bytes": 1948,
+      "after_functions": 48,
+      "after_bytes": 2524,
+      "added_functions": 11,
+      "added_bytes": 576,
+      "file_bytes": 4640948,
+      "reference_sha256": "0bc8e779aad2814a3d1bd77346f69ca5e16665845ed053cd0ad44a9cbfaefe6d",
+      "whole_file_byte_identical": true,
+      "new_functions": [
+        {
+          "name": "func_088A1380",
+          "address": "0x088A1380",
+          "size": 100,
+          "source": "src/main/resource_manager_acquire.c",
+          "unit": "main_resource_manager_acquire",
+          "entry_evidence": {
+            "checked_direct_callers": [
+              {
+                "module": "main",
+                "function": "0x0889F6A0",
+                "call_pc": "0x0889F6F0"
+              },
+              {
+                "module": "main",
+                "function": "0x0889FD38",
+                "call_pc": "0x0889FEC0"
+              },
+              {
+                "module": "main",
+                "function": "0x088A065C",
+                "call_pc": "0x088A06C4"
+              }
+            ]
+          }
+        },
+        {
+          "name": "func_088A13E4",
+          "address": "0x088A13E4",
+          "size": 28,
+          "source": "src/main/resource_manager_acquire.c",
+          "unit": "main_resource_manager_acquire",
+          "entry_evidence": {
+            "checked_direct_callers": [
+              {
+                "module": "main",
+                "function": "0x0889F704",
+                "call_pc": "0x0889F728"
+              },
+              {
+                "module": "main",
+                "function": "0x0889FF8C",
+                "call_pc": "0x088A000C"
+              }
+            ]
+          }
+        },
+        {
+          "name": "func_088A1400",
+          "address": "0x088A1400",
+          "size": 56,
+          "source": "src/main/resource_manager_acquire.c",
+          "unit": "main_resource_manager_acquire",
+          "entry_evidence": {
+            "checked_direct_callers": [
+              {
+                "module": "main",
+                "function": "0x0889F750",
+                "call_pc": "0x0889F798"
+              },
+              {
+                "module": "main",
+                "function": "0x0889FD38",
+                "call_pc": "0x0889FEE0"
+              },
+              {
+                "module": "main",
+                "function": "0x088A065C",
+                "call_pc": "0x088A06D8"
+              }
+            ]
+          }
+        },
+        {
+          "name": "func_088A1438",
+          "address": "0x088A1438",
+          "size": 56,
+          "source": "src/main/resource_manager_acquire.c",
+          "unit": "main_resource_manager_acquire",
+          "entry_evidence": {
+            "checked_direct_callers": [
+              {
+                "module": "main",
+                "function": "0x0889F830",
+                "call_pc": "0x0889F87C"
+              },
+              {
+                "module": "main",
+                "function": "0x0889FF8C",
+                "call_pc": "0x088A0000"
+              }
+            ]
+          }
+        },
+        {
+          "name": "func_088A1470",
+          "address": "0x088A1470",
+          "size": 96,
+          "source": "src/main/resource_manager_acquire.c",
+          "unit": "main_resource_manager_acquire",
+          "entry_evidence": {
+            "checked_direct_callers": [
+              {
+                "module": "main",
+                "function": "0x0889F898",
+                "call_pc": "0x0889F8C0"
+              }
+            ]
+          }
+        },
+        {
+          "name": "func_088A1540",
+          "address": "0x088A1540",
+          "size": 56,
+          "source": "src/main/resource_manager_release.c",
+          "unit": "main_resource_manager_release",
+          "entry_evidence": {
+            "checked_direct_callers": [
+              {
+                "module": "main",
+                "function": "0x0889F910",
+                "call_pc": "0x0889F934"
+              }
+            ]
+          }
+        },
+        {
+          "name": "func_088A1578",
+          "address": "0x088A1578",
+          "size": 36,
+          "source": "src/main/resource_manager_release.c",
+          "unit": "main_resource_manager_release",
+          "entry_evidence": {
+            "checked_direct_callers": [
+              {
+                "module": "main",
+                "function": "0x0889F948",
+                "call_pc": "0x0889F96C"
+              }
+            ]
+          }
+        },
+        {
+          "name": "func_088A159C",
+          "address": "0x088A159C",
+          "size": 28,
+          "source": "src/main/resource_manager_release.c",
+          "unit": "main_resource_manager_release",
+          "entry_evidence": {
+            "checked_direct_callers": [
+              {
+                "module": "main",
+                "function": "0x0889F980",
+                "call_pc": "0x0889F9A4"
+              }
+            ]
+          }
+        },
+        {
+          "name": "func_088A1638",
+          "address": "0x088A1638",
+          "size": 64,
+          "source": "src/main/resource_manager_slots.c",
+          "unit": "main_resource_manager_slots",
+          "entry_evidence": {
+            "checked_direct_callers": [
+              {
+                "module": "main",
+                "function": "0x088A0DFC",
+                "call_pc": "0x088A0E4C"
+              },
+              {
+                "module": "main",
+                "function": "0x088DCD60",
+                "call_pc": "0x088DCDC8"
+              },
+              {
+                "module": "main",
+                "function": "0x088EB370",
+                "call_pc": "0x088EB3A0"
+              }
+            ]
+          }
+        },
+        {
+          "name": "func_088A1678",
+          "address": "0x088A1678",
+          "size": 28,
+          "source": "src/main/resource_manager_slots.c",
+          "unit": "main_resource_manager_slots",
+          "entry_evidence": {
+            "checked_direct_callers": [
+              {
+                "module": "main",
+                "function": "0x088426E4",
+                "call_pc": "0x08842728"
+              }
+            ]
+          }
+        },
+        {
+          "name": "func_088A1694",
+          "address": "0x088A1694",
+          "size": 28,
+          "source": "src/main/resource_manager_slots.c",
+          "unit": "main_resource_manager_slots",
+          "entry_evidence": {
+            "checked_direct_callers": [
+              {
+                "module": "menu",
+                "function": "0x08A36A94",
+                "call_pc": "0x08A36BEC"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "module": "extra",
+      "before_functions": 24,
+      "before_bytes": 2116,
+      "after_functions": 24,
+      "after_bytes": 2116,
+      "added_functions": 0,
+      "added_bytes": 0,
+      "file_bytes": 24544,
+      "reference_sha256": "f6b7be5e15c28774985417f1ec2c64f6655e79cc3c9dce7600fa7f6bacabca01",
+      "whole_file_byte_identical": true,
+      "new_functions": []
+    },
+    {
+      "module": "menu",
+      "before_functions": 21,
+      "before_bytes": 1240,
+      "after_functions": 26,
+      "after_bytes": 1972,
+      "added_functions": 5,
+      "added_bytes": 732,
+      "file_bytes": 1556096,
+      "reference_sha256": "f021f96fa05da5907563a28c232966aa8a344526d6b8bdee728053ec75224d0a",
+      "whole_file_byte_identical": true,
+      "new_functions": [
+        {
+          "name": "func_089DD5DC",
+          "address": "0x089DD5DC",
+          "size": 152,
+          "source": "src/menu/member_dispatch.c",
+          "unit": "menu_member_dispatch",
+          "entry_evidence": {
+            "checked_direct_callers": [
+              {
+                "module": "menu",
+                "function": "0x089DEA54",
+                "call_pc": "0x089DEA60"
+              }
+            ]
+          }
+        },
+        {
+          "name": "func_089DDCC4",
+          "address": "0x089DDCC4",
+          "size": 84,
+          "source": "src/menu/state_branch_select.c",
+          "unit": "menu_state_branch_select",
+          "entry_evidence": {
+            "checked_direct_callers": [],
+            "member_records": [
+              {
+                "address": "0x089E0A28",
+                "adjustment": 0,
+                "flags": 0
+              }
+            ]
+          }
+        },
+        {
+          "name": "func_089DDD18",
+          "address": "0x089DDD18",
+          "size": 136,
+          "source": "src/menu/resource_create.c",
+          "unit": "menu_resource_create",
+          "entry_evidence": {
+            "checked_direct_callers": [],
+            "member_records": [
+              {
+                "address": "0x089E0A30",
+                "adjustment": 0,
+                "flags": 0
+              }
+            ]
+          }
+        },
+        {
+          "name": "func_089DDE58",
+          "address": "0x089DDE58",
+          "size": 204,
+          "source": "src/menu/resource_create_optional.c",
+          "unit": "menu_resource_create_optional",
+          "entry_evidence": {
+            "checked_direct_callers": [],
+            "member_records": [
+              {
+                "address": "0x089E0A40",
+                "adjustment": 0,
+                "flags": 0
+              }
+            ]
+          }
+        },
+        {
+          "name": "func_089DE008",
+          "address": "0x089DE008",
+          "size": 156,
+          "source": "src/menu/resource_create_selected.c",
+          "unit": "menu_resource_create_selected",
+          "entry_evidence": {
+            "checked_direct_callers": [],
+            "member_records": [
+              {
+                "address": "0x089E0A50",
+                "adjustment": 0,
+                "flags": 0
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "module": "battle",
+      "before_functions": 46,
+      "before_bytes": 1876,
+      "after_functions": 58,
+      "after_bytes": 3020,
+      "added_functions": 12,
+      "added_bytes": 1144,
+      "file_bytes": 1596312,
+      "reference_sha256": "1f96cfb3be771ff6e94741ae3916fab340df74e36ede07ca39545d015f4c49dc",
+      "whole_file_byte_identical": true,
+      "new_functions": [
+        {
+          "name": "func_089E0708",
+          "address": "0x089E0708",
+          "size": 152,
+          "source": "src/battle/cleanup_089e0708.c",
+          "unit": "cleanup_089e0708",
+          "entry_evidence": {
+            "checked_direct_callers": [
+              {
+                "module": "battle",
+                "function": "0x089DD534",
+                "call_pc": "0x089DD568"
+              }
+            ]
+          }
+        },
+        {
+          "name": "func_089E07AC",
+          "address": "0x089E07AC",
+          "size": 128,
+          "source": "src/battle/cleanup_089e07ac.c",
+          "unit": "cleanup_089e07ac",
+          "entry_evidence": {
+            "checked_direct_callers": [
+              {
+                "module": "battle",
+                "function": "0x089DD604",
+                "call_pc": "0x089DD63C"
+              },
+              {
+                "module": "battle",
+                "function": "0x089E0708",
+                "call_pc": "0x089E0730"
+              },
+              {
+                "module": "battle",
+                "function": "0x089E082C",
+                "call_pc": "0x089E0844"
+              }
+            ]
+          }
+        },
+        {
+          "name": "func_089E3258",
+          "address": "0x089E3258",
+          "size": 120,
+          "source": "src/battle/cleanup_089e3258.c",
+          "unit": "cleanup_089e3258",
+          "entry_evidence": {
+            "checked_direct_callers": [
+              {
+                "module": "battle",
+                "function": "0x089DD534",
+                "call_pc": "0x089DD598"
+              }
+            ]
+          }
+        },
+        {
+          "name": "func_089E6928",
+          "address": "0x089E6928",
+          "size": 112,
+          "source": "src/battle/cleanup_089e6928.c",
+          "unit": "cleanup_089e6928",
+          "entry_evidence": {
+            "checked_direct_callers": [
+              {
+                "module": "battle",
+                "function": "0x089DD534",
+                "call_pc": "0x089DD574"
+              }
+            ]
+          }
+        },
+        {
+          "name": "func_089E7180",
+          "address": "0x089E7180",
+          "size": 120,
+          "source": "src/battle/cleanup_089e7180.c",
+          "unit": "cleanup_089e7180",
+          "entry_evidence": {
+            "checked_direct_callers": [
+              {
+                "module": "battle",
+                "function": "0x089DD534",
+                "call_pc": "0x089DD580"
+              }
+            ]
+          }
+        },
+        {
+          "name": "func_089E7A20",
+          "address": "0x089E7A20",
+          "size": 176,
+          "source": "src/battle/cleanup_089e7a20.c",
+          "unit": "cleanup_089e7a20",
+          "entry_evidence": {
+            "checked_direct_callers": [
+              {
+                "module": "battle",
+                "function": "0x089DD534",
+                "call_pc": "0x089DD58C"
+              }
+            ]
+          }
+        },
+        {
+          "name": "func_089E6E98",
+          "address": "0x089E6E98",
+          "size": 88,
+          "source": "src/battle/cleanup_089e6e98.c",
+          "unit": "cleanup_089e6e98",
+          "entry_evidence": {
+            "checked_direct_callers": [
+              {
+                "module": "battle",
+                "function": "0x089E7A20",
+                "call_pc": "0x089E7A54"
+              }
+            ]
+          }
+        },
+        {
+          "name": "func_089ECF78",
+          "address": "0x089ECF78",
+          "size": 88,
+          "source": "src/battle/cleanup_089ecf78.c",
+          "unit": "cleanup_089ecf78",
+          "entry_evidence": {
+            "checked_direct_callers": [
+              {
+                "module": "battle",
+                "function": "0x089DD534",
+                "call_pc": "0x089DD55C"
+              }
+            ]
+          }
+        },
+        {
+          "name": "func_089ED01C",
+          "address": "0x089ED01C",
+          "size": 72,
+          "source": "src/battle/cleanup_089ed01c.c",
+          "unit": "cleanup_089ed01c",
+          "entry_evidence": {
+            "checked_direct_callers": [
+              {
+                "module": "battle",
+                "function": "0x089DD604",
+                "call_pc": "0x089DD634"
+              },
+              {
+                "module": "battle",
+                "function": "0x089ECF78",
+                "call_pc": "0x089ECFA0"
+              },
+              {
+                "module": "battle",
+                "function": "0x089ED064",
+                "call_pc": "0x089ED070"
+              }
+            ]
+          }
+        },
+        {
+          "name": "func_089E6EFC",
+          "address": "0x089E6EFC",
+          "size": 64,
+          "source": "src/battle/cleanup_089e6efc.c",
+          "unit": "cleanup_089e6efc",
+          "entry_evidence": {
+            "checked_direct_callers": [
+              {
+                "module": "battle",
+                "function": "0x089E6E98",
+                "call_pc": "0x089E6EC0"
+              },
+              {
+                "module": "battle",
+                "function": "0x089E6F3C",
+                "call_pc": "0x089E6F50"
+              },
+              {
+                "module": "battle",
+                "function": "0x089E7AFC",
+                "call_pc": "0x089E7B48"
+              }
+            ]
+          }
+        },
+        {
+          "name": "func_089E0D48",
+          "address": "0x089E0D48",
+          "size": 12,
+          "source": "src/battle/cleanup_089e0d48.c",
+          "unit": "cleanup_089e0d48",
+          "entry_evidence": {
+            "checked_direct_callers": [
+              {
+                "module": "battle",
+                "function": "0x089E0CB8",
+                "call_pc": "0x089E0CD4"
+              },
+              {
+                "module": "battle",
+                "function": "0x089E0D54",
+                "call_pc": "0x089E0D5C"
+              }
+            ]
+          }
+        },
+        {
+          "name": "func_089E6EF0",
+          "address": "0x089E6EF0",
+          "size": 12,
+          "source": "src/battle/cleanup_089e6ef0.c",
+          "unit": "cleanup_089e6ef0",
+          "entry_evidence": {
+            "checked_direct_callers": [
+              {
+                "module": "battle",
+                "function": "0x089E6E60",
+                "call_pc": "0x089E6E7C"
+              },
+              {
+                "module": "battle",
+                "function": "0x089E6EFC",
+                "call_pc": "0x089E6F24"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "inventory_revision": 11,
+  "inventory_boundaries_changed": false,
+  "tests_passed": 116,
+  "all_four_files_byte_identical": true,
+  "current_build_proofs": true,
+  "emulator_run": false,
+  "data_install_validation": "deferred at user request",
+  "whole_game_audited_percent": null,
+  "savedata_mapping": "config/savedata-dialog-review.json",
+  "feature_rank_change": {
+    "save": {
+      "before": 0,
+      "after": 1,
+      "scope_complete": false,
+      "poll_handler_matching_source_credit": 0
+    }
+  },
+  "member_table_limit": "The existing20-record table includes callback0x089DE3A4 without a current inventory function entry; it remains outside matching C credit and requires a later boundary audit.",
+  "unmatched": [
+    "Savedata polling switches in C and C++ frontend trials",
+    "Menu resource wait loop",
+    "Main allocator/scaled command and battle loop/deleting-wrapper mismatches remain uncredited"
+  ],
+  "review_fixes": [
+    "Shared main command return declarations match newly recovered definitions",
+    "Menu dispatcher callback receiver agrees with recovered handlers",
+    "Battle reset field04 now has pointer type consistent with observed resource use"
+  ],
+  "next": "Audit the missing member-table target and continue state handlers/resource operations; keep hard switches bounded and runtime work deferred."
+}

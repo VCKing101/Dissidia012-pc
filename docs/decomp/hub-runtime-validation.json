@@ -1,0 +1,614 @@
+{
+  "schema_version": 1,
+  "recorded_utc": "2026-10-11T10:24:57.664552+00:00",
+  "scenario_definition": "config/runtime-scenarios.json",
+  "seed_baseline": "build/ULUS10566/runtime/save-baselines/human-main-hub-20261011T084311737825Z",
+  "sessions": [
+    {
+      "case": "retail",
+      "session": "build/ULUS10566/runtime/sessions/retail/hub-baseline-v1",
+      "iso_sha256": "df94177d3e194e82800a574b50b61ee3c7be6caa877c8e82242a41af75d1ab6e",
+      "exe_sha256": "775a0ded7d0c0602f46c3aeed659228d629e98ed77d9e2bd3818c44eb30de85a",
+      "slot2_launch_start_utc": "2026-10-11T08:52:34.1483354Z",
+      "slot1_launch_start_utc": "2026-10-11T09:56:32.113206Z",
+      "stopped": true,
+      "remote_startup_disabled_after_stop": true,
+      "runtime_results": {
+        "hub-load-slot-1": "passed",
+        "hub-load-slot-2": "passed",
+        "quick-battle-load": "passed",
+        "quick-battle-post-fight-menu": "passed",
+        "quick-battle-return-to-selection": "passed",
+        "story-prologue-opening": "passed",
+        "story-world-map-load": "passed",
+        "story-world-map-movement": "passed",
+        "story-map-overview": "passed",
+        "story-gateway-entry": "pending",
+        "individual-combat-input-effects": "not-isolated"
+      },
+      "reviewed_captures": [
+        {
+          "name": "hub-slot-list",
+          "path": "build/ULUS10566/runtime/sessions/retail/hub-baseline-v1/evidence/hub-slot-list.png",
+          "sha256": "04f5ab589249fcdb2afd1190ddc02f73d094426bdf8c95eb87d847cfe3912a14",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame",
+          "utc": "2026-10-11T08:53:47.127079+00:00"
+        },
+        {
+          "name": "hub-slot2-arrival",
+          "path": "build/ULUS10566/runtime/sessions/retail/hub-baseline-v1/evidence/hub-slot2-arrival.png",
+          "sha256": "d96de01786b9f19f7361f21faafa94add362a9400d492e52c9cc0f24642f1bee",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame",
+          "utc": "2026-10-11T08:54:20.888515+00:00"
+        },
+        {
+          "name": "hub-slot1-arrival",
+          "path": "build/ULUS10566/runtime/sessions/retail/hub-baseline-v1/evidence/hub-slot1-arrival.png",
+          "sha256": "f849ecf514aba64849b27851311a91ac4b5e56c9e69a7255ca2cbe564db3c965",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame",
+          "utc": "2026-10-11T09:59:51.975203+00:00"
+        },
+        {
+          "name": "hub-slot1-battle-settings",
+          "path": "build/ULUS10566/runtime/sessions/retail/hub-baseline-v1/evidence/hub-slot1-battle-settings.png",
+          "sha256": "d1f381eeff92ad655ca3b81af6e180c3d5e03f20caa0a11c7bda542899ee733c",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame",
+          "utc": "2026-10-11T10:01:45.268184+00:00"
+        },
+        {
+          "name": "hub-match-loaded",
+          "path": "build/ULUS10566/runtime/sessions/retail/hub-baseline-v1/evidence/hub-match-loaded.png",
+          "sha256": "659ebfdd073e45d073c8c76e1bbd85c381798a8e2c5a26c414e9215dfd67d79d",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame",
+          "utc": "2026-10-11T10:03:32.661523+00:00"
+        },
+        {
+          "name": "hub-match-start",
+          "path": "build/ULUS10566/runtime/sessions/retail/hub-baseline-v1/evidence/hub-match-start.png",
+          "sha256": "7ab93f789cdb42ceb8cf071bf5035ad09200c19256aa1cf3a298d0e3751e94a3",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame",
+          "utc": "2026-10-11T10:05:24.077147+00:00"
+        },
+        {
+          "name": "hub-match-input",
+          "path": "build/ULUS10566/runtime/sessions/retail/hub-baseline-v1/evidence/hub-match-input.png",
+          "sha256": "ab3448a82aa9c3256359cd2690ef9241fb3e770b0f9db33e4a2dcc4b3665c5c9",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame",
+          "utc": "2026-10-11T10:06:51.658123+00:00"
+        },
+        {
+          "name": "hub-match-ended-menu",
+          "path": "build/ULUS10566/runtime/sessions/retail/hub-baseline-v1/evidence/hub-match-ended-menu.png",
+          "sha256": "920be62f7e56218418806ea57459b1ff25f354926698343404dbcfdfdf8f06af",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame",
+          "utc": "2026-10-11T10:09:28.111737+00:00"
+        },
+        {
+          "name": "hub-story-map-entry",
+          "path": "build/ULUS10566/runtime/sessions/retail/hub-baseline-v1/evidence/hub-story-map-entry.png",
+          "sha256": "4c7a1bfc9d4e0896b21b9a54f56a0bc2adc73b91917b189bb0955af65723f512",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame",
+          "utc": "2026-10-11T10:17:58.553728+00:00"
+        },
+        {
+          "name": "hub-story-map-movement",
+          "path": "build/ULUS10566/runtime/sessions/retail/hub-baseline-v1/evidence/hub-story-map-movement.png",
+          "sha256": "8871a72cef368d7d8098ae59f712ec0929b974a37b0a0c042e3781f31381c37e",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame",
+          "utc": "2026-10-11T10:21:20.187392+00:00"
+        },
+        {
+          "name": "hub-story-map-overview",
+          "path": "build/ULUS10566/runtime/sessions/retail/hub-baseline-v1/evidence/hub-story-map-overview.png",
+          "sha256": "d6b3f2edabcd0d041d46ec500633d66cf34236ec2956999fb461cdd0d3edad92",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame",
+          "utc": "2026-10-11T10:21:21.642569+00:00"
+        },
+        {
+          "name": "hub-slot1-selected",
+          "path": "build/ULUS10566/runtime/sessions/retail/hub-baseline-v1/evidence/hub-slot1-selected.png",
+          "sha256": "28d8e71b239ba78b708a29fde2fb3c4f8c2855d8f6f0b32f0f3caf1203ada7af",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame",
+          "utc": "2026-10-11T09:58:15.051225+00:00"
+        },
+        {
+          "name": "hub-battle-back",
+          "path": "build/ULUS10566/runtime/sessions/retail/hub-baseline-v1/evidence/hub-battle-back.png",
+          "sha256": "c33ed43d157b7c3f673b12c80f61af2d3baa812af94a61c0b7739a0148a6147f",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame",
+          "utc": "2026-10-11T10:09:59.971258+00:00"
+        },
+        {
+          "name": "hub-retail-story-help",
+          "path": "build/ULUS10566/runtime/sessions/retail/hub-baseline-v1/evidence/hub-retail-story-help.png",
+          "sha256": "1619fc278497d2c9c6703ad93f7645c9b3eaec71f6a6888868dff7362b8290fd",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame",
+          "utc": "2026-10-11T10:15:14.702108+00:00"
+        },
+        {
+          "name": "hub-retail-story-opening",
+          "path": "build/ULUS10566/runtime/sessions/retail/hub-baseline-v1/evidence/hub-retail-story-opening.png",
+          "sha256": "95cfd1142ec5c9c80c0c4a7fc8b260142f349065be2dee953b47a54cd33aa41d",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame",
+          "utc": "2026-10-11T10:16:04.510833+00:00"
+        }
+      ],
+      "current_save_files": [
+        {
+          "path": "ULUS10566GameData00/DISSIDIA.BIN",
+          "bytes": 257240,
+          "sha256": "0cd65464ff1728b3dbed163ae452efa65dde20a23273ed2a4fa318f131e75d44"
+        },
+        {
+          "path": "ULUS10566GameData00/ICON0.PNG",
+          "bytes": 20867,
+          "sha256": "9e43a784c419fd2c695e6cb16fb4021a924d51f204f8f90a2610825af18f59d1"
+        },
+        {
+          "path": "ULUS10566GameData00/PARAM.SFO",
+          "bytes": 4912,
+          "sha256": "bb57b7435f2d693fb8f6fb21df15d8f118c4cf6ba5d63b7b2b7b66dea42f84fa"
+        },
+        {
+          "path": "ULUS10566GameData01/DISSIDIA.BIN",
+          "bytes": 257240,
+          "sha256": "97254e3b95cb1125e783d92e011f7dd20e89b4046a23fc24b6f8e7cb3bbe373e"
+        },
+        {
+          "path": "ULUS10566GameData01/ICON0.PNG",
+          "bytes": 20867,
+          "sha256": "9e43a784c419fd2c695e6cb16fb4021a924d51f204f8f90a2610825af18f59d1"
+        },
+        {
+          "path": "ULUS10566GameData01/PARAM.SFO",
+          "bytes": 4912,
+          "sha256": "6d942d3acc4e344d1f553a04ed1645375cc22ca0dab038077717a8d9f5b14909"
+        }
+      ],
+      "save_files_unchanged_since_seed": false
+    },
+    {
+      "case": "original",
+      "session": "build/ULUS10566/runtime/sessions/original/hub-baseline-v1",
+      "iso_sha256": "59ca11719bc1ca40c1756abca3cac06a9c50643ee83f294dab5ca08b3285b4a1",
+      "exe_sha256": "775a0ded7d0c0602f46c3aeed659228d629e98ed77d9e2bd3818c44eb30de85a",
+      "slot2_launch_start_utc": "2026-10-11T08:52:36.2435891Z",
+      "slot1_launch_start_utc": "2026-10-11T09:57:20.9052728Z",
+      "stopped": true,
+      "remote_startup_disabled_after_stop": true,
+      "runtime_results": {
+        "hub-load-slot-1": "passed",
+        "hub-load-slot-2": "passed",
+        "quick-battle-load": "passed",
+        "quick-battle-post-fight-menu": "passed",
+        "quick-battle-return-to-selection": "passed",
+        "story-prologue-opening": "passed",
+        "story-world-map-load": "passed",
+        "story-world-map-movement": "passed",
+        "story-map-overview": "passed",
+        "story-gateway-entry": "pending",
+        "individual-combat-input-effects": "not-isolated"
+      },
+      "reviewed_captures": [
+        {
+          "name": "hub-slot-list",
+          "path": "build/ULUS10566/runtime/sessions/original/hub-baseline-v1/evidence/hub-slot-list.png",
+          "sha256": "04f5ab589249fcdb2afd1190ddc02f73d094426bdf8c95eb87d847cfe3912a14",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame",
+          "utc": "2026-10-11T08:53:47.127079+00:00"
+        },
+        {
+          "name": "hub-slot2-arrival",
+          "path": "build/ULUS10566/runtime/sessions/original/hub-baseline-v1/evidence/hub-slot2-arrival.png",
+          "sha256": "167a2dda5369de034b6bb9d2fe935620361cbc66f5cfc29ba1b35e69e992db8b",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame",
+          "utc": "2026-10-11T08:54:20.887515+00:00"
+        },
+        {
+          "name": "hub-slot1-arrival",
+          "path": "build/ULUS10566/runtime/sessions/original/hub-baseline-v1/evidence/hub-slot1-arrival.png",
+          "sha256": "bb96e40dbf6c0c414e376b971e92ff7365f1476718b03e56449d0d0ae6cef634",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame",
+          "utc": "2026-10-11T10:01:03.105071+00:00"
+        },
+        {
+          "name": "hub-slot1-battle-settings",
+          "path": "build/ULUS10566/runtime/sessions/original/hub-baseline-v1/evidence/hub-slot1-battle-settings.png",
+          "sha256": "d1f381eeff92ad655ca3b81af6e180c3d5e03f20caa0a11c7bda542899ee733c",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame",
+          "utc": "2026-10-11T10:01:45.326207+00:00"
+        },
+        {
+          "name": "hub-match-loaded",
+          "path": "build/ULUS10566/runtime/sessions/original/hub-baseline-v1/evidence/hub-match-loaded.png",
+          "sha256": "be1ea41d49f54f8138c985f8b1c3ea713e2069d836785cff69347ebf90d69870",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame",
+          "utc": "2026-10-11T10:03:32.661523+00:00"
+        },
+        {
+          "name": "hub-match-start",
+          "path": "build/ULUS10566/runtime/sessions/original/hub-baseline-v1/evidence/hub-match-start.png",
+          "sha256": "d647f44d2e669c8cc7926dc33daeca0a289bcfc594bf981ef071aee6db99fcb1",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame",
+          "utc": "2026-10-11T10:05:24.084492+00:00"
+        },
+        {
+          "name": "hub-match-input",
+          "path": "build/ULUS10566/runtime/sessions/original/hub-baseline-v1/evidence/hub-match-input.png",
+          "sha256": "64fee792cde82599eeb5ba3f426fcca348a467208e19e6f85d5ce4f1626acbd1",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame",
+          "utc": "2026-10-11T10:06:51.652615+00:00"
+        },
+        {
+          "name": "hub-match-ended-menu",
+          "path": "build/ULUS10566/runtime/sessions/original/hub-baseline-v1/evidence/hub-match-ended-menu.png",
+          "sha256": "61fdad8566fe1c6bb9c20795ab5e74d4544f46d13720309e5cfba07353219b5d",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame",
+          "utc": "2026-10-11T10:09:28.093725+00:00"
+        },
+        {
+          "name": "hub-story-map-entry",
+          "path": "build/ULUS10566/runtime/sessions/original/hub-baseline-v1/evidence/hub-story-map-entry.png",
+          "sha256": "ee8049cc1b5d68b46aaa1c531a8e07e1836bb5bb9a28f5fe342ee4f10419f658",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame",
+          "utc": "2026-10-11T10:17:58.546218+00:00"
+        },
+        {
+          "name": "hub-story-map-movement",
+          "path": "build/ULUS10566/runtime/sessions/original/hub-baseline-v1/evidence/hub-story-map-movement.png",
+          "sha256": "198655758219d191f86fafe35d6c23d38ca75ab62ec1d4208f1a5de06200a093",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame",
+          "utc": "2026-10-11T10:21:20.194898+00:00"
+        },
+        {
+          "name": "hub-story-map-overview",
+          "path": "build/ULUS10566/runtime/sessions/original/hub-baseline-v1/evidence/hub-story-map-overview.png",
+          "sha256": "34c9fd033755d84c907dccd9543cdeed3f4c00c643babebcafbf1bbc2ece6e02",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame",
+          "utc": "2026-10-11T10:21:21.588233+00:00"
+        },
+        {
+          "name": "hub-slot1-selected-v2",
+          "path": "build/ULUS10566/runtime/sessions/original/hub-baseline-v1/evidence/hub-slot1-selected-v2.png",
+          "sha256": "324f52c282e52d8b98ba9cad01a80bfe319f744e814dcf67a2dd337c6e49b44a",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame",
+          "utc": "2026-10-11T10:00:32.718305+00:00"
+        },
+        {
+          "name": "hub-match-returned-setup",
+          "path": "build/ULUS10566/runtime/sessions/original/hub-baseline-v1/evidence/hub-match-returned-setup.png",
+          "sha256": "e928ca94d961244362f1eaf9f1028a20a7d06cd7dc348d562117725c95e41dd3",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame",
+          "utc": "2026-10-11T10:09:31.472039+00:00"
+        },
+        {
+          "name": "hub-story-opening",
+          "path": "build/ULUS10566/runtime/sessions/original/hub-baseline-v1/evidence/hub-story-opening.png",
+          "sha256": "787d19d6b3becf9d220b8073013696e993a4af3d3a5d12ac5b5d404132a1b74b",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame",
+          "utc": "2026-10-11T10:13:48.097288+00:00"
+        }
+      ],
+      "current_save_files": [
+        {
+          "path": "ULUS10566GameData00/DISSIDIA.BIN",
+          "bytes": 257240,
+          "sha256": "ef6d9b1e243d21def3dcc694e0c86c1f6221ece9848c2da47b75200643d2d0f9"
+        },
+        {
+          "path": "ULUS10566GameData00/ICON0.PNG",
+          "bytes": 20867,
+          "sha256": "9e43a784c419fd2c695e6cb16fb4021a924d51f204f8f90a2610825af18f59d1"
+        },
+        {
+          "path": "ULUS10566GameData00/PARAM.SFO",
+          "bytes": 4912,
+          "sha256": "db85f624c9f3d70c8eeede9dfbb91ef54427392fa22168d3bde24ca807afe6d3"
+        },
+        {
+          "path": "ULUS10566GameData01/DISSIDIA.BIN",
+          "bytes": 257240,
+          "sha256": "97254e3b95cb1125e783d92e011f7dd20e89b4046a23fc24b6f8e7cb3bbe373e"
+        },
+        {
+          "path": "ULUS10566GameData01/ICON0.PNG",
+          "bytes": 20867,
+          "sha256": "9e43a784c419fd2c695e6cb16fb4021a924d51f204f8f90a2610825af18f59d1"
+        },
+        {
+          "path": "ULUS10566GameData01/PARAM.SFO",
+          "bytes": 4912,
+          "sha256": "6d942d3acc4e344d1f553a04ed1645375cc22ca0dab038077717a8d9f5b14909"
+        }
+      ],
+      "save_files_unchanged_since_seed": false
+    },
+    {
+      "case": "rebuilt",
+      "session": "build/ULUS10566/runtime/sessions/rebuilt/hub-baseline-v1",
+      "iso_sha256": "59ca11719bc1ca40c1756abca3cac06a9c50643ee83f294dab5ca08b3285b4a1",
+      "exe_sha256": "775a0ded7d0c0602f46c3aeed659228d629e98ed77d9e2bd3818c44eb30de85a",
+      "slot2_launch_start_utc": "2026-10-11T08:52:37.5788493Z",
+      "slot1_launch_start_utc": "2026-10-11T09:57:58.5564175Z",
+      "stopped": true,
+      "remote_startup_disabled_after_stop": true,
+      "runtime_results": {
+        "hub-load-slot-1": "passed",
+        "hub-load-slot-2": "passed",
+        "quick-battle-load": "passed",
+        "quick-battle-post-fight-menu": "passed",
+        "quick-battle-return-to-selection": "passed",
+        "story-prologue-opening": "passed",
+        "story-world-map-load": "passed",
+        "story-world-map-movement": "passed",
+        "story-map-overview": "passed",
+        "story-gateway-entry": "pending",
+        "individual-combat-input-effects": "not-isolated"
+      },
+      "reviewed_captures": [
+        {
+          "name": "hub-slot-list",
+          "path": "build/ULUS10566/runtime/sessions/rebuilt/hub-baseline-v1/evidence/hub-slot-list.png",
+          "sha256": "04f5ab589249fcdb2afd1190ddc02f73d094426bdf8c95eb87d847cfe3912a14",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame",
+          "utc": "2026-10-11T08:53:47.120105+00:00"
+        },
+        {
+          "name": "hub-slot2-arrival",
+          "path": "build/ULUS10566/runtime/sessions/rebuilt/hub-baseline-v1/evidence/hub-slot2-arrival.png",
+          "sha256": "d96de01786b9f19f7361f21faafa94add362a9400d492e52c9cc0f24642f1bee",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame",
+          "utc": "2026-10-11T08:54:21.873908+00:00"
+        },
+        {
+          "name": "hub-slot1-arrival",
+          "path": "build/ULUS10566/runtime/sessions/rebuilt/hub-baseline-v1/evidence/hub-slot1-arrival.png",
+          "sha256": "a478c9a774a8fed1b30d360405f3b956c70f8d265008eaf63331714f2f35a7d9",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame",
+          "utc": "2026-10-11T10:01:03.098071+00:00"
+        },
+        {
+          "name": "hub-slot1-battle-settings",
+          "path": "build/ULUS10566/runtime/sessions/rebuilt/hub-baseline-v1/evidence/hub-slot1-battle-settings.png",
+          "sha256": "d1f381eeff92ad655ca3b81af6e180c3d5e03f20caa0a11c7bda542899ee733c",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame",
+          "utc": "2026-10-11T10:01:45.442060+00:00"
+        },
+        {
+          "name": "hub-match-loaded",
+          "path": "build/ULUS10566/runtime/sessions/rebuilt/hub-baseline-v1/evidence/hub-match-loaded.png",
+          "sha256": "95a7d9b8177fd71e6fe763182e99d2bff30ecaf5add23db12c5eac73a7894576",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame",
+          "utc": "2026-10-11T10:03:32.980745+00:00"
+        },
+        {
+          "name": "hub-match-start",
+          "path": "build/ULUS10566/runtime/sessions/rebuilt/hub-baseline-v1/evidence/hub-match-start.png",
+          "sha256": "6d85962ee9064c5a8a95ab90ba7c3a3d1361899665543babfee976fec838f525",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame",
+          "utc": "2026-10-11T10:05:24.075144+00:00"
+        },
+        {
+          "name": "hub-match-input",
+          "path": "build/ULUS10566/runtime/sessions/rebuilt/hub-baseline-v1/evidence/hub-match-input.png",
+          "sha256": "2757e5b3a1f02b40fcc18d0c0aaaac004e415281f3d50c971bb2f5cb5a9c258d",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame",
+          "utc": "2026-10-11T10:06:51.666123+00:00"
+        },
+        {
+          "name": "hub-match-ended-menu",
+          "path": "build/ULUS10566/runtime/sessions/rebuilt/hub-baseline-v1/evidence/hub-match-ended-menu.png",
+          "sha256": "8dcdf92505ad1845c41dbc695201ee09556644864c8520099db4bdd5e0217c0c",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame",
+          "utc": "2026-10-11T10:09:28.157354+00:00"
+        },
+        {
+          "name": "hub-story-map-entry",
+          "path": "build/ULUS10566/runtime/sessions/rebuilt/hub-baseline-v1/evidence/hub-story-map-entry.png",
+          "sha256": "3235ffb27d8e67439ca0c51d9a01673ba26808d789fa9b22a443ad77e8d06026",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame",
+          "utc": "2026-10-11T10:17:58.573739+00:00"
+        },
+        {
+          "name": "hub-story-map-movement",
+          "path": "build/ULUS10566/runtime/sessions/rebuilt/hub-baseline-v1/evidence/hub-story-map-movement.png",
+          "sha256": "b1ad64d2f1ff0b416d85ddda59bef22f3953e9471e3cb9a0ed5291a9e0d34026",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame",
+          "utc": "2026-10-11T10:21:20.194898+00:00"
+        },
+        {
+          "name": "hub-story-map-overview",
+          "path": "build/ULUS10566/runtime/sessions/rebuilt/hub-baseline-v1/evidence/hub-story-map-overview.png",
+          "sha256": "34c9fd033755d84c907dccd9543cdeed3f4c00c643babebcafbf1bbc2ece6e02",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame",
+          "utc": "2026-10-11T10:21:21.620555+00:00"
+        },
+        {
+          "name": "hub-slot1-selected-v2",
+          "path": "build/ULUS10566/runtime/sessions/rebuilt/hub-baseline-v1/evidence/hub-slot1-selected-v2.png",
+          "sha256": "28d8e71b239ba78b708a29fde2fb3c4f8c2855d8f6f0b32f0f3caf1203ada7af",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame",
+          "utc": "2026-10-11T10:00:32.711272+00:00"
+        },
+        {
+          "name": "hub-match-returned-setup",
+          "path": "build/ULUS10566/runtime/sessions/rebuilt/hub-baseline-v1/evidence/hub-match-returned-setup.png",
+          "sha256": "bc52300a02378efbbffa956f75f58c67d70046d402f2482b8eac43fe12f4186c",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame",
+          "utc": "2026-10-11T10:09:31.551531+00:00"
+        },
+        {
+          "name": "hub-story-opening",
+          "path": "build/ULUS10566/runtime/sessions/rebuilt/hub-baseline-v1/evidence/hub-story-opening.png",
+          "sha256": "a2f66de8c89f9eddfe7f319d6404587c5ebf95c88e3f1314bbedad28e5c07847",
+          "width": 960,
+          "height": 544,
+          "method": "recorded-video-last-complete-frame",
+          "utc": "2026-10-11T10:13:48.097288+00:00"
+        }
+      ],
+      "current_save_files": [
+        {
+          "path": "ULUS10566GameData00/DISSIDIA.BIN",
+          "bytes": 257240,
+          "sha256": "557af3300cc56c6e8d1c04309d2248147e91064eaf22e2aa4da4b001d28cd278"
+        },
+        {
+          "path": "ULUS10566GameData00/ICON0.PNG",
+          "bytes": 20867,
+          "sha256": "9e43a784c419fd2c695e6cb16fb4021a924d51f204f8f90a2610825af18f59d1"
+        },
+        {
+          "path": "ULUS10566GameData00/PARAM.SFO",
+          "bytes": 4912,
+          "sha256": "ae53fd16fa168756dd3410e68656a85d93e124c7d8fc31389b16964ca001426f"
+        },
+        {
+          "path": "ULUS10566GameData01/DISSIDIA.BIN",
+          "bytes": 257240,
+          "sha256": "97254e3b95cb1125e783d92e011f7dd20e89b4046a23fc24b6f8e7cb3bbe373e"
+        },
+        {
+          "path": "ULUS10566GameData01/ICON0.PNG",
+          "bytes": 20867,
+          "sha256": "9e43a784c419fd2c695e6cb16fb4021a924d51f204f8f90a2610825af18f59d1"
+        },
+        {
+          "path": "ULUS10566GameData01/PARAM.SFO",
+          "bytes": 4912,
+          "sha256": "6d942d3acc4e344d1f553a04ed1645375cc22ca0dab038077717a8d9f5b14909"
+        }
+      ],
+      "save_files_unchanged_since_seed": false
+    }
+  ],
+  "slot_metadata": [
+    {
+      "slot_directory": "ULUS10566GameData00",
+      "SAVEDATA_DETAIL": "Date: \u30002026/10/11 19:04:24\nPLAYER: PPSSPP\nTime:  0\uff1a04\uff1a57",
+      "SAVEDATA_DIRECTORY": "ULUS10566GameData00",
+      "SAVEDATA_TITLE": "GAME DATA ",
+      "TITLE": "DISSIDIA 012 FINAL FANTASY"
+    },
+    {
+      "slot_directory": "ULUS10566GameData01",
+      "SAVEDATA_DETAIL": "Date: \u30002026/10/11 19:09:22\nPLAYER: PPSSPP\nTime:  0\uff1a05\uff1a03",
+      "SAVEDATA_DIRECTORY": "ULUS10566GameData01",
+      "SAVEDATA_TITLE": "GAME DATA ",
+      "TITLE": "DISSIDIA 012 FINAL FANTASY"
+    }
+  ],
+  "metadata_limit": "SFO identifies the game/profile and play time; only actual loads can establish that each slot bypasses the tutorials.",
+  "status": "milestone-complete-with-explicit-remaining-scenarios",
+  "blocker": null,
+  "save_reload_verified": true,
+  "matching_c_changed": false,
+  "isolation_setup": "Applied successfully on retry; each launcher rechecks effective rules before enabling its debugger",
+  "save_bytes_unchanged_after_first_launch": true,
+  "milestone": "Three-case post-tutorial save/load, Quick Battle endpoints and Story world-map entry",
+  "verified_slot_loads": 6,
+  "seed_and_human_profile_unchanged": true,
+  "static_build_proofs_current": true,
+  "runtime_debugger_tests_passed": 8,
+  "comparison_method": "Semantic route/checkpoint comparison from the same copied saves; not synchronized combat frames",
+  "battle_settings": {
+    "player": "Lightning Lv1, normal look, Set A",
+    "opponent": "Lightning Lv6 (Auto level), Maximum strength, Tactician",
+    "stage": "Old Chaos Shrine",
+    "rules": "None",
+    "cpu_assists_and_bgm": "Automatically selected and differed across cases; not controlled",
+    "outcome_coverage": "Post-fight defeat menus and return to battle/character selection; victory branch not tested",
+    "input_coverage": "Brief movement/jump/attack/role pulses sent; attack interruption and different fight states prevent attributing every individual response"
+  },
+  "remaining": [
+    "Actual story gateway entry and chapter progression",
+    "Quick Battle victory/result branches and deterministic assist/music selection",
+    "Saving and reloading new Battle/Story progress",
+    "Data-install success, cancellation, unavailable storage and suspend/resume"
+  ],
+  "capture_limit": "Reviewed PNGs use the last complete local recorded frame; they may slightly precede the CPU pause."
+}

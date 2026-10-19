@@ -1,0 +1,71 @@
+From d262a6980b69d0a3d327237dcdee6695a88ca19a Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Sun, 18 Oct 2026 22:00:56 +1030
+Subject: [PATCH 17/27] TRACE_GE_LIST: a word limit
+
+<prefix>_TRACE_GE_LIST=N[:M[:W]] dumps the first W words of each list run
+(default 20000, as before). A 3D battle frame with its interface takes about
+24000.
+
+Verified on Windows with one game: a battle frame's whole list (23,794
+words) dumped with N:1:400000.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/gpu/ge_state.cpp | 29 +++++++++++++++++++----------
+ 1 file changed, 19 insertions(+), 10 deletions(-)
+
+diff --git a/host/gpu/ge_state.cpp b/host/gpu/ge_state.cpp
+index b4b4d2d..265b664 100644
+--- a/host/gpu/ge_state.cpp
++++ b/host/gpu/ge_state.cpp
+@@ -1380,27 +1380,36 @@ std::uint32_t GeState::execute(const GuestMemory &memory, std::uint32_t pc, std:
+         identity(texture_matrix_);
+     }
+ 
+-    // <prefix>_TRACE_GE_LIST=N[:M]: every command word of display list runs
+-    // N to N+M-1 (default one), counted from the first, to read what a
+-    // screen is built from when it draws nothing sensible.
+-    static const auto list_trace = []() -> std::pair<std::uint64_t, std::uint64_t> {
++    // <prefix>_TRACE_GE_LIST=N[:M[:W]]: every command word of display list
++    // runs N to N+M-1 (default one), counted from the first, to read what a
++    // screen is built from when it draws nothing sensible: the first W words
++    // of each run (default 20000; a 3D scene with its interface has more).
++    struct ListTrace {
++        std::uint64_t first{~0ull};
++        std::uint64_t count{};
++        std::uint64_t words{20000u};
++    };
++    static const ListTrace list_trace = [] {
++        ListTrace trace;
+         const char *text = portablekit::env("TRACE_GE_LIST");
+-        if (text == nullptr) return {~0ull, 0ull};
++        if (text == nullptr) return trace;
+         char *end = nullptr;
+-        const std::uint64_t first = std::strtoull(text, &end, 0);
+-        const std::uint64_t count = end != nullptr && *end == ':' ? std::strtoull(end + 1, nullptr, 0) : 1ull;
+-        return {first, count};
++        trace.first = std::strtoull(text, &end, 0);
++        trace.count = 1u;
++        if (end != nullptr && *end == ':') trace.count = std::strtoull(end + 1, &end, 0);
++        if (end != nullptr && *end == ':') trace.words = std::strtoull(end + 1, nullptr, 0);
++        return trace;
+     }();
+     static std::uint64_t runs = 0;
+     const std::uint64_t run = runs++;
+-    const bool dump = run >= list_trace.first && run - list_trace.first < list_trace.second;
++    const bool dump = run >= list_trace.first && run - list_trace.first < list_trace.count;
+     if (dump) std::cerr << "[ge-list] run " << run << " from " << psprecomp::hex32(pc) << "\n";
+ 
+     for (std::uint32_t steps = 0; steps < 2'000'000u; ++steps) {
+         if (stall != 0u && pc == stall) return pc;
+         if (!memory.contains(pc, 4u)) return pc;
+         const std::uint32_t word = memory.load32(pc);
+-        if (dump && steps < 20000u)
++        if (dump && steps < list_trace.words)
+             std::cerr << "[ge-list] " << psprecomp::hex32(pc) << " " << psprecomp::hex32(word) << "\n";
+         const std::uint32_t command = word >> 24u;
+         const std::uint32_t data = word & 0x00FFFFFFu;
+-- 
+2.53.0.windows.1
+

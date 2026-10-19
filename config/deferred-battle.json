@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "main_reference_sha256": "0bc8e779aad2814a3d1bd77346f69ca5e16665845ed053cd0ad44a9cbfaefe6d",
+  "registration": "0x08889694",
+  "registration_call_pc": "0x088896D4",
+  "setter": "0x0886503C",
+  "callback_object_offset": 4,
+  "callbacks": [
+    {"phase": "setup", "wrapper": "0x08889098", "high_pc": "0x088896B4", "low_pc": "0x088896C8", "handler": "0x0888C4C8", "call_pc": "0x088890A4", "member_offset": 8, "runner": "0x08864F78", "slot_offset": 24},
+    {"phase": "update", "wrapper": "0x088890B8", "high_pc": "0x088896B8", "low_pc": "0x088896CC", "handler": "0x0888DFA4", "call_pc": "0x088890C4", "member_offset": 16, "runner": "0x08864FA0", "slot_offset": 28},
+    {"phase": "teardown", "wrapper": "0x088890D8", "high_pc": "0x088896BC", "low_pc": "0x088896D8", "handler": "0x08888F90", "call_pc": "0x088890E4", "member_offset": 24, "runner": "0x08864FC8", "slot_offset": 32}
+  ],
+  "controller_global": "0x089D6A10",
+  "controller_constructor": "0x088881FC",
+  "startup_constructor_call_pc": "0x08877954",
+  "startup_global_store_pc": "0x0887796C",
+  "member_table": "0x089C9348",
+  "dispatcher": "0x08865278",
+  "dispatcher_calls": ["0x08865398", "0x088653E4", "0x08865450"],
+  "setup": "0x0888C4C8",
+  "ensure_call_pc": "0x0888C4FC",
+  "ensure_helper": "0x08933C28",
+  "overlay_manager_start": "0x089331FC",
+  "overlay_manager_end": "0x08933C54",
+  "mode_index": 1,
+  "prefix_call_pc": "0x0888D0B0",
+  "prefix": "0x089DD4D0"
+}

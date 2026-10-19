@@ -1,0 +1,104 @@
+From 4b7ce2d0f7d96a156f47bf418e2601c8cb7fa6f1 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Sun, 18 Oct 2026 17:52:44 +1030
+Subject: [PATCH 03/27] GE: colour doubling (texture function bit 16)
+
+The texture function word carries a colour doubling bit (0xC9, bit 16) that
+was ignored. Games that draw textured quads with a vertex colour of 0x80 and
+doubling on came out at half brightness: one game's white title screen was
+drawn mid grey (127). The fragment shader now doubles the textured colour,
+clamped, when the bit is set. <prefix>_NO_COLOR_DOUBLING restores the old
+behaviour for comparison.
+
+Verified on Windows (Vulkan, AMD) by a display-list trace (0xC9010100 on every
+title-screen quad) and captures before and after. Not verified: whether the
+hardware also doubles in the replace function; this doubles after every
+function.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/gpu/ge_state.cpp        | 1 +
+ host/gpu/ge_state.hpp        | 1 +
+ host/gpu/shaders/ge.frag     | 7 ++++++-
+ host/gpu/vulkan_renderer.cpp | 9 +++++++--
+ 4 files changed, 15 insertions(+), 3 deletions(-)
+
+diff --git a/host/gpu/ge_state.cpp b/host/gpu/ge_state.cpp
+index 48af218..5277695 100644
+--- a/host/gpu/ge_state.cpp
++++ b/host/gpu/ge_state.cpp
+@@ -699,6 +699,7 @@ void GeState::handle_command(const GuestMemory &memory, std::uint32_t command, s
+     case kTextureFunction:
+         texture_.function = data & 7u;
+         texture_.alpha_from_texture = ((data >> 8u) & 1u) != 0u;
++        texture_.color_double = ((data >> 16u) & 1u) != 0u;
+         break;
+     case kTexScaleU: texture_.scale_u = decode_float24(data); break;
+     case kTexScaleV: texture_.scale_v = decode_float24(data); break;
+diff --git a/host/gpu/ge_state.hpp b/host/gpu/ge_state.hpp
+index a187ab4..f91da5c 100644
+--- a/host/gpu/ge_state.hpp
++++ b/host/gpu/ge_state.hpp
+@@ -66,6 +66,7 @@ struct TextureState {
+     std::uint32_t clut_max_bytes{};
+     std::uint32_t function{};        // TFX: modulate/decal/blend/replace/add
+     bool alpha_from_texture{};       // TCC
++    bool color_double{};             // TFUNC bit 16: the textured colour times two
+     std::uint32_t min_filter{};
+     std::uint32_t mag_filter{};
+     std::uint32_t wrap_s{};
+diff --git a/host/gpu/shaders/ge.frag b/host/gpu/shaders/ge.frag
+index f180930..aba5143 100644
+--- a/host/gpu/shaders/ge.frag
++++ b/host/gpu/shaders/ge.frag
+@@ -43,7 +43,9 @@ void main() {
+             if ((flags & 4) != 0) uv.y = clamp(uv.y, half_texel.y, 1.0 - half_texel.y);
+         }
+         vec4 texel = texture(guest_texture, uv);
+-        int function = int(push.texture_params.y + 0.5);
++        // texture_params.y: the texture function, plus 8 for colour doubling.
++        int function_bits = int(push.texture_params.y + 0.5);
++        int function = function_bits & 7;
+         if (function == 0) {          // modulate
+             color *= texel;
+         } else if (function == 1) {   // decal
+@@ -53,6 +55,9 @@ void main() {
+         } else {                      // replace and everything else
+             color = texel;
+         }
++        // Colour doubling (TFUNC bit 16): games draw with a vertex colour of
++        // 0x80 and double the modulated result to reach full brightness.
++        if ((function_bits & 8) != 0) color.rgb = min(color.rgb * 2.0, vec3(1.0));
+     }
+ 
+     // A separate specular term is added after texturing, then fog blends
+diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
+index 9347fc5..a7327ea 100644
+--- a/host/gpu/vulkan_renderer.cpp
++++ b/host/gpu/vulkan_renderer.cpp
+@@ -121,7 +121,7 @@ constexpr std::uint32_t kGpuTimerSegments = 16u;
+ struct PushConstants {
+     std::array<float, 16> transform{};
+     std::array<float, 4> viewport{};        // x,y: target size; z: through flag; w: 1 fog + 2 lighting
+-    std::array<float, 4> texture_params{};  // x: enabled + 2 clamp u + 4 clamp v, y: function, z: alpha ref, w: alpha func
++    std::array<float, 4> texture_params{};  // x: enabled + 2 clamp u + 4 clamp v, y: function + 8 colour doubling, z: alpha ref, w: alpha func
+     std::array<float, 4> uv_transform{1.0f, 1.0f, 0.0f, 0.0f};
+     std::array<float, 4> view_z{};          // row of view * world that gives view-space z, for fog
+ };
+@@ -6436,7 +6436,12 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+     const float wrap_flags = no_texture_clamp ? 0.0f
+                                               : (call.texture.wrap_s != 0u ? 2.0f : 0.0f) +
+                                                     (call.texture.wrap_t != 0u ? 4.0f : 0.0f);
+-    push.texture_params = {call.texture.enabled ? 1.0f + wrap_flags : 0.0f, static_cast<float>(call.texture.function),
++    // Colour doubling, which the texture function word carries in bit 16.
++    // <prefix>_NO_COLOR_DOUBLING ignores it, as before.
++    static const bool no_color_doubling = portablekit::env("NO_COLOR_DOUBLING") != nullptr;
++    const std::uint32_t function_bits =
++        call.texture.function + (call.texture.color_double && !no_color_doubling ? 8u : 0u);
++    push.texture_params = {call.texture.enabled ? 1.0f + wrap_flags : 0.0f, static_cast<float>(function_bits),
+                            static_cast<float>(call.alpha_test.enabled ? call.alpha_test.reference : 0u),
+                            static_cast<float>(call.alpha_test.enabled ? call.alpha_test.function : 0u)};
+     // Through-mode texture coordinates are in texels, transformed ones in [0,1].
+-- 
+2.53.0.windows.1
+

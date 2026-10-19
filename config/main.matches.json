@@ -1,0 +1,1024 @@
+{
+  "compiler": "tools/compilers/pspsnc_1.2.7503.0/pspsnc.exe",
+  "flags": [
+    "-O2",
+    "-g"
+  ],
+  "units": [
+    {
+      "name": "main_state_callbacks",
+      "source": "src/main/state_callbacks.c",
+      "functions": [
+        {
+          "name": "func_0886503C",
+          "address": "0x0886503C",
+          "size": 16
+        }
+      ]
+    },
+    {
+      "name": "main_state_active",
+      "source": "src/main/state_active.c",
+      "functions": [
+        {
+          "name": "func_0886514C",
+          "address": "0x0886514C",
+          "size": 12
+        }
+      ]
+    },
+    {
+      "name": "main_state_transitions",
+      "source": "src/main/state_transitions.c",
+      "functions": [
+        {
+          "name": "func_08865184",
+          "address": "0x08865184",
+          "size": 12
+        },
+        {
+          "name": "func_08865190",
+          "address": "0x08865190",
+          "size": 12
+        },
+        {
+          "name": "func_0886519C",
+          "address": "0x0886519C",
+          "size": 16
+        }
+      ]
+    },
+    {
+      "name": "main_state_release",
+      "source": "src/main/state_release.c",
+      "functions": [
+        {
+          "name": "func_08865088",
+          "address": "0x08865088",
+          "size": 28
+        }
+      ]
+    },
+    {
+      "name": "main_lifecycle_clear",
+      "source": "src/main/lifecycle_clear.c",
+      "functions": [
+        {
+          "name": "func_088799DC",
+          "address": "0x088799DC",
+          "size": 20
+        }
+      ]
+    },
+    {
+      "name": "main_float_record",
+      "source": "src/main/float_record.c",
+      "functions": [
+        {
+          "name": "func_0886F074",
+          "address": "0x0886F074",
+          "size": 24
+        },
+        {
+          "name": "func_0886F08C",
+          "address": "0x0886F08C",
+          "size": 8
+        },
+        {
+          "name": "func_0886F094",
+          "address": "0x0886F094",
+          "size": 8
+        },
+        {
+          "name": "func_0886F09C",
+          "address": "0x0886F09C",
+          "size": 8
+        },
+        {
+          "name": "func_0886F0A4",
+          "address": "0x0886F0A4",
+          "size": 8
+        },
+        {
+          "name": "func_0886F0AC",
+          "address": "0x0886F0AC",
+          "size": 8
+        }
+      ]
+    },
+    {
+      "name": "main_lifecycle_clear_0887974c",
+      "source": "src/main/lifecycle_clear_0887974c.c",
+      "functions": [
+        {
+          "name": "func_0887974C",
+          "address": "0x0887974C",
+          "size": 340
+        }
+      ]
+    },
+    {
+      "name": "main_lifecycle_clear_088798a0",
+      "source": "src/main/lifecycle_clear_088798a0.c",
+      "functions": [
+        {
+          "name": "func_088798A0",
+          "address": "0x088798A0",
+          "size": 316
+        }
+      ]
+    },
+    {
+      "name": "main_callback_runners",
+      "source": "src/main/callback_runners.c",
+      "functions": [
+        {
+          "name": "func_08864F78",
+          "address": "0x08864F78",
+          "size": 40
+        },
+        {
+          "name": "func_08864FA0",
+          "address": "0x08864FA0",
+          "size": 40
+        },
+        {
+          "name": "func_08864FC8",
+          "address": "0x08864FC8",
+          "size": 40
+        }
+      ]
+    },
+    {
+      "name": "main_callback_construct",
+      "source": "src/main/callback_construct.c",
+      "functions": [
+        {
+          "name": "func_08864FF0",
+          "address": "0x08864FF0",
+          "size": 76
+        }
+      ]
+    },
+    {
+      "name": "main_overlay_mode_ensure",
+      "source": "src/main/overlay_mode_ensure.c",
+      "functions": [
+        {
+          "name": "func_08933C00",
+          "address": "0x08933C00",
+          "size": 40
+        },
+        {
+          "name": "func_08933C28",
+          "address": "0x08933C28",
+          "size": 44
+        },
+        {
+          "name": "func_08933C54",
+          "address": "0x08933C54",
+          "size": 44
+        }
+      ]
+    },
+    {
+      "name": "main_state_end_request",
+      "source": "src/main/state_end_request.c",
+      "functions": [
+        {
+          "name": "func_08865158",
+          "address": "0x08865158",
+          "size": 44
+        }
+      ]
+    },
+    {
+      "name": "main_controller_phase_wrappers",
+      "source": "src/main/controller_phase_wrappers.c",
+      "functions": [
+        {
+          "name": "func_08889098",
+          "address": "0x08889098",
+          "size": 32
+        },
+        {
+          "name": "func_088890B8",
+          "address": "0x088890B8",
+          "size": 32
+        },
+        {
+          "name": "func_088890D8",
+          "address": "0x088890D8",
+          "size": 32
+        }
+      ]
+    },
+    {
+      "name": "main_state_resource_acquire",
+      "source": "src/main/state_resource_acquire.c",
+      "functions": [
+        {
+          "name": "func_0886504C",
+          "address": "0x0886504C",
+          "size": 60
+        }
+      ]
+    },
+    {
+      "name": "main_resource_handle_lifecycle",
+      "source": "src/main/resource_handle_lifecycle.c",
+      "functions": [
+        {
+          "name": "func_0889F63C",
+          "address": "0x0889F63C",
+          "size": 56
+        },
+        {
+          "name": "func_0889F674",
+          "address": "0x0889F674",
+          "size": 44
+        },
+        {
+          "name": "func_0889F6A0",
+          "address": "0x0889F6A0",
+          "size": 100
+        },
+        {
+          "name": "func_0889F704",
+          "address": "0x0889F704",
+          "size": 76
+        }
+      ]
+    },
+    {
+      "name": "main_resource_handle_commands",
+      "source": "src/main/resource_handle_commands.c",
+      "functions": [
+        {
+          "name": "func_0889F898",
+          "address": "0x0889F898",
+          "size": 60
+        }
+      ]
+    },
+    {
+      "name": "main_resource_handle_phase",
+      "source": "src/main/resource_handle_phase.c",
+      "functions": [
+        {
+          "name": "func_0889F910",
+          "address": "0x0889F910",
+          "size": 56
+        },
+        {
+          "name": "func_0889F948",
+          "address": "0x0889F948",
+          "size": 56
+        }
+      ]
+    },
+    {
+      "name": "main_descriptor_lifecycle",
+      "source": "src/main/descriptor_lifecycle.c",
+      "functions": [
+        {
+          "name": "func_088CB9E8",
+          "address": "0x088CB9E8",
+          "size": 40
+        },
+        {
+          "name": "func_088CBA10",
+          "address": "0x088CBA10",
+          "size": 68
+        },
+        {
+          "name": "func_088CBA54",
+          "address": "0x088CBA54",
+          "size": 32
+        }
+      ]
+    },
+    {
+      "name": "main_resource_manager_acquire",
+      "source": "src/main/resource_manager_acquire.c",
+      "functions": [
+        {
+          "name": "func_088A1380",
+          "address": "0x088A1380",
+          "size": 100
+        },
+        {
+          "name": "func_088A13E4",
+          "address": "0x088A13E4",
+          "size": 28
+        },
+        {
+          "name": "func_088A1400",
+          "address": "0x088A1400",
+          "size": 56
+        },
+        {
+          "name": "func_088A1438",
+          "address": "0x088A1438",
+          "size": 56
+        },
+        {
+          "name": "func_088A1470",
+          "address": "0x088A1470",
+          "size": 96
+        }
+      ]
+    },
+    {
+      "name": "main_resource_manager_release",
+      "source": "src/main/resource_manager_release.c",
+      "functions": [
+        {
+          "name": "func_088A1540",
+          "address": "0x088A1540",
+          "size": 56
+        },
+        {
+          "name": "func_088A1578",
+          "address": "0x088A1578",
+          "size": 36
+        },
+        {
+          "name": "func_088A159C",
+          "address": "0x088A159C",
+          "size": 28
+        }
+      ]
+    },
+    {
+      "name": "main_resource_manager_slots",
+      "source": "src/main/resource_manager_slots.c",
+      "functions": [
+        {
+          "name": "func_088A1638",
+          "address": "0x088A1638",
+          "size": 64
+        },
+        {
+          "name": "func_088A1678",
+          "address": "0x088A1678",
+          "size": 28
+        },
+        {
+          "name": "func_088A1694",
+          "address": "0x088A1694",
+          "size": 28
+        }
+      ]
+    },
+    {
+      "name": "main_drawing_color",
+      "source": "src/main/drawing_color.c",
+      "functions": [
+        {
+          "name": "func_088D9AF4",
+          "address": "0x088D9AF4",
+          "size": 52
+        },
+        {
+          "name": "func_088D9B28",
+          "address": "0x088D9B28",
+          "size": 32
+        },
+        {
+          "name": "func_088D9B48",
+          "address": "0x088D9B48",
+          "size": 60
+        }
+      ]
+    },
+    {
+      "name": "main_drawing_transform",
+      "source": "src/main/drawing_transform.c",
+      "functions": [
+        {
+          "name": "func_088D9C0C",
+          "address": "0x088D9C0C",
+          "size": 84
+        }
+      ]
+    },
+    {
+      "name": "main_drawing_enable",
+      "source": "src/main/drawing_enable.c",
+      "functions": [
+        {
+          "name": "func_088D9CD8",
+          "address": "0x088D9CD8",
+          "size": 36
+        },
+        {
+          "name": "func_088D9CFC",
+          "address": "0x088D9CFC",
+          "size": 40
+        }
+      ]
+    },
+    {
+      "name": "main_drawing_owner",
+      "source": "src/main/drawing_owner.c",
+      "functions": [
+        {
+          "name": "func_088D991C",
+          "address": "0x088D991C",
+          "size": 8
+        }
+      ]
+    },
+    {
+      "name": "main_drawing_delete",
+      "source": "src/main/drawing_delete.c",
+      "functions": [
+        {
+          "name": "func_088D99B0",
+          "address": "0x088D99B0",
+          "size": 44
+        }
+      ]
+    },
+    {
+      "name": "main_menu_context_activation",
+      "source": "src/main/menu_context_activation.c",
+      "functions": [
+        {
+          "name": "func_088AC82C",
+          "address": "0x088AC82C",
+          "size": 100
+        }
+      ]
+    },
+    {
+      "name": "main_drawing_derived_flags",
+      "source": "src/main/drawing_derived_flags.cpp",
+      "functions": [
+        {
+          "name": "func_088D9D24",
+          "address": "0x088D9D24",
+          "size": 184
+        },
+        {
+          "name": "func_088D9DDC",
+          "address": "0x088D9DDC",
+          "size": 108
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fYMainDrawingFlagAccessorsIhas_flagPC6XMainDrawingRecordPrefixUiT",
+        "__0fYMainDrawingFlagAccessorsIset_flagP6XMainDrawingRecordPrefixUiT",
+        "__0fYMainDrawingFlagAccessorsKclear_flagP6XMainDrawingRecordPrefixUiT"
+      ]
+    },
+    {
+      "name": "main_drawing_transform_update",
+      "source": "src/main/drawing_transform_update.cpp",
+      "functions": [
+        {
+          "name": "func_088D9B84",
+          "address": "0x088D9B84",
+          "size": 136
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fYMainDrawingFlagAccessorsIset_flagP6XMainDrawingRecordPrefixUiT",
+        "__0fYMainDrawingFlagAccessorsKclear_flagP6XMainDrawingRecordPrefixUiT"
+      ]
+    },
+    {
+      "name": "main_drawing_position",
+      "source": "src/main/drawing_position.cpp",
+      "functions": [
+        {
+          "name": "func_088D9C60",
+          "address": "0x088D9C60",
+          "size": 44
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fYMainDrawingFlagAccessorsKclear_flagP6XMainDrawingRecordPrefixUiT"
+      ]
+    },
+    {
+      "name": "main_menu_resource_schedule",
+      "source": "src/main/menu_resource_schedule.c",
+      "functions": [
+        {
+          "name": "func_088AD524",
+          "address": "0x088AD524",
+          "size": 80
+        }
+      ]
+    },
+    {
+      "name": "main_resource_handle_status",
+      "source": "src/main/resource_handle_status.c",
+      "functions": [
+        {
+          "name": "func_0889F980",
+          "address": "0x0889F980",
+          "size": 68
+        }
+      ]
+    },
+    {
+      "name": "main_utility_dialog_common",
+      "source": "src/main/utility_dialog_common.c",
+      "functions": [
+        {
+          "name": "func_088B168C",
+          "address": "0x088B168C",
+          "size": 112
+        }
+      ]
+    },
+    {
+      "name": "main_utility_dialog_settings",
+      "source": "src/main/utility_dialog_settings.c",
+      "functions": [
+        {
+          "name": "func_08867B90",
+          "address": "0x08867B90",
+          "size": 32
+        },
+        {
+          "name": "func_08867BB0",
+          "address": "0x08867BB0",
+          "size": 36
+        }
+      ]
+    },
+    {
+      "name": "main_task_construct",
+      "source": "src/main/task_construct.c",
+      "functions": [
+        {
+          "name": "func_088822BC",
+          "address": "0x088822BC",
+          "size": 36
+        }
+      ]
+    },
+    {
+      "name": "main_task_finalize",
+      "source": "src/main/task_finalize.c",
+      "functions": [
+        {
+          "name": "func_088822E0",
+          "address": "0x088822E0",
+          "size": 76
+        }
+      ]
+    },
+    {
+      "name": "main_task_remove_matching",
+      "source": "src/main/task_remove_matching.cpp",
+      "functions": [
+        {
+          "name": "func_088825F0",
+          "address": "0x088825F0",
+          "size": 196
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fRMainTaskIterationEnextP6NMainTaskOwnerP6IMainTaskT",
+        "__0fRMainTaskIterationNmatching_nextP6NMainTaskOwnerP6IMainTaskUiTDT"
+      ]
+    },
+    {
+      "name": "main_task_remove_all",
+      "source": "src/main/task_remove_all.c",
+      "functions": [
+        {
+          "name": "func_088826B4",
+          "address": "0x088826B4",
+          "size": 32
+        }
+      ]
+    },
+    {
+      "name": "main_task_count",
+      "source": "src/main/task_count.cpp",
+      "functions": [
+        {
+          "name": "func_088826D4",
+          "address": "0x088826D4",
+          "size": 48
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fRMainTaskIterationEnextP6NMainTaskOwnerP6IMainTaskT"
+      ]
+    },
+    {
+      "name": "main_task_owner_finalize",
+      "source": "src/main/task_owner_finalize.c",
+      "functions": [
+        {
+          "name": "func_08882704",
+          "address": "0x08882704",
+          "size": 72
+        }
+      ]
+    },
+    {
+      "name": "main_task_has_callback",
+      "source": "src/main/task_has_callback.cpp",
+      "functions": [
+        {
+          "name": "func_0888274C",
+          "address": "0x0888274C",
+          "size": 68
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fRMainTaskIterationEnextP6NMainTaskOwnerP6IMainTaskT"
+      ]
+    },
+    {
+      "name": "main_task_dispatch",
+      "source": "src/main/task_dispatch.cpp",
+      "functions": [
+        {
+          "name": "func_0888245C",
+          "address": "0x0888245C",
+          "size": 344
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fRMainTaskIterationEnextP6NMainTaskOwnerP6IMainTaskT",
+        "__0fYMainTaskPendingIterationHadvanceP6NMainTaskOwnerRP6IMainTaskUiTDT",
+        "__0fRMainTaskIterationNmatching_nextP6NMainTaskOwnerP6IMainTaskUiTDT"
+      ]
+    },
+    {
+      "name": "main_presentation_events",
+      "source": "src/main/presentation_events.c",
+      "functions": [
+        {
+          "name": "func_08873B18",
+          "address": "0x08873B18",
+          "size": 28
+        },
+        {
+          "name": "func_08873B34",
+          "address": "0x08873B34",
+          "size": 40
+        },
+        {
+          "name": "func_08873B5C",
+          "address": "0x08873B5C",
+          "size": 8
+        },
+        {
+          "name": "func_08873B64",
+          "address": "0x08873B64",
+          "size": 188
+        },
+        {
+          "name": "func_08873C20",
+          "address": "0x08873C20",
+          "size": 40
+        }
+      ]
+    },
+    {
+      "name": "main_presentation_channels",
+      "source": "src/main/presentation_channels.c",
+      "functions": [
+        {
+          "name": "func_08873CE0",
+          "address": "0x08873CE0",
+          "size": 84
+        },
+        {
+          "name": "func_08873D34",
+          "address": "0x08873D34",
+          "size": 124
+        }
+      ]
+    },
+    {
+      "name": "main_presentation_current",
+      "source": "src/main/presentation_current.c",
+      "functions": [
+        {
+          "name": "func_08873DB0",
+          "address": "0x08873DB0",
+          "size": 60
+        }
+      ]
+    },
+    {
+      "name": "main_drawing_acquire_default",
+      "source": "src/main/drawing_acquire_default.c",
+      "functions": [
+        {
+          "name": "func_088DAA68",
+          "address": "0x088DAA68",
+          "size": 56
+        }
+      ]
+    },
+    {
+      "name": "main_presentation_default_input",
+      "source": "src/main/presentation_default_input.c",
+      "functions": [
+        {
+          "name": "func_088D4C5C",
+          "address": "0x088D4C5C",
+          "size": 8
+        }
+      ]
+    },
+    {
+      "name": "main_presentation_initialize",
+      "source": "src/main/presentation_initialize.c",
+      "functions": [
+        {
+          "name": "func_0887391C",
+          "address": "0x0887391C",
+          "size": 60
+        }
+      ]
+    },
+    {
+      "name": "main_presentation_reconfigure",
+      "source": "src/main/presentation_reconfigure.c",
+      "functions": [
+        {
+          "name": "func_08873958",
+          "address": "0x08873958",
+          "size": 116
+        }
+      ]
+    },
+    {
+      "name": "main_presentation_index_wrappers",
+      "source": "src/main/presentation_index_wrappers.c",
+      "functions": [
+        {
+          "name": "func_08873DEC",
+          "address": "0x08873DEC",
+          "size": 40
+        },
+        {
+          "name": "func_08873E14",
+          "address": "0x08873E14",
+          "size": 52
+        }
+      ]
+    },
+    {
+      "name": "main_presentation_update_second",
+      "source": "src/main/presentation_update_second.c",
+      "functions": [
+        {
+          "name": "func_08873E48",
+          "address": "0x08873E48",
+          "size": 36
+        }
+      ]
+    },
+    {
+      "name": "main_presentation_render_gates",
+      "source": "src/main/presentation_render_gates.c",
+      "functions": [
+        {
+          "name": "func_08874118",
+          "address": "0x08874118",
+          "size": 52
+        },
+        {
+          "name": "func_0887414C",
+          "address": "0x0887414C",
+          "size": 52
+        }
+      ]
+    },
+    {
+      "name": "main_presentation_finish",
+      "source": "src/main/presentation_finish.c",
+      "functions": [
+        {
+          "name": "func_088740DC",
+          "address": "0x088740DC",
+          "size": 60
+        }
+      ]
+    },
+    {
+      "name": "main_presentation_idle",
+      "source": "src/main/presentation_idle.c",
+      "functions": [
+        {
+          "name": "func_08873F78",
+          "address": "0x08873F78",
+          "size": 8
+        }
+      ]
+    },
+    {
+      "name": "main_task_unlink",
+      "source": "src/main/task_unlink.cpp",
+      "functions": [
+        {
+          "name": "func_088828BC",
+          "address": "0x088828BC",
+          "size": 148
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fYMainTaskUnlinkOperationsNprevious_slotP6IMainTaskT",
+        "__0fYMainTaskUnlinkOperationsOfollowing_slotP6IMainTaskT",
+        "__0fYMainTaskUnlinkOperationsGunlinkP6NMainTaskOwnerP6IMainTaskT",
+        "__0fRMainTaskIterationEnextP6NMainTaskOwnerP6IMainTaskT"
+      ]
+    },
+    {
+      "name": "main_resource_buffer_initialize",
+      "source": "src/main/resource_buffer_initialize.c",
+      "functions": [
+        {
+          "name": "func_088D52AC",
+          "address": "0x088D52AC",
+          "size": 108
+        }
+      ]
+    },
+    {
+      "name": "main_drawing_acquire_at_origin",
+      "source": "src/main/drawing_acquire_at_origin.c",
+      "functions": [
+        {
+          "name": "func_088DAA40",
+          "address": "0x088DAA40",
+          "size": 40
+        }
+      ]
+    },
+    {
+      "name": "main_resource_integer_pair",
+      "source": "src/main/resource_integer_pair.c",
+      "functions": [
+        {
+          "name": "func_088A18B0",
+          "address": "0x088A18B0",
+          "size": 44
+        }
+      ]
+    }
+  ],
+  "symbols": {
+    "func_088823C4": "0x088823C4",
+    "D_089DE79C": "0x089DE79C",
+    "D_089E330C": "0x089E330C",
+    "D_089E09C0": "0x089E09C0",
+    "D_089E75C4": "0x089E75C4",
+    "D_089D7F20": "0x089D7F20",
+    "D_089D7F10": "0x089D7F10",
+    "D_08AC7500": "0x08AC7500",
+    "D_08B01CF8": "0x08B01CF8",
+    "D_08B243C0": "0x08B243C0",
+    "D_08AC4560": "0x08AC4560",
+    "D_08B22E98": "0x08B22E98",
+    "D_08B1CB00": "0x08B1CB00",
+    "D_08ABB9E4": "0x08ABB9E4",
+    "D_08B25044": "0x08B25044",
+    "D_08B29CF8": "0x08B29CF8",
+    "D_08B32D90": "0x08B32D90",
+    "D_08A457EC": "0x08A457EC",
+    "D_08A457F0": "0x08A457F0",
+    "D_08A35A00": "0x08A35A00",
+    "D_08A0B6A0": "0x08A0B6A0",
+    "D_089E75C8": "0x089E75C8",
+    "D_08A23FF0": "0x08A23FF0",
+    "D_089E9D38": "0x089E9D38",
+    "D_08A4C0FC": "0x08A4C0FC",
+    "D_08A4FFF4": "0x08A4FFF4",
+    "D_08A51CBC": "0x08A51CBC",
+    "D_08AA3F44": "0x08AA3F44",
+    "D_08A6D710": "0x08A6D710",
+    "D_08A6D7E0": "0x08A6D7E0",
+    "D_08A8B7A8": "0x08A8B7A8",
+    "D_08A87EAC": "0x08A87EAC",
+    "D_08B54058": "0x08B54058",
+    "D_08A96A28": "0x08A96A28",
+    "D_08B41CC0": "0x08B41CC0",
+    "D_08B42088": "0x08B42088",
+    "D_08B42C28": "0x08B42C28",
+    "D_08B42288": "0x08B42288",
+    "D_08B44F08": "0x08B44F08",
+    "D_08B45878": "0x08B45878",
+    "D_08B438C0": "0x08B438C0",
+    "D_08B426B0": "0x08B426B0",
+    "D_08B42A98": "0x08B42A98",
+    "D_08B54C38": "0x08B54C38",
+    "D_08B59230": "0x08B59230",
+    "D_08A405E0": "0x08A405E0",
+    "D_08A50568": "0x08A50568",
+    "D_08AC8EF8": "0x08AC8EF8",
+    "D_08AB6738": "0x08AB6738",
+    "D_08ACEE24": "0x08ACEE24",
+    "D_08ACBBC8": "0x08ACBBC8",
+    "D_089D85F0": "0x089D85F0",
+    "D_08ACEE20": "0x08ACEE20",
+    "D_08AD0158": "0x08AD0158",
+    "D_08AB8388": "0x08AB8388",
+    "D_08AB4250": "0x08AB4250",
+    "D_089D6A14": "0x089D6A14",
+    "D_08B12DE0": "0x08B12DE0",
+    "D_08A22C70": "0x08A22C70",
+    "D_08B1D820": "0x08B1D820",
+    "D_08A22AB0": "0x08A22AB0",
+    "D_08B1FE60": "0x08B1FE60",
+    "D_08B212E8": "0x08B212E8",
+    "D_08B23058": "0x08B23058",
+    "D_08B27990": "0x08B27990",
+    "D_08B28588": "0x08B28588",
+    "D_08B2D2B8": "0x08B2D2B8",
+    "D_08B04BA0": "0x08B04BA0",
+    "D_08B05258": "0x08B05258",
+    "D_08B0CF20": "0x08B0CF20",
+    "D_08B11E28": "0x08B11E28",
+    "D_08B13B48": "0x08B13B48",
+    "D_08B18830": "0x08B18830",
+    "D_08ABBDF8": "0x08ABBDF8",
+    "D_08A80218": "0x08A80218",
+    "D_08AA5828": "0x08AA5828",
+    "D_08AAAD80": "0x08AAAD80",
+    "D_08ACA350": "0x08ACA350",
+    "D_08A62280": "0x08A62280",
+    "D_08ACF110": "0x08ACF110",
+    "D_08ACD0E8": "0x08ACD0E8",
+    "D_08B491E8": "0x08B491E8",
+    "D_08B3D6B8": "0x08B3D6B8",
+    "D_08B54330": "0x08B54330",
+    "D_089C9348": "0x089C9348",
+    "D_089C9370": "0x089C9370",
+    "D_089D6A10": "0x089D6A10",
+    "func_08933ACC": "0x08933ACC",
+    "func_08882390": "0x08882390",
+    "func_0888C4C8": "0x0888C4C8",
+    "func_0888DFA4": "0x0888DFA4",
+    "func_08888F90": "0x08888F90",
+    "D_089D6C88": "0x089D6C88",
+    "func_08992F04": "0x08992F04",
+    "func_088A1380": "0x088A1380",
+    "func_088A13E4": "0x088A13E4",
+    "func_088A1470": "0x088A1470",
+    "func_088A1540": "0x088A1540",
+    "func_088A1578": "0x088A1578",
+    "func_088B7E30": "0x088B7E30",
+    "func_088B83F0": "0x088B83F0",
+    "D_089D08E0": "0x089D08E0",
+    "D_089D08E4": "0x089D08E4",
+    "D_089D08E8": "0x089D08E8",
+    "D_089D08EC": "0x089D08EC",
+    "D_089D08F8": "0x089D08F8",
+    "D_089D08FC": "0x089D08FC",
+    "func_0899016C": "0x0899016C",
+    "func_0899029C": "0x0899029C",
+    "func_0899036C": "0x0899036C",
+    "func_089904B0": "0x089904B0",
+    "func_08991660": "0x08991660",
+    "func_089907F8": "0x089907F8",
+    "func_08990CA0": "0x08990CA0",
+    "func_08990DC8": "0x08990DC8",
+    "func_08935524": "0x08935524",
+    "func_088D9DDC": "0x088D9DDC",
+    "func_088D9D24": "0x088D9D24",
+    "func_088DA0A0": "0x088DA0A0",
+    "func_088AC034": "0x088AC034",
+    "func_088AC07C": "0x088AC07C",
+    "D_089D727C": "0x089D727C",
+    "func_0887AFBC": "0x0887AFBC",
+    "func_088B1230": "0x088B1230",
+    "func_08935828": "0x08935828",
+    "func_08867B90": "0x08867B90",
+    "func_08867BB0": "0x08867BB0",
+    "D_089D5ECC": "0x089D5ECC",
+    "D_089C942C": "0x089C942C",
+    "D_089D5F1D": "0x089D5F1D",
+    "func_0885C538": "0x0885C538",
+    "func_0885C488": "0x0885C488",
+    "func_088828BC": "0x088828BC",
+    "D_089D69B0": "0x089D69B0",
+    "D_09B47B50": "0x09B47B50",
+    "D_09B48210": "0x09B48210",
+    "func_089A3868": "0x089A3868",
+    "func_0887391C": "0x0887391C",
+    "func_08874350": "0x08874350",
+    "func_088DAA40": "0x088DAA40",
+    "D_09B69878": "0x09B69878",
+    "func_0885C6CC": "0x0885C6CC",
+    "func_088A1BEC": "0x088A1BEC",
+    "func_088DA954": "0x088DA954",
+    "func_088739CC": "0x088739CC",
+    "func_088741C0": "0x088741C0"
+  },
+  "status": "97 matching C/C++ functions / 6104 bytes; typed presentation callbacks, initialization, rendering gates, exact task unlink and drawing allocation support. Larger transition/update and task factory/registration remain unfinished."
+}

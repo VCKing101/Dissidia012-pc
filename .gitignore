@@ -1,0 +1,46 @@
+# Private material kept out of the public repository
+/private/
+
+# Original game images, binaries and locally generated game content
+*.[iI][sS][oO]
+*.[cC][sS][oO]
+*.[bB][iI][nN]
+*.[pP][rR][xX]
+*.[eE][lL][fF]
+*.[pP][bB][pP]
+*.[oO]
+*.[oO][bB][jJ]
+*.[oO][lL][dD]
+*.[eE][dD][aA][tT]
+*.[pP][gG][dD]
+*.[aA][tT]3
+*.[gG][iI][mM]
+*.[gG][mM][oO]
+*.[oO][bB][jJ][xX]
+*.[pP][mM][fF]
+/orig/
+/disks/
+/extracted/
+/assets/
+/asm/
+/analysis/
+/build/
+
+# Music and mods: no audio is ever committed, and no mods folder outside the example
+*.[mM][pP]3
+*.[oO][gG][gG]
+*.[oO][pP][uU][sS]
+*.[fF][lL][aA][cC]
+*.[wW][aA][vV]
+/mods/
+/port/mods/
+/port/tools/mod_maker/mods/
+
+# Local toolchains, clones and Python environments
+/tools/compilers/
+/tools/local/
+/tools/downloads/
+.venv/
+__pycache__/
+*.pyc
+*.splat_cache

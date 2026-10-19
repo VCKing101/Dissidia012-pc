@@ -1,0 +1,9 @@
+{
+  "version": "ULUS10566",
+  "module": "menu",
+  "path": "orig/ULUS10566/PSP_GAME/USRDIR/DATA/OVL_MENU_APP.ELF",
+  "sha256": "f021f96fa05da5907563a28c232966aa8a344526d6b8bdee728053ec75224d0a",
+  "payload_address": "0x089DD4C0",
+  "payload_file_offset": 84,
+  "payload_bytes": 1555864
+}

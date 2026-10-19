@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "module": "menu",
+  "reference_sha256": "f021f96fa05da5907563a28c232966aa8a344526d6b8bdee728053ec75224d0a",
+  "dispatcher": "0x089DD5DC",
+  "table": "0x089E09E8",
+  "record_count": 20,
+  "record_bytes": 8,
+  "table_high_pc": "0x089DD5E8",
+  "table_low_pc": "0x089DD5FC",
+  "copy_size_pc": "0x089DD5F0",
+  "copy_call_pc": "0x089DD5F8",
+  "copy_helper": "0x08935524",
+  "empty_callback": {"entry": "0x089DE3A4", "bytes": 8, "record_index": 19, "next_function": "0x089DE3AC"},
+  "scope": "Copied member-table binding and one empty callback boundary only; other handler ownership remains provisional"
+}

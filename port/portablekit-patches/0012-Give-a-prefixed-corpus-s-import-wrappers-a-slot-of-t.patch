@@ -1,0 +1,83 @@
+From 754c102ec2750c286a340f14a0a8b9ecc6e316fe Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Sun, 18 Oct 2026 18:35:54 +1030
+Subject: [PATCH 12/27] Give a prefixed corpus's import wrappers a slot of
+ their own
+
+Import wrappers call Runtime::invoke_import_cached with a slot that
+indexes the runtime's cache of import bindings, numbered from 0 in each
+corpus. The executable's corpus fills that cache first, so a corpus
+loaded at run time with imports of its own (a module recompiled as an
+overlay library) would call the executable's import 0 for its own
+import 0, and so on.
+
+psp_recomp now gives the wrappers of a prefixed corpus the slot
+0xFFFFFFFF, and invoke_import_cached looks that slot up by library and
+NID on every call (invoke_import). The executable's corpus is generated
+as before. No header changes, so no generated code rebuilds.
+
+Verified on Windows (MSVC 19.44) with a game's disc PRX recompiled as an
+overlay library: its 26 import wrappers carry the new slot, and the game
+boots to its title screen with them and PSPRECOMP_NO_INTERPRETER=1. The
+main corpus's registry is byte-identical with the old psp_recomp. Not
+verified: a corpus with imports that are called often (each call now
+does two map lookups).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/runtime.cpp        | 10 ++++++++++
+ tools/codegen_main.cpp | 11 ++++++++++-
+ 2 files changed, 20 insertions(+), 1 deletion(-)
+
+diff --git a/src/runtime.cpp b/src/runtime.cpp
+index 93dad41..e105675 100644
+--- a/src/runtime.cpp
++++ b/src/runtime.cpp
+@@ -1288,6 +1288,16 @@ void Runtime::note_first_hle_call(std::string_view library, std::uint32_t nid, c
+ 
+ void Runtime::invoke_import_cached(std::uint32_t slot, std::string_view library,
+                                    std::uint32_t nid, AllegrexContext &ctx) {
++    // Slots number the executable's imports. A corpus loaded at run time (an
++    // overlay or module library with imports of its own) numbers its imports
++    // from 0 as well, so psp_recomp gives its wrappers this slot instead
++    // (tools/codegen_main.cpp, kUncachedImportSlot), and they are looked up by
++    // name on every call rather than reusing the executable's binding.
++    constexpr std::uint32_t kUncachedImportSlot = 0xFFFFFFFFu;
++    if (slot == kUncachedImportSlot) {
++        invoke_import(library, nid, ctx);
++        return;
++    }
+     if (hle_histogram_enabled_) ++hle_histogram_[hle_key(library, nid)];
+ 
+     const HleFunction *bound = slot < import_bindings_.size() ? import_bindings_[slot] : nullptr;
+diff --git a/tools/codegen_main.cpp b/tools/codegen_main.cpp
+index a59d9dd..865e50f 100644
+--- a/tools/codegen_main.cpp
++++ b/tools/codegen_main.cpp
+@@ -1280,13 +1280,22 @@ std::string emit_function_source(const GeneratedFunctionInput &function,
+     return body.str();
+ }
+ 
++// The import slot a prefixed corpus's wrappers pass. Slots index the
++// runtime's cache of the executable's import bindings; a corpus loaded at run
++// time with imports of its own (a module recompiled as an overlay library)
++// would otherwise reuse the executable's binding for the same index.
++// Runtime::invoke_import_cached looks this slot up by name on every call.
++constexpr std::uint32_t kUncachedImportSlot = 0xFFFFFFFFu;
++
+ void write_import_wrappers(std::ostream &out, const std::vector<psprecomp::PspImport> &imports) {
++    const bool own_slots = g_symbol_prefix == "recomp";
+     for (std::size_t i = 0; i < imports.size(); ++i) {
++        const std::string slot = own_slots ? std::to_string(i) + "u" : psprecomp::hex32(kUncachedImportSlot) + "u";
+         out << "static void import_" << i << "(CorpusRuntime &rt, AllegrexContext &ctx) {\n"
+             << "    const RuntimeExecutionContextToken caller_context = rt.capture_execution_context();\n"
+             << "    const std::uint32_t import_pc = ctx.pc;\n"
+             << "    const std::uint32_t return_address = ctx.gpr[31];\n"
+-            << "    rt.invoke_import_cached(" << i << "u, \"" << cpp_escape(imports[i].library) << "\", "
++            << "    rt.invoke_import_cached(" << slot << ", \"" << cpp_escape(imports[i].library) << "\", "
+             << psprecomp::hex32(imports[i].nid) << "u, ctx);\n"
+             << "    if (!rt.stopped() && rt.execution_context_matches(caller_context) &&\n"
+             << "        ctx.pc == import_pc) ctx.pc = return_address;\n"
+-- 
+2.53.0.windows.1
+

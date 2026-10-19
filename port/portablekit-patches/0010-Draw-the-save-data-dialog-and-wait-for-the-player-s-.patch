@@ -1,0 +1,765 @@
+From 809756dd282c359cc098964a08cdee336014476f Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Sun, 18 Oct 2026 18:51:21 +1030
+Subject: [PATCH 10/27] Draw the save-data dialog and wait for the player's
+ choice
+
+The list modes (LISTLOAD, LISTSAVE, LISTDELETE) acted as if the player had
+confirmed the first entry, and SAVE and DELETE went ahead without the
+question a PSP asks: a list save overwrote the first listed save, a list
+delete deleted the first one there was, all without anyone seeing it.
+
+Those modes now open the port's save-data dialog over the running game
+(host/ui/save_list_dialog.*): the game's slots with each save's title,
+detail and date or "New data", then a Yes/No question (overwrite and delete
+open on No); loading and deleting list only slots that hold a save. The
+request stays VISIBLE until the player answers and the work is done then;
+backing out reports result 1. The other modes are unchanged.
+
+For tests and runs without a window, <prefix>_SAVEDATA_ANSWERS answers the
+next asking requests in order (a save name, "new", "first" or "cancel").
+<prefix>_SAVEDATA_INSTANT=1 skips the dialog as before but never
+overwrites or deletes: a list load takes the first save, a list save the
+first empty slot, a save goes ahead only over nothing, the rest cancel.
+
+Verified on Windows (Vulkan, AMD) with a game's LISTSAVE of twenty slots
+on an empty memory stick: listed, a slot chosen and confirmed with the
+scripted virtual pad, saved, and the game went on. Not verified: LISTLOAD,
+LISTDELETE, SAVE and DELETE with a game; the cancel result value (1) is
+the common dialog's, not traced.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ cmake/PortableKit.cmake      |   1 +
+ host/hle/hle_savedata.cpp    | 337 +++++++++++++++++++++++++++++++----
+ host/ui/menu.cpp             |  11 +-
+ host/ui/save_list_dialog.cpp | 194 ++++++++++++++++++++
+ host/ui/save_list_dialog.hpp |  53 ++++++
+ 5 files changed, 556 insertions(+), 40 deletions(-)
+ create mode 100644 host/ui/save_list_dialog.cpp
+ create mode 100644 host/ui/save_list_dialog.hpp
+
+diff --git a/cmake/PortableKit.cmake b/cmake/PortableKit.cmake
+index 90a601f..b278112 100644
+--- a/cmake/PortableKit.cmake
++++ b/cmake/PortableKit.cmake
+@@ -105,6 +105,7 @@ set(PORTABLEKIT_RENDERER_SOURCES
+     host/ui/layer.cpp
+     host/ui/menu.cpp
+     host/ui/message_dialog.cpp
++    host/ui/save_list_dialog.cpp
+     host/ui/save_screen.cpp
+     host/ui/setup_screens.cpp
+     host/ui/text_input.cpp
+diff --git a/host/hle/hle_savedata.cpp b/host/hle/hle_savedata.cpp
+index 348b854..5c40c39 100644
+--- a/host/hle/hle_savedata.cpp
++++ b/host/hle/hle_savedata.cpp
+@@ -4,24 +4,30 @@
+ // Load, save, delete, sizes and the list modes are answered from those
+ // folders; each game uses its own few. <prefix>_TRACE_SAVEDATA prints every
+ // request, which is how to find out which a game asks for.
+-// No save-data UI is drawn: modes that would show a list act as if the player
+-// confirmed the first entry. Every mode, the failures included, reports QUIT
+-// after a few polls; see utility_dialog.hpp.
++// The modes that ask the player on a PSP (the list modes, SAVE and DELETE)
++// draw the port's save-data dialog and wait for the answer; the others do
++// their work at once and report QUIT after a few polls (utility_dialog.hpp).
+ #include "../profile.hpp"
+ #include "hle_common.hpp"
+ #include "utility_dialog.hpp"
+ 
+ #include "crypto_keys.hpp"
++#include "save_data/param_sfo.hpp"
+ #include "save_data/savedata_crypto.hpp"
+ #include "save_data/savedata_store.hpp"
+ #include "save_data/save_transfer.hpp"
+ 
++#if defined(PORTABLEKIT_HAS_RENDERER)
++#include "ui/save_list_dialog.hpp"
++#endif
++
+ #include "psprecomp/common.hpp"
+ 
+ #include <algorithm>
+ #include <chrono>
+ #include <ctime>
+ #include <filesystem>
++#include <fstream>
+ #include <cstdio>
+ #include <cstdlib>
+ #include <iostream>
+@@ -109,6 +115,8 @@ constexpr std::uint32_t kDeleteNoData = 0x80110347u;
+ constexpr std::uint32_t kSaveAccessError = 0x80110385u;
+ constexpr std::uint32_t kSaveParam = 0x80110388u;
+ constexpr std::uint32_t kSizesNoData = 0x801103C7u;
++// The common header's result when the player backs out of the dialog.
++constexpr std::uint32_t kCancelled = 1u;
+ } // namespace result
+ 
+ constexpr std::uint32_t kClusterSize = 0x8000u;
+@@ -345,18 +353,6 @@ std::uint32_t do_sizes(psprecomp::GuestMemory &memory, std::uint32_t params) {
+     return outcome;
+ }
+ 
+-// Picks the save a list dialog would land on when the player just confirms:
+-// for loading and deleting the first listed save that exists, for saving the
+-// first listed name.
+-std::optional<std::string> pick_from_list(psprecomp::GuestMemory &memory, std::uint32_t params, bool must_exist) {
+-    const auto names = save_name_list(memory, memory.load32(params + param::kSaveNameList));
+-    for (const auto &name : names) {
+-        if (!must_exist || savedata::save_exists(state().memory_stick, files_for(memory, params, name))) return name;
+-    }
+-    if (!must_exist) return save_name_at(memory, params + param::kSaveName);
+-    return std::nullopt;
+-}
+-
+ // A save name pattern as LIST takes it: '?' stands for any one character.
+ bool name_matches(std::string_view pattern, std::string_view name) {
+     if (pattern.size() != name.size()) return false;
+@@ -428,6 +424,269 @@ std::uint32_t do_list(psprecomp::GuestMemory &memory, std::uint32_t params) {
+     return result::kOk;
+ }
+ 
++// The modes that ask the player on a PSP: the three list modes, where the
++// player picks a slot, and saving and deleting one named save, which ask
++// first. They are drawn by the interface (host/ui/save_list_dialog.hpp) and
++// stay VISIBLE until the player has answered; the work is done then.
++//
++//   <prefix>_SAVEDATA_ANSWERS=new,cancel,DATA01,first
++//       answers the next asking requests in order, without drawing them: a
++//       save name, "new" (the first listed slot with no save), "first" (the
++//       first listed slot with one) or "cancel". For tests and runs without a
++//       window.
++//   <prefix>_SAVEDATA_INSTANT=1
++//       no dialog, as before, but nothing is overwritten or deleted without a
++//       person: a list load takes the first save there is, a list save the
++//       first empty slot, a save goes ahead only if there is no save to
++//       replace, and the rest cancel.
++//
++// With no window and no scripted answer the request waits and says so once.
++// LOAD and the automatic and data modes never ask.
++enum class Asking { No, List, Single };
++
++Asking asking_mode(std::uint32_t mode) {
++    switch (mode) {
++    case kListLoad:
++    case kListSave:
++    case kListDelete: return Asking::List;
++    case kSave:
++    case kDelete: return Asking::Single;
++    default: return Asking::No;
++    }
++}
++
++#if defined(PORTABLEKIT_HAS_RENDERER)
++ui::SaveAction save_action(std::uint32_t mode) {
++    switch (mode) {
++    case kListSave:
++    case kSave: return ui::SaveAction::Save;
++    case kListDelete:
++    case kDelete: return ui::SaveAction::Delete;
++    default: return ui::SaveAction::Load;
++    }
++}
++#endif
++
++bool action_saves(std::uint32_t mode) { return mode == kListSave || mode == kSave; }
++
++bool savedata_instant() {
++    static const bool instant = [] {
++        const char *text = portablekit::env("SAVEDATA_INSTANT");
++        return text != nullptr && *text != '\0' && *text != '0';
++    }();
++    return instant;
++}
++
++std::vector<std::string> &savedata_answers() {
++    static std::vector<std::string> answers = [] {
++        std::vector<std::string> list;
++        const char *text = portablekit::env("SAVEDATA_ANSWERS");
++        if (text == nullptr) return list;
++        std::string item;
++        for (const char c : std::string(text) + ",") {
++            if (c != ',' && c != ';' && c != ' ') {
++                item.push_back(c);
++                continue;
++            }
++            if (!item.empty()) list.push_back(item);
++            item.clear();
++        }
++        std::reverse(list.begin(), list.end());
++        return list;
++    }();
++    return answers;
++}
++
++struct Slot {
++    std::string name;
++    bool exists{};
++    std::string title;
++    std::string detail;
++    std::string modified;
++};
++
++std::string format_time(std::filesystem::file_time_type written) {
++    const auto system_time = std::chrono::system_clock::now() +
++                             std::chrono::duration_cast<std::chrono::system_clock::duration>(
++                                 written - std::filesystem::file_time_type::clock::now());
++    const std::time_t time = std::chrono::system_clock::to_time_t(system_time);
++    std::tm tm{};
++#if defined(_WIN32)
++    localtime_s(&tm, &time);
++#else
++    localtime_r(&time, &tm);
++#endif
++    char text[32];
++    std::strftime(text, sizeof(text), "%Y-%m-%d %H:%M", &tm);
++    return text;
++}
++
++// The slots the request offers: the listed names for a list mode, else the
++// one save name; each with what its PARAM.SFO says when it holds a save.
++std::vector<Slot> request_slots(const psprecomp::GuestMemory &memory, std::uint32_t params, Asking asking) {
++    std::vector<std::string> names;
++    if (asking == Asking::List) names = save_name_list(memory, memory.load32(params + param::kSaveNameList));
++    if (names.empty()) names.push_back(save_name_at(memory, params + param::kSaveName));
++    std::vector<Slot> slots;
++    for (const std::string &name : names) {
++        Slot slot;
++        slot.name = name;
++        const auto files = files_for(memory, params, name);
++        slot.exists = savedata::save_exists(state().memory_stick, files);
++        if (slot.exists) {
++            const auto folder = savedata::save_folder(state().memory_stick, files);
++            std::error_code error;
++            slot.modified = format_time(std::filesystem::last_write_time(folder, error));
++            std::ifstream in(folder / "PARAM.SFO", std::ios::binary);
++            const std::vector<std::uint8_t> bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
++            if (const auto sfo = savedata::ParamSfo::parse(bytes)) {
++                slot.title = sfo->string("SAVEDATA_TITLE").value_or("");
++                slot.detail = sfo->string("SAVEDATA_DETAIL").value_or("");
++            }
++        }
++        slots.push_back(std::move(slot));
++    }
++    return slots;
++}
++
++// The slot the request focuses first (the focus field), in list order.
++std::size_t focused_slot(const std::vector<Slot> &slots, std::uint32_t focus) {
++    // 1 first, 2 last, 3 latest, 4 oldest; anything else the first.
++    if (focus == 2u && !slots.empty()) return slots.size() - 1u;
++    if (focus == 3u || focus == 4u) {
++        std::optional<std::size_t> best;
++        for (std::size_t i = 0; i < slots.size(); ++i) {
++            if (!slots[i].exists) continue;
++            if (!best || (focus == 3u ? slots[i].modified >= slots[*best].modified
++                                      : slots[i].modified < slots[*best].modified))
++                best = i;
++        }
++        if (best) return *best;
++    }
++    return 0u;
++}
++
++std::optional<std::string> scripted_choice(const std::vector<Slot> &slots, const std::string &answer,
++                                           std::uint32_t mode) {
++    if (answer == "cancel") return std::nullopt;
++    for (const Slot &slot : slots) {
++        if (answer == "new" && !slot.exists) return slot.name;
++        if (answer == "first" && slot.exists) return slot.name;
++        if (answer == slot.name && (slot.exists || action_saves(mode))) return slot.name;
++    }
++    std::cerr << "[savedata] SAVEDATA_ANSWERS: \"" << answer << "\" names no slot this request can use; cancelling\n";
++    return std::nullopt;
++}
++
++std::optional<std::string> instant_choice(const std::vector<Slot> &slots, std::uint32_t mode) {
++    for (const Slot &slot : slots) {
++        if (mode == kListLoad && slot.exists) return slot.name;
++        if ((mode == kListSave || mode == kSave) && !slot.exists) return slot.name;
++    }
++    return std::nullopt;
++}
++
++struct AskingState {
++    bool active{};
++    std::uint32_t params{};
++    std::uint32_t mode{};
++    std::uint32_t status{dialog_status::kNone};
++    // Set once answered: the save name chosen, or nullopt for a cancel.
++    std::optional<std::optional<std::string>> choice;
++    unsigned serial{};
++};
++
++AskingState &asking_state() {
++    static AskingState value;
++    return value;
++}
++
++void set_choice(std::optional<std::string> choice, const char *by) {
++    AskingState &a = asking_state();
++    std::cerr << "[savedata] " << mode_name(a.mode) << " -> " << (choice ? "\"" + *choice + "\"" : "cancel") << " ("
++              << by << ")" << std::endl;
++    a.choice = std::move(choice);
++}
++
++// Starts an asking request: where the answer comes from.
++void start_asking(psprecomp::GuestMemory &memory, std::uint32_t params, std::uint32_t mode, Asking asking) {
++    AskingState &a = asking_state();
++    a = AskingState{true, params, mode, dialog_status::kInit, std::nullopt, a.serial + 1u};
++    const std::vector<Slot> slots = request_slots(memory, params, asking);
++    if (savedata_instant()) {
++        set_choice(instant_choice(slots, mode), "SAVEDATA_INSTANT");
++        return;
++    }
++    if (auto &script = savedata_answers(); !script.empty()) {
++        const std::string answer = script.back();
++        script.pop_back();
++        set_choice(scripted_choice(slots, answer, mode), "SAVEDATA_ANSWERS");
++        return;
++    }
++#if defined(PORTABLEKIT_HAS_RENDERER)
++    ui::SaveListRequest request;
++    request.action = save_action(mode);
++    request.single = asking == Asking::Single;
++    request.focus = focused_slot(slots, memory.load32(params + param::kFocus));
++    for (const Slot &slot : slots)
++        request.slots.push_back(ui::SaveSlot{slot.name, slot.exists, slot.title, slot.detail, slot.modified});
++    const unsigned serial = a.serial;
++    std::vector<std::string> names;
++    for (const Slot &slot : slots) names.push_back(slot.name);
++    if (ui::open_game_save_list(std::move(request), [serial, names](std::optional<std::size_t> index) {
++            if (asking_state().serial != serial || !asking_state().active) return;
++            set_choice(index ? std::optional<std::string>(names[*index]) : std::nullopt, "player");
++        }))
++        return;
++#endif
++    log_once("savedata-waiting",
++             "[savedata] no window to draw the save-data dialog in and no answer scripted; the game waits "
++             "(<prefix>_SAVEDATA_ANSWERS answers save-data dialogs in order)");
++}
++
++// The player's choice carried out, as the PSP does once the dialog closes.
++std::uint32_t finish_asking(psprecomp::GuestMemory &memory) {
++    const AskingState &a = asking_state();
++    const std::optional<std::string> &choice = *a.choice;
++    if (!choice) return result::kCancelled;
++    write_cstring(memory, a.params + param::kSaveName, *choice, 20u);
++    switch (a.mode) {
++    case kListLoad: return do_load(memory, a.params, *choice);
++    case kListSave:
++    case kSave: return do_save(memory, a.params, *choice);
++    default: return do_delete(memory, a.params, *choice);
++    }
++}
++
++std::uint32_t asking_poll(psprecomp::GuestMemory &memory) {
++    AskingState &a = asking_state();
++    const std::uint32_t reported = a.status;
++    switch (a.status) {
++    case dialog_status::kInit: a.status = dialog_status::kVisible; break;
++    case dialog_status::kVisible:
++        if (a.choice) {
++            const std::uint32_t outcome = finish_asking(memory);
++            memory.store32(a.params + dialog_common::kResultOffset, outcome);
++            if (outcome != result::kOk || trace_savedata())
++                std::cerr << "[savedata] result " << psprecomp::hex32(outcome) << "\n";
++            a.status = dialog_status::kQuit;
++        }
++        break;
++    case dialog_status::kFinished:
++        a.status = dialog_status::kNone;
++        a.active = false;
++        break;
++    default: break;
++    }
++    return reported;
++}
++
++void close_asking_ui() {
++#if defined(PORTABLEKIT_HAS_RENDERER)
++    if (ui::game_save_list_open()) ui::close_game_save_list();
++#endif
++}
++
+ std::uint32_t run_request(psprecomp::GuestMemory &memory, std::uint32_t params) {
+     const std::uint32_t mode = memory.load32(params + param::kMode);
+     const std::string save_name = save_name_at(memory, params + param::kSaveName);
+@@ -438,23 +697,7 @@ std::uint32_t run_request(psprecomp::GuestMemory &memory, std::uint32_t params)
+     case kAutoSave:
+     case kSave:
+         return do_save(memory, params, save_name);
+-    case kListLoad: {
+-        const auto chosen = pick_from_list(memory, params, true);
+-        if (!chosen) return result::kLoadNoData;
+-        write_cstring(memory, params + param::kSaveName, *chosen, 20u);
+-        return do_load(memory, params, *chosen);
+-    }
+-    case kListSave: {
+-        const auto chosen = pick_from_list(memory, params, false);
+-        write_cstring(memory, params + param::kSaveName, *chosen, 20u);
+-        return do_save(memory, params, *chosen);
+-    }
+-    case kListDelete: {
+-        const auto chosen = pick_from_list(memory, params, true);
+-        if (!chosen) return result::kDeleteNoData;
+-        write_cstring(memory, params + param::kSaveName, *chosen, 20u);
+-        return do_delete(memory, params, *chosen);
+-    }
++    // The list modes, SAVE and DELETE ask the player first (start_asking).
+     case kDelete:
+     case kAutoDelete:
+     case kSingleDelete:
+@@ -507,6 +750,15 @@ void register_savedata(HleRegistrar &hle, const std::filesystem::path &memory_st
+         if (state().dialog.active())
+             std::cerr << "[savedata] InitStart while a dialog is active (status " << state().dialog.status() << ")\n";
+         log_request(memory, params);
++        const std::uint32_t mode = memory.load32(params + param::kMode);
++        if (const Asking asking = asking_mode(mode); asking != Asking::No) {
++            close_asking_ui();
++            memory.store32(params + dialog_common::kResultOffset, 0u);
++            start_asking(memory, params, mode, asking);
++            kernel().finish(ctx, 0u);
++            return;
++        }
++        asking_state().active = false;
+         const std::uint32_t outcome = run_request(memory, params);
+         memory.store32(params + dialog_common::kResultOffset, outcome);
+         if (outcome != result::kOk || trace_savedata())
+@@ -515,18 +767,31 @@ void register_savedata(HleRegistrar &hle, const std::filesystem::path &memory_st
+         kernel().finish(ctx, 0u);
+     });
+ 
+-    hle.add("sceUtility", "sceUtilitySavedataUpdate", [](Runtime &, AllegrexContext &ctx) {
+-        (void)state().dialog.poll();
++    hle.add("sceUtility", "sceUtilitySavedataUpdate", [](Runtime &rt, AllegrexContext &ctx) {
++        if (asking_state().active) (void)asking_poll(rt.memory());
++        else (void)state().dialog.poll();
+         kernel().finish(ctx, 0u);
+     });
+ 
+-    hle.add("sceUtility", "sceUtilitySavedataGetStatus", [](Runtime &, AllegrexContext &ctx) {
+-        const std::uint32_t status = state().dialog.poll();
++    hle.add("sceUtility", "sceUtilitySavedataGetStatus", [](Runtime &rt, AllegrexContext &ctx) {
++        const std::uint32_t status = asking_state().active ? asking_poll(rt.memory()) : state().dialog.poll();
+         if (trace_savedata()) std::cerr << "[savedata] status " << status << "\n";
+         kernel().finish(ctx, status);
+     });
+ 
+     hle.add("sceUtility", "sceUtilitySavedataShutdownStart", [](Runtime &, AllegrexContext &ctx) {
++        if (AskingState &a = asking_state(); a.active) {
++            if (a.status == dialog_status::kNone) {
++                kernel().finish(ctx, kErrorUtilityInvalidStatus);
++                return;
++            }
++            if (a.status != dialog_status::kQuit)
++                std::cerr << "[savedata] ShutdownStart before the player answered\n";
++            close_asking_ui();
++            a.status = dialog_status::kFinished;
++            kernel().finish(ctx, 0u);
++            return;
++        }
+         if (!state().dialog.active()) {
+             kernel().finish(ctx, kErrorUtilityInvalidStatus);
+             return;
+diff --git a/host/ui/menu.cpp b/host/ui/menu.cpp
+index 42cd4d6..e7a03d4 100644
+--- a/host/ui/menu.cpp
++++ b/host/ui/menu.cpp
+@@ -9,6 +9,7 @@
+ #include "ui/input_script.hpp"
+ #include "ui/layer.hpp"
+ #include "ui/message_dialog.hpp"
++#include "ui/save_list_dialog.hpp"
+ #include "ui/save_screen.hpp"
+ #include "ui/texture_pack_screen.hpp"
+ #include "ui/text_input.hpp"
+@@ -1560,10 +1561,12 @@ void draw_over_game() {
+         layer.end_frame();
+         return;
+     }
+-    // The game's message dialog, the same way.
+-    if (game_message_open() && !menu) {
++    // The game's message and save-data dialogs, the same way. A save-data
++    // dialog asks its questions as message dialogs.
++    if ((game_message_open() || game_save_list_open()) && !menu) {
+         layer.begin_frame();
+-        game_message_frame();
++        if (game_message_open()) game_message_frame();
++        else game_save_list_frame();
+         layer.end_frame();
+         return;
+     }
+@@ -1609,7 +1612,7 @@ bool take_quit_request() { return std::exchange(quit_requested(), false); }
+ 
+ bool menu_requested() {
+     Layer &layer = Layer::get();
+-    if (!layer.attached() || text_input_open() || game_message_open()) return false;
++    if (!layer.attached() || text_input_open() || game_message_open() || game_save_list_open()) return false;
+     // The on-screen menu button, then Esc or L3+R3.
+     const bool touched = layer.renderer().take_touch_menu();
+     return layer.take_menu_toggle() || touched;
+diff --git a/host/ui/save_list_dialog.cpp b/host/ui/save_list_dialog.cpp
+new file mode 100644
+index 0000000..9f041c4
+--- /dev/null
++++ b/host/ui/save_list_dialog.cpp
+@@ -0,0 +1,194 @@
++#include "ui/save_list_dialog.hpp"
++
++#include "ui/layer.hpp"
++#include "ui/message_dialog.hpp"
++#include "ui/widgets.hpp"
++
++#include "gpu/vulkan_renderer.hpp"
++
++#include "imgui.h"
++
++#include <string>
++#include <utility>
++
++namespace portablekit::ui {
++namespace {
++
++struct Dialog {
++    bool open{};
++    SaveListRequest request;
++    SaveListDone on_done;
++    std::size_t selected{};
++    bool focus_pending{};  // focus the selected row on the next frame
++    bool asking{};         // a question about the selected slot is up
++};
++
++Dialog &dialog() {
++    static Dialog value;
++    return value;
++}
++
++void take_game() {
++    Layer &layer = Layer::get();
++    layer.renderer().set_game_input(false);
++    layer.set_interactive(true);
++}
++
++void release_game() {
++    Layer &layer = Layer::get();
++    layer.set_interactive(false);
++    layer.renderer().set_game_input(true);
++}
++
++void finish(std::optional<std::size_t> chosen) {
++    Dialog &d = dialog();
++    if (!d.open) return;
++    d.open = false;
++    d.asking = false;
++    if (game_message_open()) close_game_message();
++    release_game();
++    SaveListDone done = std::move(d.on_done);
++    d.on_done = nullptr;
++    if (done) done(chosen);
++}
++
++bool usable(const SaveSlot &slot, SaveAction action) { return action == SaveAction::Save || slot.exists; }
++
++const char *action_title(SaveAction action) {
++    switch (action) {
++    case SaveAction::Load: return "Load";
++    case SaveAction::Save: return "Save";
++    case SaveAction::Delete: return "Delete";
++    }
++    return "";
++}
++
++// The question about a slot, and whether it opens on No.
++std::pair<std::string, bool> question(const SaveSlot &slot, SaveAction action) {
++    std::string what = slot.exists ? (slot.title.empty() ? slot.name : slot.title) : "New data";
++    if (slot.exists && !slot.modified.empty()) what += "\n" + slot.modified;
++    switch (action) {
++    case SaveAction::Load: return {"Load this data?\n\n" + what, false};
++    case SaveAction::Save:
++        if (slot.exists) return {"Overwrite this data?\n\n" + what, true};
++        return {"Save the data?\n\n" + what, false};
++    case SaveAction::Delete: return {"Delete this data?\n\n" + what, true};
++    }
++    return {what, true};
++}
++
++void ask(std::size_t index) {
++    Dialog &d = dialog();
++    d.selected = index;
++    d.asking = true;
++    const auto [text, default_no] = question(d.request.slots[index], d.request.action);
++    MessageRequest request;
++    request.text = text;
++    request.question = true;
++    request.default_no = default_no;
++    open_game_message(std::move(request), [index](MessageAnswer answer) {
++        Dialog &state = dialog();
++        if (!state.open) return;
++        state.asking = false;
++        if (answer == MessageAnswer::Yes) {
++            finish(index);
++            return;
++        }
++        // No or back: a single request ends there, a list goes back to it.
++        if (state.request.single) {
++            finish(std::nullopt);
++            return;
++        }
++        take_game();
++        state.focus_pending = true;
++    });
++}
++
++} // namespace
++
++bool open_game_save_list(SaveListRequest request, SaveListDone on_done) {
++    Layer &layer = Layer::get();
++    if (!layer.attached()) return false;
++    if (dialog().open) close_game_save_list();
++    Dialog &d = dialog();
++    d = Dialog{};
++    d.open = true;
++    d.request = std::move(request);
++    d.on_done = std::move(on_done);
++    d.selected = d.request.focus < d.request.slots.size() ? d.request.focus : 0u;
++    // Start on a slot the action can use.
++    if (!d.request.slots.empty() && !usable(d.request.slots[d.selected], d.request.action)) {
++        for (std::size_t i = 0; i < d.request.slots.size(); ++i)
++            if (usable(d.request.slots[i], d.request.action)) {
++                d.selected = i;
++                break;
++            }
++    }
++    d.focus_pending = true;
++    take_game();
++    if (d.request.single && !d.request.slots.empty()) ask(0u);
++    return true;
++}
++
++bool game_save_list_open() { return dialog().open; }
++
++void close_game_save_list() {
++    Dialog &d = dialog();
++    if (!d.open) return;
++    d.open = false;
++    d.on_done = nullptr;
++    if (d.asking && game_message_open()) close_game_message();
++    d.asking = false;
++    release_game();
++}
++
++void game_save_list_frame() {
++    Dialog &d = dialog();
++    if (!d.open || d.asking) return;
++    Layer &layer = Layer::get();
++    (void)layer.take_menu_toggle();
++
++    bool any = false;
++    for (const SaveSlot &slot : d.request.slots) any = any || usable(slot, d.request.action);
++    if (!any) {
++        // Nothing to load or delete: say so, then back out.
++        d.asking = true;
++        MessageRequest request;
++        request.text = "There is no saved data.";
++        open_game_message(std::move(request), [](MessageAnswer) { finish(std::nullopt); });
++        return;
++    }
++
++    const bool back = layer.take_back();
++    const ImGuiKey cancel = layer.confirm_south() ? ImGuiKey_GamepadFaceRight : ImGuiKey_GamepadFaceDown;
++    if (back || (layer.gamepad_armed() && ImGui::IsKeyPressed(cancel, false))) {
++        finish(std::nullopt);
++        return;
++    }
++
++    begin_panel("##savelist", action_title(d.request.action), "Save data", true);
++    begin_content();
++    std::optional<std::size_t> chosen;
++    for (std::size_t i = 0; i < d.request.slots.size(); ++i) {
++        const SaveSlot &slot = d.request.slots[i];
++        if (!usable(slot, d.request.action)) continue;
++        if (d.focus_pending && i == d.selected) {
++            focus_next_row();
++            d.focus_pending = false;
++        }
++        const std::string id = "##slot" + std::to_string(i);
++        const std::string name = slot.exists ? (slot.title.empty() ? slot.name : slot.title) : "New data";
++        const std::string detail = slot.exists ? slot.modified : slot.name;
++        if (list_row(id.c_str(), name, detail, ListIcon::File, slot.exists)) chosen = i;
++        if (ImGui::IsItemFocused()) {
++            d.selected = i;
++            if (slot.exists && !slot.detail.empty()) layer.set_description(slot.detail);
++        }
++    }
++    begin_footer();
++    hints({{Control::Confirm, "Choose"}, {Control::Back, "Back"}});
++    end_panel();
++    if (chosen) ask(*chosen);
++}
++
++} // namespace portablekit::ui
+diff --git a/host/ui/save_list_dialog.hpp b/host/ui/save_list_dialog.hpp
+new file mode 100644
+index 0000000..f9eeca6
+--- /dev/null
++++ b/host/ui/save_list_dialog.hpp
+@@ -0,0 +1,53 @@
++#pragma once
++
++#include <cstddef>
++#include <functional>
++#include <optional>
++#include <string>
++#include <vector>
++
++// The save-data dialog (sceUtilitySavedata list and confirmation modes),
++// drawn by the interface layer over the running game.
++//
++// A list request shows the game's save slots, each with the title and detail
++// of the save in it or "New data"; the player picks one, confirms it in a
++// Yes/No question (an overwrite or a delete opens on No), or backs out. A
++// single request (one named save) asks only the question. Loading and
++// deleting list only the slots that hold a save.
++//
++// The game keeps running behind it, as it does behind the PSP's dialog, but
++// reads a neutral pad until the dialog closes.
++namespace portablekit::ui {
++
++struct SaveSlot {
++    std::string name;      // the save name, e.g. "DATA01"
++    bool exists{};
++    std::string title;     // the save's own title and detail, when it exists
++    std::string detail;
++    std::string modified;  // when it was last written, already formatted
++};
++
++enum class SaveAction { Load, Save, Delete };
++
++struct SaveListRequest {
++    SaveAction action{SaveAction::Load};
++    std::vector<SaveSlot> slots;
++    std::size_t focus{};  // the slot selected first
++    bool single{};        // one slot: ask the question only
++};
++
++// Called once: the index of the slot the player confirmed, or nullopt after
++// backing out.
++using SaveListDone = std::function<void(std::optional<std::size_t>)>;
++
++// Opens the dialog over the running game. False when there is no interface
++// to draw it in.
++bool open_game_save_list(SaveListRequest request, SaveListDone on_done);
++[[nodiscard]] bool game_save_list_open();
++// Closes an open dialog without an answer.
++void close_game_save_list();
++// Builds this frame of the list and handles its input. Called inside an
++// interface frame by draw_over_game(); its questions are message dialogs.
++void game_save_list_frame();
++
++} // namespace portablekit::ui
+-- 
+2.53.0.windows.1
+

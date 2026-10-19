@@ -1,0 +1,40 @@
+From 1ee55eb5a0947a8f84433d4564bbc97610606d5e Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Sun, 18 Oct 2026 18:32:27 +1030
+Subject: [PATCH 05/27] <prefix>_MEMORY_STICK_DIR: use another ms0 for a run
+
+The memory stick was always ms0/ next to the game (or in the data
+directory for an installation). A test run with fresh saves meant moving
+the player's saves aside. <prefix>_MEMORY_STICK_DIR names another
+directory for ms0; it is created with PSP/SAVEDATA if missing.
+
+Verified on Windows: a game's save-data requests went to the named
+directory.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/main.cpp | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/host/main.cpp b/host/main.cpp
+index ebeb54d..1cc86c7 100644
+--- a/host/main.cpp
++++ b/host/main.cpp
+@@ -358,6 +358,14 @@ int main(int argc, char **argv) {
+         portablekit::ProfilePaths paths;
+         paths.disc_image = files->disc_image;
+         paths.memory_stick = files->memory_stick;
++        // <prefix>_MEMORY_STICK_DIR: another ms0, e.g. a fresh one for a test
++        // run, so the saves next to the game are never touched.
++        if (const char *ms0 = portablekit::env("MEMORY_STICK_DIR"); ms0 != nullptr && *ms0 != '\0') {
++            paths.memory_stick = std::filesystem::path(ms0);
++            std::error_code ec;
++            std::filesystem::create_directories(paths.memory_stick / "PSP" / "SAVEDATA", ec);
++            std::cout << "Memory stick: " << paths.memory_stick.string() << "\n";
++        }
+         if (!std::filesystem::is_regular_file(executable))
+             throw psprecomp::Error("Missing " + executable.string() + " (run scripts/prepare_game.sh)");
+ 
+-- 
+2.53.0.windows.1
+

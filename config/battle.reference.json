@@ -1,0 +1,9 @@
+{
+  "version": "ULUS10566",
+  "module": "battle",
+  "path": "orig/ULUS10566/PSP_GAME/USRDIR/DATA/OVL_BATTLE_APP.ELF",
+  "sha256": "1f96cfb3be771ff6e94741ae3916fab340df74e36ede07ca39545d015f4c49dc",
+  "payload_address": "0x089DD4C0",
+  "payload_file_offset": 84,
+  "payload_bytes": 1596080
+}

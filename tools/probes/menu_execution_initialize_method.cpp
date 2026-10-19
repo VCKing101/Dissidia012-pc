@@ -1,0 +1,47 @@
+extern "C" {
+#include "menu/execution_state.h"
+extern MenuRuntimePrefix *D_089E09C0;
+extern unsigned char D_089D5F20;
+extern void *D_089D7830;
+extern const unsigned char D_089E0740[];
+extern void func_0888A2B4(int,int);
+extern void func_089DE870(MenuRuntimePrefix *);
+extern void func_08865088(MainCallbackBlock *,MainRegisteredCallback,MainRegisteredCallback,MainRegisteredCallback,const void *);
+extern void func_089DEA54(void);
+extern void func_088D52AC(void *,void *,unsigned int);
+extern void *func_0885C6CC(void *,unsigned int,int,int,int,int);
+extern void *func_08935828(void *,int,unsigned int);
+extern void func_088D1604(void *,int);
+extern void func_08883F78(void);
+extern void func_08883F64(void);
+extern void func_088623A8(void *,void *);
+}
+void MenuRuntimePrefix::func_089DE3AC() {
+    func_0888A2B4(-1,0);
+    func_089DE870(this);
+    func_08865088(&D_089E09C0->callback_0100,0,0,func_089DEA54,D_089E0740);
+    func_088D52AC(this->unknown_013C,this->field_0138,0xE1000);
+    this->field_01DC = static_cast<MenuExecutionState *>(func_0885C6CC(this->field_0138,0x3FAB0,0,0,1,0));
+    this->field_01DC->field_0008 = 0;
+    this->field_01DC->field_0014 = 0;
+    this->field_01DC->field_0028 = 0;
+    this->field_01DC->field_000C = 0;
+    this->field_01DC->field_0044 = 0;
+    this->field_01DC->field_0000 = 0;
+    this->field_01DC->field_0058 = 0;
+    this->field_01DC->field_0060 = 0;
+    this->field_01DC->field_0068 = 0;
+    this->field_01DC->field_006C = 0;
+    this->field_01DC->field_0070 = 0;
+    this->field_01DC->field_0074 = 0;
+    this->field_01DC->field_0078 = 0;
+    this->field_01DC->field_0054 = -1;
+    func_08935828(this->field_01DC->names_0C28,0,0x1A4);
+    func_08935828(&this->field_01DC->slots_067C,0,0xC);
+    func_08935828(this->field_01DC->entries_0688,0,0x5A0);
+    this->field_01DC->field_0DCC = 0;
+    func_088D1604(D_089D7830,0);
+    func_08883F78();
+    func_08883F64();
+    if (!D_089D5F20) func_088623A8(this->unknown_01E0,this->field_0138);
+}

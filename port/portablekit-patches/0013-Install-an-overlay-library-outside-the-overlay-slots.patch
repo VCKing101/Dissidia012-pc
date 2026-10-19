@@ -1,0 +1,78 @@
+From 686838a41f6e96c90efd69c6fe4542426b7f339e Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Sun, 18 Oct 2026 18:35:54 +1030
+Subject: [PATCH 13/27] Install an overlay library outside the overlay slots
+
+install_overlay_for only looked at misses inside the profile's overlay
+slots. A module that a game (or its profile) loads at the same fixed
+address on every run, outside the overlay window, such as a disc PRX
+placed in the first block of the user partition, could only run
+interpreted.
+
+A miss outside every slot now also matches an overlay library whose
+base lies in no slot and whose range holds the address; that range is
+then treated as the slot. Such a library is built like any overlay
+(meta.txt with base, size, code_size and hash over the image as loaded,
+relocations applied) and is identified, installed, revalidated and
+replaced the same way. Misses inside the slots behave as before.
+
+Verified on Windows with a game whose disc PRX the profile loads at a
+fixed address: "[overlay] installed" for it on the first call, and the
+game reaches its title screen with PSPRECOMP_NO_INTERPRETER=1 and no
+interpreter entries. Not verified: a module whose load address varies
+between runs (its hash would not match and it would run interpreted, as
+before).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/overlays.cpp | 20 ++++++++++++++++++--
+ 1 file changed, 18 insertions(+), 2 deletions(-)
+
+diff --git a/host/overlays.cpp b/host/overlays.cpp
+index 67c1380..0d68c1c 100644
+--- a/host/overlays.cpp
++++ b/host/overlays.cpp
+@@ -117,6 +117,22 @@ std::pair<std::uint32_t, std::uint32_t> slot_of(std::uint32_t address) {
+     return {0u, 0u};
+ }
+ 
++// Where the code at `address` is swapped as a whole: the overlay slot holding
++// it, or else the range of a corpus whose base lies in no slot. Such a corpus
++// is a module the game loads at the same fixed address on every run, outside
++// the overlay window (a disc PRX in the first block of the user partition, for
++// example), recompiled as an overlay library: it installs on the first miss
++// inside it and is identified by its hash like any overlay. {0, 0} for
++// neither.
++std::pair<std::uint32_t, std::uint32_t> code_range_of(std::uint32_t address) {
++    if (const auto slot = slot_of(address); slot.first != 0u) return slot;
++    for (const OverlayCorpus &corpus : overlay_corpora()) {
++        if (address >= corpus.base && address - corpus.base < corpus.size && slot_of(corpus.base).first == 0u)
++            return {corpus.base, corpus.base + corpus.size};
++    }
++    return {0u, 0u};
++}
++
+ std::map<std::uint32_t, std::uint64_t> &installed_overlays() {
+     static std::map<std::uint32_t, std::uint64_t> installed;
+     return installed;
+@@ -273,7 +289,7 @@ void dump_slot(const psprecomp::GuestMemory &memory, std::uint32_t slot_start, s
+ }
+ 
+ bool install_overlay_for(Runtime &runtime, std::uint32_t pc) {
+-    const auto [slot_start, slot_end] = slot_of(pc);
++    const auto [slot_start, slot_end] = code_range_of(pc);
+     if (slot_start == 0u) return false;
+     if (const auto unmatched = unmatched_slots().find(slot_start);
+         unmatched != unmatched_slots().end() && unmatched->second == header_hash(runtime.memory(), slot_start))
+@@ -316,7 +332,7 @@ bool missing_function_hook(Runtime &runtime, AllegrexContext &ctx, std::uint32_t
+ // the slot really did change, drop the stale corpus and install the right one,
+ // then let the dispatch retry.
+ bool unsupported_instruction_hook(Runtime &runtime, AllegrexContext &, std::uint32_t pc, std::uint32_t) {
+-    const auto [slot_start, slot_end] = slot_of(pc);
++    const auto [slot_start, slot_end] = code_range_of(pc);
+     if (slot_start == 0u) return false;
+     (void)slot_end;
+     revalidate_overlays(runtime);
+-- 
+2.53.0.windows.1
+

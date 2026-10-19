@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "target": "ULUS10566 v1.00",
+  "milestone": "Local decrypted ISO packaging and first-screen boot",
+  "source_iso_sha256": "df94177d3e194e82800a574b50b61ee3c7be6caa877c8e82242a41af75d1ab6e",
+  "source_iso_unchanged": true,
+  "packages_byte_identical": true,
+  "checkpoint": {
+    "schema_version": 1,
+    "checkpoint": "first-autosave-notice",
+    "ppsspp_version": "1.20.4",
+    "graphics": "directx11",
+    "width": 960,
+    "height": 544,
+    "codec": "ffv1",
+    "rgb_sha256": "3416dd4be6d3d734f1a6c347b7cd350e92a4955d3ee6113643ce50086b5fce30",
+    "review": "Agent visually inspected all three offline-boot-v1 final frames on 2026-10-11. The game's initial autosave notice awaits cross/Enter. This identifies one stable screen, not frame-synchronized gameplay."
+  },
+  "cases": [
+    {
+      "case": "retail",
+      "session": "build/ULUS10566/runtime/sessions/retail/offline-boot-v1",
+      "requested_wall_seconds": 30,
+      "checkpoint_pass": true,
+      "video": {
+        "path": "build/ULUS10566/runtime/sessions/retail/offline-boot-v1/memstick/PSP/VIDEO/ULUS10566_2026-10-11_16-25-03.avi",
+        "sha256": "5687a41fa1d016781e1262aa220b4f4b9665998ad313a9a5a1bd417d2f95c26b",
+        "codec": "ffv1",
+        "decoded_frames": 883,
+        "width": 960,
+        "height": 544,
+        "last_frame": "build/ULUS10566/runtime/sessions/retail/offline-boot-v1/evidence/ULUS10566_2026-10-11_16-25-03-last.png",
+        "last_frame_rgb_sha256": "3416dd4be6d3d734f1a6c347b7cd350e92a4955d3ee6113643ce50086b5fce30",
+        "last_frame_time_seconds": 14.7147
+      },
+      "log_sha256": "1548163c68eac82482602c8bf53dd4461e935d08360747280773963730f4998d"
+    },
+    {
+      "case": "original",
+      "session": "build/ULUS10566/runtime/sessions/original/offline-boot-v1",
+      "requested_wall_seconds": 30,
+      "checkpoint_pass": true,
+      "video": {
+        "path": "build/ULUS10566/runtime/sessions/original/offline-boot-v1/memstick/PSP/VIDEO/ULUS10566_2026-10-11_16-23-22.avi",
+        "sha256": "e3facfafd7679abe75d5b4e062b29207a2c86a8b73e23d90cbe99322ae125aa4",
+        "codec": "ffv1",
+        "decoded_frames": 882,
+        "width": 960,
+        "height": 544,
+        "last_frame": "build/ULUS10566/runtime/sessions/original/offline-boot-v1/evidence/ULUS10566_2026-10-11_16-23-22-last.png",
+        "last_frame_rgb_sha256": "3416dd4be6d3d734f1a6c347b7cd350e92a4955d3ee6113643ce50086b5fce30",
+        "last_frame_time_seconds": 14.698016666666666
+      },
+      "log_sha256": "bf23876afd13f08cc6ca684a907aeb45b4be5f098216491aefa6973ca518ce44"
+    },
+    {
+      "case": "rebuilt",
+      "session": "build/ULUS10566/runtime/sessions/rebuilt/offline-boot-v1",
+      "requested_wall_seconds": 30,
+      "checkpoint_pass": true,
+      "video": {
+        "path": "build/ULUS10566/runtime/sessions/rebuilt/offline-boot-v1/memstick/PSP/VIDEO/ULUS10566_2026-10-11_16-24-12.avi",
+        "sha256": "37cba7576aa2db1f99f5790a10237d804fa2d0ba54763802c225ea8f06d52505",
+        "codec": "ffv1",
+        "decoded_frames": 881,
+        "width": 960,
+        "height": 544,
+        "last_frame": "build/ULUS10566/runtime/sessions/rebuilt/offline-boot-v1/evidence/ULUS10566_2026-10-11_16-24-12-last.png",
+        "last_frame_rgb_sha256": "3416dd4be6d3d734f1a6c347b7cd350e92a4955d3ee6113643ce50086b5fce30",
+        "last_frame_time_seconds": 14.681333333333333
+      },
+      "log_sha256": "b2dabe14ec048fcc09507ab132841a4fe7e39d16c19a41b78a579a4a73c30d05"
+    }
+  ],
+  "scenario_status": {
+    "boot_to_first_autosave_notice": "passed-three-cases",
+    "title": "not-run",
+    "menus": "not-run",
+    "battle": "not-run",
+    "in_game_save_load": "not-run",
+    "data_install": "not-run"
+  },
+  "full_runtime_baseline_complete": false,
+  "remaining_obstacle": "PPSSPP 1.20.4 startup debugger also enables network disc sharing; every debugger session needs verified isolation. Applied protection and deeper rebuilt-only checks are documented separately in protected-runtime-milestone.md.",
+  "matching_c_changed": false
+}

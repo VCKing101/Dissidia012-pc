@@ -1,0 +1,26 @@
+{
+  "ghidra": {
+    "version": "12.1.3",
+    "url": "https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_12.1.3_build/ghidra_12.1.3_PUBLIC_20260817.zip",
+    "sha256": "93a5d11a9ad510622acaaf908c556a7b9b764d338e78a7567f3689bf5081fd54",
+    "destination": "tools/local"
+  },
+  "java": {
+    "version": "Temurin 21.0.12.1+1",
+    "url": "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.12.1%2B1/OpenJDK21U-jdk_x64_windows_hotspot_21.0.12.1_1.zip",
+    "sha256": "f9d6e191ab098c0d416e7d588a24420a8621cd2f4720dab2459b8b7b2d2d8b4e",
+    "destination": "tools/local"
+  },
+  "allegrex": {
+    "version": "21.4 for Ghidra 12.1.3",
+    "url": "https://github.com/kotcrab/ghidra-allegrex/releases/download/v21.4/ghidra_12.1.3_PUBLIC_20260825_ghidra-allegrex.zip",
+    "sha256": "62e829fa9e6ed6f2bd343763fb339a3f8812b02a4e0ed5a9409b14007b408243",
+    "destination": "tools/local/ghidra_12.1.3_PUBLIC/Ghidra/Extensions"
+  },
+  "ppsspp": {
+    "version": "1.20.4 Windows x64",
+    "url": "https://github.com/hrydgard/ppsspp/releases/download/v1.20.4/PPSSPP-v1.20.4-Windows-x64.zip",
+    "sha256": "fbc9cd2f5131b159a92424e5c458c35ce43ba603cdded64dfc98e4bd4f17ff93",
+    "destination": "tools/local/ppsspp"
+  }
+}

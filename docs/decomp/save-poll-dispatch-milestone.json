@@ -1,0 +1,220 @@
+{
+  "schema_version": 1,
+  "recorded_utc": "2026-10-12T11:13:33.530865+00:00",
+  "target": "ULUS10566 v1.00",
+  "before": {
+    "functions": 231,
+    "bytes": 16816
+  },
+  "after": {
+    "functions": 234,
+    "bytes": 17516
+  },
+  "added": {
+    "functions": 3,
+    "bytes": 700
+  },
+  "modules": [
+    {
+      "module": "main",
+      "before_functions": 73,
+      "before_bytes": 4308,
+      "after_functions": 74,
+      "after_bytes": 4652,
+      "added_functions": 1,
+      "added_bytes": 344,
+      "sha256": "0bc8e779aad2814a3d1bd77346f69ca5e16665845ed053cd0ad44a9cbfaefe6d",
+      "byte_identical": true,
+      "inventory_sha256": "0a199775ad7e4688d8c69da7d62213dfca6595f9fe47f39da7cb02b0218db572",
+      "new_functions": [
+        {
+          "name": "func_0888245C",
+          "address": "0x0888245C",
+          "size": 344,
+          "unit": "main_task_dispatch",
+          "source": "src/main/task_dispatch.cpp",
+          "direct_callers": [
+            {
+              "module": "main",
+              "function": "0x08865278",
+              "pc": "0x088653B0"
+            },
+            {
+              "module": "main",
+              "function": "0x08882250",
+              "pc": "0x08882260"
+            },
+            {
+              "module": "main",
+              "function": "0x088825B4",
+              "pc": "0x088825C0"
+            }
+          ],
+          "primary_feature": "main_helpers",
+          "entry_provenance": "checked-direct-caller"
+        }
+      ]
+    },
+    {
+      "module": "extra",
+      "before_functions": 24,
+      "before_bytes": 2116,
+      "after_functions": 24,
+      "after_bytes": 2116,
+      "added_functions": 0,
+      "added_bytes": 0,
+      "sha256": "f6b7be5e15c28774985417f1ec2c64f6655e79cc3c9dce7600fa7f6bacabca01",
+      "byte_identical": true,
+      "inventory_sha256": "4d00284fb9186943aec6cae678e9bc35d794c31d43e36b4e7e9ecd76fd36a127",
+      "new_functions": []
+    },
+    {
+      "module": "menu",
+      "before_functions": 42,
+      "before_bytes": 3964,
+      "after_functions": 44,
+      "after_bytes": 4320,
+      "added_functions": 2,
+      "added_bytes": 356,
+      "sha256": "f021f96fa05da5907563a28c232966aa8a344526d6b8bdee728053ec75224d0a",
+      "byte_identical": true,
+      "inventory_sha256": "137d27e6097b27974a8e78d7b2e417fe1152c3c02f5a8ab23e43fe6e67b0021f",
+      "new_functions": [
+        {
+          "name": "func_089DD930",
+          "address": "0x089DD930",
+          "size": 172,
+          "unit": "menu_savedata_list_poll",
+          "source": "src/menu/savedata_list_poll.c",
+          "direct_callers": [],
+          "primary_feature": "save",
+          "member_record": "0x089E0A00",
+          "record_index": 3,
+          "entry_provenance": "checked-controller-member-record"
+        },
+        {
+          "name": "func_089DDB68",
+          "address": "0x089DDB68",
+          "size": 184,
+          "unit": "menu_savedata_load_poll",
+          "source": "src/menu/savedata_load_poll.c",
+          "direct_callers": [],
+          "primary_feature": "save",
+          "member_record": "0x089E0A10",
+          "record_index": 5,
+          "entry_provenance": "checked-controller-member-record"
+        }
+      ]
+    },
+    {
+      "module": "battle",
+      "before_functions": 92,
+      "before_bytes": 6428,
+      "after_functions": 92,
+      "after_bytes": 6428,
+      "added_functions": 0,
+      "added_bytes": 0,
+      "sha256": "1f96cfb3be771ff6e94741ae3916fab340df74e36ede07ca39545d015f4c49dc",
+      "byte_identical": true,
+      "inventory_sha256": "5d801a26fd0743c6893a917ff73a23d0ba564a6f46ce48a3b82edb353af486ac",
+      "new_functions": []
+    }
+  ],
+  "inventory_revision": 16,
+  "inventory_boundaries_changed": false,
+  "provisional_total_functions": 21280,
+  "provisional_function_body_bytes": 4717908,
+  "controller": {
+    "scope_id": "menu_controller_members",
+    "scope": "Only the twenty direct member callbacks copied by func_089DD5DC; dispatcher and dependencies are tracked separately. Not the whole menu or game.",
+    "reference_sha256": "f021f96fa05da5907563a28c232966aa8a344526d6b8bdee728053ec75224d0a",
+    "table": "0x089E09E8",
+    "dispatcher": "0x089DD5DC",
+    "dispatcher_matching_source": true,
+    "handler_count": 20,
+    "matching_handlers": 14,
+    "handler_count_percent": 70.0,
+    "reviewed_handler_bytes": 8188,
+    "matching_handler_bytes": 2688,
+    "handler_byte_percent": 32.8285,
+    "extent_checks": "Pinned direct table targets; contiguous inventory extents; terminal jr-ra/delay slot; next known entries; bounded relative branches; no overlaps.",
+    "dependencies_included": false,
+    "runtime_verified": false
+  },
+  "savedata_callback_slice": {
+    "start": "0x089DD760",
+    "end": "0x089DDC20",
+    "reviewed_functions": 4,
+    "matching_functions": 4,
+    "reviewed_bytes": 1216,
+    "matching_bytes": 1216,
+    "matching_percent": 100,
+    "includes_dependencies": false,
+    "includes_serialization": false,
+    "scope_complete_for_save_feature": false,
+    "records": [
+      {
+        "record_index": 2,
+        "address": "0x089DD760",
+        "body_bytes": 464,
+        "next_function": "0x089DD930",
+        "member_record": "0x089E09F8",
+        "matching_source": true,
+        "source": "src/menu/savedata_list_setup.c"
+      },
+      {
+        "record_index": 3,
+        "address": "0x089DD930",
+        "body_bytes": 172,
+        "next_function": "0x089DD9DC",
+        "member_record": "0x089E0A00",
+        "matching_source": true,
+        "source": "src/menu/savedata_list_poll.c"
+      },
+      {
+        "record_index": 4,
+        "address": "0x089DD9DC",
+        "body_bytes": 396,
+        "next_function": "0x089DDB68",
+        "member_record": "0x089E0A08",
+        "matching_source": true,
+        "source": "src/menu/savedata_latest_slot.c"
+      },
+      {
+        "record_index": 5,
+        "address": "0x089DDB68",
+        "body_bytes": 184,
+        "next_function": "0x089DDC20",
+        "member_record": "0x089E0A10",
+        "matching_source": true,
+        "source": "src/menu/savedata_load_poll.c"
+      }
+    ]
+  },
+  "poll_status_behavior": {
+    "0": "advance phase; load poll sets completion flag",
+    "1": "wait",
+    "2": "update with argument 2",
+    "3": "request shutdown",
+    "4": "wait",
+    "default": "request shutdown and set phase 6"
+  },
+  "whole_game_audited_code_percent": null,
+  "runtime_verified_this_batch": false,
+  "emulator_launched_this_batch": false,
+  "iso_repacked_this_batch": false,
+  "regression_tests": {
+    "status": "passed",
+    "count": 159,
+    "command": ".venv/Scripts/python.exe -m unittest discover -s tools -p 'test_*.py'"
+  },
+  "uncredited_task_candidates": [
+    "0x088823C4",
+    "0x08882790",
+    "0x088828BC"
+  ],
+  "existing_untraced_entries": [
+    "main:0x088D99B0",
+    "menu:0x089DEA74"
+  ]
+}

@@ -1,0 +1,71 @@
+From 9b7c583cc26132da8522988ddce01bb5bbd6c813 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Sun, 18 Oct 2026 22:00:56 +1030
+Subject: [PATCH 20/27] Save data: LIST matches '*' in the save name
+
+A game was traced asking LIST for "NAME*" to find its saves "NAME00" to
+"NAME19". The pattern matched '?' only, so LIST found none; the game took
+its save to be gone and, at each autosave, said it could not autosave and
+offered the save and delete screens (LISTSAVE) instead of saving with
+AUTOSAVE, which needs no dialog. '*' now stands for any run of characters,
+none included. <prefix>_NO_SAVEDATA_LIST_STAR matches '?' only, as before.
+
+Verified on Windows with one game: LIST finds its save, and its
+autosaves after a battle and on leaving a settings screen now go through
+AUTOSAVE with no dialog; with the switch the old prompt comes back.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/hle/hle_savedata.cpp | 35 ++++++++++++++++++++++++++++++-----
+ 1 file changed, 30 insertions(+), 5 deletions(-)
+
+diff --git a/host/hle/hle_savedata.cpp b/host/hle/hle_savedata.cpp
+index 5c40c39..d16b583 100644
+--- a/host/hle/hle_savedata.cpp
++++ b/host/hle/hle_savedata.cpp
+@@ -353,12 +353,37 @@ std::uint32_t do_sizes(psprecomp::GuestMemory &memory, std::uint32_t params) {
+     return outcome;
+ }
+ 
+-// A save name pattern as LIST takes it: '?' stands for any one character.
++// A save name pattern as LIST takes it: '?' stands for any one character and
++// '*' for any run of characters, none included. A game was traced asking for
++// "NAME*" to find its saves "NAME00" to "NAME19"; with '?' alone that found
++// none, and the game took its save to be gone and said it could not
++// autosave. <prefix>_NO_SAVEDATA_LIST_STAR matches '?' only, as before.
+ bool name_matches(std::string_view pattern, std::string_view name) {
+-    if (pattern.size() != name.size()) return false;
+-    for (std::size_t i = 0; i < name.size(); ++i)
+-        if (pattern[i] != '?' && pattern[i] != name[i]) return false;
+-    return true;
++    static const bool no_star = portablekit::env("NO_SAVEDATA_LIST_STAR") != nullptr;
++    if (no_star) {
++        if (pattern.size() != name.size()) return false;
++        for (std::size_t i = 0; i < name.size(); ++i)
++            if (pattern[i] != '?' && pattern[i] != name[i]) return false;
++        return true;
++    }
++    std::size_t p = 0, n = 0;
++    std::size_t star = std::string_view::npos, resume = 0;
++    while (n < name.size()) {
++        if (p < pattern.size() && (pattern[p] == '?' || pattern[p] == name[n])) {
++            ++p;
++            ++n;
++        } else if (p < pattern.size() && pattern[p] == '*') {
++            star = p++;
++            resume = n;
++        } else if (star != std::string_view::npos) {
++            p = star + 1u;
++            n = ++resume;
++        } else {
++            return false;
++        }
++    }
++    while (p < pattern.size() && pattern[p] == '*') ++p;
++    return p == pattern.size();
+ }
+ 
+ // LIST: which saves of this game match the save name, up to the list's
+-- 
+2.53.0.windows.1
+

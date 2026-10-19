@@ -1,0 +1,843 @@
+From 18a73d27819bd0277febb7871510c82711c03bbc Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Mon, 19 Oct 2026 07:16:24 +1030
+Subject: [PATCH 25/27] Host audio tracks: a host audio file played as one of
+ the game's ATRAC tracks
+
+host/audio/host_audio.hpp lets a port play an audio file of the host's
+own (MP3, Ogg Vorbis, Opus, FLAC, WAV) where the game plays one of its
+ATRAC3plus tracks, with no ATRAC encoding. A port registers a file and
+its loop under a 32-bit id (register_host_track) and serves the game a
+stand-in ATRAC3plus WAVE file for it (virtual_atrac_file), for example
+through a file provider at the path the game opens. The stand-in carries
+the track's length in `fact`, its loop in `smpl`, a private "PKHA" chunk
+naming the id, and frames of zero bytes. sceAtrac (hle_atrac.cpp) reads
+the chunk and fills each frame from the decoded file at the same
+positions instead of opening the ATRAC decoder; the game's buffer and
+reads, sceAtracAddStreamData, GetStreamDataInfo, loops and resets are the
+same code as for the game's own tracks, so the game cannot tell.
+
+Files are decoded with libavformat, libavcodec and libswresample to
+44,100 Hz 16-bit stereo (downmixed or resampled as needed) the first time
+they are needed, through the host's own file I/O, and kept in memory
+while they play; the last three decoded stay cached, and
+prefetch_host_track decodes on a worker thread. Loops: the whole file, a
+range in samples of the file or in seconds, the file's own LOOPSTART with
+LOOPLENGTH or LOOPEND tags, or none. Tracks over 30 minutes, unreadable
+files and files with no decodable audio are refused with a log line.
+
+A file without a PKHA chunk is handled exactly as before. With
+<prefix>_NO_HOST_AUDIO set, or a build without libavformat, nothing is
+registered, no stand-in is made and the chunk is ignored.
+
+Verified on Windows with one game (recompiled, no interpreter): a
+stand-in served in place of its battle music played a generated 6 s
+WAV (in the whole-file case) and a 30 s WAV streamed in 16
+AddStreamData calls, both looping at their loop points, checked in the
+audio dump with a Goertzel scan; MP3, Vorbis (with loop tags), Opus
+(48 kHz), FLAC and 48 kHz mono WAV decode at the right pitch and length.
+Not verified: other games, the source-built FFmpeg, prefetch from a
+game's menu, a track that plays once to its end in a game.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ cmake/PortableKit.cmake   |   1 +
+ docs/PROFILE_GUIDE.md     |   4 +
+ host/audio/host_audio.cpp | 538 ++++++++++++++++++++++++++++++++++++++
+ host/audio/host_audio.hpp | 111 ++++++++
+ host/hle/hle_atrac.cpp    |  42 ++-
+ 5 files changed, 695 insertions(+), 1 deletion(-)
+ create mode 100644 host/audio/host_audio.cpp
+ create mode 100644 host/audio/host_audio.hpp
+
+diff --git a/cmake/PortableKit.cmake b/cmake/PortableKit.cmake
+index b278112..4697646 100644
+--- a/cmake/PortableKit.cmake
++++ b/cmake/PortableKit.cmake
+@@ -27,6 +27,7 @@ set(PORTABLEKIT_HOST_SOURCES
+     host/app_paths.cpp
+     host/corpus_library.cpp
+     host/audio/atrac_decoder.cpp
++    host/audio/host_audio.cpp
+     host/movie/avc_decoder.cpp
+     host/movie/psmf_demuxer.cpp
+     host/movie/psmf_header.cpp
+diff --git a/docs/PROFILE_GUIDE.md b/docs/PROFILE_GUIDE.md
+index fe7dcab..78b2443 100644
+--- a/docs/PROFILE_GUIDE.md
++++ b/docs/PROFILE_GUIDE.md
+@@ -73,6 +73,10 @@ Two more are for a port that goes further than the PSP did, and both are null un
+ 
+ A driver writes into the game's memory, so check the code it relies on before it writes anything — Yakumo compares every instruction and constant it depends on at start-up, from `patch_loaded_image`, and stays out, saying why, if one differs.
+ 
++## Host audio tracks
++
++A port can play an audio file of the host's own (MP3, Ogg Vorbis, Opus, FLAC or WAV) where the game plays one of its ATRAC tracks, with no ATRAC encoding: music a player adds, for example. `host/audio/host_audio.hpp` has the pieces. `register_host_track(id, track)` names the file and its loop (the whole file, a range in samples of the file or in seconds, its own `LOOPSTART`/`LOOPLENGTH` or `LOOPEND` tags, or none) under a 32-bit id the port chooses. `virtual_atrac_file(id, block_align)` is a stand-in ATRAC3plus WAVE file for it: the track's length and loop in its `fact` and `smpl` chunks, a private `PKHA` chunk naming the id, and frames of silence. Serve it where the game opens its music, usually with a file provider (`hle_extension::add_file_provider`). sceAtrac recognises the chunk and takes each frame from the decoded file instead of the ATRAC decoder; the game's buffer, its reads, `sceAtracAddStreamData`, loop counts and reset positions run as for its own tracks. A file is decoded to 44,100 Hz 16-bit stereo the first time it is needed (`prefetch_host_track` does it on a worker thread) and kept while it plays; the last three decoded are kept. It needs FFmpeg's libavformat and libswresample, which the bundled FFmpeg has; `<prefix>_NO_HOST_AUDIO` turns the whole facility off.
++
+ ## Generated code stays out of the repository
+ 
+ Recompiled code is a translation of the game's own executable, so it is derived from copyrighted material. Every player generates it from their own copy. Make that reproducible by documenting the executable identity and hash the profile expects, the exact generator command, and any deterministic pass that follows it.
+diff --git a/host/audio/host_audio.cpp b/host/audio/host_audio.cpp
+new file mode 100644
+index 0000000..fab5e73
+--- /dev/null
++++ b/host/audio/host_audio.cpp
+@@ -0,0 +1,538 @@
++#include "audio/host_audio.hpp"
++
++#include "../profile.hpp"
++#include "install/user_data.hpp"
++#include "portablekit/hle_extension.hpp"
++
++#include <algorithm>
++#include <chrono>
++#include <cmath>
++#include <cstdio>
++#include <cstring>
++#include <deque>
++#include <future>
++#include <iostream>
++#include <map>
++#include <mutex>
++#include <sstream>
++
++#if defined(PORTABLEKIT_HAS_HOST_AUDIO)
++extern "C" {
++#include <libavcodec/avcodec.h>
++#include <libavformat/avformat.h>
++#include <libavutil/channel_layout.h>
++#include <libavutil/dict.h>
++#include <libavutil/mem.h>
++#include <libswresample/swresample.h>
++}
++#endif
++
++namespace portablekit::audio {
++namespace {
++
++// Longer than any game's music; a track this long would hold 300 MiB.
++constexpr std::uint32_t kMaxFrames = 30u * 60u * kHostAudioRate;
++// Decoded tracks kept after nothing plays them any more.
++constexpr std::size_t kKeptTracks = 3u;
++// Samples per ATRAC3plus frame, which the stand-in file is counted in.
++constexpr std::uint32_t kFrameSamples = 2048u;
++
++std::string describe(const HostTrack &track) {
++    return track.name.empty() ? install::path_to_utf8(track.file) : track.name;
++}
++
++std::shared_ptr<HostPcm> silence(std::string error) {
++    auto pcm = std::make_shared<HostPcm>();
++    pcm->samples.assign(static_cast<std::size_t>(kHostAudioRate) * 2u, 0);
++    pcm->loop_start = 0;
++    pcm->loop_end = static_cast<std::int32_t>(kHostAudioRate - 1u);
++    pcm->failed = true;
++    pcm->error = std::move(error);
++    return pcm;
++}
++
++std::int64_t to_frames(const HostLoopPoint &point, std::uint32_t source_rate) {
++    if (point.unit == HostLoopPoint::Unit::Microseconds)
++        return static_cast<std::int64_t>(std::llround(static_cast<double>(point.value) * kHostAudioRate / 1e6));
++    if (source_rate == 0u) return point.value;
++    return static_cast<std::int64_t>(
++        std::llround(static_cast<double>(point.value) * kHostAudioRate / static_cast<double>(source_rate)));
++}
++
++// Sets the loop from the track's settings, the file's tags (`tag_start`,
++// `tag_end` in source samples, end excluded) and its length.
++void resolve_loop(HostPcm &pcm, const HostTrack &track, std::optional<std::int64_t> tag_start,
++                  std::optional<std::int64_t> tag_end) {
++    const auto frames = static_cast<std::int64_t>(pcm.frames());
++    HostTrack::Loop mode = track.loop;
++    HostLoopPoint start = track.loop_start;
++    std::optional<HostLoopPoint> end = track.loop_end;
++    if (mode == HostTrack::Loop::Auto) {
++        if (tag_start) {
++            mode = HostTrack::Loop::Range;
++            start = {HostLoopPoint::Unit::Samples, *tag_start};
++            end.reset();
++            if (tag_end) end = HostLoopPoint{HostLoopPoint::Unit::Samples, *tag_end};
++        } else {
++            mode = HostTrack::Loop::Whole;
++        }
++    }
++    switch (mode) {
++    case HostTrack::Loop::None:
++        pcm.loop_start = pcm.loop_end = -1;
++        return;
++    case HostTrack::Loop::Range: {
++        const std::int64_t first = to_frames(start, pcm.source_rate);
++        const std::int64_t last = end ? to_frames(*end, pcm.source_rate) - 1 : frames - 1;
++        if (first >= 0 && first < last && last < frames) {
++            pcm.loop_start = static_cast<std::int32_t>(first);
++            pcm.loop_end = static_cast<std::int32_t>(last);
++            return;
++        }
++        std::cerr << "[host-audio] " << describe(track) << ": loop " << first << ".." << last
++                  << " (frames at 44100 Hz) is outside the track's " << frames << " frames; looping the whole track\n";
++        [[fallthrough]];
++    }
++    case HostTrack::Loop::Whole:
++    case HostTrack::Loop::Auto:
++        pcm.loop_start = 0;
++        pcm.loop_end = static_cast<std::int32_t>(frames - 1);
++        return;
++    }
++}
++
++#if defined(PORTABLEKIT_HAS_HOST_AUDIO)
++
++std::string av_error(int code) {
++    char text[AV_ERROR_MAX_STRING_SIZE]{};
++    av_strerror(code, text, sizeof text);
++    return text;
++}
++
++// A host file read through FFmpeg with the host's own I/O, so paths are the
++// host's (wide on Windows) and no FFmpeg protocol is needed.
++class InputFile {
++public:
++    ~InputFile() { close(); }
++
++    bool open(const std::filesystem::path &path, std::string &error) {
++#if defined(_WIN32)
++        file_ = _wfopen(path.c_str(), L"rb");
++#else
++        file_ = std::fopen(path.c_str(), "rb");
++#endif
++        if (file_ == nullptr) {
++            error = "cannot open the file";
++            return false;
++        }
++        std::error_code ec;
++        size_ = static_cast<std::int64_t>(std::filesystem::file_size(path, ec));
++        constexpr int kBufferSize = 64 * 1024;
++        auto *buffer = static_cast<unsigned char *>(av_malloc(kBufferSize));
++        io_ = buffer != nullptr ? avio_alloc_context(buffer, kBufferSize, 0, this, &read, nullptr, &seek) : nullptr;
++        if (io_ == nullptr) {
++            av_free(buffer);
++            error = "out of memory";
++            return false;
++        }
++        format_ = avformat_alloc_context();
++        if (format_ == nullptr) {
++            error = "out of memory";
++            return false;
++        }
++        format_->pb = io_;
++        format_->flags |= AVFMT_FLAG_CUSTOM_IO;
++        // The name only helps FFmpeg guess the container from the extension.
++        const std::string name = install::path_to_utf8(path.filename());
++        if (const int result = avformat_open_input(&format_, name.c_str(), nullptr, nullptr); result < 0) {
++            error = "not a file FFmpeg can read (" + av_error(result) + ")";
++            return false;
++        }
++        if (const int result = avformat_find_stream_info(format_, nullptr); result < 0) {
++            error = "cannot read the streams (" + av_error(result) + ")";
++            return false;
++        }
++        const AVCodec *codec = nullptr;
++        stream_ = av_find_best_stream(format_, AVMEDIA_TYPE_AUDIO, -1, -1, &codec, 0);
++        if (stream_ < 0 || codec == nullptr) {
++            error = stream_ == AVERROR_DECODER_NOT_FOUND ? "no decoder for its audio in this build" : "no audio stream";
++            return false;
++        }
++        decoder_ = avcodec_alloc_context3(codec);
++        if (decoder_ == nullptr ||
++            avcodec_parameters_to_context(decoder_, format_->streams[stream_]->codecpar) < 0) {
++            error = "cannot set up the decoder";
++            return false;
++        }
++        // So the decoder can account for the samples it drops (encoder delay
++        // and padding) in the packets' times.
++        decoder_->pkt_timebase = format_->streams[stream_]->time_base;
++        if (const int result = avcodec_open2(decoder_, codec, nullptr); result < 0) {
++            error = "the decoder refused the stream (" + av_error(result) + ")";
++            return false;
++        }
++        return true;
++    }
++
++    void close() {
++        avcodec_free_context(&decoder_);
++        if (format_ != nullptr) avformat_close_input(&format_);
++        if (io_ != nullptr) {
++            av_freep(&io_->buffer);
++            avio_context_free(&io_);
++        }
++        if (file_ != nullptr) {
++            std::fclose(file_);
++            file_ = nullptr;
++        }
++    }
++
++    [[nodiscard]] AVFormatContext *format() const noexcept { return format_; }
++    [[nodiscard]] AVCodecContext *decoder() const noexcept { return decoder_; }
++    [[nodiscard]] int stream() const noexcept { return stream_; }
++
++    // An integer tag of the file or of its audio stream (LOOPSTART and so on).
++    [[nodiscard]] std::optional<std::int64_t> integer_tag(const char *key) const {
++        for (const AVDictionary *dictionary : {format_->metadata, format_->streams[stream_]->metadata}) {
++            const AVDictionaryEntry *entry = av_dict_get(dictionary, key, nullptr, 0);
++            if (entry == nullptr || entry->value == nullptr) continue;
++            char *end = nullptr;
++            const long long value = std::strtoll(entry->value, &end, 10);
++            if (end != entry->value && value >= 0) return value;
++        }
++        return std::nullopt;
++    }
++
++private:
++    static int read(void *opaque, std::uint8_t *buffer, int size) {
++        auto *self = static_cast<InputFile *>(opaque);
++        const std::size_t count = std::fread(buffer, 1u, static_cast<std::size_t>(size), self->file_);
++        return count == 0u ? AVERROR_EOF : static_cast<int>(count);
++    }
++    static std::int64_t seek(void *opaque, std::int64_t offset, int whence) {
++        auto *self = static_cast<InputFile *>(opaque);
++        if ((whence & AVSEEK_SIZE) != 0) return self->size_;
++        whence &= ~AVSEEK_FORCE;
++#if defined(_WIN32)
++        if (_fseeki64(self->file_, offset, whence) != 0) return -1;
++        return _ftelli64(self->file_);
++#else
++        if (fseeko(self->file_, static_cast<off_t>(offset), whence) != 0) return -1;
++        return static_cast<std::int64_t>(ftello(self->file_));
++#endif
++    }
++
++    std::FILE *file_{};
++    std::int64_t size_{-1};
++    AVIOContext *io_{};
++    AVFormatContext *format_{};
++    AVCodecContext *decoder_{};
++    int stream_{-1};
++};
++
++std::shared_ptr<HostPcm> decode(const HostTrack &track) {
++    const auto started = std::chrono::steady_clock::now();
++    InputFile input;
++    std::string error;
++    if (!input.open(track.file, error)) return silence(error);
++    AVCodecContext *decoder = input.decoder();
++
++    AVChannelLayout out_layout{};
++    av_channel_layout_default(&out_layout, 2);
++    AVChannelLayout in_layout{};
++    if (decoder->ch_layout.order == AV_CHANNEL_ORDER_UNSPEC || av_channel_layout_check(&decoder->ch_layout) == 0)
++        av_channel_layout_default(&in_layout, std::max(decoder->ch_layout.nb_channels, 1));
++    else
++        av_channel_layout_copy(&in_layout, &decoder->ch_layout);
++    SwrContext *resampler = nullptr;
++    int result = swr_alloc_set_opts2(&resampler, &out_layout, AV_SAMPLE_FMT_S16, static_cast<int>(kHostAudioRate),
++                                     &in_layout, decoder->sample_fmt, decoder->sample_rate, 0, nullptr);
++    if (result >= 0) result = swr_init(resampler);
++    const unsigned source_channels = static_cast<unsigned>(in_layout.nb_channels);
++    av_channel_layout_uninit(&in_layout);
++    av_channel_layout_uninit(&out_layout);
++    if (result < 0) {
++        swr_free(&resampler);
++        return silence("cannot resample it (" + av_error(result) + ")");
++    }
++
++    auto pcm = std::make_shared<HostPcm>();
++    pcm->source_rate = static_cast<std::uint32_t>(decoder->sample_rate);
++    pcm->source_channels = source_channels;
++    pcm->codec = decoder->codec != nullptr && decoder->codec->name != nullptr ? decoder->codec->name : "?";
++    if (input.format()->duration > 0)
++        pcm->samples.reserve(static_cast<std::size_t>(
++            std::min<std::int64_t>(input.format()->duration / 1000 * kHostAudioRate / 1000 + kHostAudioRate, kMaxFrames) *
++            2));
++
++    bool too_long = false;
++    std::vector<std::int16_t> chunk;
++    const auto convert = [&](const AVFrame *frame) {
++        const int in_count = frame != nullptr ? frame->nb_samples : 0;
++        const int out_count = swr_get_out_samples(resampler, in_count);
++        if (out_count <= 0) return;
++        chunk.resize(static_cast<std::size_t>(out_count) * 2u);
++        auto *out = reinterpret_cast<std::uint8_t *>(chunk.data());
++        const int made = swr_convert(resampler, &out, out_count,
++                                     frame != nullptr ? reinterpret_cast<const std::uint8_t *const *>(frame->extended_data)
++                                                      : nullptr,
++                                     in_count);
++        if (made <= 0) return;
++        if (pcm->frames() + static_cast<std::uint32_t>(made) > kMaxFrames) {
++            too_long = true;
++            return;
++        }
++        pcm->samples.insert(pcm->samples.end(), chunk.begin(), chunk.begin() + static_cast<std::ptrdiff_t>(made) * 2);
++    };
++
++    AVPacket *packet = av_packet_alloc();
++    AVFrame *frame = av_frame_alloc();
++    const auto receive = [&]() {
++        while (!too_long && avcodec_receive_frame(decoder, frame) == 0) {
++            convert(frame);
++            av_frame_unref(frame);
++        }
++    };
++    while (!too_long && av_read_frame(input.format(), packet) >= 0) {
++        if (packet->stream_index == input.stream() && avcodec_send_packet(decoder, packet) >= 0) receive();
++        av_packet_unref(packet);
++    }
++    if (!too_long) {
++        avcodec_send_packet(decoder, nullptr);
++        receive();
++        convert(nullptr);  // what the resampler still holds
++    }
++    av_frame_free(&frame);
++    av_packet_free(&packet);
++    swr_free(&resampler);
++
++    if (too_long) return silence("longer than 30 minutes");
++    if (pcm->frames() == 0u) return silence("no audio decoded");
++    pcm->samples.shrink_to_fit();
++
++    std::optional<std::int64_t> tag_end;
++    const std::optional<std::int64_t> tag_start = input.integer_tag("LOOPSTART");
++    if (const auto length = input.integer_tag("LOOPLENGTH"); tag_start && length && *length > 0)
++        tag_end = *tag_start + *length;
++    else if (const auto end = input.integer_tag("LOOPEND"); tag_start && end)
++        tag_end = *end;  // taken as the first sample after the loop
++    resolve_loop(*pcm, track, tag_start, tag_end);
++
++    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started);
++    std::ostringstream line;
++    line << "[host-audio] decoded " << describe(track) << ": " << pcm->codec << ", " << pcm->source_rate << " Hz, "
++         << pcm->source_channels << " channel(s), " << pcm->frames() << " frames at 44100 Hz ("
++         << static_cast<double>(pcm->frames()) / kHostAudioRate << " s), ";
++    if (pcm->loop_start < 0) line << "no loop";
++    else line << "loop " << pcm->loop_start << ".." << pcm->loop_end;
++    line << ", in " << ms.count() << " ms";
++    std::cout << line.str() << std::endl;
++    return pcm;
++}
++
++bool can_decode() { return true; }
++
++bool probe(const std::filesystem::path &file, std::string &error) {
++    InputFile input;
++    return input.open(file, error);
++}
++
++#else // !PORTABLEKIT_HAS_HOST_AUDIO
++
++std::shared_ptr<HostPcm> decode(const HostTrack &) { return silence("this build cannot decode host audio files"); }
++bool can_decode() { return false; }
++bool probe(const std::filesystem::path &, std::string &error) {
++    error = "this build cannot decode host audio files (no libavformat)";
++    return false;
++}
++
++#endif
++
++struct Entry {
++    HostTrack track;
++    std::weak_ptr<const HostPcm> decoded;
++    std::shared_future<std::shared_ptr<const HostPcm>> pending;
++};
++
++struct Registry {
++    std::mutex lock;
++    std::map<std::uint32_t, Entry> tracks;
++    std::deque<std::shared_ptr<const HostPcm>> kept;
++};
++
++Registry &registry() {
++    static Registry instance;
++    return instance;
++}
++
++void keep(Registry &tracks, const std::shared_ptr<const HostPcm> &pcm) {
++    auto &kept = tracks.kept;
++    kept.erase(std::remove(kept.begin(), kept.end(), pcm), kept.end());
++    kept.push_front(pcm);
++    while (kept.size() > kKeptTracks) kept.pop_back();
++}
++
++std::shared_ptr<const HostPcm> decode_logged(const HostTrack &track) {
++    auto pcm = decode(track);
++    if (pcm->failed) std::cerr << "[host-audio] " << describe(track) << ": " << pcm->error << "\n";
++    return pcm;
++}
++
++// The decoded track, or the decode in flight for it, starting one with
++// `policy` if there is neither.
++std::shared_ptr<const HostPcm> obtain(std::uint32_t id, std::launch policy, bool wait) {
++    Registry &tracks = registry();
++    std::shared_future<std::shared_ptr<const HostPcm>> pending;
++    {
++        std::lock_guard<std::mutex> guard(tracks.lock);
++        const auto found = tracks.tracks.find(id);
++        if (found == tracks.tracks.end()) return nullptr;
++        Entry &entry = found->second;
++        if (auto decoded = entry.decoded.lock()) {
++            keep(tracks, decoded);
++            return decoded;
++        }
++        if (!entry.pending.valid()) entry.pending = std::async(policy, decode_logged, entry.track).share();
++        pending = entry.pending;
++    }
++    if (!wait) return nullptr;
++    std::shared_ptr<const HostPcm> decoded = pending.get();
++    std::lock_guard<std::mutex> guard(tracks.lock);
++    Entry &entry = tracks.tracks.at(id);
++    entry.decoded = decoded;
++    entry.pending = {};
++    keep(tracks, decoded);
++    return decoded;
++}
++
++void put_le16(std::vector<std::uint8_t> &out, std::uint32_t value) {
++    out.push_back(static_cast<std::uint8_t>(value));
++    out.push_back(static_cast<std::uint8_t>(value >> 8u));
++}
++void put_le32(std::vector<std::uint8_t> &out, std::uint32_t value) {
++    for (unsigned shift = 0; shift < 32u; shift += 8u) out.push_back(static_cast<std::uint8_t>(value >> shift));
++}
++void put_id(std::vector<std::uint8_t> &out, const char *id) { out.insert(out.end(), id, id + 4); }
++
++// The stand-in: a header, then frames of zero bytes.
++class VirtualAtracFile final : public hle_extension::FileFilter {
++public:
++    VirtualAtracFile(std::vector<std::uint8_t> header, std::uint64_t data_size)
++        : header_(std::move(header)), size_(header_.size() + data_size) {}
++    [[nodiscard]] std::uint64_t size() const override { return size_; }
++    std::size_t read(std::uint64_t offset, std::uint8_t *destination, std::size_t length) override {
++        if (offset >= size_) return 0u;
++        length = static_cast<std::size_t>(std::min<std::uint64_t>(length, size_ - offset));
++        std::size_t done = 0u;
++        if (offset < header_.size()) {
++            done = std::min<std::size_t>(length, header_.size() - static_cast<std::size_t>(offset));
++            std::memcpy(destination, header_.data() + offset, done);
++        }
++        std::memset(destination + done, 0, length - done);
++        return length;
++    }
++
++private:
++    std::vector<std::uint8_t> header_;
++    std::uint64_t size_;
++};
++
++} // namespace
++
++bool host_audio_available() {
++    static const bool available = can_decode() && portablekit::env("NO_HOST_AUDIO") == nullptr;
++    return available;
++}
++
++bool probe_host_audio(const std::filesystem::path &file, std::string &error) {
++    if (!host_audio_available()) {
++        error = can_decode() ? "host audio is turned off (" + portablekit::env_name("NO_HOST_AUDIO") + ")"
++                             : "this build cannot decode host audio files (no libavformat)";
++        return false;
++    }
++    return probe(file, error);
++}
++
++bool register_host_track(std::uint32_t id, HostTrack track) {
++    if (!host_audio_available()) return false;
++    Registry &tracks = registry();
++    std::lock_guard<std::mutex> guard(tracks.lock);
++    return tracks.tracks.emplace(id, Entry{std::move(track), {}, {}}).second;
++}
++
++bool host_track_registered(std::uint32_t id) {
++    Registry &tracks = registry();
++    std::lock_guard<std::mutex> guard(tracks.lock);
++    return tracks.tracks.contains(id);
++}
++
++std::shared_ptr<const HostPcm> host_track_pcm(std::uint32_t id) { return obtain(id, std::launch::deferred, true); }
++
++void prefetch_host_track(std::uint32_t id) { (void)obtain(id, std::launch::async, false); }
++
++std::shared_ptr<hle_extension::FileFilter> virtual_atrac_file(std::uint32_t id, std::uint32_t block_align) {
++    if (block_align < 8u || block_align > 0x2000u) {
++        std::cerr << "[host-audio] track " << id << ": frame size " << block_align << " is out of range\n";
++        return nullptr;
++    }
++    const auto pcm = host_track_pcm(id);
++    if (!pcm || pcm->failed) return nullptr;
++
++    // Enough frames for every sample whatever the decoder delay sceAtrac
++    // allows for (fact's sample count is what ends the track): two more than
++    // the samples need.
++    const std::uint32_t total = pcm->frames();
++    const std::uint32_t frames = (total + kFrameSamples - 1u) / kFrameSamples + 2u;
++    const std::uint64_t data_size = static_cast<std::uint64_t>(frames) * block_align;
++
++    std::vector<std::uint8_t> header;
++    put_id(header, "RIFF");
++    put_le32(header, 0u);  // patched below
++    put_id(header, "WAVE");
++    // WAVE_FORMAT_EXTENSIBLE with the ATRAC3plus sub-format, stereo, as the
++    // PSP's own ATRAC3plus files are; the codec bytes are left zero, since
++    // no ATRAC decoder ever sees this file.
++    put_id(header, "fmt ");
++    put_le32(header, 52u);
++    put_le16(header, 0xFFFEu);
++    put_le16(header, 2u);
++    put_le32(header, kHostAudioRate);
++    put_le32(header, static_cast<std::uint32_t>(static_cast<std::uint64_t>(block_align) * kHostAudioRate / kFrameSamples));
++    put_le16(header, block_align);
++    put_le16(header, 0u);
++    put_le16(header, 34u);
++    put_le16(header, kFrameSamples);
++    put_le32(header, 3u);  // front left and right
++    constexpr std::uint8_t kAtrac3PlusGuid[16] = {0xBF, 0xAA, 0x23, 0xE9, 0x58, 0xCB, 0x71, 0x44,
++                                                  0xA1, 0x19, 0xFF, 0xFA, 0x01, 0xE4, 0xCE, 0x62};
++    header.insert(header.end(), std::begin(kAtrac3PlusGuid), std::end(kAtrac3PlusGuid));
++    header.insert(header.end(), 12u, 0u);
++    put_id(header, "fact");
++    put_le32(header, 8u);
++    put_le32(header, total);
++    put_le32(header, 0u);  // no encoder delay
++    if (pcm->loop_start >= 0) {
++        put_id(header, "smpl");
++        put_le32(header, 60u);
++        for (int i = 0; i < 7; ++i) put_le32(header, 0u);  // manufacturer ... SMPTE offset
++        put_le32(header, 1u);                             // one loop
++        put_le32(header, 0u);                             // no sampler data
++        put_le32(header, 0u);                             // cue point id
++        put_le32(header, 0u);                             // forward
++        put_le32(header, static_cast<std::uint32_t>(pcm->loop_start));
++        put_le32(header, static_cast<std::uint32_t>(pcm->loop_end));
++        put_le32(header, 0u);  // fraction
++        put_le32(header, 0u);  // forever
++    }
++    put_id(header, "PKHA");
++    put_le32(header, 8u);
++    put_le32(header, kHostChunkVersion);
++    put_le32(header, id);
++    put_id(header, "data");
++    put_le32(header, static_cast<std::uint32_t>(data_size));
++    const std::uint64_t riff_size = header.size() - 8u + data_size;
++    for (unsigned i = 0; i < 4u; ++i) header[4u + i] = static_cast<std::uint8_t>(riff_size >> (8u * i));
++    return std::make_shared<VirtualAtracFile>(std::move(header), data_size);
++}
++
++} // namespace portablekit::audio
+diff --git a/host/audio/host_audio.hpp b/host/audio/host_audio.hpp
+new file mode 100644
+index 0000000..bfb7512
+--- /dev/null
++++ b/host/audio/host_audio.hpp
+@@ -0,0 +1,111 @@
++#pragma once
++
++// Host audio tracks: audio files of the host's own (MP3, Ogg Vorbis, Opus,
++// FLAC, WAV) that a port plays where a game plays one of its ATRAC tracks,
++// with no ATRAC encoding.
++//
++// A port registers a track under a 32-bit id of its choosing, then serves the
++// game a stand-in ATRAC3plus WAVE file for it (virtual_atrac_file), usually
++// through a file provider (hle_extension::add_file_provider) at a path the
++// game opens. The stand-in has the track's length and loop points in its
++// `fact` and `smpl` chunks, a private "PKHA" chunk naming the id, and frames
++// of silence. sceAtrac (hle/hle_atrac.cpp) recognises the chunk and takes each
++// frame from the decoded host file instead of the ATRAC decoder. Everything
++// else -- the game's buffer and its reads, sceAtracAddStreamData, loop counts,
++// reset positions -- runs as for one of the game's own tracks, because to the
++// game it is one.
++//
++// Files are decoded with FFmpeg (libavformat, libavcodec, libswresample) to
++// 44,100 Hz 16-bit stereo, what ATRAC decodes to, the first time a track is
++// needed, and kept in memory while it plays. Without libavformat in the build,
++// or with <prefix>_NO_HOST_AUDIO set, nothing is registered and no stand-in is
++// made, so the game plays its own tracks.
++
++#include <cstddef>
++#include <cstdint>
++#include <filesystem>
++#include <memory>
++#include <optional>
++#include <string>
++#include <vector>
++
++namespace portablekit::hle_extension {
++class FileFilter;
++}
++
++namespace portablekit::audio {
++
++inline constexpr std::uint32_t kHostAudioRate = 44'100u;
++
++// A loop point: a sample of the file at its own rate, or a time.
++struct HostLoopPoint {
++    enum class Unit { Samples, Microseconds };
++    Unit unit = Unit::Samples;
++    std::int64_t value{};
++};
++
++struct HostTrack {
++    std::filesystem::path file;
++    enum class Loop {
++        Auto,   // the file's LOOPSTART with LOOPLENGTH or LOOPEND tags, else Whole
++        Whole,  // the whole file, over and over
++        Range,  // from loop_start (included) to loop_end (excluded; none: the end)
++        None,   // plays once
++    };
++    Loop loop = Loop::Auto;
++    HostLoopPoint loop_start{};
++    std::optional<HostLoopPoint> loop_end;
++    std::string name;  // for the log
++};
++
++// A decoded track: 44,100 Hz stereo, interleaved 16-bit samples.
++struct HostPcm {
++    std::vector<std::int16_t> samples;
++    // Frames (stereo samples), both ends included; -1 without a loop.
++    std::int32_t loop_start{-1};
++    std::int32_t loop_end{-1};
++    std::uint32_t source_rate{};
++    unsigned source_channels{};
++    std::string codec;
++    // The file could not be decoded: the samples are a second of silence and
++    // `error` says why.
++    bool failed{};
++    std::string error;
++
++    [[nodiscard]] std::uint32_t frames() const noexcept { return static_cast<std::uint32_t>(samples.size() / 2u); }
++};
++
++// True when the build can decode host files and <prefix>_NO_HOST_AUDIO is not
++// set.
++[[nodiscard]] bool host_audio_available();
++
++// Opens `file` far enough to know it has an audio stream that can be decoded,
++// without decoding it; `error` says why not.
++[[nodiscard]] bool probe_host_audio(const std::filesystem::path &file, std::string &error);
++
++// Registers `track` under `id`. False when the id is taken or host audio is
++// not available.
++bool register_host_track(std::uint32_t id, HostTrack track);
++[[nodiscard]] bool host_track_registered(std::uint32_t id);
++
++// The decoded track, decoding it now if no earlier call or prefetch has; null
++// for an id nobody registered. The last few decoded tracks are kept, so a
++// track played again is not decoded again.
++[[nodiscard]] std::shared_ptr<const HostPcm> host_track_pcm(std::uint32_t id);
++// Starts decoding the track on a worker thread, so that host_track_pcm finds
++// it ready, for a port that knows which track comes next (a menu choice).
++void prefetch_host_track(std::uint32_t id);
++
++// The stand-in ATRAC3plus WAVE file for track `id`, in frames of
++// `block_align` bytes (the game's own tracks' frame size is the safest
++// choice), decoding the track if need be. Null for an unknown id, a track
++// that cannot be decoded, or a block size out of range; the log says which.
++[[nodiscard]] std::shared_ptr<hle_extension::FileFilter> virtual_atrac_file(std::uint32_t id,
++                                                                            std::uint32_t block_align);
++
++// The private WAVE chunk of a stand-in file: "PKHA", eight bytes, a version
++// (1) and the track id, both little-endian.
++inline constexpr std::uint32_t kHostChunkId = 0x41484B50u;  // "PKHA" read little-endian
++inline constexpr std::uint32_t kHostChunkVersion = 1u;
++
++} // namespace portablekit::audio
+diff --git a/host/hle/hle_atrac.cpp b/host/hle/hle_atrac.cpp
+index 4129deb..ae62e5b 100644
+--- a/host/hle/hle_atrac.cpp
++++ b/host/hle/hle_atrac.cpp
+@@ -11,10 +11,16 @@
+ // sample the encoder was given. The decoded stream starts earlier, by the
+ // encoder delay recorded in the `fact` chunk plus the decoder's own delay, and
+ // loop points in the `smpl` chunk are counted including the encoder delay.
++//
++// A track may also be a host audio file (audio/host_audio.hpp): the game is
++// given a stand-in ATRAC3plus file with a "PKHA" chunk naming it, and each
++// frame comes from the decoded host file instead of the ATRAC decoder, at the
++// same positions. Everything else is the same.
+ #include "../profile.hpp"
+ #include "hle_common.hpp"
+ 
+ #include "audio/atrac_decoder.hpp"
++#include "audio/host_audio.hpp"
+ 
+ #include "psprecomp/common.hpp"
+ 
+@@ -77,6 +83,8 @@ struct TrackInfo {
+     std::int32_t loop_start{-1};  // positions, -1 without a loop
+     std::int32_t loop_end{-1};
+     std::uint32_t skip{};         // decoded samples before position 0
++    // A stand-in for a host audio track: its id.
++    std::optional<std::uint32_t> host_track;
+ };
+ 
+ struct AtracContext {
+@@ -88,6 +96,8 @@ struct AtracContext {
+     std::int32_t loop_num{};
+     std::int32_t position{};  // next position DecodeData returns
+     audio::AtracDecoder decoder;
++    // The decoded host file a stand-in's frames come from, if it is one.
++    std::shared_ptr<const audio::HostPcm> host;
+     // The frame the decoder produces next if fed sequentially, and the last
+     // frame it produced, kept because a call rarely consumes a whole frame.
+     std::int64_t next_frame{};
+@@ -197,6 +207,9 @@ std::optional<std::uint32_t> parse_header(const psprecomp::GuestMemory &memory,
+         } else if (id == 0x6C706D73u && size >= 36u) {  // "smpl"
+             const std::uint32_t loops = read_le32(bytes, body + 28u);
+             if (loops > 0u && size >= 36u + 24u) loop = {read_le32(bytes, body + 36u + 8u), read_le32(bytes, body + 36u + 12u)};
++        } else if (id == audio::kHostChunkId && size >= 8u && read_le32(bytes, body) == audio::kHostChunkVersion &&
++                   audio::host_audio_available()) {
++            info.host_track = read_le32(bytes, body + 4u);
+         }
+         offset = body + size + (size & 1u);
+     }
+@@ -243,6 +256,23 @@ bool load_frame(const psprecomp::GuestMemory &memory, AtracContext &context, std
+     const TrackInfo &track = context.track;
+     const std::size_t frame_samples = audio::atrac_frame_samples(track.codec);
+     context.cached.assign(frame_samples * 2u, 0);
++    if (context.host) {
++        // A host track: the frame's samples, counted from position 0 as
++        // `skip` decoded samples after the stream's start, and silence
++        // outside the file.
++        const std::vector<std::int16_t> &samples = context.host->samples;
++        const std::int64_t frames = static_cast<std::int64_t>(samples.size() / 2u);
++        const std::int64_t first = frame * static_cast<std::int64_t>(frame_samples) - track.skip;
++        for (std::size_t i = 0; i < frame_samples; ++i) {
++            const std::int64_t at = first + static_cast<std::int64_t>(i);
++            if (at < 0 || at >= frames) continue;
++            context.cached[i * 2u] = samples[static_cast<std::size_t>(at) * 2u];
++            context.cached[i * 2u + 1u] = samples[static_cast<std::size_t>(at) * 2u + 1u];
++        }
++        context.next_frame = frame + 1;
++        context.cached_frame = frame;
++        return true;
++    }
+     std::vector<std::uint8_t> bytes(track.block_align);
+     const auto decode = [&](std::int64_t index) {
+         const std::uint64_t offset = track.data_offset + static_cast<std::uint64_t>(index) * track.block_align;
+@@ -423,8 +453,17 @@ LoadResult load_track(const psprecomp::GuestMemory &memory, std::optional<std::u
+     // than the file streams too: the buffer holds its first bufferSize bytes
+     // and the game refills it through GetStreamDataInfo/AddStreamData.
+     if (!streaming && buffer_size < track.file_size) streaming = true;
+-    if (!context->decoder.open(track.codec, track.channels, track.block_align, track.extradata))
++    if (track.host_track) {
++        // Decoded when the stand-in was made, so normally at hand. If it was
++        // not registered, its frames are silent.
++        context->host = audio::host_track_pcm(*track.host_track);
++        if (!context->host)
++            log_once("atrac-host-unknown", "[atrac] a stand-in names host track " + std::to_string(*track.host_track) +
++                                               ", which nobody registered; it is silent");
++        if (!context->host) context->host = std::make_shared<const audio::HostPcm>();
++    } else if (!context->decoder.open(track.codec, track.channels, track.block_align, track.extradata)) {
+         return {atrac_error::kBadCodecParam, "decoder refused the stream"};
++    }
+     auto &table = contexts();
+     std::uint32_t slot = 0u;
+     if (id) {
+@@ -443,6 +482,7 @@ LoadResult load_track(const psprecomp::GuestMemory &memory, std::optional<std::u
+     details << "file=" << track.file_size << " align=" << track.block_align << " channels=" << track.channels
+             << " end=" << track.end_sample << " loop=" << track.loop_start << ".." << track.loop_end
+             << " skip=" << track.skip;
++    if (track.host_track) details << " host track " << *track.host_track;
+     if (streaming) details << " streamed, " << read_size << " of it in a buffer of " << buffer_size;
+     table[slot] = std::move(context);
+     return {slot, details.str()};
+-- 
+2.53.0.windows.1
+

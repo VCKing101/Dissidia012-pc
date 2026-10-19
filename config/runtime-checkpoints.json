@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "checkpoint": "first-autosave-notice",
+  "ppsspp_version": "1.20.4",
+  "graphics": "directx11",
+  "width": 960,
+  "height": 544,
+  "codec": "ffv1",
+  "rgb_sha256": "3416dd4be6d3d734f1a6c347b7cd350e92a4955d3ee6113643ce50086b5fce30",
+  "review": "Agent visually inspected all three offline-boot-v1 final frames on 2026-10-11. The game's initial autosave notice awaits cross/Enter. This identifies one stable screen, not frame-synchronized gameplay."
+}

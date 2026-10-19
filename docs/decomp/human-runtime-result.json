@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "recorded_utc": "2026-10-11T08:43:11.737825+00:00",
+  "case": "rebuilt",
+  "session": "build/ULUS10566/runtime/sessions/rebuilt/human-combat-v1",
+  "iso_sha256": "59ca11719bc1ca40c1756abca3cac06a9c50643ee83f294dab5ca08b3285b4a1",
+  "ppsspp": "1.20.4 Windows x64",
+  "evidence_type": "user-reported gameplay plus agent-verified save-file snapshot",
+  "user_report": "Reached the main menu/main hub. Saved in the second slot; both slots should have similar progress at the hub. Felt like normal retail: no input, graphical or sound issues; Lightning controls and mechanics worked normally.",
+  "results": {
+    "tutorial_route_to_main_hub": "passed-user-report",
+    "lightning_controls_and_mechanics": "passed-user-report",
+    "graphics": "no-issues-user-report",
+    "audio": "no-issues-user-report",
+    "two_save_slots": "present-files-verified",
+    "post_hub_restart_load": "pending",
+    "precise_encounter_outcomes": "not-reported"
+  },
+  "save_baseline": {
+    "path": "build/ULUS10566/runtime/save-baselines/human-main-hub-20261011T084311737825Z",
+    "savedata_subdir": "SAVEDATA",
+    "files": [
+      {
+        "path": "ULUS10566GameData00/DISSIDIA.BIN",
+        "bytes": 257240,
+        "sha256": "dae3441d84b699b8ce91e5aa1b4e28047e6733984becdadb60a47dc6e63a526c"
+      },
+      {
+        "path": "ULUS10566GameData00/ICON0.PNG",
+        "bytes": 20867,
+        "sha256": "9e43a784c419fd2c695e6cb16fb4021a924d51f204f8f90a2610825af18f59d1"
+      },
+      {
+        "path": "ULUS10566GameData00/PARAM.SFO",
+        "bytes": 4912,
+        "sha256": "ee30ee2121461e4bf89513062da877d3b120eb623866b94ad35997ed98f45c26"
+      },
+      {
+        "path": "ULUS10566GameData01/DISSIDIA.BIN",
+        "bytes": 257240,
+        "sha256": "97254e3b95cb1125e783d92e011f7dd20e89b4046a23fc24b6f8e7cb3bbe373e"
+      },
+      {
+        "path": "ULUS10566GameData01/ICON0.PNG",
+        "bytes": 20867,
+        "sha256": "9e43a784c419fd2c695e6cb16fb4021a924d51f204f8f90a2610825af18f59d1"
+      },
+      {
+        "path": "ULUS10566GameData01/PARAM.SFO",
+        "bytes": 4912,
+        "sha256": "6d942d3acc4e344d1f553a04ed1645375cc22ca0dab038077717a8d9f5b14909"
+      }
+    ],
+    "copy_hashes_verified": true,
+    "source_unchanged_during_copy": true,
+    "slot_progress": "User reports both slots at similar main-hub progress; not independently decoded or reloaded",
+    "restore_policy": "Copy this snapshot into a fresh isolated test session only; retain the original human session and immutable snapshot"
+  },
+  "scope_limit": "One human rebuilt-package test; no synchronized retail comparison, exhaustive gameplay coverage or additional recovered C credit"
+}

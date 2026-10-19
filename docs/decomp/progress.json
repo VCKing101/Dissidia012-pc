@@ -1,0 +1,539 @@
+{
+  "schema_version": 1,
+  "scope_version": 1,
+  "version": "ULUS10566",
+  "inventory_revision": 18,
+  "generated_at_utc": "2026-10-19T02:51:50.350159+00:00",
+  "whole_game_audited_code_percent": null,
+  "matched_c_functions": 278,
+  "matched_c_bytes": 20944,
+  "executable_section_bytes": 5018140,
+  "mixed_section_coverage_proxy_percent": 0.4174,
+  "provisional_total_functions": 21282,
+  "provisional_function_body_bytes": 4717940,
+  "provisional_function_byte_coverage_percent": 0.4439,
+  "proxy_note": "Includes data embedded in executable overlay sections and import stubs; not audited game-code completion.",
+  "source_languages": [
+    "C",
+    "C++"
+  ],
+  "metric_note": "Legacy matched_c keys count exact original C/C++ function bodies. Discarded compiler inline copies, assembly, SDK stubs and opaque bytes receive no matching-source credit.",
+  "local_source_scopes": [
+    {
+      "scope_id": "menu_controller_members",
+      "scope": "Only the twenty direct member callbacks copied by func_089DD5DC; dispatcher and dependencies are tracked separately. Not the whole menu or game.",
+      "reference_sha256": "f021f96fa05da5907563a28c232966aa8a344526d6b8bdee728053ec75224d0a",
+      "table": "0x089E09E8",
+      "dispatcher": "0x089DD5DC",
+      "dispatcher_matching_source": true,
+      "handler_count": 20,
+      "matching_handlers": 14,
+      "handler_count_percent": 70.0,
+      "reviewed_handler_bytes": 8188,
+      "matching_handler_bytes": 2688,
+      "handler_byte_percent": 32.8285,
+      "extent_checks": "Pinned direct table targets; contiguous inventory extents; terminal jr-ra/delay slot; next known entries; bounded relative branches; no overlaps.",
+      "dependencies_included": false,
+      "runtime_verified": false,
+      "entries": [
+        {
+          "record_index": 0,
+          "address": "0x089DD674",
+          "body_bytes": 152,
+          "next_function": "0x089DD70C",
+          "member_record": "0x089E09E8",
+          "matching_source": true,
+          "source": "src/menu/execution_updates.c"
+        },
+        {
+          "record_index": 1,
+          "address": "0x089DD70C",
+          "body_bytes": 84,
+          "next_function": "0x089DD760",
+          "member_record": "0x089E09F0",
+          "matching_source": true,
+          "source": "src/menu/execution_updates.c"
+        },
+        {
+          "record_index": 2,
+          "address": "0x089DD760",
+          "body_bytes": 464,
+          "next_function": "0x089DD930",
+          "member_record": "0x089E09F8",
+          "matching_source": true,
+          "source": "src/menu/savedata_list_setup.c"
+        },
+        {
+          "record_index": 3,
+          "address": "0x089DD930",
+          "body_bytes": 172,
+          "next_function": "0x089DD9DC",
+          "member_record": "0x089E0A00",
+          "matching_source": true,
+          "source": "src/menu/savedata_list_poll.c"
+        },
+        {
+          "record_index": 4,
+          "address": "0x089DD9DC",
+          "body_bytes": 396,
+          "next_function": "0x089DDB68",
+          "member_record": "0x089E0A08",
+          "matching_source": true,
+          "source": "src/menu/savedata_latest_slot.c"
+        },
+        {
+          "record_index": 5,
+          "address": "0x089DDB68",
+          "body_bytes": 184,
+          "next_function": "0x089DDC20",
+          "member_record": "0x089E0A10",
+          "matching_source": true,
+          "source": "src/menu/savedata_load_poll.c"
+        },
+        {
+          "record_index": 6,
+          "address": "0x089DEAA8",
+          "body_bytes": 968,
+          "next_function": "0x089DEE70",
+          "member_record": "0x089E0A18",
+          "matching_source": false,
+          "source": null
+        },
+        {
+          "record_index": 7,
+          "address": "0x089DDC20",
+          "body_bytes": 164,
+          "next_function": "0x089DDCC4",
+          "member_record": "0x089E0A20",
+          "matching_source": true,
+          "source": "src/menu/context_finish.c"
+        },
+        {
+          "record_index": 8,
+          "address": "0x089DDCC4",
+          "body_bytes": 84,
+          "next_function": "0x089DDD18",
+          "member_record": "0x089E0A28",
+          "matching_source": true,
+          "source": "src/menu/state_branch_select.c"
+        },
+        {
+          "record_index": 9,
+          "address": "0x089DDD18",
+          "body_bytes": 136,
+          "next_function": "0x089DDDA0",
+          "member_record": "0x089E0A30",
+          "matching_source": true,
+          "source": "src/menu/resource_create.c"
+        },
+        {
+          "record_index": 10,
+          "address": "0x089DDDA0",
+          "body_bytes": 184,
+          "next_function": "0x089DDE58",
+          "member_record": "0x089E0A38",
+          "matching_source": true,
+          "source": "src/menu/resource_wait.cpp"
+        },
+        {
+          "record_index": 11,
+          "address": "0x089DDE58",
+          "body_bytes": 204,
+          "next_function": "0x089DDF24",
+          "member_record": "0x089E0A40",
+          "matching_source": true,
+          "source": "src/menu/resource_create_optional.c"
+        },
+        {
+          "record_index": 12,
+          "address": "0x089DDF24",
+          "body_bytes": 228,
+          "next_function": "0x089DE008",
+          "member_record": "0x089E0A48",
+          "matching_source": false,
+          "source": null
+        },
+        {
+          "record_index": 13,
+          "address": "0x089DE008",
+          "body_bytes": 156,
+          "next_function": "0x089DE0A4",
+          "member_record": "0x089E0A50",
+          "matching_source": true,
+          "source": "src/menu/resource_create_selected.c"
+        },
+        {
+          "record_index": 14,
+          "address": "0x089DE0A4",
+          "body_bytes": 300,
+          "next_function": "0x089DE1D0",
+          "member_record": "0x089E0A58",
+          "matching_source": true,
+          "source": "src/menu/resource_presentation.cpp"
+        },
+        {
+          "record_index": 15,
+          "address": "0x089DEE70",
+          "body_bytes": 732,
+          "next_function": "0x089DF14C",
+          "member_record": "0x089E0A60",
+          "matching_source": false,
+          "source": null
+        },
+        {
+          "record_index": 16,
+          "address": "0x089DF14C",
+          "body_bytes": 2212,
+          "next_function": "0x089DF9F0",
+          "member_record": "0x089E0A68",
+          "matching_source": false,
+          "source": null
+        },
+        {
+          "record_index": 17,
+          "address": "0x089DE1D0",
+          "body_bytes": 468,
+          "next_function": "0x089DE3A4",
+          "member_record": "0x089E0A70",
+          "matching_source": false,
+          "source": null
+        },
+        {
+          "record_index": 18,
+          "address": "0x089DF9F0",
+          "body_bytes": 892,
+          "next_function": "0x089DFD6C",
+          "member_record": "0x089E0A78",
+          "matching_source": false,
+          "source": null
+        },
+        {
+          "record_index": 19,
+          "address": "0x089DE3A4",
+          "body_bytes": 8,
+          "next_function": "0x089DE3AC",
+          "member_record": "0x089E0A80",
+          "matching_source": true,
+          "source": "src/menu/final_member_callback.c"
+        }
+      ]
+    }
+  ],
+  "static_savedata_setup": {
+    "slot_capacity": 20,
+    "name_list_records": 21,
+    "slot_record_bytes": 72,
+    "request_bytes": 1536,
+    "payload_offset": 3536,
+    "payload_capacity": 257224,
+    "cached_timestamp_offset": 260760,
+    "observed_allocation_bytes": 260784,
+    "sdk_bindings": [
+      {
+        "address": "0x089C5858",
+        "library": "sceUtility",
+        "nid": "0x50C4CD57",
+        "api": "sceUtilitySavedataInitStart"
+      },
+      {
+        "address": "0x089C5D78",
+        "library": "sceRtc",
+        "nid": "0x6FF40ACC",
+        "api": "sceRtcGetTick"
+      }
+    ],
+    "source_matching_not_assessed": true,
+    "runtime_verified": false,
+    "scope": "Static savedata listing and latest-entry load request mapping; serialization format, full save/profile ownership and runtime validation remain incomplete."
+  },
+  "modules": [
+    {
+      "id": "main",
+      "name": "Main executable",
+      "reference_sha256": "0bc8e779aad2814a3d1bd77346f69ca5e16665845ed053cd0ad44a9cbfaefe6d",
+      "map_status": "provisional",
+      "matched_c_functions": 97,
+      "matched_c_bytes": 6104,
+      "executable_section_bytes": 1841884,
+      "audited_code_completion_percent": null,
+      "module_rebuild_verified": true,
+      "payload_c_coverage_percent": 0.3149,
+      "reconstruction_breakdown": {
+        "assembly_instruction_bytes": 1785388,
+        "raw_instruction_fallback_bytes": 1352,
+        "opaque_original_bytes": 145716
+      },
+      "provisional_functions": 8621,
+      "provisional_function_body_bytes": 1783508,
+      "provisional_function_count_percent": 1.1252,
+      "provisional_function_byte_percent": 0.3422,
+      "inventory_sha256": "496aefc226fe18b84b9aa2e3d04882acabf316f713a0bb79201ae2a66115b787",
+      "inventory_audited": false,
+      "classification_summary": {
+        "executable_section_bytes": 1841884,
+        "decoded_instruction_bytes": 1792844,
+        "defined_data_bytes_in_executable_sections": 0,
+        "padding_or_zero_fill_bytes": 0,
+        "unclassified_executable_bytes": 49040,
+        "function_body_bytes_union": 1783508,
+        "overlapping_function_body_bytes": 0,
+        "function_body_bytes_not_decoded": 0,
+        "decoded_instruction_bytes_outside_functions": 9336,
+        "platform_import_functions": 296,
+        "matched_c_functions": 97
+      }
+    },
+    {
+      "id": "extra",
+      "name": "Extra overlay",
+      "reference_sha256": "f6b7be5e15c28774985417f1ec2c64f6655e79cc3c9dce7600fa7f6bacabca01",
+      "map_status": "boundaries/layout reviewed",
+      "matched_c_functions": 24,
+      "matched_c_bytes": 2116,
+      "executable_section_bytes": 24312,
+      "audited_code_completion_percent": 9.2823,
+      "module_rebuild_verified": true,
+      "payload_c_coverage_percent": 8.7035,
+      "provisional_functions": 100,
+      "provisional_function_body_bytes": 22796,
+      "provisional_function_count_percent": 24.0,
+      "provisional_function_byte_percent": 9.2823,
+      "inventory_sha256": "4d00284fb9186943aec6cae678e9bc35d794c31d43e36b4e7e9ecd76fd36a127",
+      "inventory_audited": true,
+      "classification_summary": {
+        "executable_section_bytes": 24312,
+        "decoded_instruction_bytes": 22796,
+        "defined_data_bytes_in_executable_sections": 1476,
+        "padding_or_zero_fill_bytes": 40,
+        "unclassified_executable_bytes": 0,
+        "function_body_bytes_union": 22796,
+        "overlapping_function_body_bytes": 0,
+        "function_body_bytes_not_decoded": 0,
+        "decoded_instruction_bytes_outside_functions": 0,
+        "platform_import_functions": 0,
+        "matched_c_functions": 24
+      },
+      "audit_scope": "Function boundaries and CPU-code/data/zero-fill partition; not behavior, ownership, or source recovery"
+    },
+    {
+      "id": "menu",
+      "name": "Menu overlay",
+      "reference_sha256": "f021f96fa05da5907563a28c232966aa8a344526d6b8bdee728053ec75224d0a",
+      "map_status": "provisional",
+      "matched_c_functions": 45,
+      "matched_c_bytes": 4344,
+      "executable_section_bytes": 1555864,
+      "audited_code_completion_percent": null,
+      "module_rebuild_verified": true,
+      "payload_c_coverage_percent": 0.2792,
+      "reconstruction_breakdown": {
+        "assembly_instruction_bytes": 1406596,
+        "raw_instruction_fallback_bytes": 64,
+        "opaque_original_bytes": 144860
+      },
+      "provisional_functions": 6294,
+      "provisional_function_body_bytes": 1406464,
+      "provisional_function_count_percent": 0.715,
+      "provisional_function_byte_percent": 0.3089,
+      "inventory_sha256": "41b16cd40c04ef6ad2478de8b7fc3e805f285c7c8cf89a40f107dbbc65faef23",
+      "inventory_audited": false,
+      "classification_summary": {
+        "executable_section_bytes": 1555864,
+        "decoded_instruction_bytes": 1411004,
+        "defined_data_bytes_in_executable_sections": 28711,
+        "padding_or_zero_fill_bytes": 5,
+        "unclassified_executable_bytes": 116144,
+        "function_body_bytes_union": 1406464,
+        "overlapping_function_body_bytes": 0,
+        "function_body_bytes_not_decoded": 0,
+        "decoded_instruction_bytes_outside_functions": 4540,
+        "platform_import_functions": 0,
+        "matched_c_functions": 45
+      }
+    },
+    {
+      "id": "battle",
+      "name": "Battle overlay",
+      "reference_sha256": "1f96cfb3be771ff6e94741ae3916fab340df74e36ede07ca39545d015f4c49dc",
+      "map_status": "provisional",
+      "matched_c_functions": 112,
+      "matched_c_bytes": 8380,
+      "executable_section_bytes": 1596080,
+      "audited_code_completion_percent": null,
+      "module_rebuild_verified": true,
+      "payload_c_coverage_percent": 0.525,
+      "reconstruction_breakdown": {
+        "assembly_instruction_bytes": 1500496,
+        "raw_instruction_fallback_bytes": 24,
+        "opaque_original_bytes": 87180
+      },
+      "provisional_functions": 6267,
+      "provisional_function_body_bytes": 1505172,
+      "provisional_function_count_percent": 1.7871,
+      "provisional_function_byte_percent": 0.5567,
+      "inventory_sha256": "74691dfef78c42e3695e8e9dad4a4b0aec324cb7575db094d0e816479e917daf",
+      "inventory_audited": false,
+      "classification_summary": {
+        "executable_section_bytes": 1596080,
+        "decoded_instruction_bytes": 1508900,
+        "defined_data_bytes_in_executable_sections": 17192,
+        "padding_or_zero_fill_bytes": 0,
+        "unclassified_executable_bytes": 69988,
+        "function_body_bytes_union": 1505172,
+        "overlapping_function_body_bytes": 0,
+        "function_body_bytes_not_decoded": 0,
+        "decoded_instruction_bytes_outside_functions": 3728,
+        "platform_import_functions": 0,
+        "matched_c_functions": 112
+      }
+    }
+  ],
+  "features": [
+    {
+      "id": "data_install",
+      "name": "Data installation",
+      "evidence_rank": 2,
+      "scope_complete": false,
+      "note": "Substantial behavior explained; 24 exact C functions. Table loop and broader state machine unfinished.",
+      "matched_functions": 24,
+      "matched_c_bytes": 2116,
+      "rank_label": "Behavior explained in part",
+      "completion_percent": null
+    },
+    {
+      "id": "save",
+      "name": "Saves and player profile",
+      "evidence_rank": 2,
+      "scope_complete": false,
+      "note": "Four exact owned savedata handlers / 1216 bytes cover the reviewed list/setup, list/poll, latest-slot selection and load/poll slice. Status 0 advances, 4 waits, and unknown statuses fall back. Host tests cover all statuses and request lifetime. Serialization, called services and full feature ownership remain incomplete.",
+      "evidence_functions": [
+        "menu:0x089DD760",
+        "menu:0x089DD930",
+        "menu:0x089DD9DC",
+        "menu:0x089DDB68"
+      ],
+      "matched_functions": 4,
+      "matched_c_bytes": 1216,
+      "rank_label": "Behavior explained in part",
+      "completion_percent": null
+    },
+    {
+      "id": "file_io",
+      "name": "Shared file/archive services",
+      "evidence_rank": 1,
+      "scope_complete": false,
+      "note": "Selected main helpers and support-library interfaces traced; ownership inventory incomplete.",
+      "matched_functions": 0,
+      "matched_c_bytes": 0,
+      "rank_label": "Mapped in part",
+      "completion_percent": null
+    },
+    {
+      "id": "menus",
+      "name": "Menus and configuration",
+      "evidence_rank": 1,
+      "scope_complete": false,
+      "note": "Menu initialization and selected configuration-data helpers mapped; flow ownership and runtime scenarios remain incomplete.",
+      "evidence_functions": [
+        "menu:0x089DD4D0",
+        "menu:0x08A93DF4"
+      ],
+      "matched_functions": 0,
+      "matched_c_bytes": 0,
+      "rank_label": "Mapped in part",
+      "completion_percent": null
+    },
+    {
+      "id": "combat",
+      "name": "Combat, AI and character abilities",
+      "evidence_rank": 1,
+      "scope_complete": false,
+      "note": "Deferred battle setup, callback lifecycle and guarded constructor entry mapped; combat/AI/ability ownership and runtime scenarios remain incomplete.",
+      "evidence_functions": [
+        "main:0x0888C4C8",
+        "battle:0x089DD4D0"
+      ],
+      "matched_functions": 0,
+      "matched_c_bytes": 0,
+      "rank_label": "Mapped in part",
+      "completion_percent": null
+    },
+    {
+      "id": "battle_helpers",
+      "name": "Battle lifecycle and state helpers",
+      "evidence_rank": 1,
+      "scope_complete": false,
+      "note": "112 exact C/C++ routines including curve control, guarded resource cleanup and connected release callees, plus a second activation/cleanup group. Original combat/AI/ability ownership remains incomplete.",
+      "matched_functions": 112,
+      "matched_c_bytes": 8380,
+      "rank_label": "Mapped in part",
+      "completion_percent": null
+    },
+    {
+      "id": "menu_helpers",
+      "name": "Menu lifecycle and configuration helpers",
+      "evidence_rank": 1,
+      "scope_complete": false,
+      "note": "41 exact support routines plus four save-owned handlers; menu total45. Presentation completion callback nowaudited ascode and typedvoid(int). Controller14/20; broader ownership remains incomplete.",
+      "matched_functions": 41,
+      "matched_c_bytes": 3128,
+      "rank_label": "Mapped in part",
+      "completion_percent": null
+    },
+    {
+      "id": "main_helpers",
+      "name": "Main runtime and scalar helpers",
+      "evidence_rank": 1,
+      "scope_complete": false,
+      "note": "97 exact C/C++ routines including typed presentation event callbacks, channel initialization/render gates, task unlink with checked address layout and drawing allocation support. Transition/update, task factory/registration and broader gameplay ownership remain incomplete.",
+      "matched_functions": 97,
+      "matched_c_bytes": 6104,
+      "rank_label": "Mapped in part",
+      "completion_percent": null
+    },
+    {
+      "id": "story",
+      "name": "Story modes and progression",
+      "evidence_rank": 0,
+      "scope_complete": false,
+      "note": "Mode entry points, scripts and shared dependencies not mapped.",
+      "matched_functions": 0,
+      "matched_c_bytes": 0,
+      "rank_label": "Unmapped",
+      "completion_percent": null
+    },
+    {
+      "id": "stages",
+      "name": "Arenas and stages",
+      "evidence_rank": 0,
+      "scope_complete": false,
+      "note": "Code and asset relationships not mapped.",
+      "matched_functions": 0,
+      "matched_c_bytes": 0,
+      "rank_label": "Unmapped",
+      "completion_percent": null
+    },
+    {
+      "id": "cutscenes",
+      "name": "Cutscenes and movie playback",
+      "evidence_rank": 0,
+      "scope_complete": false,
+      "note": "Movie files inventoried; playback code and scripted sequences not mapped.",
+      "matched_functions": 0,
+      "matched_c_bytes": 0,
+      "rank_label": "Unmapped",
+      "completion_percent": null
+    },
+    {
+      "id": "audio",
+      "name": "Audio and presentation",
+      "evidence_rank": 0,
+      "scope_complete": false,
+      "note": "Feature-owned code and assets not mapped.",
+      "matched_functions": 0,
+      "matched_c_bytes": 0,
+      "rank_label": "Unmapped",
+      "completion_percent": null
+    }
+  ]
+}

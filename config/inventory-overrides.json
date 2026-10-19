@@ -1,0 +1,1203 @@
+{
+  "schema_version": 1,
+  "modules": {
+    "extra": {
+      "reference_sha256": "f6b7be5e15c28774985417f1ec2c64f6655e79cc3c9dce7600fa7f6bacabca01",
+      "non_function_ranges": [
+        {
+          "start": "0x089DD4C0",
+          "end": "0x089DD4D0",
+          "evidence": "Leading word 3 and zero fill; spimdisasm labels the first four bytes as a function without a return. Prefix role remains unclassified; do not credit it as a function."
+        }
+      ],
+      "additional_functions": [
+        {
+          "address": "0x089DE668",
+          "size": 8,
+          "name": "func_089DE668",
+          "evidence": "spimdisasm boundary plus manual control-flow review: returns the first argument through a jr-ra delay slot."
+        },
+        {
+          "address": "0x089E0DFC",
+          "size": 28,
+          "name": "func_089E0DFC",
+          "evidence": "spimdisasm boundary plus manual review: global pointer chain, flag update, jr-ra and store delay slot; no interior branch."
+        },
+        {
+          "address": "0x089E0E18",
+          "size": 28,
+          "name": "func_089E0E18",
+          "evidence": "Adjacent independent flag-update leaf with its own jr-ra and store delay slot, ending at the next mapped function."
+        }
+      ],
+      "layout_audit": {
+        "scope": "Function boundaries and CPU-code/data/zero-fill partition; not behavior, ownership, or source recovery",
+        "code_ranges": [
+          {
+            "start": "0x089DD4D0",
+            "end": "0x089DE744"
+          },
+          {
+            "start": "0x089DE7A0",
+            "end": "0x089E2E38"
+          }
+        ],
+        "data_regions": [
+          {
+            "start": "0x089DD4C0",
+            "end": "0x089DD4D0",
+            "kind": "overlay_descriptor",
+            "evidence": "Main loader 0x089331FC passes loaded segment base to 0x0893F810; that walker reads count at +4 and table pointer at +8. Cleanup walker 0x0893F888 reads +6/+12. Extra has tag 3 and zero hook counts/pointers."
+          },
+          {
+            "start": "0x089DE748",
+            "end": "0x089DE74D",
+            "kind": "ascii_string",
+            "evidence": "Pointer at 0x089DE798; file/path helpers receive this string. References confirmed from three matched callers."
+          },
+          {
+            "start": "0x089DE750",
+            "end": "0x089DE758",
+            "kind": "ascii_string",
+            "evidence": "Device name passed by the matched lifecycle routines to sceIoDevctl."
+          },
+          {
+            "start": "0x089DE758",
+            "end": "0x089DE76B",
+            "kind": "ascii_string",
+            "evidence": "Name passed to sceKernelCreateCallback by the matched initializer."
+          },
+          {
+            "start": "0x089DE76C",
+            "end": "0x089DE77D",
+            "kind": "ascii_string",
+            "evidence": "Second callback name in the matched initializer."
+          },
+          {
+            "start": "0x089DE788",
+            "end": "0x089DE7A0",
+            "kind": "static_globals",
+            "evidence": "Two eight-byte constants and two four-byte pointers, accessed by matched setup/transfer/callback routines."
+          },
+          {
+            "start": "0x089E2E38",
+            "end": "0x089E2E57",
+            "kind": "ascii_string",
+            "evidence": "Pointer stored at 0x089E32C8, consumed as a string by 0x089DE7A0."
+          },
+          {
+            "start": "0x089E2E58",
+            "end": "0x089E2E6A",
+            "kind": "ascii_string",
+            "evidence": "Pointer at 0x089E32CC, read and passed by 0x089DFA1C."
+          },
+          {
+            "start": "0x089E2E6C",
+            "end": "0x089E2F11",
+            "kind": "ascii_pool",
+            "evidence": "Strings pointed to by the records at 0x089E32D0; that table is passed by 0x089DE7A0."
+          },
+          {
+            "start": "0x089E2F12",
+            "end": "0x089E2FCA",
+            "kind": "binary_configuration",
+            "evidence": "Binary configuration streams passed from 0x089DFA1C and 0x089E0088 to main helpers; no flow references into this data island."
+          },
+          {
+            "start": "0x089E2FCA",
+            "end": "0x089E3242",
+            "kind": "halfword_records",
+            "evidence": "0x089DF3D4 and 0x089DF424 read unsigned halfwords, advance by eight bytes and test 0xFFFF sentinels. Other subtables are passed to UI helpers."
+          },
+          {
+            "start": "0x089E3244",
+            "end": "0x089E324B",
+            "kind": "ascii_string",
+            "evidence": "Label supplied by initialization at 0x089DE9DC."
+          },
+          {
+            "start": "0x089E324C",
+            "end": "0x089E3252",
+            "kind": "utf16_string",
+            "evidence": "UTF-16 formatting string passed by 0x089DECF0 and 0x089DEEB8; Ghidra's ASCII recognition missed most of it."
+          },
+          {
+            "start": "0x089E3258",
+            "end": "0x089E3260",
+            "kind": "static_globals",
+            "evidence": "Eight-byte value loaded as two words by 0x089DEEB8 and event routines."
+          },
+          {
+            "start": "0x089E3260",
+            "end": "0x089E3267",
+            "kind": "ascii_string",
+            "evidence": "Formatting/path string passed by 0x089DF0A8."
+          },
+          {
+            "start": "0x089E3268",
+            "end": "0x089E3280",
+            "kind": "static_globals",
+            "evidence": "Three eight-byte values loaded in low/high word pairs by code."
+          },
+          {
+            "start": "0x089E3280",
+            "end": "0x089E328D",
+            "kind": "ascii_string",
+            "evidence": "Identifier passed by 0x089E0CA4."
+          },
+          {
+            "start": "0x089E3290",
+            "end": "0x089E32A8",
+            "kind": "static_globals",
+            "evidence": "Three eight-byte flag values, followed by the separately consumed switch table."
+          },
+          {
+            "start": "0x089E32A8",
+            "end": "0x089E32C4",
+            "kind": "jump_table",
+            "evidence": "0x089E13E0 checks index below seven, scales by four, loads this table and jumps through the selected word at 0x089E13FC."
+          },
+          {
+            "start": "0x089E32C8",
+            "end": "0x089E32F8",
+            "kind": "string_pointer_records",
+            "evidence": "Two string pointers followed by flag/pointer records and a 0xFFFF/null sentinel; initialization consumes the table."
+          },
+          {
+            "start": "0x089E32F8",
+            "end": "0x089E330C",
+            "kind": "binary_configuration",
+            "evidence": "Configuration blob passed from 0x089DE998 to a main helper; never a flow destination."
+          },
+          {
+            "start": "0x089E330C",
+            "end": "0x089E3310",
+            "kind": "static_globals",
+            "evidence": "Four-byte context pointer, read by the flag-update leaf routines and other instance wrappers."
+          },
+          {
+            "start": "0x089E3310",
+            "end": "0x089E33B8",
+            "kind": "member_dispatch_table",
+            "evidence": "0x089DEB00 copies 168 bytes, indexes eight-byte records, reads signed halfwords at +0/+2 and an address at +4, then invokes the resolved member target."
+          }
+        ],
+        "padding_regions": [
+          {
+            "start": "0x089DE744",
+            "end": "0x089DE748"
+          },
+          {
+            "start": "0x089DE74D",
+            "end": "0x089DE750"
+          },
+          {
+            "start": "0x089DE76B",
+            "end": "0x089DE76C"
+          },
+          {
+            "start": "0x089DE77D",
+            "end": "0x089DE788"
+          },
+          {
+            "start": "0x089E2E57",
+            "end": "0x089E2E58"
+          },
+          {
+            "start": "0x089E2E6A",
+            "end": "0x089E2E6C"
+          },
+          {
+            "start": "0x089E2F11",
+            "end": "0x089E2F12"
+          },
+          {
+            "start": "0x089E3242",
+            "end": "0x089E3244"
+          },
+          {
+            "start": "0x089E324B",
+            "end": "0x089E324C"
+          },
+          {
+            "start": "0x089E3252",
+            "end": "0x089E3258"
+          },
+          {
+            "start": "0x089E3267",
+            "end": "0x089E3268"
+          },
+          {
+            "start": "0x089E328D",
+            "end": "0x089E3290"
+          },
+          {
+            "start": "0x089E32C4",
+            "end": "0x089E32C8"
+          }
+        ]
+      }
+    },
+    "menu": {
+      "reference_sha256": "f021f96fa05da5907563a28c232966aa8a344526d6b8bdee728053ec75224d0a",
+      "data_island_audit": {
+        "scope": "Partial review of two menu data islands; full module layout, function boundaries and ownership remain provisional",
+        "readers": {
+          "main:0x088D3910": {
+            "stride": 4,
+            "sentinel_offset": 0,
+            "sentinel_load_pc": "0x088D3940",
+            "sentinel_constant_pc": "0x088D393C",
+            "sentinel_branch_pc": "0x088D3950",
+            "stride_pc": "0x088D39D0"
+          },
+          "main:0x088D3B88": {
+            "stride": 4,
+            "sentinel_offset": 0,
+            "sentinel_load_pc": "0x088D3BAC",
+            "sentinel_constant_pc": "0x088D3BA8",
+            "sentinel_branch_pc": "0x088D3BC0",
+            "stride_pc": "0x088D3BF4"
+          },
+          "main:0x088D3C24": {
+            "stride": 4,
+            "sentinel_offset": 0,
+            "sentinel_load_pc": "0x088D3C3C",
+            "sentinel_constant_pc": "0x088D3C38",
+            "sentinel_branch_pc": "0x088D3C48",
+            "stride_pc": "0x088D3C8C"
+          },
+          "main:0x088D3CF0": {
+            "stride": 8,
+            "sentinel_offset": 0,
+            "sentinel_load_pc": "0x088D3D08",
+            "sentinel_constant_pc": "0x088D3D04",
+            "sentinel_branch_pc": "0x088D3D14",
+            "stride_pc": "0x088D3D6C"
+          },
+          "main:0x088D3F00": {
+            "stride": 8,
+            "sentinel_offset": 0,
+            "sentinel_load_pc": "0x088D3F18",
+            "sentinel_constant_pc": "0x088D3F14",
+            "sentinel_branch_pc": "0x088D3F24",
+            "stride_pc": "0x088D3F58"
+          },
+          "main:0x088D3F7C": {
+            "stride": 6,
+            "sentinel_offset": 0,
+            "sentinel_load_pc": "0x088D3FA0",
+            "sentinel_constant_pc": "0x088D3F9C",
+            "sentinel_branch_pc": "0x088D3FB0",
+            "stride_pc": "0x088D4090"
+          },
+          "main:0x088D428C": {
+            "stride": 8,
+            "sentinel_offset": 4,
+            "sentinel_load_pc": "0x088D42F4",
+            "sentinel_constant_pc": "0x088D429C",
+            "sentinel_branch_pc": "0x088D42F8",
+            "stride_pc": "0x088D4344"
+          },
+          "main:0x088D44EC": {
+            "stride": 8,
+            "sentinel_offset": 4,
+            "sentinel_load_pc": "0x088D450C",
+            "sentinel_constant_pc": "0x088D4508",
+            "sentinel_branch_pc": "0x088D4518",
+            "stride_pc": "0x088D455C"
+          }
+        },
+        "data_regions": [
+          {
+            "start": "0x08A08EF8",
+            "end": "0x08A08FD9",
+            "kind": "ascii_resource_paths",
+            "string_count": 6
+          },
+          {
+            "start": "0x08A08FDA",
+            "end": "0x08A09102",
+            "kind": "sentinel_halfword_table",
+            "stride": 4,
+            "sentinel_offset": 0,
+            "evidence": {
+              "high_pc": "0x089FFB74",
+              "low_pc": "0x089FFB8C",
+              "call_pc": "0x089FFB88",
+              "consumer": "main:0x088D3910"
+            }
+          },
+          {
+            "start": "0x08A09102",
+            "end": "0x08A094B6",
+            "kind": "sentinel_halfword_table",
+            "stride": 4,
+            "sentinel_offset": 0,
+            "evidence": {
+              "high_pc": "0x089FFB98",
+              "low_pc": "0x089FFBAC",
+              "call_pc": "0x089FFBA8",
+              "consumer": "main:0x088D3B88"
+            }
+          },
+          {
+            "start": "0x08A094B6",
+            "end": "0x08A094DE",
+            "kind": "sentinel_halfword_table",
+            "stride": 4,
+            "sentinel_offset": 0,
+            "evidence": {
+              "high_pc": "0x089F6540",
+              "low_pc": "0x089F6568",
+              "call_pc": "0x089F6564",
+              "consumer": "main:0x088D3B88"
+            }
+          },
+          {
+            "start": "0x08A094DE",
+            "end": "0x08A09506",
+            "kind": "sentinel_halfword_table",
+            "stride": 4,
+            "sentinel_offset": 0,
+            "evidence": {
+              "high_pc": "0x089F679C",
+              "low_pc": "0x089F67C8",
+              "call_pc": "0x089F67C4",
+              "consumer": "main:0x088D3B88"
+            }
+          },
+          {
+            "start": "0x08A09506",
+            "end": "0x08A09542",
+            "kind": "sentinel_halfword_table",
+            "stride": 4,
+            "sentinel_offset": 0,
+            "evidence": {
+              "high_pc": "0x089FB138",
+              "low_pc": "0x089FB14C",
+              "call_pc": "0x089FB148",
+              "consumer": "main:0x088D3C24"
+            }
+          },
+          {
+            "start": "0x08A09542",
+            "end": "0x08A0962A",
+            "kind": "sentinel_halfword_table",
+            "stride": 4,
+            "sentinel_offset": 0,
+            "evidence": {
+              "high_pc": "0x089F9B2C",
+              "low_pc": "0x089F9B40",
+              "call_pc": "0x089F9B3C",
+              "consumer": "main:0x088D3B88"
+            }
+          },
+          {
+            "start": "0x08A0962A",
+            "end": "0x08A0963C",
+            "kind": "sentinel_halfword_table",
+            "stride": 6,
+            "sentinel_offset": 0,
+            "evidence": {
+              "high_pc": "0x089FFB48",
+              "low_pc": "0x089FFB50",
+              "call_pc": "0x089FFB68",
+              "consumer": "main:0x088D3F7C"
+            }
+          },
+          {
+            "start": "0x08A0963C",
+            "end": "0x08A096A2",
+            "kind": "sentinel_halfword_table",
+            "stride": 6,
+            "sentinel_offset": 0,
+            "evidence": {
+              "high_pc": "0x089FB730",
+              "low_pc": "0x089FB740",
+              "call_pc": "0x089FB73C",
+              "consumer": "main:0x088D3F7C"
+            }
+          },
+          {
+            "start": "0x08A096A2",
+            "end": "0x08A096C2",
+            "kind": "sentinel_halfword_table",
+            "stride": 8,
+            "sentinel_offset": 0,
+            "evidence": {
+              "high_pc": "0x089F5EA8",
+              "low_pc": "0x089F5EAC",
+              "call_pc": "0x089F5EBC",
+              "consumer": "main:0x088D3CF0"
+            }
+          },
+          {
+            "start": "0x08A096C2",
+            "end": "0x08A097BA",
+            "kind": "sentinel_halfword_table",
+            "stride": 8,
+            "sentinel_offset": 0,
+            "evidence": {
+              "high_pc": "0x089F5A60",
+              "low_pc": "0x089F5A70",
+              "call_pc": "0x089F5A6C",
+              "consumer": "main:0x088D3CF0"
+            }
+          },
+          {
+            "start": "0x08A097BA",
+            "end": "0x08A09A4A",
+            "kind": "sentinel_halfword_table",
+            "stride": 8,
+            "sentinel_offset": 0,
+            "evidence": {
+              "high_pc": "0x089F7C64",
+              "low_pc": "0x089F7C70",
+              "call_pc": "0x089F7C6C",
+              "consumer": "main:0x088D3F00"
+            }
+          },
+          {
+            "start": "0x08A09A4A",
+            "end": "0x08A09A8A",
+            "kind": "sentinel_halfword_table",
+            "stride": 8,
+            "sentinel_offset": 0,
+            "evidence": {
+              "high_pc": "0x089F75B4",
+              "low_pc": "0x089F75C4",
+              "call_pc": "0x089F75C0",
+              "consumer": "main:0x088D3F00"
+            }
+          },
+          {
+            "start": "0x08A09A8A",
+            "end": "0x08A09AFA",
+            "kind": "sentinel_halfword_table",
+            "stride": 8,
+            "sentinel_offset": 0,
+            "evidence": {
+              "high_pc": "0x089F5780",
+              "low_pc": "0x089F57A8",
+              "call_pc": "0x089F57A4",
+              "consumer": "main:0x088D3CF0"
+            }
+          },
+          {
+            "start": "0x08A09AFA",
+            "end": "0x08A09B0A",
+            "kind": "sentinel_halfword_table",
+            "stride": 8,
+            "sentinel_offset": 0,
+            "evidence": {
+              "high_pc": "0x089F5F0C",
+              "low_pc": "0x089F5F18",
+              "call_pc": "0x089F5F14",
+              "consumer": "main:0x088D3CF0"
+            }
+          },
+          {
+            "start": "0x08A09B0A",
+            "end": "0x08A09B1A",
+            "kind": "sentinel_halfword_table",
+            "stride": 8,
+            "sentinel_offset": 4,
+            "evidence": {
+              "high_pc": "0x089F3C90",
+              "low_pc": "0x089F3C9C",
+              "call_pc": "0x089F3C98",
+              "consumer": "main:0x088D44EC"
+            }
+          },
+          {
+            "start": "0x08A09B1A",
+            "end": "0x08A09B2A",
+            "kind": "sentinel_halfword_table",
+            "stride": 8,
+            "sentinel_offset": 0,
+            "evidence": {
+              "high_pc": "0x089F5F24",
+              "low_pc": "0x089F5F30",
+              "call_pc": "0x089F5F2C",
+              "consumer": "main:0x088D3CF0"
+            }
+          },
+          {
+            "start": "0x08A09B2A",
+            "end": "0x08A09B4A",
+            "kind": "sentinel_halfword_table",
+            "stride": 8,
+            "sentinel_offset": 4,
+            "evidence": {
+              "high_pc": "0x089F3E00",
+              "low_pc": "0x089F3E10",
+              "call_pc": "0x089F3E0C",
+              "consumer": "main:0x088D44EC"
+            }
+          },
+          {
+            "start": "0x08A09B4A",
+            "end": "0x08A09B82",
+            "kind": "sentinel_halfword_table",
+            "stride": 8,
+            "sentinel_offset": 0,
+            "evidence": {
+              "high_pc": "0x089F4568",
+              "low_pc": "0x089F4578",
+              "call_pc": "0x089F4574",
+              "consumer": "main:0x088D3CF0"
+            }
+          },
+          {
+            "start": "0x08A09B82",
+            "end": "0x08A09BBA",
+            "kind": "sentinel_halfword_table",
+            "stride": 8,
+            "sentinel_offset": 4,
+            "evidence": {
+              "high_pc": "0x089F45A0",
+              "low_pc": "0x089F45AC",
+              "call_pc": "0x089F45B0",
+              "consumer": "main:0x088D428C"
+            }
+          },
+          {
+            "start": "0x08A09BBA",
+            "end": "0x08A09BF2",
+            "kind": "sentinel_halfword_table",
+            "stride": 8,
+            "sentinel_offset": 0,
+            "evidence": {
+              "high_pc": "0x089F508C",
+              "low_pc": "0x089F509C",
+              "call_pc": "0x089F5098",
+              "consumer": "main:0x088D3F00"
+            }
+          },
+          {
+            "start": "0x08A09BF2",
+            "end": "0x08A09C22",
+            "kind": "sentinel_halfword_table",
+            "stride": 8,
+            "sentinel_offset": 4,
+            "evidence": {
+              "high_pc": "0x089F50A8",
+              "low_pc": "0x089F50B4",
+              "call_pc": "0x089F50B0",
+              "consumer": "main:0x088D44EC"
+            }
+          },
+          {
+            "start": "0x08A09C22",
+            "end": "0x08A09C3A",
+            "kind": "sentinel_halfword_table",
+            "stride": 8,
+            "sentinel_offset": 0,
+            "evidence": {
+              "high_pc": "0x089F5214",
+              "low_pc": "0x089F5224",
+              "call_pc": "0x089F5220",
+              "consumer": "main:0x088D3F00"
+            }
+          },
+          {
+            "start": "0x08A09C3A",
+            "end": "0x08A09C62",
+            "kind": "sentinel_halfword_table",
+            "stride": 8,
+            "sentinel_offset": 4,
+            "evidence": {
+              "high_pc": "0x089F5230",
+              "low_pc": "0x089F523C",
+              "call_pc": "0x089F5238",
+              "consumer": "main:0x088D44EC"
+            }
+          },
+          {
+            "start": "0x08A09C62",
+            "end": "0x08A09C9A",
+            "kind": "sentinel_halfword_table",
+            "stride": 8,
+            "sentinel_offset": 0,
+            "evidence": {
+              "high_pc": "0x089F50F4",
+              "low_pc": "0x089F5104",
+              "call_pc": "0x089F5100",
+              "consumer": "main:0x088D3F00"
+            }
+          },
+          {
+            "start": "0x08A09C9A",
+            "end": "0x08A09CB2",
+            "kind": "sentinel_halfword_table",
+            "stride": 8,
+            "sentinel_offset": 4,
+            "evidence": {
+              "high_pc": "0x089F5110",
+              "low_pc": "0x089F511C",
+              "call_pc": "0x089F5118",
+              "consumer": "main:0x088D44EC"
+            }
+          },
+          {
+            "start": "0x08A09CB2",
+            "end": "0x08A09CDA",
+            "kind": "sentinel_halfword_table",
+            "stride": 8,
+            "sentinel_offset": 0,
+            "evidence": {
+              "high_pc": "0x089F515C",
+              "low_pc": "0x089F516C",
+              "call_pc": "0x089F5168",
+              "consumer": "main:0x088D3F00"
+            }
+          },
+          {
+            "start": "0x08A09CDA",
+            "end": "0x08A09CFA",
+            "kind": "sentinel_halfword_table",
+            "stride": 8,
+            "sentinel_offset": 4,
+            "evidence": {
+              "high_pc": "0x089F5178",
+              "low_pc": "0x089F5184",
+              "call_pc": "0x089F5180",
+              "consumer": "main:0x088D44EC"
+            }
+          },
+          {
+            "start": "0x08A09CFA",
+            "end": "0x08A09D2A",
+            "kind": "sentinel_halfword_table",
+            "stride": 8,
+            "sentinel_offset": 0,
+            "evidence": {
+              "high_pc": "0x089F51AC",
+              "low_pc": "0x089F51BC",
+              "call_pc": "0x089F51B8",
+              "consumer": "main:0x088D3F00"
+            }
+          },
+          {
+            "start": "0x08A09D2A",
+            "end": "0x08A09D42",
+            "kind": "sentinel_halfword_table",
+            "stride": 8,
+            "sentinel_offset": 4,
+            "evidence": {
+              "high_pc": "0x089F51C8",
+              "low_pc": "0x089F51D4",
+              "call_pc": "0x089F51D0",
+              "consumer": "main:0x088D44EC"
+            }
+          },
+          {
+            "start": "0x08A09D42",
+            "end": "0x08A09D6A",
+            "kind": "sentinel_halfword_table",
+            "stride": 8,
+            "sentinel_offset": 0,
+            "evidence": {
+              "high_pc": "0x089F5264",
+              "low_pc": "0x089F5274",
+              "call_pc": "0x089F5270",
+              "consumer": "main:0x088D3F00"
+            }
+          },
+          {
+            "start": "0x08A09D6A",
+            "end": "0x08A09DA2",
+            "kind": "sentinel_halfword_table",
+            "stride": 8,
+            "sentinel_offset": 4,
+            "evidence": {
+              "high_pc": "0x089F5280",
+              "low_pc": "0x089F528C",
+              "call_pc": "0x089F5288",
+              "consumer": "main:0x088D44EC"
+            }
+          },
+          {
+            "start": "0x08A09DA2",
+            "end": "0x08A09DE2",
+            "kind": "sentinel_halfword_table",
+            "stride": 8,
+            "sentinel_offset": 0,
+            "evidence": {
+              "high_pc": "0x089F52B4",
+              "low_pc": "0x089F52C4",
+              "call_pc": "0x089F52C0",
+              "consumer": "main:0x088D3F00"
+            }
+          },
+          {
+            "start": "0x08A09DE2",
+            "end": "0x08A09E0A",
+            "kind": "sentinel_halfword_table",
+            "stride": 8,
+            "sentinel_offset": 4,
+            "evidence": {
+              "high_pc": "0x089F52D0",
+              "low_pc": "0x089F52DC",
+              "call_pc": "0x089F52D8",
+              "consumer": "main:0x088D44EC"
+            }
+          },
+          {
+            "start": "0x08A09E0A",
+            "end": "0x08A09E3A",
+            "kind": "sentinel_halfword_table",
+            "stride": 8,
+            "sentinel_offset": 0,
+            "evidence": {
+              "high_pc": "0x089F5304",
+              "low_pc": "0x089F5314",
+              "call_pc": "0x089F5310",
+              "consumer": "main:0x088D3F00"
+            }
+          },
+          {
+            "start": "0x08A09E3A",
+            "end": "0x08A09E52",
+            "kind": "sentinel_halfword_table",
+            "stride": 8,
+            "sentinel_offset": 4,
+            "evidence": {
+              "high_pc": "0x089F5320",
+              "low_pc": "0x089F532C",
+              "call_pc": "0x089F5328",
+              "consumer": "main:0x088D44EC"
+            }
+          },
+          {
+            "start": "0x08A09E52",
+            "end": "0x08A09EC2",
+            "kind": "sentinel_halfword_table",
+            "stride": 8,
+            "sentinel_offset": 0,
+            "evidence": {
+              "high_pc": "0x08A0036C",
+              "low_pc": "0x08A00374",
+              "call_pc": "0x08A00370",
+              "consumer": "main:0x088D3CF0"
+            }
+          },
+          {
+            "start": "0x08A09EC2",
+            "end": "0x08A0A032",
+            "kind": "sentinel_halfword_table",
+            "stride": 8,
+            "sentinel_offset": 0,
+            "evidence": {
+              "high_pc": "0x08A0037C",
+              "low_pc": "0x08A0038C",
+              "call_pc": "0x08A00388",
+              "consumer": "main:0x088D3CF0"
+            }
+          },
+          {
+            "start": "0x08A0A032",
+            "end": "0x08A0A052",
+            "kind": "sentinel_halfword_table",
+            "stride": 8,
+            "sentinel_offset": 4,
+            "evidence": {
+              "high_pc": "0x08A00510",
+              "low_pc": "0x08A00520",
+              "call_pc": "0x08A0051C",
+              "consumer": "main:0x088D428C"
+            }
+          },
+          {
+            "start": "0x08A0A052",
+            "end": "0x08A0A0A2",
+            "kind": "sentinel_halfword_table",
+            "stride": 8,
+            "sentinel_offset": 0,
+            "evidence": {
+              "high_pc": "0x08A00548",
+              "low_pc": "0x08A00550",
+              "call_pc": "0x08A0054C",
+              "consumer": "main:0x088D3CF0"
+            }
+          },
+          {
+            "start": "0x08A0A0A2",
+            "end": "0x08A0A0E2",
+            "kind": "sentinel_halfword_table",
+            "stride": 8,
+            "sentinel_offset": 4,
+            "evidence": {
+              "high_pc": "0x08A00594",
+              "low_pc": "0x08A005A0",
+              "call_pc": "0x08A005A4",
+              "consumer": "main:0x088D428C"
+            }
+          },
+          {
+            "start": "0x08A0A0E2",
+            "end": "0x08A0A0F2",
+            "kind": "sentinel_halfword_table",
+            "stride": 8,
+            "sentinel_offset": 0,
+            "evidence": {
+              "high_pc": "0x089F5354",
+              "low_pc": "0x089F5364",
+              "call_pc": "0x089F5360",
+              "consumer": "main:0x088D3F00"
+            }
+          },
+          {
+            "start": "0x08A0A0F2",
+            "end": "0x08A0A102",
+            "kind": "sentinel_halfword_table",
+            "stride": 8,
+            "sentinel_offset": 4,
+            "evidence": {
+              "high_pc": "0x089F5370",
+              "low_pc": "0x089F537C",
+              "call_pc": "0x089F5378",
+              "consumer": "main:0x088D44EC"
+            }
+          },
+          {
+            "start": "0x08A0A102",
+            "end": "0x08A0A12A",
+            "kind": "sentinel_halfword_table",
+            "stride": 8,
+            "sentinel_offset": 0,
+            "evidence": {
+              "high_pc": "0x08A001EC",
+              "low_pc": "0x08A001F8",
+              "call_pc": "0x08A001F4",
+              "consumer": "main:0x088D3CF0"
+            }
+          },
+          {
+            "start": "0x08A0A12A",
+            "end": "0x08A0A152",
+            "kind": "sentinel_halfword_table",
+            "stride": 8,
+            "sentinel_offset": 0,
+            "evidence": {
+              "high_pc": "0x08A00240",
+              "low_pc": "0x08A0024C",
+              "call_pc": "0x08A00248",
+              "consumer": "main:0x088D3CF0"
+            }
+          },
+          {
+            "start": "0x08A0A152",
+            "end": "0x08A0A192",
+            "kind": "sentinel_halfword_table",
+            "stride": 8,
+            "sentinel_offset": 0,
+            "evidence": {
+              "high_pc": "0x089F5EE4",
+              "low_pc": "0x089F5EF0",
+              "call_pc": "0x089F5EEC",
+              "consumer": "main:0x088D3CF0"
+            }
+          },
+          {
+            "start": "0x08A0A192",
+            "end": "0x08A0A1CA",
+            "kind": "sentinel_halfword_table",
+            "stride": 8,
+            "sentinel_offset": 4,
+            "evidence": {
+              "high_pc": "0x089FF874",
+              "low_pc": "0x089FF880",
+              "pointer_register": 17,
+              "argument_move_pc": "0x089FF9D8",
+              "call_pc": "0x089FF9E0",
+              "consumer": "main:0x088D428C"
+            }
+          },
+          {
+            "start": "0x08A0A1CA",
+            "end": "0x08A0A1DA",
+            "kind": "sentinel_halfword_table",
+            "stride": 8,
+            "sentinel_offset": 0,
+            "evidence": {
+              "high_pc": "0x089F9CCC",
+              "low_pc": "0x089F9CE4",
+              "call_pc": "0x089F9CE0",
+              "consumer": "main:0x088D3F00"
+            }
+          },
+          {
+            "start": "0x08A0A1DA",
+            "end": "0x08A0A1FA",
+            "kind": "sentinel_halfword_table",
+            "stride": 8,
+            "sentinel_offset": 0,
+            "evidence": {
+              "high_pc": "0x089F8B44",
+              "low_pc": "0x089F8B50",
+              "call_pc": "0x089F8B4C",
+              "consumer": "main:0x088D3CF0"
+            }
+          },
+          {
+            "start": "0x08A0A1FA",
+            "end": "0x08A0A212",
+            "kind": "sentinel_halfword_table",
+            "stride": 8,
+            "sentinel_offset": 4,
+            "evidence": {
+              "high_pc": "0x089F8BD0",
+              "low_pc": "0x089F8BEC",
+              "call_pc": "0x089F8BE8",
+              "consumer": "main:0x088D428C"
+            }
+          },
+          {
+            "start": "0x08A0A212",
+            "end": "0x08A0A23A",
+            "kind": "sentinel_halfword_table",
+            "stride": 8,
+            "sentinel_offset": 0,
+            "evidence": {
+              "high_pc": "0x089F8D00",
+              "low_pc": "0x089F8D0C",
+              "call_pc": "0x089F8D08",
+              "consumer": "main:0x088D3CF0"
+            }
+          },
+          {
+            "start": "0x08A0A23A",
+            "end": "0x08A0A2B2",
+            "kind": "sentinel_halfword_table",
+            "stride": 8,
+            "sentinel_offset": 0,
+            "evidence": {
+              "high_pc": "0x08A03D8C",
+              "low_pc": "0x08A03D9C",
+              "call_pc": "0x08A03D98",
+              "consumer": "main:0x088D3CF0"
+            }
+          },
+          {
+            "start": "0x08A0A2B2",
+            "end": "0x08A0A3E2",
+            "kind": "sentinel_halfword_table",
+            "stride": 8,
+            "sentinel_offset": 4,
+            "evidence": {
+              "high_pc": "0x08A040CC",
+              "low_pc": "0x08A040DC",
+              "call_pc": "0x08A040D8",
+              "consumer": "main:0x088D428C"
+            }
+          },
+          {
+            "start": "0x08A0A3E2",
+            "end": "0x08A0A40A",
+            "kind": "sentinel_halfword_table",
+            "stride": 8,
+            "sentinel_offset": 0,
+            "evidence": {
+              "high_pc": "0x089F9174",
+              "low_pc": "0x089F9180",
+              "call_pc": "0x089F917C",
+              "consumer": "main:0x088D3F00"
+            }
+          },
+          {
+            "start": "0x08A0A40A",
+            "end": "0x08A0A45A",
+            "kind": "sentinel_halfword_table",
+            "stride": 8,
+            "sentinel_offset": 4,
+            "evidence": {
+              "high_pc": "0x089F9188",
+              "low_pc": "0x089F9198",
+              "call_pc": "0x089F9194",
+              "consumer": "main:0x088D44EC"
+            }
+          },
+          {
+            "start": "0x08A0A45A",
+            "end": "0x08A0A46A",
+            "kind": "sentinel_halfword_table",
+            "stride": 8,
+            "sentinel_offset": 0,
+            "evidence": {
+              "high_pc": "0x089F9220",
+              "low_pc": "0x089F922C",
+              "call_pc": "0x089F9228",
+              "consumer": "main:0x088D3CF0"
+            }
+          },
+          {
+            "start": "0x08A0A46A",
+            "end": "0x08A0A4D2",
+            "kind": "sentinel_halfword_table",
+            "stride": 8,
+            "sentinel_offset": 0,
+            "evidence": {
+              "high_pc": "0x089F9318",
+              "low_pc": "0x089F9324",
+              "call_pc": "0x089F9320",
+              "consumer": "main:0x088D3F00"
+            }
+          },
+          {
+            "start": "0x08A0A4D2",
+            "end": "0x08A0A59A",
+            "kind": "sentinel_halfword_table",
+            "stride": 8,
+            "sentinel_offset": 4,
+            "evidence": {
+              "high_pc": "0x089F932C",
+              "low_pc": "0x089F933C",
+              "call_pc": "0x089F9338",
+              "consumer": "main:0x088D44EC"
+            }
+          },
+          {
+            "start": "0x08A0A59A",
+            "end": "0x08A0A5AA",
+            "kind": "sentinel_halfword_table",
+            "stride": 8,
+            "sentinel_offset": 0,
+            "evidence": {
+              "high_pc": "0x089F96A8",
+              "low_pc": "0x089F96B4",
+              "call_pc": "0x089F96B0",
+              "consumer": "main:0x088D3CF0"
+            }
+          },
+          {
+            "start": "0x08A0A5AA",
+            "end": "0x08A0A642",
+            "kind": "sentinel_halfword_table",
+            "stride": 8,
+            "sentinel_offset": 0,
+            "evidence": {
+              "high_pc": "0x089F99F4",
+              "low_pc": "0x089F9A00",
+              "call_pc": "0x089F99FC",
+              "consumer": "main:0x088D3F00"
+            }
+          },
+          {
+            "start": "0x08A0A642",
+            "end": "0x08A0A672",
+            "kind": "sentinel_halfword_table",
+            "stride": 8,
+            "sentinel_offset": 4,
+            "evidence": {
+              "high_pc": "0x089F9A08",
+              "low_pc": "0x089F9A18",
+              "call_pc": "0x089F9A14",
+              "consumer": "main:0x088D44EC"
+            }
+          },
+          {
+            "start": "0x08A93E20",
+            "end": "0x08A946F0",
+            "kind": "numeric_configuration_island",
+            "getters": [
+              {
+                "entry": "0x08A93D78",
+                "target": "0x08A93E24",
+                "high_pc": "0x08A93D78",
+                "return_pc": "0x08A93D7C",
+                "low_pc": "0x08A93D80"
+              },
+              {
+                "entry": "0x08A93DC4",
+                "target": "0x08A9443C",
+                "high_pc": "0x08A93DC4",
+                "return_pc": "0x08A93DC8",
+                "low_pc": "0x08A93DCC"
+              },
+              {
+                "entry": "0x08A93DD0",
+                "target": "0x08A94638",
+                "high_pc": "0x08A93DD0",
+                "return_pc": "0x08A93DD4",
+                "low_pc": "0x08A93DD8"
+              },
+              {
+                "entry": "0x08A93DDC",
+                "target": "0x08A94670",
+                "high_pc": "0x08A93DDC",
+                "return_pc": "0x08A93DE0",
+                "low_pc": "0x08A93DE4"
+              },
+              {
+                "entry": "0x08A93DE8",
+                "target": "0x08A94568",
+                "high_pc": "0x08A93DE8",
+                "return_pc": "0x08A93DEC",
+                "low_pc": "0x08A93DF0"
+              }
+            ],
+            "initializer_pointer_slot": "0x08A94668",
+            "initializer": {
+              "entry": "0x08A93DF4",
+              "constant_pointer": {
+                "high_pc": "0x08A93DF4",
+                "low_pc": "0x08A93DF8",
+                "memory_load": true
+              },
+              "load_pc": "0x08A93DF8",
+              "object_pointer": {
+                "high_pc": "0x08A93E08",
+                "low_pc": "0x08A93E0C"
+              },
+              "object_base": "0x08A94670",
+              "write_pcs": [
+                "0x08A93E10",
+                "0x08A93E18"
+              ]
+            }
+          }
+        ],
+        "padding_regions": [
+          {
+            "start": "0x08A08FD9",
+            "end": "0x08A08FDA"
+          },
+          {
+            "start": "0x08A93E1C",
+            "end": "0x08A93E20"
+          }
+        ]
+      },
+      "additional_functions": [
+        {
+          "address": "0x089DE3A4",
+          "size": 8,
+          "name": "func_089DE3A4",
+          "entry_audit": "menu-member-table-empty-callback",
+          "evidence": "Final record19 of the copied160-byte member table binds this jr-ra/nop callback; the8-byte extent abuts known function089DE3AC. Checked by audit_menu_member_table.py."
+        },
+        {
+          "address": "0x089DE9D4",
+          "size": 24,
+          "name": "func_089DE9D4",
+          "entry_audit": "presentation-callback",
+          "evidence": "Pinned native presentation address construction, callback invocation, independent jr-ra/delay-slot body and exact adjacent boundaries; tools/audit_presentation_callbacks.py repeats checks."
+        }
+      ]
+    },
+    "main": {
+      "reference_sha256": "0bc8e779aad2814a3d1bd77346f69ca5e16665845ed053cd0ad44a9cbfaefe6d",
+      "additional_functions": [
+        {
+          "address": "0x08873F78",
+          "size": 8,
+          "name": "func_08873F78",
+          "entry_audit": "presentation-callback",
+          "evidence": "Pinned native presentation address construction, callback invocation, independent jr-ra/delay-slot body and exact adjacent boundaries; tools/audit_presentation_callbacks.py repeats checks."
+        }
+      ]
+    }
+  }
+}

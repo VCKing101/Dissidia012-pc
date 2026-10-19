@@ -1,0 +1,1970 @@
+{
+  "image": {
+    "filename": "ULES-01505.ISO",
+    "size": 1614608384,
+    "volume_id": "",
+    "logical_block_size": 2048,
+    "volume_blocks": 856704,
+    "sha1": "2f11e41888d3fab3081360bce25dcc00cea52199",
+    "sha256": "0b312fad0744d99e8bc2f45ebe934f50b86444a1c5778ddd7821f75753ec27ca"
+  },
+  "validation": {
+    "declared_volume_size": 1754529792,
+    "image_size_matches_volume": false,
+    "files_outside_image": [
+      {
+        "path": "/PSP_GAME/USRDIR/DATA/MOVIE/END.PMF",
+        "declared_end": 1754513408,
+        "bytes_missing": 139905024
+      }
+    ]
+  },
+  "files": [
+    {
+      "path": "/PSP_GAME/ICON0.PNG",
+      "extent_lba": 25616,
+      "size": 17207
+    },
+    {
+      "path": "/PSP_GAME/ICON1.PMF",
+      "extent_lba": 25632,
+      "size": 260096
+    },
+    {
+      "path": "/PSP_GAME/PARAM.SFO",
+      "extent_lba": 25600,
+      "size": 560
+    },
+    {
+      "path": "/PSP_GAME/PIC1.PNG",
+      "extent_lba": 25760,
+      "size": 170502
+    },
+    {
+      "path": "/PSP_GAME/SND0.AT3",
+      "extent_lba": 25856,
+      "size": 219964
+    },
+    {
+      "path": "/PSP_GAME/SYSDIR/BOOT.BIN",
+      "extent_lba": 23337,
+      "size": 4622516
+    },
+    {
+      "path": "/PSP_GAME/SYSDIR/EBOOT.OLD",
+      "extent_lba": 560,
+      "size": 4640948
+    },
+    {
+      "path": "/PSP_GAME/SYSDIR/OPNSSMP.BIN",
+      "extent_lba": 48,
+      "size": 880
+    },
+    {
+      "path": "/PSP_GAME/SYSDIR/UPDATE/DATA.BIN",
+      "extent_lba": 6944,
+      "size": 26115152
+    },
+    {
+      "path": "/PSP_GAME/SYSDIR/UPDATE/EBOOT.BIN",
+      "extent_lba": 2848,
+      "size": 5540576
+    },
+    {
+      "path": "/PSP_GAME/SYSDIR/UPDATE/PARAM.SFO",
+      "extent_lba": 2832,
+      "size": 2080
+    },
+    {
+      "path": "/PSP_GAME/SYSDIR/EBOOT.BIN",
+      "extent_lba": 23328,
+      "size": 11394
+    },
+    {
+      "path": "/PSP_GAME/SYSDIR/prometheus.prx",
+      "extent_lba": 23334,
+      "size": 4738
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/B01_01.AT3",
+      "extent_lba": 86736,
+      "size": 1258484
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/B01_02.AT3",
+      "extent_lba": 27248,
+      "size": 1705364
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/B02_01.AT3",
+      "extent_lba": 28096,
+      "size": 1340244
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/B02_02.AT3",
+      "extent_lba": 28752,
+      "size": 1001444
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/B03_01.AT3",
+      "extent_lba": 29248,
+      "size": 2053124
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/B03_02.AT3",
+      "extent_lba": 30256,
+      "size": 853604
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/B04_01.AT3",
+      "extent_lba": 30688,
+      "size": 1474644
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/B04_02.AT3",
+      "extent_lba": 31424,
+      "size": 914644
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/B05_01.AT3",
+      "extent_lba": 31872,
+      "size": 1047924
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/B05_02.AT3",
+      "extent_lba": 32384,
+      "size": 783044
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/B06_01.AT3",
+      "extent_lba": 32768,
+      "size": 694564
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/B06_02.AT3",
+      "extent_lba": 33120,
+      "size": 887204
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/B07_01.AT3",
+      "extent_lba": 33568,
+      "size": 3068964
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/B07_02.AT3",
+      "extent_lba": 35072,
+      "size": 1125204
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/B08_01.AT3",
+      "extent_lba": 35632,
+      "size": 1974164
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/B08_02.AT3",
+      "extent_lba": 36608,
+      "size": 1834164
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/B09_01.AT3",
+      "extent_lba": 37504,
+      "size": 2207684
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/B09_02.AT3",
+      "extent_lba": 38592,
+      "size": 1380004
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/B10_01.AT3",
+      "extent_lba": 39280,
+      "size": 1740084
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/B10_02.AT3",
+      "extent_lba": 40144,
+      "size": 1242804
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/B11.AT3",
+      "extent_lba": 40752,
+      "size": 1284244
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/B11_02.AT3",
+      "extent_lba": 41392,
+      "size": 1292644
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/B11_03.AT3",
+      "extent_lba": 42032,
+      "size": 1437124
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/B12.AT3",
+      "extent_lba": 42736,
+      "size": 1496484
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/B12_02.AT3",
+      "extent_lba": 43472,
+      "size": 4383284
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/B13.AT3",
+      "extent_lba": 45616,
+      "size": 678884
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/B14.AT3",
+      "extent_lba": 45952,
+      "size": 1205284
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/BS01.AT3",
+      "extent_lba": 46544,
+      "size": 274004
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/BS02.AT3",
+      "extent_lba": 46688,
+      "size": 393284
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/BS03.AT3",
+      "extent_lba": 46896,
+      "size": 442004
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/BS04.AT3",
+      "extent_lba": 47120,
+      "size": 844644
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/BS05.AT3",
+      "extent_lba": 47536,
+      "size": 2011124
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/BS06.AT3",
+      "extent_lba": 48528,
+      "size": 2309604
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/BS07.AT3",
+      "extent_lba": 49664,
+      "size": 2529124
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/BS08.AT3",
+      "extent_lba": 50912,
+      "size": 1081524
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/BS09.AT3",
+      "extent_lba": 51456,
+      "size": 2003284
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/BS10.AT3",
+      "extent_lba": 52448,
+      "size": 2236244
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/BS11.AT3",
+      "extent_lba": 53552,
+      "size": 3287924
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/BS12.AT3",
+      "extent_lba": 55168,
+      "size": 1072004
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/E01.AT3",
+      "extent_lba": 55696,
+      "size": 831204
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/E02.AT3",
+      "extent_lba": 56112,
+      "size": 458244
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/E03.AT3",
+      "extent_lba": 56336,
+      "size": 788636
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/E04.AT3",
+      "extent_lba": 56736,
+      "size": 606652
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/FF7TATAKAU.AT3",
+      "extent_lba": 57040,
+      "size": 981284
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/INSTALL.AT3",
+      "extent_lba": 57520,
+      "size": 611124
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/INSTALL_OK.AT3",
+      "extent_lba": 57824,
+      "size": 216884
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/LOSE_B.AT3",
+      "extent_lba": 57936,
+      "size": 282404
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/LOSE_H.AT3",
+      "extent_lba": 58080,
+      "size": 259444
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/M01.AT3",
+      "extent_lba": 58208,
+      "size": 439764
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/M02.AT3",
+      "extent_lba": 58432,
+      "size": 598244
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/M03.AT3",
+      "extent_lba": 58736,
+      "size": 688964
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/M04.AT3",
+      "extent_lba": 59088,
+      "size": 688964
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/M05.AT3",
+      "extent_lba": 59440,
+      "size": 598244
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/PRELUDE.AT3",
+      "extent_lba": 59744,
+      "size": 875492
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/R01.AT3",
+      "extent_lba": 60288,
+      "size": 580324
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/R02.AT3",
+      "extent_lba": 60576,
+      "size": 648084
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/R03.AT3",
+      "extent_lba": 60896,
+      "size": 862004
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/R04.AT3",
+      "extent_lba": 61328,
+      "size": 938164
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/R05.AT3",
+      "extent_lba": 61792,
+      "size": 603844
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/R06.AT3",
+      "extent_lba": 62096,
+      "size": 405604
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/R07.AT3",
+      "extent_lba": 62304,
+      "size": 811604
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/R08.AT3",
+      "extent_lba": 62704,
+      "size": 812724
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/R09.AT3",
+      "extent_lba": 63104,
+      "size": 724804
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/R10.AT3",
+      "extent_lba": 63472,
+      "size": 767364
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/R11.AT3",
+      "extent_lba": 63856,
+      "size": 877124
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/R12.AT3",
+      "extent_lba": 64288,
+      "size": 612804
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/R13.AT3",
+      "extent_lba": 64592,
+      "size": 641364
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/R14.AT3",
+      "extent_lba": 64912,
+      "size": 909604
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/R_CLEAR.AT3",
+      "extent_lba": 60176,
+      "size": 220244
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_01CHOS.AT3",
+      "extent_lba": 65360,
+      "size": 1378324
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_01GURUGU.AT3",
+      "extent_lba": 66048,
+      "size": 398324
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_01MATOYA.AT3",
+      "extent_lba": 66256,
+      "size": 596124
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_02DUNGE.AT3",
+      "extent_lba": 66560,
+      "size": 807684
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_02PANDEMO.AT3",
+      "extent_lba": 66960,
+      "size": 2068244
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_02TEIKOKU.AT3",
+      "extent_lba": 67984,
+      "size": 521524
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_03BATTLE1.AT3",
+      "extent_lba": 68240,
+      "size": 1615204
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_03CRYSTAL.AT3",
+      "extent_lba": 69040,
+      "size": 778108
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_03DOUGA.AT3",
+      "extent_lba": 69424,
+      "size": 490724
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_04AINO.AT3",
+      "extent_lba": 69664,
+      "size": 994724
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_04BATTLE1.AT3",
+      "extent_lba": 70160,
+      "size": 1567604
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_04DUNGE.AT3",
+      "extent_lba": 70928,
+      "size": 683364
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_04GIWAKU.AT3",
+      "extent_lba": 71264,
+      "size": 648388
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_05DUNGE.AT3",
+      "extent_lba": 71584,
+      "size": 890004
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_05HARUKA.AT3",
+      "extent_lba": 72032,
+      "size": 905684
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_05LBATTLE.AT3",
+      "extent_lba": 73120,
+      "size": 1287044
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_05L_BATTLE.AT3",
+      "extent_lba": 72480,
+      "size": 1287604
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_06MAYOI.AT3",
+      "extent_lba": 73760,
+      "size": 823228
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_06NAKAMA.AT3",
+      "extent_lba": 74176,
+      "size": 999764
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_06SENTO.AT3",
+      "extent_lba": 74672,
+      "size": 788084
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_07JENOVA.AT3",
+      "extent_lba": 75072,
+      "size": 1222644
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_07JYUKAI.AT3",
+      "extent_lba": 75680,
+      "size": 687492
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_07TATAKAU.AT3",
+      "extent_lba": 76016,
+      "size": 981284
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_07TIFA.AT3",
+      "extent_lba": 76496,
+      "size": 618404
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_08FIND.AT3",
+      "extent_lba": 76800,
+      "size": 792004
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_08FORCE.AT3",
+      "extent_lba": 77200,
+      "size": 1336324
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_08JULIA.AT3",
+      "extent_lba": 77856,
+      "size": 550084
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_08PREMONI.AT3",
+      "extent_lba": 78128,
+      "size": 1878404
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_09HITORI.AT3",
+      "extent_lba": 79056,
+      "size": 1654404
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_09ITSUKA.AT3",
+      "extent_lba": 79872,
+      "size": 820004
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_09SAIGONO.AT3",
+      "extent_lba": 80288,
+      "size": 1273044
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_10ITSUKA.AT3",
+      "extent_lba": 80912,
+      "size": 1826324
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_10JYOUZAI.AT3",
+      "extent_lba": 81808,
+      "size": 802644
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_10KESEN.AT3",
+      "extent_lba": 82208,
+      "size": 2232324
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_10YUNA.AT3",
+      "extent_lba": 83312,
+      "size": 658540
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_11AREALM.AT3",
+      "extent_lba": 83648,
+      "size": 1389524
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_11HEAVEN.AT3",
+      "extent_lba": 84336,
+      "size": 889028
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_11IRON.AT3",
+      "extent_lba": 84784,
+      "size": 1493124
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_11RONF.AT3",
+      "extent_lba": 85520,
+      "size": 803676
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_12GORUMOA.AT3",
+      "extent_lba": 85920,
+      "size": 949188
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_12HIGASI.AT3",
+      "extent_lba": 86384,
+      "size": 720324
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_12JIYUU.AT3",
+      "extent_lba": 26080,
+      "size": 2359444
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_12SYOUKAN.AT3",
+      "extent_lba": 87360,
+      "size": 1194644
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_13ARUKA.AT3",
+      "extent_lba": 87952,
+      "size": 830748
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_13BATTLE.AT3",
+      "extent_lba": 88368,
+      "size": 2436164
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_13BOSSBAT.AT3",
+      "extent_lba": 89568,
+      "size": 1981444
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_13HUNG.AT3",
+      "extent_lba": 90544,
+      "size": 995060
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_13LAST.AT3",
+      "extent_lba": 91040,
+      "size": 3116564
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_DUN_DFF.AT3",
+      "extent_lba": 92576,
+      "size": 632596
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_EVENT05.AT3",
+      "extent_lba": 94960,
+      "size": 583716
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_EVENT_01.AT3",
+      "extent_lba": 92896,
+      "size": 584468
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_EVENT_02.AT3",
+      "extent_lba": 93184,
+      "size": 713044
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_EVENT_03.AT3",
+      "extent_lba": 93536,
+      "size": 576948
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_EVENT_04.AT3",
+      "extent_lba": 93824,
+      "size": 772404
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_EVENT_05.AT3",
+      "extent_lba": 94208,
+      "size": 898404
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_EVENT_06.AT3",
+      "extent_lba": 94656,
+      "size": 608532
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_INSTALL.AT3",
+      "extent_lba": 95248,
+      "size": 611124
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_MANBO.AT3",
+      "extent_lba": 95552,
+      "size": 417924
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_MENU01.AT3",
+      "extent_lba": 95760,
+      "size": 797604
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_MENU02.AT3",
+      "extent_lba": 96160,
+      "size": 869284
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_MENU03.AT3",
+      "extent_lba": 96592,
+      "size": 757844
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_URACHOAS.AT3",
+      "extent_lba": 96976,
+      "size": 5318484
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/U_WORLDMAP.AT3",
+      "extent_lba": 99584,
+      "size": 849124
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/WIN_B.AT3",
+      "extent_lba": 100000,
+      "size": 292692
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/BGM/WIN_H.AT3",
+      "extent_lba": 100144,
+      "size": 263740
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/MODULE/LIBFONT.PRX",
+      "extent_lba": 25968,
+      "size": 20752
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/MODULE/LIBSUPPREACC.PRX",
+      "extent_lba": 25984,
+      "size": 24868
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/MOVIE/DES00_001.PMF",
+      "extent_lba": 100288,
+      "size": 3737600
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/MOVIE/DES00_002.PMF",
+      "extent_lba": 102128,
+      "size": 38920192
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/MOVIE/DES00_003.PMF",
+      "extent_lba": 121136,
+      "size": 25524224
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/MOVIE/DES00_004.PMF",
+      "extent_lba": 133600,
+      "size": 25131008
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/MOVIE/DES00_005.PMF",
+      "extent_lba": 145872,
+      "size": 10702848
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/MOVIE/DES01_001.PMF",
+      "extent_lba": 151104,
+      "size": 6080512
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/MOVIE/DES01_010.PMF",
+      "extent_lba": 154080,
+      "size": 4460544
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/MOVIE/DES02_001.PMF",
+      "extent_lba": 156272,
+      "size": 8083456
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/MOVIE/DES02_010.PMF",
+      "extent_lba": 160224,
+      "size": 5822464
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/MOVIE/DES03_001.PMF",
+      "extent_lba": 163072,
+      "size": 10426368
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/MOVIE/DES03_010.PMF",
+      "extent_lba": 168176,
+      "size": 5249024
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/MOVIE/DES04_001.PMF",
+      "extent_lba": 170752,
+      "size": 7766016
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/MOVIE/DES04_010.PMF",
+      "extent_lba": 174544,
+      "size": 5279744
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/MOVIE/DES05_001.PMF",
+      "extent_lba": 177136,
+      "size": 11288576
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/MOVIE/DES05_010.PMF",
+      "extent_lba": 182656,
+      "size": 4896768
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/MOVIE/DES06_001.PMF",
+      "extent_lba": 691696,
+      "size": 9326592
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/MOVIE/DES06_010.PMF",
+      "extent_lba": 696256,
+      "size": 2846720
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/MOVIE/DES07_001.PMF",
+      "extent_lba": 697648,
+      "size": 8529920
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/MOVIE/DES07_010.PMF",
+      "extent_lba": 701824,
+      "size": 5011456
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/MOVIE/DES08_001.PMF",
+      "extent_lba": 704272,
+      "size": 9809920
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/MOVIE/DES08_010.PMF",
+      "extent_lba": 709072,
+      "size": 4814848
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/MOVIE/DES09_001.PMF",
+      "extent_lba": 711424,
+      "size": 5378048
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/MOVIE/DES09_010.PMF",
+      "extent_lba": 714064,
+      "size": 5343232
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/MOVIE/DES10_001.PMF",
+      "extent_lba": 716688,
+      "size": 9895936
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/MOVIE/END.PMF",
+      "extent_lba": 777888,
+      "size": 161398784
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/MOVIE/FFST03COSMOS.PMF",
+      "extent_lba": 721520,
+      "size": 1447936
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/MOVIE/LOP.PMF",
+      "extent_lba": 722240,
+      "size": 37873664
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/MOVIE/M_FF01_002.PMF",
+      "extent_lba": 740736,
+      "size": 5279744
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/MOVIE/M_ST04_001.PMF",
+      "extent_lba": 743328,
+      "size": 15144960
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/MOVIE/UP_ENB.PMF",
+      "extent_lba": 776256,
+      "size": 3321856
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/MOVIE/UP_END.PMF",
+      "extent_lba": 750736,
+      "size": 27766784
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/MOVIE/UP_GIL.PMF",
+      "extent_lba": 764304,
+      "size": 5085184
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/MOVIE/UP_OPN.PMF",
+      "extent_lba": 766800,
+      "size": 15026176
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/MOVIE/UP_PRI.PMF",
+      "extent_lba": 774144,
+      "size": 4296704
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/OVL_BATTLE_APP.ELF",
+      "extent_lba": 185824,
+      "size": 1596312
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/OVL_EXTRA_APP.ELF",
+      "extent_lba": 186608,
+      "size": 24544
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/OVL_MENU_APP.ELF",
+      "extent_lba": 185056,
+      "size": 1556096
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/PACKAGE.BIN",
+      "extent_lba": 186624,
+      "size": 1034358784
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/PACKAGE_INFO.BIN",
+      "extent_lba": 26000,
+      "size": 132532
+    },
+    {
+      "path": "/PSP_GAME/USRDIR/DATA/PACK.bin",
+      "extent_lba": 36,
+      "size": 39
+    },
+    {
+      "path": "/UMD_DATA.BIN",
+      "extent_lba": 35,
+      "size": 48
+    }
+  ],
+  "metadata": {
+    "/PSP_GAME/PARAM.SFO": {
+      "APP_VER": "01.00",
+      "BOOTABLE": 1,
+      "CATEGORY": "UG",
+      "DISC_ID": "ULES01505",
+      "DISC_NUMBER": 1,
+      "DISC_TOTAL": 1,
+      "DISC_VERSION": "1.00",
+      "HRKGMP_VER": 19,
+      "PARENTAL_LEVEL": 5,
+      "PSP_SYSTEM_VER": "6.35",
+      "REGION": 32768,
+      "TITLE": "DISSIDIA duodecim FINAL FANTASY",
+      "USE_USB": 0
+    },
+    "/PSP_GAME/SYSDIR/UPDATE/PARAM.SFO": {
+      "BOOTABLE": 1,
+      "CATEGORY": "MG",
+      "DISC_ID": "MSTKUPDATE",
+      "DISC_VERSION": "1.00",
+      "PARENTAL_LEVEL": 1,
+      "REGION": 32768,
+      "TITLE": "PSP\u2122 Update ver 6.35",
+      "TITLE_0": "PSP\u2122 \u30a2\u30c3\u30d7\u30c7\u30fc\u30c8 ver 6.35",
+      "TITLE_10": "PSP\u2122\u66f4\u65b0 \u7248\u672c 6.35",
+      "TITLE_11": "PSP\u2122\u5347\u7ea7 \u7248\u672c 6.35",
+      "TITLE_2": "Mise \u00e0 jour PSP\u2122 ver. 6.35",
+      "TITLE_3": "Actualizaci\u00f3n de PSP\u2122 ver. 6.35",
+      "TITLE_4": "PSP\u2122-Aktualisierung Ver. 6.35",
+      "TITLE_5": "Aggiornamento della PSP\u2122\nver. 6.35",
+      "TITLE_6": "PSP\u2122-update versie 6.35",
+      "TITLE_7": "Actualiza\u00e7\u00e3o PSP\u2122 ver 6.35",
+      "TITLE_8": "\u041e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u0438\u0435 PSP\u2122 \u0432\u0435\u0440. 6.35",
+      "TITLE_9": "PSP\u2122 \uc5c5\ub370\uc774\ud2b8 \ubc84\uc804 6.35",
+      "UPDATER_VER": "6.35"
+    },
+    "/UMD_DATA.BIN": "ULES-01505|065509A16381F928|0001|G\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000|"
+  },
+  "executables": {
+    "/PSP_GAME/SYSDIR/BOOT.BIN": {
+      "size": 4622516,
+      "sha256": "dcb57043f57a5650abc31ab66a842831a88c3afbe4c025c01ccee2a5c0438d64",
+      "format": "all-zero placeholder"
+    },
+    "/PSP_GAME/SYSDIR/EBOOT.OLD": {
+      "size": 4640948,
+      "sha256": "0bc8e779aad2814a3d1bd77346f69ca5e16665845ed053cd0ad44a9cbfaefe6d",
+      "format": "ELF32 little endian",
+      "type": "0x0002",
+      "machine": 8,
+      "entry": "0x00000000",
+      "flags": "0x10a23001",
+      "module_name": null,
+      "program_headers": [
+        {
+          "type": 1,
+          "offset": 4120,
+          "virtual_address": "0x08804040",
+          "physical_address": "0x001c3208",
+          "file_size": 1938304,
+          "memory_size": 1938304,
+          "flags": 7,
+          "alignment": 4096
+        },
+        {
+          "type": 1,
+          "offset": 1945600,
+          "virtual_address": "0x08b63170",
+          "physical_address": "0x08b63170",
+          "file_size": 256,
+          "memory_size": 16833424,
+          "flags": 6,
+          "alignment": 4096
+        }
+      ],
+      "sections": [
+        {
+          "name": "",
+          "type": "0x00000000",
+          "address": "0x00000000",
+          "offset": 0,
+          "size": 0
+        },
+        {
+          "name": "",
+          "type": "0x70000006",
+          "address": "0x08804000",
+          "offset": 1949696,
+          "size": 24
+        },
+        {
+          "name": "",
+          "type": "0x00000001",
+          "address": "0x08804040",
+          "offset": 4120,
+          "size": 1839516
+        },
+        {
+          "name": "",
+          "type": "0x00000001",
+          "address": "0x089c51dc",
+          "offset": 1843636,
+          "size": 652
+        },
+        {
+          "name": "",
+          "type": "0x00000001",
+          "address": "0x089c5468",
+          "offset": 1844288,
+          "size": 736
+        },
+        {
+          "name": "",
+          "type": "0x00000001",
+          "address": "0x089c5748",
+          "offset": 1845024,
+          "size": 8
+        },
+        {
+          "name": "",
+          "type": "0x00000001",
+          "address": "0x089c5750",
+          "offset": 1845032,
+          "size": 32
+        },
+        {
+          "name": "",
+          "type": "0x00000001",
+          "address": "0x089c5770",
+          "offset": 1845064,
+          "size": 2368
+        },
+        {
+          "name": "",
+          "type": "0x00000001",
+          "address": "0x089c60b0",
+          "offset": 1847432,
+          "size": 384
+        },
+        {
+          "name": "",
+          "type": "0x00000001",
+          "address": "0x089c6230",
+          "offset": 1847816,
+          "size": 52
+        },
+        {
+          "name": "",
+          "type": "0x00000001",
+          "address": "0x089c6264",
+          "offset": 1847868,
+          "size": 616
+        },
+        {
+          "name": "",
+          "type": "0x00000001",
+          "address": "0x089c64cc",
+          "offset": 1848484,
+          "size": 1184
+        },
+        {
+          "name": "",
+          "type": "0x00000001",
+          "address": "0x089c6970",
+          "offset": 1849672,
+          "size": 48784
+        },
+        {
+          "name": "",
+          "type": "0x00000001",
+          "address": "0x089d2800",
+          "offset": 1898456,
+          "size": 43968
+        },
+        {
+          "name": "",
+          "type": "0x00000008",
+          "address": "0x089dd3c0",
+          "offset": 1999256,
+          "size": 0
+        },
+        {
+          "name": "",
+          "type": "0x00000008",
+          "address": "0x089dd4c0",
+          "offset": 1999256,
+          "size": 0
+        },
+        {
+          "name": "",
+          "type": "0x00000008",
+          "address": "0x08b62f70",
+          "offset": 1999256,
+          "size": 0
+        },
+        {
+          "name": "",
+          "type": "0x00000008",
+          "address": "0x08b63170",
+          "offset": 1999256,
+          "size": 0
+        },
+        {
+          "name": "",
+          "type": "0x00000001",
+          "address": "0x08b63170",
+          "offset": 1945600,
+          "size": 240
+        },
+        {
+          "name": "",
+          "type": "0x00000001",
+          "address": "0x08b63260",
+          "offset": 1945840,
+          "size": 8
+        },
+        {
+          "name": "",
+          "type": "0x00000001",
+          "address": "0x08b63268",
+          "offset": 1945848,
+          "size": 8
+        },
+        {
+          "name": "",
+          "type": "0x00000008",
+          "address": "0x08b63270",
+          "offset": 1999256,
+          "size": 0
+        },
+        {
+          "name": "",
+          "type": "0x00000008",
+          "address": "0x08b63270",
+          "offset": 1999256,
+          "size": 0
+        },
+        {
+          "name": "",
+          "type": "0x00000008",
+          "address": "0x08b63280",
+          "offset": 1945872,
+          "size": 16833152
+        },
+        {
+          "name": "",
+          "type": "0x00000008",
+          "address": "0x09b70d00",
+          "offset": 1999256,
+          "size": 0
+        },
+        {
+          "name": "",
+          "type": "0x00000003",
+          "address": "0x00000000",
+          "offset": 4639568,
+          "size": 1
+        }
+      ],
+      "compiler_comments": []
+    },
+    "/PSP_GAME/SYSDIR/UPDATE/EBOOT.BIN": {
+      "size": 5540576,
+      "sha256": "5ff66bc5cf2f1bfc658107737a6405b57fb969fe0641d64baca8039300d0a05f",
+      "format": "~PSP container (requires decoding before ELF analysis)",
+      "module_name": "updater",
+      "elf_size_from_header": 5540239,
+      "container_size_from_header": 5540576,
+      "tag": "0x02000000"
+    },
+    "/PSP_GAME/SYSDIR/EBOOT.BIN": {
+      "size": 11394,
+      "sha256": "c176a50f84f217528480631e832a4568c536358725ce64a697fc0dc21aa61eb0",
+      "format": "ELF32 little endian",
+      "type": "0xffa0",
+      "machine": 8,
+      "entry": "0x00000168",
+      "flags": "0x10a23001",
+      "module_name": "Prometheus Loader",
+      "program_headers": [
+        {
+          "type": 1,
+          "offset": 96,
+          "virtual_address": "0x00000000",
+          "physical_address": "0x800014c0",
+          "file_size": 7120,
+          "memory_size": 7176,
+          "flags": 5,
+          "alignment": 16
+        }
+      ],
+      "sections": [
+        {
+          "name": "",
+          "type": "0x00000000",
+          "address": "0x00000000",
+          "offset": 0,
+          "size": 0
+        },
+        {
+          "name": ".text",
+          "type": "0x00000001",
+          "address": "0x00000000",
+          "offset": 96,
+          "size": 4864
+        },
+        {
+          "name": ".rel.text",
+          "type": "0x700000a0",
+          "address": "0x00000000",
+          "offset": 8096,
+          "size": 2744
+        },
+        {
+          "name": ".sceStub.text",
+          "type": "0x00000001",
+          "address": "0x00001300",
+          "offset": 4960,
+          "size": 152
+        },
+        {
+          "name": ".lib.ent.top",
+          "type": "0x00000001",
+          "address": "0x00001398",
+          "offset": 5112,
+          "size": 4
+        },
+        {
+          "name": ".lib.ent",
+          "type": "0x00000001",
+          "address": "0x0000139c",
+          "offset": 5116,
+          "size": 32
+        },
+        {
+          "name": ".rel.lib.ent",
+          "type": "0x700000a0",
+          "address": "0x00000000",
+          "offset": 10840,
+          "size": 24
+        },
+        {
+          "name": ".lib.ent.btm",
+          "type": "0x00000001",
+          "address": "0x000013bc",
+          "offset": 5148,
+          "size": 4
+        },
+        {
+          "name": ".lib.stub.top",
+          "type": "0x00000001",
+          "address": "0x000013c0",
+          "offset": 5152,
+          "size": 4
+        },
+        {
+          "name": ".lib.stub",
+          "type": "0x00000001",
+          "address": "0x000013c4",
+          "offset": 5156,
+          "size": 140
+        },
+        {
+          "name": ".rel.lib.stub",
+          "type": "0x700000a0",
+          "address": "0x00000000",
+          "offset": 10864,
+          "size": 168
+        },
+        {
+          "name": ".lib.stub.btm",
+          "type": "0x00000001",
+          "address": "0x00001450",
+          "offset": 5296,
+          "size": 4
+        },
+        {
+          "name": ".rodata.sceModuleInfo",
+          "type": "0x00000001",
+          "address": "0x00001460",
+          "offset": 5312,
+          "size": 64
+        },
+        {
+          "name": ".rel.rodata.sceModuleInfo",
+          "type": "0x700000a0",
+          "address": "0x00000000",
+          "offset": 11032,
+          "size": 40
+        },
+        {
+          "name": ".rodata.sceResident",
+          "type": "0x00000001",
+          "address": "0x000014a0",
+          "offset": 5376,
+          "size": 212
+        },
+        {
+          "name": ".rel.rodata.sceResident",
+          "type": "0x700000a0",
+          "address": "0x00000000",
+          "offset": 11072,
+          "size": 48
+        },
+        {
+          "name": ".rodata.sceNid",
+          "type": "0x00000001",
+          "address": "0x00001574",
+          "offset": 5588,
+          "size": 76
+        },
+        {
+          "name": ".rodata",
+          "type": "0x00000001",
+          "address": "0x000015c0",
+          "offset": 5664,
+          "size": 266
+        },
+        {
+          "name": ".data",
+          "type": "0x00000001",
+          "address": "0x000017cc",
+          "offset": 6188,
+          "size": 1028
+        },
+        {
+          "name": ".sbss",
+          "type": "0x00000008",
+          "address": "0x00001bd0",
+          "offset": 7216,
+          "size": 0
+        },
+        {
+          "name": ".bss",
+          "type": "0x00000008",
+          "address": "0x00001bd0",
+          "offset": 7216,
+          "size": 56
+        },
+        {
+          "name": ".shstrtab",
+          "type": "0x00000003",
+          "address": "0x00000000",
+          "offset": 11120,
+          "size": 274
+        }
+      ],
+      "compiler_comments": []
+    },
+    "/PSP_GAME/SYSDIR/prometheus.prx": {
+      "size": 4738,
+      "sha256": "b22567ceb6005ce8e97b3d0126da63e49e3d4b72c524abb7419aa9a7b2caa53d",
+      "format": "ELF32 little endian",
+      "type": "0xffa0",
+      "machine": 8,
+      "entry": "0x00000060",
+      "flags": "0x10a23001",
+      "module_name": "Prometheus",
+      "program_headers": [
+        {
+          "type": 1,
+          "offset": 96,
+          "virtual_address": "0x00000000",
+          "physical_address": "0x00000770",
+          "file_size": 2400,
+          "memory_size": 2568,
+          "flags": 5,
+          "alignment": 16
+        }
+      ],
+      "sections": [
+        {
+          "name": "",
+          "type": "0x00000000",
+          "address": "0x00000000",
+          "offset": 0,
+          "size": 0
+        },
+        {
+          "name": ".text",
+          "type": "0x00000001",
+          "address": "0x00000000",
+          "offset": 96,
+          "size": 1516
+        },
+        {
+          "name": ".rel.text",
+          "type": "0x700000a0",
+          "address": "0x00000000",
+          "offset": 3376,
+          "size": 856
+        },
+        {
+          "name": ".sceStub.text",
+          "type": "0x00000001",
+          "address": "0x000005ec",
+          "offset": 1612,
+          "size": 120
+        },
+        {
+          "name": ".lib.ent.top",
+          "type": "0x00000001",
+          "address": "0x00000664",
+          "offset": 1732,
+          "size": 4
+        },
+        {
+          "name": ".lib.ent",
+          "type": "0x00000001",
+          "address": "0x00000668",
+          "offset": 1736,
+          "size": 16
+        },
+        {
+          "name": ".rel.lib.ent",
+          "type": "0x700000a0",
+          "address": "0x00000000",
+          "offset": 4232,
+          "size": 8
+        },
+        {
+          "name": ".lib.ent.btm",
+          "type": "0x00000001",
+          "address": "0x00000678",
+          "offset": 1752,
+          "size": 4
+        },
+        {
+          "name": ".lib.stub.top",
+          "type": "0x00000001",
+          "address": "0x0000067c",
+          "offset": 1756,
+          "size": 4
+        },
+        {
+          "name": ".lib.stub",
+          "type": "0x00000001",
+          "address": "0x00000680",
+          "offset": 1760,
+          "size": 140
+        },
+        {
+          "name": ".rel.lib.stub",
+          "type": "0x700000a0",
+          "address": "0x00000000",
+          "offset": 4240,
+          "size": 168
+        },
+        {
+          "name": ".lib.stub.btm",
+          "type": "0x00000001",
+          "address": "0x0000070c",
+          "offset": 1900,
+          "size": 4
+        },
+        {
+          "name": ".rodata.sceModuleInfo",
+          "type": "0x00000001",
+          "address": "0x00000710",
+          "offset": 1904,
+          "size": 64
+        },
+        {
+          "name": ".rel.rodata.sceModuleInfo",
+          "type": "0x700000a0",
+          "address": "0x00000000",
+          "offset": 4408,
+          "size": 40
+        },
+        {
+          "name": ".rodata.sceResident",
+          "type": "0x00000001",
+          "address": "0x00000750",
+          "offset": 1968,
+          "size": 160
+        },
+        {
+          "name": ".rel.rodata.sceResident",
+          "type": "0x700000a0",
+          "address": "0x00000000",
+          "offset": 4448,
+          "size": 16
+        },
+        {
+          "name": ".rodata.sceNid",
+          "type": "0x00000001",
+          "address": "0x000007f0",
+          "offset": 2128,
+          "size": 60
+        },
+        {
+          "name": ".rodata",
+          "type": "0x00000001",
+          "address": "0x0000082c",
+          "offset": 2188,
+          "size": 47
+        },
+        {
+          "name": ".data",
+          "type": "0x00000001",
+          "address": "0x0000095c",
+          "offset": 2492,
+          "size": 4
+        },
+        {
+          "name": ".sbss",
+          "type": "0x00000008",
+          "address": "0x00000960",
+          "offset": 2496,
+          "size": 0
+        },
+        {
+          "name": ".bss",
+          "type": "0x00000008",
+          "address": "0x00000960",
+          "offset": 2496,
+          "size": 168
+        },
+        {
+          "name": ".shstrtab",
+          "type": "0x00000003",
+          "address": "0x00000000",
+          "offset": 4464,
+          "size": 274
+        }
+      ],
+      "compiler_comments": []
+    },
+    "/PSP_GAME/USRDIR/DATA/MODULE/LIBFONT.PRX": {
+      "size": 20752,
+      "sha256": "5ab12c4db6d2072229e8e7a4cefdd839a4d2ce4d064dca53b779a760f02907c2",
+      "format": "~SCE wrapped module (requires decoding before ELF analysis)"
+    },
+    "/PSP_GAME/USRDIR/DATA/MODULE/LIBSUPPREACC.PRX": {
+      "size": 24868,
+      "sha256": "aed4d30f80b1e83561bdfdff4ddfc47dead5b29694be314e253bee69f61f8778",
+      "format": "ELF32 little endian",
+      "type": "0xffa0",
+      "machine": 8,
+      "entry": "0xffffffff",
+      "flags": "0x10a23001",
+      "module_name": "scesupPreAcc_library",
+      "program_headers": [
+        {
+          "type": 1,
+          "offset": 160,
+          "virtual_address": "0x00000000",
+          "physical_address": "0x00003870",
+          "file_size": 15208,
+          "memory_size": 15208,
+          "flags": 5,
+          "alignment": 16
+        },
+        {
+          "type": 1,
+          "offset": 15424,
+          "virtual_address": "0x00003b80",
+          "physical_address": "0x00000000",
+          "file_size": 2788,
+          "memory_size": 2800,
+          "flags": 6,
+          "alignment": 64
+        },
+        {
+          "type": 1879048352,
+          "offset": 18224,
+          "virtual_address": "0x00000000",
+          "physical_address": "0x00000000",
+          "file_size": 5248,
+          "memory_size": 0,
+          "flags": 0,
+          "alignment": 16
+        }
+      ],
+      "sections": [
+        {
+          "name": "",
+          "type": "0x00000000",
+          "address": "0x00000000",
+          "offset": 0,
+          "size": 0
+        },
+        {
+          "name": ".text",
+          "type": "0x00000001",
+          "address": "0x00000000",
+          "offset": 160,
+          "size": 13948
+        },
+        {
+          "name": ".rel.text",
+          "type": "0x700000a0",
+          "address": "0x00000000",
+          "offset": 18224,
+          "size": 4968
+        },
+        {
+          "name": ".sceStub.text",
+          "type": "0x00000001",
+          "address": "0x0000367c",
+          "offset": 14108,
+          "size": 208
+        },
+        {
+          "name": ".lib.ent.top",
+          "type": "0x00000001",
+          "address": "0x00003750",
+          "offset": 14320,
+          "size": 4
+        },
+        {
+          "name": ".lib.ent",
+          "type": "0x00000001",
+          "address": "0x00003754",
+          "offset": 14324,
+          "size": 32
+        },
+        {
+          "name": ".rel.lib.ent",
+          "type": "0x700000a0",
+          "address": "0x00000000",
+          "offset": 23192,
+          "size": 24
+        },
+        {
+          "name": ".lib.ent.btm",
+          "type": "0x00000001",
+          "address": "0x00003774",
+          "offset": 14356,
+          "size": 4
+        },
+        {
+          "name": ".lib.stub.top",
+          "type": "0x00000001",
+          "address": "0x00003778",
+          "offset": 14360,
+          "size": 4
+        },
+        {
+          "name": ".lib.stub",
+          "type": "0x00000001",
+          "address": "0x0000377c",
+          "offset": 14364,
+          "size": 80
+        },
+        {
+          "name": ".rel.lib.stub",
+          "type": "0x700000a0",
+          "address": "0x00000000",
+          "offset": 23216,
+          "size": 96
+        },
+        {
+          "name": ".lib.stub.btm",
+          "type": "0x00000001",
+          "address": "0x000037cc",
+          "offset": 14444,
+          "size": 4
+        },
+        {
+          "name": ".rodata.sceModuleInfo",
+          "type": "0x00000001",
+          "address": "0x000037d0",
+          "offset": 14448,
+          "size": 52
+        },
+        {
+          "name": ".rel.rodata.sceModuleInfo",
+          "type": "0x700000a0",
+          "address": "0x00000000",
+          "offset": 23312,
+          "size": 40
+        },
+        {
+          "name": ".rodata.sceResident",
+          "type": "0x00000001",
+          "address": "0x00003804",
+          "offset": 14500,
+          "size": 224
+        },
+        {
+          "name": ".rel.rodata.sceResident",
+          "type": "0x700000a0",
+          "address": "0x00000000",
+          "offset": 23352,
+          "size": 120
+        },
+        {
+          "name": ".rodata.sceNid",
+          "type": "0x00000001",
+          "address": "0x000038e4",
+          "offset": 14724,
+          "size": 104
+        },
+        {
+          "name": ".ctors",
+          "type": "0x00000001",
+          "address": "0x00000000",
+          "offset": 24868,
+          "size": 0
+        },
+        {
+          "name": ".rodata",
+          "type": "0x00000001",
+          "address": "0x0000394c",
+          "offset": 14828,
+          "size": 540
+        },
+        {
+          "name": ".data",
+          "type": "0x00000001",
+          "address": "0x00003b80",
+          "offset": 15424,
+          "size": 1088
+        },
+        {
+          "name": ".data.0001",
+          "type": "0x00000001",
+          "address": "0x00003fc0",
+          "offset": 16512,
+          "size": 1700
+        },
+        {
+          "name": ".sbss",
+          "type": "0x00000008",
+          "address": "0x00004670",
+          "offset": 18212,
+          "size": 0
+        },
+        {
+          "name": ".bss",
+          "type": "0x00000008",
+          "address": "0x00004670",
+          "offset": 18212,
+          "size": 0
+        },
+        {
+          "name": ".comment",
+          "type": "0x00000001",
+          "address": "0x00000000",
+          "offset": 23472,
+          "size": 96
+        },
+        {
+          "name": ".shstrtab",
+          "type": "0x00000003",
+          "address": "0x00000000",
+          "offset": 23568,
+          "size": 300
+        }
+      ],
+      "compiler_comments": [
+        "GCC: (GNU) 3.3.6+allegrex-2.2.2-psp-1.14.0",
+        "GCC: (GNU) 3.3.6+allegrex-2.2.2-psp-1.15.2.internal"
+      ]
+    },
+    "/PSP_GAME/USRDIR/DATA/OVL_BATTLE_APP.ELF": {
+      "size": 1596312,
+      "sha256": "1f96cfb3be771ff6e94741ae3916fab340df74e36ede07ca39545d015f4c49dc",
+      "format": "ELF32 little endian",
+      "type": "0xffa8",
+      "machine": 8,
+      "entry": "0x00000000",
+      "flags": "0x10a23001",
+      "module_name": null,
+      "program_headers": [
+        {
+          "type": 1,
+          "offset": 84,
+          "virtual_address": "0x089dd4c0",
+          "physical_address": "0x00000000",
+          "file_size": 1596080,
+          "memory_size": 1596080,
+          "flags": 7,
+          "alignment": 4
+        }
+      ],
+      "sections": [
+        {
+          "name": "",
+          "type": "0x00000000",
+          "address": "0x00000000",
+          "offset": 0,
+          "size": 0
+        },
+        {
+          "name": ".ovl_battle_app",
+          "type": "0x00000001",
+          "address": "0x089dd4c0",
+          "offset": 84,
+          "size": 1596080
+        },
+        {
+          "name": ".shstrtab",
+          "type": "0x00000003",
+          "address": "0x00000000",
+          "offset": 1596164,
+          "size": 27
+        }
+      ],
+      "compiler_comments": []
+    },
+    "/PSP_GAME/USRDIR/DATA/OVL_EXTRA_APP.ELF": {
+      "size": 24544,
+      "sha256": "f6b7be5e15c28774985417f1ec2c64f6655e79cc3c9dce7600fa7f6bacabca01",
+      "format": "ELF32 little endian",
+      "type": "0xffa8",
+      "machine": 8,
+      "entry": "0x00000000",
+      "flags": "0x10a23001",
+      "module_name": null,
+      "program_headers": [
+        {
+          "type": 1,
+          "offset": 84,
+          "virtual_address": "0x089dd4c0",
+          "physical_address": "0x00000000",
+          "file_size": 24312,
+          "memory_size": 24312,
+          "flags": 7,
+          "alignment": 4
+        }
+      ],
+      "sections": [
+        {
+          "name": "",
+          "type": "0x00000000",
+          "address": "0x00000000",
+          "offset": 0,
+          "size": 0
+        },
+        {
+          "name": ".ovl_extra_app",
+          "type": "0x00000001",
+          "address": "0x089dd4c0",
+          "offset": 84,
+          "size": 24312
+        },
+        {
+          "name": ".shstrtab",
+          "type": "0x00000003",
+          "address": "0x00000000",
+          "offset": 24396,
+          "size": 26
+        }
+      ],
+      "compiler_comments": []
+    },
+    "/PSP_GAME/USRDIR/DATA/OVL_MENU_APP.ELF": {
+      "size": 1556096,
+      "sha256": "f021f96fa05da5907563a28c232966aa8a344526d6b8bdee728053ec75224d0a",
+      "format": "ELF32 little endian",
+      "type": "0xffa8",
+      "machine": 8,
+      "entry": "0x00000000",
+      "flags": "0x10a23001",
+      "module_name": null,
+      "program_headers": [
+        {
+          "type": 1,
+          "offset": 84,
+          "virtual_address": "0x089dd4c0",
+          "physical_address": "0x00000000",
+          "file_size": 1555864,
+          "memory_size": 1555864,
+          "flags": 7,
+          "alignment": 4
+        }
+      ],
+      "sections": [
+        {
+          "name": "",
+          "type": "0x00000000",
+          "address": "0x00000000",
+          "offset": 0,
+          "size": 0
+        },
+        {
+          "name": ".ovl_menu_app",
+          "type": "0x00000001",
+          "address": "0x089dd4c0",
+          "offset": 84,
+          "size": 1555864
+        },
+        {
+          "name": ".shstrtab",
+          "type": "0x00000003",
+          "address": "0x00000000",
+          "offset": 1555948,
+          "size": 25
+        }
+      ],
+      "compiler_comments": []
+    }
+  }
+}

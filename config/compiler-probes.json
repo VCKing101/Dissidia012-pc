@@ -1,0 +1,20 @@
+{
+  "source": "tools/probes/extra_probe.c",
+  "candidates": {
+    "mwccpsp_147": "tools/compilers/mwccpsp_147/mwccpsp.exe",
+    "mwccpsp_219": "tools/compilers/mwccpsp_219/mwccpsp.exe",
+    "pspsnc_1.2.7503.0": "tools/compilers/pspsnc_1.2.7503.0/pspsnc.exe",
+    "psp-gcc-1.3.1": "tools/compilers/psp-gcc-1.3.1/bin/psp-gcc",
+    "psp-gcc-1.7.1": "tools/compilers/psp-gcc-1.7.1/psp/bin/gcc"
+  },
+  "base_flags": ["-lang", "c", "-sdatathreshold", "0", "-char", "unsigned"],
+  "optimizations": ["-O0", "-O1", "-O2", "-O3", "-O4,s", "-O4,p"],
+  "functions": [
+    {"name": "func_089DD648", "address": "0x089DD648", "size": 20},
+    {"name": "func_089DD65C", "address": "0x089DD65C", "size": 20},
+    {"name": "func_089DD5F8", "address": "0x089DD5F8", "size": 52},
+    {"name": "func_089DD62C", "address": "0x089DD62C", "size": 28},
+    {"name": "func_089DDE10", "address": "0x089DDE10", "size": 16},
+    {"name": "func_089DDE20", "address": "0x089DDE20", "size": 16}
+  ]
+}

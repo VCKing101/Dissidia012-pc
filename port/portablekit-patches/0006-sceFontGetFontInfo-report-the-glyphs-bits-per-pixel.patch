@@ -1,0 +1,40 @@
+From f549e27ab374e34fcf97c5344ed701d53c12cc0e Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Sun, 18 Oct 2026 18:32:28 +1030
+Subject: [PATCH 06/27] sceFontGetFontInfo: report the glyphs' bits per pixel
+
+SceFontInfo ends with the font style and then the bits per pixel of the
+glyph bitmaps (byte 260), which was left as the game had it, zero. A game
+that sizes its glyph buffers from it computed a line length of zero,
+allocated empty buffers 48 bytes apart and asked for every glyph with a
+line length of zero, so each string was drawn over the next and all text
+came out as stripes. It is now 4.
+
+Verified on Windows with <prefix>_TRACE_FONT (bytes per line 48 for a
+96-pixel 4-bit buffer, was 0) and captures of a menu before and after.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/hle/hle_font.cpp | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/host/hle/hle_font.cpp b/host/hle/hle_font.cpp
+index 5ff3cdc..4758110 100644
+--- a/host/hle/hle_font.cpp
++++ b/host/hle/hle_font.cpp
+@@ -113,6 +113,12 @@ void write_font_info(psprecomp::GuestMemory &memory, std::uint32_t address) {
+     memory.store16(address + 82u, static_cast<std::uint16_t>(fonts::kCell));  // max glyph bitmap height
+     memory.store32(address + 84u, 0x10000u);                                  // glyph count
+     memory.store32(address + 88u, 0u);                                        // shadow map length
++    // The font's style (168 bytes from +92) is left as the game had it; then
++    // the bits per pixel of the glyph bitmaps, which the glyphs are drawn at
++    // whatever format the game asks for. A game may size its glyph buffers
++    // from it: left at zero, one computed a line length of zero, allocated
++    // empty buffers and laid every string over the next.
++    memory.store8(address + 260u, 4u);
+ }
+ 
+ // A game may keep every glyph it has drawn in a texture atlas and draw it
+-- 
+2.53.0.windows.1
+
