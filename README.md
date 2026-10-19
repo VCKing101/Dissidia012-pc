@@ -32,6 +32,23 @@ game's executable and overlays.
 - **A mod maker**: a local browser tool for writing a mod's `mod.json` and setting its loop points
   ([README](port/tools/mod_maker/README.md)).
 
+## BGM playlist selector
+
+The loading screen before a battle chooses its music by series and track. L2 or R2 (1 and 3 on the keyboard) moves
+the D-pad from the screen's menu to the music: left and right change the series, up and down roll the track wheel,
+and L2 or R2 again hands the D-pad back. Mods add series of their own after the game's
+([design](docs/port/bgm-playlist-design.md), [mod format](docs/port/mod-folder.md)).
+
+<p>
+  <img src="docs/images/bgm-playlist-game-series.png" width="49%" alt="BATTLE BGM box showing FINAL FANTASY VII 3/5, with a five-row track wheel below it and One-Winged Angel highlighted">
+  <img src="docs/images/bgm-playlist-mod-series.png" width="49%" alt="BATTLE BGM box showing a mod's series FINAL FANTASY XV 3/5, with its tracks on the wheel">
+</p>
+
+![The track wheel rolling through FINAL FANTASY XIII, then left and right switching to DISSIDIA, a mod's FINAL FANTASY XV and CRISIS CORE](docs/images/bgm-playlist-wheel.gif)
+
+The FINAL FANTASY XV and CRISIS CORE series in these captures come from a test mod with track titles only; it plays
+generated tones.
+
 ## Requirements
 
 - Windows 10 or 11 (x64) with a Vulkan-capable GPU.
