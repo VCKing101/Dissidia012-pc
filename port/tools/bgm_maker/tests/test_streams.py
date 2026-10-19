@@ -4,7 +4,7 @@ silence only), and, with the port's FFmpeg, that FFmpeg decodes them to
 exactly the samples encoded, so a loop start in the header is the same sample
 in the decoded audio. Also the import and save path in the API.
 
-    python -m unittest discover -s port/tools/mod_maker/tests
+    python -m unittest discover -s port/tools/bgm_maker/tests
 """
 
 import json
@@ -20,7 +20,7 @@ sys.path.insert(0, TOOL)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import stream_fixtures as sf  # noqa: E402
-from modmaker import audio, manifest as mf, nintendo  # noqa: E402
+from bgmmaker import audio, manifest as mf, nintendo  # noqa: E402
 
 RATE = 32000
 LOOP = 12345  # not a multiple of 14 (a DSP-ADPCM frame) nor of a block

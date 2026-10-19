@@ -1,7 +1,7 @@
 """Manifest building and validation against the port's rules (port/host/d012_mods.cpp),
 key generation, and seconds/samples conversion.
 
-    python -m unittest discover -s port/tools/mod_maker/tests
+    python -m unittest discover -s port/tools/bgm_maker/tests
 """
 
 import json
@@ -13,7 +13,7 @@ import unittest
 TOOL = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, TOOL)
 
-from modmaker import manifest as mf  # noqa: E402
+from bgmmaker import manifest as mf  # noqa: E402
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(TOOL)))
 EXAMPLE = os.path.join(REPO, "port", "examples", "mods", "example-tones", "mod.json")

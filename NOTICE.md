@@ -3,7 +3,7 @@
 ## What the MIT licence covers
 
 The [MIT licence](LICENSE) covers the original work in this repository: the port's host code and build files
-(`port/`), the mod maker (`port/tools/mod_maker/`), the example mod, the tools and scripts (`tools/`), the
+(`port/`), the Battle BGM Maker (`port/tools/bgm_maker/`), the example mod, the tools and scripts (`tools/`), the
 configuration (`config/`) and the documentation (`docs/`, `README.md`).
 
 ## What it does not cover

@@ -1,7 +1,7 @@
-"""The mod maker's local server: the page, and a small JSON API over one mods folder.
+"""The Battle BGM Maker's local server: the page, and a small JSON API over one mods folder.
 
 Bound to 127.0.0.1 only. Every API call needs the session's random token (in
-the X-Mod-Maker-Token header), the Host header must be this server's, and
+the X-Bgm-Maker-Token header), the Host header must be this server's, and
 every path is a mod folder's name or a path inside that folder, checked after
 resolving links, so nothing outside the mods folder is read or written.
 MIT licence; see port/README.md.
@@ -35,7 +35,7 @@ STATIC = {"index.html": "text/html; charset=utf-8", "style.css": "text/css; char
 MAX_UPLOAD = 1 << 30
 MAX_REQUEST = 4 << 20
 KEPT_BACKUPS = 20
-TOKEN_HEADER = "X-Mod-Maker-Token"
+TOKEN_HEADER = "X-Bgm-Maker-Token"
 
 
 class ApiError(Exception):
@@ -333,7 +333,7 @@ class App:
 
 def make_handler(app: App):
     class Handler(http.server.BaseHTTPRequestHandler):
-        server_version = "ModMaker/1"
+        server_version = "BattleBgmMaker/1"
         protocol_version = "HTTP/1.1"
 
         def log_message(self, fmt, *args):  # quiet
@@ -375,7 +375,7 @@ def make_handler(app: App):
                 self._json(403, {"error": "this server only answers its own page"})
                 return False
             if not self._authorised():
-                self._json(403, {"error": "missing or wrong session token; open the address the mod maker printed"})
+                self._json(403, {"error": "missing or wrong session token; open the address the Battle BGM Maker printed"})
                 return False
             return True
 

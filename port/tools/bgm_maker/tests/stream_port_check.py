@@ -1,9 +1,9 @@
-"""End-to-end check: a BRSTM imported through the mod maker, saved with
+"""End-to-end check: a BRSTM imported through the Battle BGM Maker, saved with
 "loop": "auto", loops in the game exactly at the loop start its header gives.
 Test tones only (stream_fixtures.py writes the file; FFmpeg cannot).
 
-    python port/tools/mod_maker/tests/stream_port_check.py            # make, run the port (90 s at most), analyse
-    python port/tools/mod_maker/tests/stream_port_check.py --analyse  # analyse the last run's dump again
+    python port/tools/bgm_maker/tests/stream_port_check.py            # make, run the port (90 s at most), analyse
+    python port/tools/bgm_maker/tests/stream_port_check.py --analyse  # analyse the last run's dump again
 
 1. build/port/data-brstm-test is made once as a muted copy of build/port/data
    (build/port/data itself is never written).
@@ -48,8 +48,8 @@ sys.path.insert(0, HERE)
 
 import port_check as pc  # noqa: E402
 import stream_fixtures as sf  # noqa: E402
-from modmaker import audio  # noqa: E402
-from modmaker.server import App, serve  # noqa: E402
+from bgmmaker import audio  # noqa: E402
+from bgmmaker.server import App, serve  # noqa: E402
 
 ROOT = audio.REPO_ROOT
 DATA = os.path.join(ROOT, "build", "port", "data-brstm-test")

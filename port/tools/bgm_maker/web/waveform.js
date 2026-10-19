@@ -1,4 +1,4 @@
-// Waveform and seam views for the mod maker, drawn on canvases.
+// Waveform and seam views for the Battle BGM Maker, drawn on canvases.
 // MIT licence; see port/README.md.
 "use strict";
 

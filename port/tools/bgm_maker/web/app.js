@@ -1,4 +1,4 @@
-// The mod maker's page. Talks to the local server (modmaker/server.py) with
+// The Battle BGM Maker's page. Talks to the local server (bgmmaker/server.py) with
 // the session token; plays and draws the WAV the server decoded with the
 // port's FFmpeg, so every sample here is the sample the port counts.
 // MIT licence; see port/README.md.
@@ -23,7 +23,7 @@ const S = {
 
 async function api(path, body) {
   const res = await fetch(path, {
-    method: "POST", headers: { "Content-Type": "application/json", "X-Mod-Maker-Token": TOKEN },
+    method: "POST", headers: { "Content-Type": "application/json", "X-Bgm-Maker-Token": TOKEN },
     body: JSON.stringify(body || {}),
   });
   const data = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
@@ -296,7 +296,7 @@ async function addFiles(si, files) {
     series._uploads = `Copying ${file.name} (${i + 1} of ${list.length})...`; renderSeries();
     try {
       const res = await fetch(`/api/track/import?folder=${encodeURIComponent(S.folder)}&name=${encodeURIComponent(file.name)}`,
-        { method: "POST", headers: { "X-Mod-Maker-Token": TOKEN, "Content-Type": "application/octet-stream" }, body: file });
+        { method: "POST", headers: { "X-Bgm-Maker-Token": TOKEN, "Content-Type": "application/octet-stream" }, body: file });
       const r = await res.json();
       if (!res.ok) throw new Error(r.error || res.status);
       const key = (await api("/api/key", { kind: "track", text: r.title, taken: allTrackKeys(), mod_id: S.model.id, folder: S.folder })).key;
@@ -599,7 +599,7 @@ function parseWav(buf) {
 async function loadAudio(file) {
   if (S.audioCache.has(file)) return S.audioCache.get(file);
   const res = await fetch(`/api/track/audio?folder=${encodeURIComponent(S.folder)}&file=${encodeURIComponent(file)}`,
-                          { headers: { "X-Mod-Maker-Token": TOKEN } });
+                          { headers: { "X-Bgm-Maker-Token": TOKEN } });
   if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
   const { rate, channels } = parseWav(await res.arrayBuffer());
   const n = channels[0].length;
@@ -965,7 +965,7 @@ function ensureCustom() {
 
 async function main() {
   wire();
-  if (!TOKEN) { status("No session token: open the address the mod maker printed", "bad"); return; }
+  if (!TOKEN) { status("No session token: open the address the Battle BGM Maker printed", "bad"); return; }
   try {
     await refreshMods();
     render();
@@ -976,7 +976,7 @@ async function main() {
       const key = HASH.get("track");
       if (key) S.model.series.forEach((s, si) => s.tracks.forEach((t, ti) => { if (t.key === key) selectTrack(si, ti); }));
     }
-  } catch (e) { status("Cannot reach the mod maker: " + e.message, "bad"); }
+  } catch (e) { status("Cannot reach the Battle BGM Maker: " + e.message, "bad"); }
 }
 
 main();

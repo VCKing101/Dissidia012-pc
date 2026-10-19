@@ -5,8 +5,8 @@
 // a mod track's "loop": "auto" takes the header's loop flag, loop start and
 // sample count (the loop runs from the start to the end of the stream).
 // FFmpeg's brstm and bfstm demuxers decode the audio; their "loop_start"
-// metadata is in microseconds, so it is not used. The mod maker reads headers
-// with the same rules (port/tools/mod_maker/modmaker/nintendo.py). The format
+// metadata is in microseconds, so it is not used. The Battle BGM Maker reads headers
+// with the same rules (port/tools/bgm_maker/bgmmaker/nintendo.py). The format
 // notes are docs/port/mod-folder.md, section 3. MIT licence; see
 // port/README.md.
 

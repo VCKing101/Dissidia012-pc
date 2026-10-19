@@ -1,4 +1,4 @@
-"""FFmpeg for the mod maker: finding the port's own ffmpeg/ffprobe, reading a
+"""FFmpeg for the Battle BGM Maker: finding the port's own ffmpeg/ffprobe, reading a
 file's tags, and decoding it to a PCM WAV at the file's own rate.
 
 The port decodes mod music with the same FFmpeg libraries (PortableKit
@@ -28,7 +28,7 @@ from . import nintendo
 TOOL_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(TOOL_DIR)))
 EXE = ".exe" if os.name == "nt" else ""
-CACHE_DIR = os.path.join(tempfile.gettempdir(), "d012-mod-maker")
+CACHE_DIR = os.path.join(tempfile.gettempdir(), "d012-bgm-maker")
 CACHE_DAYS = 7
 
 # Where the port's build keeps FFmpeg, most likely first.
@@ -100,7 +100,7 @@ def find_ffmpeg(explicit: Optional[str] = None, root: str = REPO_ROOT) -> FFmpeg
     if on_path[0] and on_path[1]:
         return FFmpeg(on_path[0], on_path[1], "PATH (not necessarily the port's FFmpeg)")
     raise FFmpegMissing(
-        "No ffmpeg" + EXE + " and ffprobe" + EXE + " found. The mod maker decodes with the port's own FFmpeg so "
+        "No ffmpeg" + EXE + " and ffprobe" + EXE + " found. The Battle BGM Maker decodes with the port's own FFmpeg so "
         "loop points mean the same in the tool and the game. Build the port once (cmake unpacks FFmpeg into the "
         "build's _deps/ffmpeg), or pass --ffmpeg <path to ffmpeg" + EXE + ">. Looked in:\n  " + "\n  ".join(looked))
 

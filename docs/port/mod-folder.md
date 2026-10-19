@@ -274,7 +274,7 @@ and scanned for the test frequencies with a Goertzel filter every 0.25 s.
 
 - V (19 October 2026, Nintendo streams): a 4 s stereo 44.1 kHz DSP-ADPCM BRSTM of test tones (440 Hz to sample
   88,207, which is not a multiple of a 14-sample frame; then 660 Hz, 880 Hz and a 990 Hz marker to the end, sample
-  176,407), its header saying loop flag on, loop start 88,207, imported through the mod maker's API and saved as
+  176,407), its header saying loop flag on, loop start 88,207, imported through the Battle BGM Maker's API and saved as
   `"auto"`, chosen with `D012_TEST_BGM_START` in a Quick Battle. The log: `the BRSTM header's loop, samples 88207
   to 176407` and `176407 frames at 44100 Hz, loop 88207..176406`. A Goertzel scan of the dump (10 ms windows, 5 ms
   steps) shows the marker up to each of 9 matched seams, 2.000 s apart, and 660 Hz right after it, never 440 Hz;
@@ -283,20 +283,20 @@ and scanned for the test frequencies with a Goertzel filter every 0.25 s.
   Wii U BFSTM, Switch BFSTM at 48 kHz (header loop 96,008, frame 88,207 after resampling), a BRSTM without a loop
   flag (whole file) and a BRSTM with `{"start": 132300}` in the manifest (the manifest wins) all loop where
   expected; an IMA-ADPCM BCSTM and a BWAV are refused with their errors.
-  `port/tools/mod_maker/tests/stream_port_check.py`, output in `build/port/brstm-test/analysis.txt`.
+  `port/tools/bgm_maker/tests/stream_port_check.py`, output in `build/port/brstm-test/analysis.txt`.
 
 Not verified: a long real-world MP3 or Ogg (decode time), a track that plays once to its end in battle, the
 source-built FFmpeg on macOS and Linux, a real (not synthetic) BRSTM, BCSTM or BFSTM.
 
-## 8. Making a mod with the mod maker
+## 8. Making a mod with the Battle BGM Maker
 
-`port/tools/mod_maker/` is a small local tool that writes `mod.json` for you, above all the loop points, which an
+`port/tools/bgm_maker/` is a small local tool that writes `mod.json` for you, above all the loop points, which an
 MP3 cannot carry in its tags. It needs only Python 3.10 or newer (standard library) and the port's own FFmpeg, and
 it never uses the network.
 
 ```powershell
-python port/tools/mod_maker/mod_maker.py                    # works on build/port/data/mods
-python port/tools/mod_maker/mod_maker.py D:\my-data\mods     # or any mods folder
+python port/tools/bgm_maker/bgm_maker.py                    # works on build/port/data/mods
+python port/tools/bgm_maker/bgm_maker.py D:\my-data\mods     # or any mods folder
 ```
 
 It serves a page on `127.0.0.1` only and opens it in the default browser. The address it prints carries a random
@@ -361,7 +361,7 @@ encoder delay and padding.
 
 ### Verification (19 October 2026)
 
-- `python -m unittest discover -s port/tools/mod_maker/tests`: 69 tests (manifest rules against the port's,
+- `python -m unittest discover -s port/tools/bgm_maker/tests`: 69 tests (manifest rules against the port's,
   including every case in section 7's validation list; keys and ids; samples and seconds; the API's token, host
   check and path safety; decoding; Nintendo stream headers). One is skipped on Windows without the right to make a
   symbolic link. `tests/test_streams.py` writes its own BRSTM, BCSTM and BFSTM files (`tests/stream_fixtures.py`:
@@ -371,7 +371,7 @@ encoder delay and padding.
   9,734,769 at 44,100 Hz). With FFmpeg: every variant decodes to exactly the samples encoded and the header's count;
   silence, then a tone from the loop start (sample 3,001, mid-frame, small blocks), decodes with its first sound at
   sample 3,001; importing through the API pre-fills the loop and saves `"auto"`; BWAV and IMA-ADPCM are refused.
-- `python port/tools/mod_maker/tests/port_check.py` (end to end, test tones only): makes an MP3 of tones (440 Hz
+- `python port/tools/bgm_maker/tests/port_check.py` (end to end, test tones only): makes an MP3 of tones (440 Hz
   for 2 s, 660 Hz for 1 s, 880 Hz for 0.95 s, a 50 ms 990 Hz marker, then 1320 Hz), creates the mod
   `modmaker-test` **through the tool's HTTP API** in `build/port/data-modmaker-test/mods` (a muted copy of
   `build/port/data`), imports the MP3 and saves the loop 88,200 to 176,400. The recompiled port then runs (90 s at

@@ -2,7 +2,7 @@
 with backups, and (when the port's FFmpeg is there) decoding, including an
 MP3's encoder delay.
 
-    python -m unittest discover -s port/tools/mod_maker/tests
+    python -m unittest discover -s port/tools/bgm_maker/tests
 """
 
 import http.client
@@ -20,8 +20,8 @@ import wave
 TOOL = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, TOOL)
 
-from modmaker import audio, manifest as mf  # noqa: E402
-from modmaker.server import TOKEN_HEADER, App, safe_file_name, serve  # noqa: E402
+from bgmmaker import audio, manifest as mf  # noqa: E402
+from bgmmaker.server import TOKEN_HEADER, App, safe_file_name, serve  # noqa: E402
 
 
 def read(path):
@@ -139,7 +139,7 @@ class Security(ServerCase):
     def test_only_its_own_static_files(self):
         self.assertEqual(self.request("GET", "/", token=False)[0], 200)
         self.assertEqual(self.request("GET", "/static/app.js", token=False)[0], 200)
-        for path in ("/static/../modmaker/server.py", "/static/..%2fmod_maker.py", "/static/x.js", "/mod_maker.py"):
+        for path in ("/static/../bgmmaker/server.py", "/static/..%2fbgm_maker.py", "/static/x.js", "/bgm_maker.py"):
             self.assertEqual(self.request("GET", path, token=False)[0], 404, path)
 
     def test_bad_mod_folders(self):

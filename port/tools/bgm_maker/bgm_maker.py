@@ -1,6 +1,6 @@
-"""The mod maker: set up a mod's mod.json, above all its loop points, in the browser.
+"""The Battle BGM Maker: set up a mod's mod.json, above all its loop points, in the browser.
 
-    python port/tools/mod_maker/mod_maker.py [mods folder] [--ffmpeg PATH] [--port N] [--no-browser]
+    python port/tools/bgm_maker/bgm_maker.py [mods folder] [--ffmpeg PATH] [--port N] [--no-browser]
 
 Serves a page on 127.0.0.1 only (a free port unless --port), opens it in the
 default browser, and works on the mods folder given (default
@@ -20,8 +20,8 @@ import webbrowser
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from modmaker.audio import REPO_ROOT, Decoder, FFmpegMissing, find_ffmpeg  # noqa: E402
-from modmaker.server import App, serve  # noqa: E402
+from bgmmaker.audio import REPO_ROOT, Decoder, FFmpegMissing, find_ffmpeg  # noqa: E402
+from bgmmaker.server import App, serve  # noqa: E402
 
 
 def default_mods_dir() -> str:
@@ -39,7 +39,7 @@ def default_mods_dir() -> str:
 
 def main(argv=None) -> int:
     if sys.version_info < (3, 10):
-        print("The mod maker needs Python 3.10 or newer.", file=sys.stderr)
+        print("The Battle BGM Maker needs Python 3.10 or newer.", file=sys.stderr)
         return 2
     parser = argparse.ArgumentParser(description=__doc__.strip().splitlines()[0])
     parser.add_argument("mods_dir", nargs="?", default=None, help="the mods folder (default build/port/data/mods)")
@@ -66,7 +66,7 @@ def main(argv=None) -> int:
     url = f"http://127.0.0.1:{app.port}/#token={app.token}"
     print(f"Mods folder: {mods_dir}", flush=True)
     print(f"FFmpeg:      {ff.ffmpeg} ({ff.version}; from {ff.source})")
-    print(f"Mod maker:   {url}", flush=True)
+    print(f"Battle BGM Maker:   {url}", flush=True)
     print("Stop with Ctrl+C.", flush=True)
     if not options.no_browser:
         webbrowser.open(url)

@@ -29,8 +29,8 @@ game's executable and overlays.
   Ogg Vorbis, Opus, FLAC or WAV with loop points ([format](docs/port/mod-folder.md)).
 - **A BGM playlist selector** on the loading screen: choose music by series and track, mod tracks included
   ([design](docs/port/bgm-playlist-design.md)).
-- **A mod maker**: a local browser tool for writing a mod's `mod.json` and setting its loop points
-  ([README](port/tools/mod_maker/README.md)).
+- **A Battle BGM Maker**: a local browser tool for writing a mod's `mod.json` and setting its loop points
+  ([README](port/tools/bgm_maker/README.md)).
 
 ## BGM playlist selector
 
@@ -61,7 +61,7 @@ generated tones.
 - Visual Studio 2022 (C++ workload), CMake and Ninja.
 - SDL3, glslang and the Vulkan headers and loader library; PortableKit's FFmpeg build is fetched on the first
   configure.
-- Python 3.10 or newer, for the preparation, run and mod-maker scripts.
+- Python 3.10 or newer, for the preparation, run and Battle BGM Maker scripts.
 - A clone of PortableKit at `33800c4` with this repository's patches applied (`port/portablekit-patches/`).
 - Your own dump of the game (USA ULUS10566 v1.00). The decrypted `EBOOT.ELF` and the overlays are produced locally
   from it.
@@ -84,7 +84,7 @@ The full steps, from applying the PortableKit patches to the recompiled build an
 
 | Path | What it is |
 | --- | --- |
-| `port/` | The port: PortableKit profile and host code, decompiled C used as native overrides, PortableKit patches, example mod, mod maker |
+| `port/` | The port: PortableKit profile and host code, decompiled C used as native overrides, PortableKit patches, example mod, Battle BGM Maker |
 | `docs/port/` | Port research, bring-up log, recompiled build, mod folder and BGM playlist design |
 | `tools/port/` | Port scripts: build wrapper, game-directory preparation, bounded runs, overlay metadata, surveys |
 | `src/`, `include/` | Matching decompiled C/C++ for main and the menu, battle and extra overlays |
@@ -100,7 +100,7 @@ Ignored and never committed: the game image, everything extracted or built from 
 
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -s tools -p "test_*.py"
-python -m unittest discover -s port/tools/mod_maker/tests
+python -m unittest discover -s port/tools/bgm_maker/tests
 ```
 
 Many tool tests need the locally extracted game files and skip or fail without them.

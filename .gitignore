@@ -34,7 +34,7 @@
 *.[wW][aA][vV]
 /mods/
 /port/mods/
-/port/tools/mod_maker/mods/
+/port/tools/bgm_maker/mods/
 
 # Local toolchains, clones and Python environments
 /tools/compilers/

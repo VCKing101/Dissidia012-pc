@@ -1,9 +1,9 @@
-"""End-to-end check: a mod made through the mod maker's HTTP API plays in the
+"""End-to-end check: a mod made through the Battle BGM Maker's HTTP API plays in the
 port with its loop exactly where the tool set it, with an MP3 (encoder delay
 and padding) as the source. Test tones only.
 
-    python port/tools/mod_maker/tests/port_check.py            # make, run the port (90 s at most), analyse
-    python port/tools/mod_maker/tests/port_check.py --analyse  # analyse the last run's dump again
+    python port/tools/bgm_maker/tests/port_check.py            # make, run the port (90 s at most), analyse
+    python port/tools/bgm_maker/tests/port_check.py --analyse  # analyse the last run's dump again
 
 1. build/port/data-modmaker-test is made once as a copy of build/port/data
    (muted in its settings.ini; build/port/data itself is never written).
@@ -48,8 +48,8 @@ import wave
 TOOL = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, TOOL)
 
-from modmaker import audio  # noqa: E402
-from modmaker.server import TOKEN_HEADER, App, serve  # noqa: E402
+from bgmmaker import audio  # noqa: E402
+from bgmmaker.server import TOKEN_HEADER, App, serve  # noqa: E402
 
 ROOT = audio.REPO_ROOT
 SOURCE_DATA = os.path.join(ROOT, "build", "port", "data")
@@ -106,7 +106,7 @@ def make_tones(ff) -> str:
         out.writeframes(bytes(frames))
     mp3 = os.path.join(source, "modmaker_tones.mp3")
     subprocess.run([ff.ffmpeg, "-hide_banner", "-v", "error", "-y", "-i", wav_path, "-c:a", "libmp3lame", "-b:a",
-                    "192k", "-metadata", "title=Mod maker test tones", mp3], check=True)
+                    "192k", "-metadata", "title=BGM maker test tones", mp3], check=True)
     return mp3
 
 
@@ -138,7 +138,7 @@ def make_mod(ff, mp3) -> tuple:
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
         api = Client(app)
-        assert api.call("/api/mod/create", {"id": MOD_ID, "name": "Mod maker test", "version": "1.0.0",
+        assert api.call("/api/mod/create", {"id": MOD_ID, "name": "BGM maker test", "version": "1.0.0",
                                             "author": "Dissidia 012 native port"})["ok"]
         with open(mp3, "rb") as handle:
             imported = api.call(f"/api/track/import?folder={MOD_ID}&name=modmaker_tones.mp3", raw=handle.read())
@@ -146,8 +146,8 @@ def make_mod(ff, mp3) -> tuple:
         info = api.call("/api/track/info", {"folder": MOD_ID, "file": imported["file"]})
         print(f"imported {imported['file']} as \"{imported['title']}\" (key {key}): {info['codec']} {info['rate']} Hz, "
               f"{info['samples']} samples after decoding (encoded from {int(sum(p[2] for p in PARTS) * RATE)})")
-        model = {"id": MOD_ID, "name": "Mod maker test", "version": "1.0.0", "author": "Dissidia 012 native port",
-                 "description": "", "extra": {}, "series": [{"key": "tones", "name": "MOD MAKER TEST", "order": 0,
+        model = {"id": MOD_ID, "name": "BGM maker test", "version": "1.0.0", "author": "Dissidia 012 native port",
+                 "description": "", "extra": {}, "series": [{"key": "tones", "name": "BGM MAKER TEST", "order": 0,
                  "extra": {}, "tracks": [{"key": key, "title": imported["title"], "file": imported["file"], "extra": {},
                                           "loop": {"mode": "custom", "start": LOOP_START, "end": LOOP_END}}]}]}
         saved = api.call("/api/mod/save", {"folder": MOD_ID, "model": model})

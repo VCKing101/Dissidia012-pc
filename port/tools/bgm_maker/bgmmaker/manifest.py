@@ -3,7 +3,7 @@
 The rules are port/host/d012_mods.cpp's (read_mod, read_loop, track_file) and
 the JSON reader's (port/host/d012_json.cpp); the format is
 docs/port/mod-folder.md. Where the port leaves a broken part out and carries
-on, this module reports an error, because the mod maker never writes a
+on, this module reports an error, because the Battle BGM Maker never writes a
 manifest the port would read differently from what the modder set.
 
 Loop positions are samples of the file at its own rate, as decoded by FFmpeg
