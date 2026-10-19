@@ -565,6 +565,7 @@ and the wheel follow. After confirm the list stays, dimmed, while the screen fad
 | `D012_NO_BGM_PLAYLIST=1` | The game's selector **and layout**: nothing of this section. V: the three pages captured with it are pixel-identical to the previous build's (outside the random BGM name) |
 | `D012_BGM_PLAYLIST_FLAT=1` | The one-line selector of section 10 (the track in the box, the series on a line under it), the pages where the game has them |
 | `D012_TEST_BGM_UNLOCK_ALL=1` | Test only: the selector offers every row with a weight, locked or not (five tracks a series; the test save has three at most). Nothing is written to the save |
+| `D012_TEST_OVERLAY_FIXED_STEP=1` | Test only: the wheel's roll advances by 1/60 s per drawn frame instead of by the clock, so frame captures (which pause the game while saving) show the motion. Used for the README animation |
 | `D012_TRACE_BGM_LAYOUT=1` | Logs the screen's elements, the layout's animations, parts, pictures and anchors, 60 frames into the screen |
 
 ### 11.5 Evidence (V)

@@ -44,6 +44,12 @@ and L2 or R2 again hands the D-pad back. Mods add series of their own after the 
   <img src="docs/images/bgm-playlist-mod-series.png" width="49%" alt="BATTLE BGM box showing a mod's series FINAL FANTASY XV 3/5, with its tracks on the wheel">
 </p>
 
+*Rolling through a series' tracks (up/down):*
+
+![The track wheel rolling down through FINAL FANTASY VII's five tracks, wrapping from the last to the first, then back up](docs/images/bgm-playlist-wheel-scroll.gif)
+
+*Switching series (left/right):*
+
 ![The track wheel rolling through FINAL FANTASY XIII, then left and right switching to DISSIDIA, a mod's FINAL FANTASY XV and CRISIS CORE](docs/images/bgm-playlist-wheel.gif)
 
 The FINAL FANTASY XV and CRISIS CORE series in these captures come from a test mod with track titles only; it plays

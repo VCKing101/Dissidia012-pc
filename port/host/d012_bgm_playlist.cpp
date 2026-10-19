@@ -948,7 +948,11 @@ void wheel_draw() {
     r.serial = o.screen_serial;
     r.series = o.series_index;
     r.position = position;
-    r.offset *= std::exp(-ImGui::GetIO().DeltaTime * 16.0f);
+    // D012_TEST_OVERLAY_FIXED_STEP=1 advances the roll by 1/60 s per drawn frame instead of by the clock, so frame
+    // captures (which pause the game while they save) show every step of it.
+    static const bool fixed_step = std::getenv("D012_TEST_OVERLAY_FIXED_STEP") != nullptr;
+    const float dt = fixed_step ? 1.0f / 60.0f : ImGui::GetIO().DeltaTime;
+    r.offset *= std::exp(-dt * 16.0f);
     if (std::fabs(r.offset) < 0.01f) r.offset = 0.0f;
 
     // The frame: lavender, darker to the left, as the game's gradient quads.
