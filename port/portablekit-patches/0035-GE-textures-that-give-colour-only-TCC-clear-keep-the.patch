@@ -1,0 +1,88 @@
+From e8143854858baeb74b72a935565be110d10dac53 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Tue, 20 Oct 2026 21:33:55 +1030
+Subject: [PATCH 35/39] GE: textures that give colour only (TCC clear) keep the
+ vertex alpha
+
+The texture function's TCC bit (bit 8) says whether the texture gives
+colour and alpha or colour alone; the renderer parsed it and never used
+it, so every texture's alpha always went into the fragment. A game that
+draws the previous frame back over the screen, twisted a little more each
+frame, for a swirl transition does so with TCC clear and a vertex alpha
+of one half: the framebuffer texture's alpha bits hold the stencil, 0
+there, so the twisted layer was blended at nothing and the swirl never
+showed, only a fade.
+
+With TCC clear the shader takes the texel's alpha as one, which is what
+the GE does for modulate, decal, blend and add, and keeps the fragment's
+alpha for replace.
+
+<prefix>_NO_TEXTURE_RGB takes the texture's alpha always, as before.
+---
+ host/gpu/shaders/ge.frag     |  9 +++++++--
+ host/gpu/vulkan_renderer.cpp | 13 ++++++++++---
+ 2 files changed, 17 insertions(+), 5 deletions(-)
+
+diff --git a/host/gpu/shaders/ge.frag b/host/gpu/shaders/ge.frag
+index 24cae9d..f9f0e87 100644
+--- a/host/gpu/shaders/ge.frag
++++ b/host/gpu/shaders/ge.frag
+@@ -51,9 +51,14 @@ void main() {
+             if ((flags & 4) != 0) uv.y = clamp(uv.y, half_texel.y, 1.0 - half_texel.y);
+         }
+         vec4 texel = texture(guest_texture, uv);
+-        // texture_params.y: the texture function, plus 8 for colour doubling.
++        // texture_params.y: the texture function, plus 8 for colour doubling,
++        // plus 16 when the texture gives colour only (TCC clear): then every
++        // function keeps the fragment's alpha, as an opaque texel does in all
++        // but replace.
+         int function_bits = int(push.texture_params.y + 0.5);
+         int function = function_bits & 7;
++        bool rgb_only = (function_bits & 16) != 0;
++        if (rgb_only) texel.a = 1.0;
+         if (function == 0) {          // modulate
+             color *= texel;
+         } else if (function == 1) {   // decal
+@@ -61,7 +66,7 @@ void main() {
+         } else if (function == 2) {   // blend
+             color = vec4(mix(color.rgb, texel.rgb, texel.rgb), color.a * texel.a);
+         } else {                      // replace and everything else
+-            color = texel;
++            color = vec4(texel.rgb, rgb_only ? color.a : texel.a);
+         }
+         // Colour doubling (TFUNC bit 16): games draw with a vertex colour of
+         // 0x80 and double the modulated result to reach full brightness.
+diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
+index 4807918..6a83f0c 100644
+--- a/host/gpu/vulkan_renderer.cpp
++++ b/host/gpu/vulkan_renderer.cpp
+@@ -126,7 +126,7 @@ constexpr std::uint32_t kGpuTimerSegments = 16u;
+ struct PushConstants {
+     std::array<float, 16> transform{};
+     std::array<float, 4> viewport{};        // x,y: target size; z: through flag; w: 1 fog + 2 lighting
+-    std::array<float, 4> texture_params{};  // x: enabled + 2 clamp u + 4 clamp v, y: function + 8 colour doubling, z: alpha ref, w: alpha func
++    std::array<float, 4> texture_params{};  // x: enabled + 2 clamp u + 4 clamp v, y: function + 8 colour doubling + 16 RGB only, z: alpha ref, w: alpha func
+     std::array<float, 4> uv_transform{1.0f, 1.0f, 0.0f, 0.0f};
+     std::array<float, 4> view_z{};          // row of view * world that gives view-space z, for fog
+ };
+@@ -7369,8 +7369,15 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+     // Colour doubling, which the texture function word carries in bit 16.
+     // <prefix>_NO_COLOR_DOUBLING ignores it, as before.
+     static const bool no_color_doubling = portablekit::env("NO_COLOR_DOUBLING") != nullptr;
+-    const std::uint32_t function_bits =
+-        call.texture.function + (call.texture.color_double && !no_color_doubling ? 8u : 0u);
++    // The texture function's colour component bit (TCC, bit 8): clear, the
++    // texture gives colour only and the fragment keeps the vertex alpha, so a
++    // framebuffer texture whose alpha bits hold the stencil (often 0) still
++    // blends by the vertex alpha. Plus 16 for that. <prefix>_NO_TEXTURE_RGB
++    // takes the texture's alpha always, as before.
++    static const bool no_texture_rgb = portablekit::env("NO_TEXTURE_RGB") != nullptr;
++    const std::uint32_t function_bits = call.texture.function +
++                                        (call.texture.color_double && !no_color_doubling ? 8u : 0u) +
++                                        (!call.texture.alpha_from_texture && !no_texture_rgb ? 16u : 0u);
+     push.texture_params = {call.texture.enabled ? 1.0f + wrap_flags : 0.0f, static_cast<float>(function_bits),
+                            static_cast<float>(call.alpha_test.enabled ? call.alpha_test.reference : 0u),
+                            static_cast<float>(call.alpha_test.enabled ? call.alpha_test.function : 0u)};
+-- 
+2.53.0.windows.1
+

@@ -1,0 +1,67 @@
+From b701e1425173fc7275e30e82d7cf99ddb3e652f1 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Tue, 20 Oct 2026 22:47:10 +1030
+Subject: [PATCH 39/39] GE census: doubled source alpha and colour-only
+ textures are drawn right now
+
+Since the blend factors 6 and 7 and the TCC bit are honoured, the census
+counts them as handled (info), and as approximations only with their off
+switches (<prefix>_NO_DOUBLE_ALPHA, <prefix>_NO_TEXTURE_RGB). Blend factors
+8 and 9, twice the destination alpha, are still approximated and counted.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/gpu/ge_census.cpp | 15 +++++++++++----
+ 1 file changed, 11 insertions(+), 4 deletions(-)
+
+diff --git a/host/gpu/ge_census.cpp b/host/gpu/ge_census.cpp
+index 4c78d21..db8eaba 100644
+--- a/host/gpu/ge_census.cpp
++++ b/host/gpu/ge_census.cpp
+@@ -56,7 +56,8 @@ constexpr FeatureInfo kFeatures[] = {
+     {"target.beyond_480x272", "target", "medium", "A draw that reaches past 480x272 of its target (scissor or vertices): cut off, every target holds 480x272"},
+     // Blending.
+     {"blend.abs_diff", "blend", "high", "Blend equation ABS (5): drawn as ADD"},
+-    {"blend.doubled_alpha_factor", "blend", "high", "Blend factors 2x source/destination alpha (6-9): drawn as the single-alpha factors"},
++    {"blend.doubled_alpha_factor", "blend", "high", "Blend factors 2x source alpha (6, 7) with <prefix>_NO_DOUBLE_ALPHA, or 2x destination alpha (8, 9): drawn as the single-alpha factors"},
++    {"blend.doubled_source_alpha", "blend", "info", "Blend factors 2x source alpha (6, 7): drawn right (the shader doubles the alpha the blend reads)"},
+     {"blend.two_fixed_colors", "blend", "medium", "Both blend factors FIX with colours that are not complements: one constant serves both, the source's"},
+     {"blend.dst_alpha_16bit_target", "blend", "medium", "Blending by destination alpha on a 5551/4444 target: the renderer's alpha has 8 bits, the GE's 1 or 4"},
+     {"blend.dst_alpha_5650_target", "blend", "medium", "Blending by destination alpha on a 5650 target, which has no alpha on the GE"},
+@@ -64,7 +65,8 @@ constexpr FeatureInfo kFeatures[] = {
+     {"tfx.blend_env_color", "texture", "high", "Texture function BLEND (2): mixed by the texel instead of with the environment colour 0xCA"},
+     {"tfx.add", "texture", "high", "Texture function ADD (4): drawn as REPLACE"},
+     {"tfx.invalid", "texture", "low", "Texture function 5-7: drawn as REPLACE"},
+-    {"tfx.tcc_rgb", "texture", "high", "Texture colour component RGB (0xC9 bit 8 clear) on a texture with alpha: the renderer still takes the texel's alpha"},
++    {"tfx.tcc_rgb", "texture", "high", "Texture colour component RGB (0xC9 bit 8 clear) on a texture with alpha, with <prefix>_NO_TEXTURE_RGB: the renderer takes the texel's alpha"},
++    {"tfx.tcc_rgb_handled", "texture", "info", "Texture colour component RGB (0xC9 bit 8 clear) on a texture with alpha: drawn right (the vertex alpha is kept)"},
+     {"texmap.projection", "texture", "high", "Texture map mode 1 (0xC0): texture coordinates from the texture matrix and position/UV/normal; the renderer ignores the matrix"},
+     {"texmap.projection_identity_uv", "texture", "info", "Texture map mode 1 with UV as the source and an identity texture matrix: the same as mode 0"},
+     {"texmap.env_map", "texture", "high", "Texture map mode 2 (0xC0): environment (shade) mapping from the lights 0xC1; the renderer uses the vertex UVs"},
+@@ -642,8 +644,12 @@ void note_draw(const GuestMemory &memory, const DrawCall &call, const std::array
+         const BlendState &blend = call.blend;
+         if (blend.equation == 5u) hit_draw(s, "blend.abs_diff", "", detail);
+         const auto doubled = [](std::uint32_t factor) { return factor >= 6u && factor <= 9u; };
++        static const bool plain_double = portablekit::env("NO_DOUBLE_ALPHA") != nullptr;
++        const auto destination_doubled = [](std::uint32_t factor) { return factor == 8u || factor == 9u; };
++        const bool unhandled = plain_double || destination_doubled(blend.source_factor) ||
++                               destination_doubled(blend.destination_factor);
+         if (blend.equation < 3u && (doubled(blend.source_factor) || doubled(blend.destination_factor)))
+-            hit_draw(s, "blend.doubled_alpha_factor",
++            hit_draw(s, unhandled ? "blend.doubled_alpha_factor" : "blend.doubled_source_alpha",
+                      std::to_string(blend.source_factor) + "/" + std::to_string(blend.destination_factor), detail);
+         const auto plain = [](std::uint32_t color) {
+             color &= 0x00FFFFFFu;
+@@ -676,7 +682,8 @@ void note_draw(const GuestMemory &memory, const DrawCall &call, const std::array
+                                      (is_clut(texture.format) && texture.clut_format == 0u));
+     if (!texture.alpha_from_texture && texture_has_alpha) {
+         static const char *kFunctions[] = {"modulate", "decal", "blend", "replace", "add", "5", "6", "7"};
+-        hit_draw(s, "tfx.tcc_rgb", kFunctions[function & 7u], detail);
++        static const bool texture_alpha_always = portablekit::env("NO_TEXTURE_RGB") != nullptr;
++        hit_draw(s, texture_alpha_always ? "tfx.tcc_rgb" : "tfx.tcc_rgb_handled", kFunctions[function & 7u], detail);
+     }
+ 
+     // Texture coordinate generation.
+-- 
+2.53.0.windows.1
+

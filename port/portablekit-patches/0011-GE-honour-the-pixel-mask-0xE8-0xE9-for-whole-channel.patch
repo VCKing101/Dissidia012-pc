@@ -1,7 +1,7 @@
 From 5717536e652e2c9fcb67f3d85d4e7c767da7e03a Mon Sep 17 00:00:00 2001
 From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
 Date: Sun, 18 Oct 2026 19:03:34 +1030
-Subject: [PATCH 11/31] GE: honour the pixel mask (0xE8, 0xE9) for whole
+Subject: [PATCH 11/39] GE: honour the pixel mask (0xE8, 0xE9) for whole
  channels
 
 The pixel mask registers were ignored, so a draw meant to touch only some

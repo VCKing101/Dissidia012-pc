@@ -1,0 +1,148 @@
+From 13f77525e4fb7f31cf1a00555326ac163d2f2ae9 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Tue, 20 Oct 2026 21:03:05 +1030
+Subject: [PATCH 34/39] GE: blend factors of twice the source alpha (6 and 7)
+
+The GE's blend factors 6 and 7 are twice the source alpha and one minus
+twice it, clamped. The renderer read them as the plain alpha, so effects
+drawn the usual way with them (a vertex or texture alpha of 0x80, factor
+6, an additive destination) came out at half strength: in one game's
+battles the glowing orbs and hit flashes of the fighters' attacks looked
+as if a layer were missing.
+
+The fragment shader now doubles the alpha it hands to the blender for
+these draws (after the alpha test, which reads the fragment's own), and
+the blend reads it as SRC_ALPHA or ONE_MINUS_SRC_ALPHA. The alpha written
+to the target is halved again through the blend constant's alpha, so the
+alpha bits, which hold the stencil, get the fragment's alpha as before.
+Factors 8 and 9 (twice the destination alpha) still read the plain one.
+
+<prefix>_NO_DOUBLE_ALPHA blends with the plain alpha, as before.
+---
+ host/gpu/shaders/ge.frag     | 14 +++++++++++---
+ host/gpu/vulkan_renderer.cpp | 37 +++++++++++++++++++++++++++++++-----
+ 2 files changed, 43 insertions(+), 8 deletions(-)
+
+diff --git a/host/gpu/shaders/ge.frag b/host/gpu/shaders/ge.frag
+index c46e302..24cae9d 100644
+--- a/host/gpu/shaders/ge.frag
++++ b/host/gpu/shaders/ge.frag
+@@ -29,6 +29,14 @@ layout(set = 1, binding = 0) uniform Environment {
+     vec4 fog_color;
+ } lighting;
+ 
++// The colour handed to the blender. viewport.w bit 2: the blend reads twice
++// the source alpha (GE blend factors 6 and 7), so the alpha is doubled here,
++// after the alpha test, which reads the fragment's own.
++vec4 blended(vec4 color) {
++    if ((int(push.viewport.w + 0.5) & 4) != 0) color.a = min(color.a * 2.0, 1.0);
++    return color;
++}
++
+ void main() {
+     vec4 color = frag_color;
+     if (push.texture_params.x > 0.5) {
+@@ -67,7 +75,7 @@ void main() {
+ 
+     // PSP alpha test, evaluated per fragment.
+     if (!kAlphaTest) {
+-        out_color = color;
++        out_color = blended(color);
+         return;
+     }
+     int alpha_function = int(push.texture_params.w + 0.5);
+@@ -88,7 +96,7 @@ void main() {
+         else if (alpha_function == 6) hit = value > wanted;
+         else if (alpha_function == 7) hit = value >= wanted;
+         if (!hit) discard;
+-        out_color = color;
++        out_color = blended(color);
+         return;
+     }
+     float reference = float(packed & 255) / 255.0;
+@@ -103,5 +111,5 @@ void main() {
+     else if (alpha_function == 7) passed = alpha >= reference;
+     if (!passed) discard;
+ 
+-    out_color = color;
++    out_color = blended(color);
+ }
+diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
+index 1407a06..4807918 100644
+--- a/host/gpu/vulkan_renderer.cpp
++++ b/host/gpu/vulkan_renderer.cpp
+@@ -135,6 +135,9 @@ struct PushConstants {
+ static_assert(sizeof(PushConstants) == 128u, "PushConstants must fit the guaranteed push constant size");
+ constexpr float kPushFog = 1.0f;
+ constexpr float kPushLighting = 2.0f;
++// The blend reads twice the source alpha (doubled_alpha()): the fragment
++// shader doubles the alpha it hands to the blender.
++constexpr float kPushDoubleAlpha = 4.0f;
+ 
+ struct GpuVertex {
+     float x{}, y{}, z{}, w{1.0f};
+@@ -455,6 +458,23 @@ VkBlendFactor to_blend_factor(std::uint32_t factor, bool source) {
+     }
+ }
+ 
++// GE blend factors 6 and 7 are twice the source alpha and one minus twice
++// it; 8 and 9 are the same of the destination alpha. Vulkan has no doubled
++// factor. For 6 and 7 the fragment shader doubles the alpha it outputs
++// (clamped to one, as the GE clamps the factor) and the blend takes it as
++// SRC_ALPHA or ONE_MINUS_SRC_ALPHA; the alpha written to the target is then
++// halved again through the blend constant's alpha (0.5), so the alpha byte,
++// which holds the stencil, gets the fragment's own alpha as before. Games
++// draw additive effects with a vertex alpha of 0x80 and this factor to reach
++// full strength; read as plain alpha they came out at half.
++// <prefix>_NO_DOUBLE_ALPHA blends with the plain alpha, as before. 8 and 9
++// still read the plain destination alpha.
++bool doubled_alpha(std::uint32_t source_factor, std::uint32_t destination_factor) {
++    static const bool off = portablekit::env("NO_DOUBLE_ALPHA") != nullptr;
++    return !off && (source_factor == 6u || source_factor == 7u || destination_factor == 6u ||
++                    destination_factor == 7u);
++}
++
+ VkBlendOp to_blend_op(std::uint32_t equation) {
+     switch (equation) {
+     // GU_SUBTRACT is source minus destination; GU_REVERSE_SUBTRACT is the other
+@@ -5697,7 +5717,9 @@ VkPipeline VulkanRenderer::Impl::create_pipeline(const PipelineKey &key) const {
+     blend_attachment.srcColorBlendFactor = to_blend_factor(key.source_factor, true);
+     blend_attachment.dstColorBlendFactor = to_blend_factor(key.destination_factor, false);
+     blend_attachment.colorBlendOp = to_blend_op(key.equation);
+-    blend_attachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
++    blend_attachment.srcAlphaBlendFactor = key.blend && doubled_alpha(key.source_factor, key.destination_factor)
++                                               ? VK_BLEND_FACTOR_CONSTANT_ALPHA
++                                               : VK_BLEND_FACTOR_ONE;
+     blend_attachment.dstAlphaBlendFactor = key.alpha_add ? VK_BLEND_FACTOR_ONE : VK_BLEND_FACTOR_ZERO;
+     blend_attachment.alphaBlendOp = VK_BLEND_OP_ADD;
+     blend_attachment.colorWriteMask = key.color_mask;
+@@ -7332,7 +7354,9 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+     PushConstants push{};
+     push.transform = multiply(call.projection, view_world);
+     push.viewport = {static_cast<float>(kPspWidth), static_cast<float>(kPspHeight), call.through ? 1.0f : 0.0f,
+-                     (fogged ? kPushFog : 0.0f) + (lit ? kPushLighting : 0.0f)};
++                     (fogged ? kPushFog : 0.0f) + (lit ? kPushLighting : 0.0f) +
++                         (key.blend && doubled_alpha(key.source_factor, key.destination_factor) ? kPushDoubleAlpha
++                                                                                                : 0.0f)};
+     push.view_z = {view_world[2], view_world[6], view_world[10], view_world[14]};
+     // The GE's texture wrap register: clamp in u, in v, or repeat. The
+     // sampler repeats; the fragment shader clamps the axes flagged here
+@@ -7558,9 +7582,12 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+     // when both do, because the destination is then its complement.
+     const std::uint32_t constant_color =
+         key.source_factor == kFactorFixed ? call.blend.fixed_source : call.blend.fixed_destination;
+-    const std::array<float, 4> blend_constants{static_cast<float>(constant_color & 0xFFu) / 255.0f,
+-                                               static_cast<float>((constant_color >> 8u) & 0xFFu) / 255.0f,
+-                                               static_cast<float>((constant_color >> 16u) & 0xFFu) / 255.0f, 1.0f};
++    // Its alpha halves the doubled alpha a draw writes (doubled_alpha()).
++    const std::array<float, 4> blend_constants{
++        static_cast<float>(constant_color & 0xFFu) / 255.0f,
++        static_cast<float>((constant_color >> 8u) & 0xFFu) / 255.0f,
++        static_cast<float>((constant_color >> 16u) & 0xFFu) / 255.0f,
++        key.blend && doubled_alpha(key.source_factor, key.destination_factor) ? 0.5f : 1.0f};
+ 
+     const auto clamp_axis = [](std::uint32_t value, std::uint32_t limit) { return std::min(value, limit); };
+     const std::uint32_t sx1 = clamp_axis(call.viewport.scissor_x1, kPspWidth - 1u);
+-- 
+2.53.0.windows.1
+

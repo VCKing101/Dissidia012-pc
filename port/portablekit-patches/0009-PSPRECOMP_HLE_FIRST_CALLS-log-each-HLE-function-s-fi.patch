@@ -1,7 +1,7 @@
 From 86f054bbbf295b346911a93e1d11f3cc017568f8 Mon Sep 17 00:00:00 2001
 From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
 Date: Sun, 18 Oct 2026 18:51:21 +1030
-Subject: [PATCH 09/31] PSPRECOMP_HLE_FIRST_CALLS: log each HLE function's
+Subject: [PATCH 09/39] PSPRECOMP_HLE_FIRST_CALLS: log each HLE function's
  first call
 
 One line the first time each HLE function is called, numbered, with the

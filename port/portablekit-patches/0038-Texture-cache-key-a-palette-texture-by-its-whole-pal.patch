@@ -1,0 +1,94 @@
+From fe31234e4c67008c86e6f01bb4bf9844cb6d47d5 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Tue, 20 Oct 2026 22:12:09 +1030
+Subject: [PATCH 38/39] Texture cache: key a palette texture by its whole
+ palette and index mode
+
+A CLUT texture's cache key took the first word of its palette, and neither
+the key nor the per-list lookup took the CLUT index shift, mask and start.
+A palette changed in place with its first entry kept (entry 0 is often the
+transparent one), or one texture drawn with two parts of a CLUT, found the
+old decode and drew the old colours. The GE census found the first in the
+battles of a game (a CLUT8 texture in VRAM whose palette changed while its
+first word did not, four times in a short battle).
+
+The key now hashes the bytes the last CLUT load read, eight at a time, and
+the index mode; the per-list lookup keys by the index mode too. A palette
+animated in place now decodes again when it changes.
+<prefix>_CLUT_FIRST_WORD_KEY keys by the first word alone, as before; the
+census counts the cases as clut.change_missed_by_key and
+clut.variant_cache_collision only with it set.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/gpu/texture_decode.cpp  | 23 +++++++++++++++++++++--
+ host/gpu/vulkan_renderer.cpp |  2 ++
+ 2 files changed, 23 insertions(+), 2 deletions(-)
+
+diff --git a/host/gpu/texture_decode.cpp b/host/gpu/texture_decode.cpp
+index 3adac51..10b3ec6 100644
+--- a/host/gpu/texture_decode.cpp
++++ b/host/gpu/texture_decode.cpp
+@@ -479,9 +479,17 @@ std::uint64_t texture_key(const GuestMemory &memory, const TextureState &texture
+     // first word changes every frame (issue #144).
+     const bool indexed = texture.format == TextureFormat::Clut4 || texture.format == TextureFormat::Clut8 ||
+                          texture.format == TextureFormat::Clut16 || texture.format == TextureFormat::Clut32;
++    // The whole palette the last CLUT load read, and the index shift, mask and
++    // start, which choose the entries a texel reads: a game that animates a
++    // palette in place, or draws one texture with several parts of a CLUT,
++    // keeps the first word. <prefix>_CLUT_FIRST_WORD_KEY keys by the first
++    // word alone, as before.
++    static const bool first_word_only = portablekit::env("CLUT_FIRST_WORD_KEY") != nullptr;
+     if (indexed) {
+         mix(texture.clut_address);
+         mix(texture.clut_format);
++        if (!first_word_only)
++            mix(texture.clut_shift | texture.clut_mask << 8u | texture.clut_offset << 16u);
+     }
+     const std::uint32_t bits = bits_per_texel(texture.format);
+     // DXT1 blocks hold half a byte per texel, DXT3 and DXT5 blocks a byte.
+@@ -521,8 +529,19 @@ std::uint64_t texture_key(const GuestMemory &memory, const TextureState &texture
+             mix(memory.load32(texture.address + offset));
+         }
+     }
+-    if (indexed && texture.clut_address != 0u && memory.contains(texture.clut_address, 4u))
+-        mix(memory.load32(texture.clut_address));
++    if (indexed && texture.clut_address != 0u) {
++        const std::uint32_t clut_bytes = std::max<std::uint32_t>(texture.clut_load_bytes, 4u);
++        const std::uint8_t *clut = first_word_only ? nullptr : memory.raw_pointer(texture.clut_address, clut_bytes);
++        if (clut != nullptr) {
++            for (std::uint32_t offset = 0; offset + 8u <= clut_bytes; offset += 8u) {
++                std::uint64_t word{};
++                std::memcpy(&word, clut + offset, sizeof(word));
++                mix(word);
++            }
++        } else if (memory.contains(texture.clut_address, 4u)) {
++            mix(memory.load32(texture.clut_address));
++        }
++    }
+     return key;
+ }
+ 
+diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
+index bbe3b23..309f218 100644
+--- a/host/gpu/vulkan_renderer.cpp
++++ b/host/gpu/vulkan_renderer.cpp
+@@ -1969,6 +1969,7 @@ struct VulkanRenderer::Impl {
+         std::uint32_t format{};
+         std::uint32_t clut_address{};
+         std::uint32_t clut_format{};
++        std::uint32_t clut_mode{};  // index shift, mask and start
+         bool swizzled{};
+         auto operator<=>(const TextureKeyInput &) const = default;
+     };
+@@ -4570,6 +4571,7 @@ VulkanRenderer::Impl::Texture &VulkanRenderer::Impl::texture_for(const GuestMemo
+                                 static_cast<std::uint32_t>(state.format),
+                                 state.clut_address,
+                                 state.clut_format,
++                                state.clut_shift | state.clut_mask << 8u | state.clut_offset << 16u,
+                                 state.swizzled};
+     static const bool no_lookup_env = portablekit::env("NO_LOOKUP_CACHE") != nullptr;
+     const bool no_lookup_cache = no_lookup_env || perf::alternate_off(perf::NewPath::Lookup);
+-- 
+2.53.0.windows.1
+

@@ -1,0 +1,75 @@
+From 62b09491bc3fdc974f046f11510274dfd04f139d Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Tue, 20 Oct 2026 20:51:40 +1030
+Subject: [PATCH 32/39] Window captures of blended presents:
+ <prefix>_CAPTURE_BLENDED
+
+With frame interpolation every other present is drawn again from the
+older frame's recording, and a fault that shows only there (a flicker at
+60 fps that is not there at 30) is hard to catch with a capture, which
+takes whichever present comes next. With CAPTURE_BLENDED set, a window
+capture waits for a present that interpolation blended. For tests only;
+nothing changes without it.
+---
+ docs/BRINGING_UP_A_GAME.md   |  1 +
+ host/gpu/vulkan_renderer.cpp | 10 +++++++++-
+ 2 files changed, 10 insertions(+), 1 deletion(-)
+
+diff --git a/docs/BRINGING_UP_A_GAME.md b/docs/BRINGING_UP_A_GAME.md
+index ce47dc0..523073e 100644
+--- a/docs/BRINGING_UP_A_GAME.md
++++ b/docs/BRINGING_UP_A_GAME.md
+@@ -81,6 +81,7 @@ Every one of these takes the profile's own prefix, so `TENKAWA_TRACE_KERNEL` for
+ | `<PREFIX>_TRACE_KERNEL`, `_TRACE_IO`, `_TRACE_GE`, `_TRACE_SAVEDATA`, … | One subsystem each |
+ | `<PREFIX>_TRACE_SYNC` | Every kernel object a thread waits on, which is how a deadlock is read |
+ | `<PREFIX>_TRACE_GE_LIST=N[:M[:W]]` | Every command word of display-list runs N to N+M-1, the first W of each (20000 by default): what a screen that draws nothing is built from |
++| `<PREFIX>_CAPTURE_BLENDED` | A window capture (the input script's `shot`) waits for a present that frame interpolation blended, to look at an in-between frame; with `<PREFIX>_FRAME_RATE_AUTO=0` the rate does not step down while captures stall the frames |
+ | `<PREFIX>_TRACE_SAS` | SAS voices set, keyed on and off, and each change of the end flags a game polls |
+ | `<PREFIX>_NO_BUSY_CLOCK` | Keep emulated time still for a thread that never waits, as before the busy clock (`Kernel::charge_busy_time`) |
+ | `PSPRECOMP_NO_INTERPRETER=1` | Turn the interpreter off. Nothing runs without a corpus; with one, the runtime stops at the first address the recompiler missed and names it |
+diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
+index ce1e3e5..16784c7 100644
+--- a/host/gpu/vulkan_renderer.cpp
++++ b/host/gpu/vulkan_renderer.cpp
+@@ -1276,6 +1276,10 @@ struct VulkanRenderer::Impl {
+     // Window capture: the presented image is copied here and written after
+     // its frame completes.
+     std::string capture_path;
++    // <prefix>_CAPTURE_BLENDED: a window capture waits for a present between
++    // flips that frame interpolation blended, to look at an in-between frame.
++    bool capture_blended_only{};
++    bool presenting_blended{};
+     VkBuffer capture_buffer{};
+     VkDeviceMemory capture_memory{};
+     VkExtent2D capture_extent{};
+@@ -2418,6 +2422,7 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
+     impl.sharp_screen = player.sharp_screen;
+     impl.sharp_textures = player.sharp_textures;
+     impl.trace_interpolation = portablekit::env("TRACE_INTERPOLATION") != nullptr;
++    impl.capture_blended_only = portablekit::env("CAPTURE_BLENDED") != nullptr;
+     if (const interpolation::CutThresholds *thresholds = portablekit::game().interpolation_thresholds)
+         impl.cut_thresholds = *thresholds;
+     pacing::set_game_frame_vblanks(static_cast<int>(portablekit::game().frame_vblanks));
+@@ -3954,7 +3959,8 @@ void VulkanRenderer::Impl::submit_and_present(VkCommandBuffer commands, VkFence
+             ImGui_ImplVulkan_RenderDrawData(ui, commands);
+             vkCmdEndRenderPass(commands);
+         }
+-        if (!capture_path.empty() && (swapchain_usage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) != 0u) {
++        if (!capture_path.empty() && (swapchain_usage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) != 0u &&
++            (!capture_blended_only || presenting_blended)) {
+             const VkDeviceSize bytes = static_cast<VkDeviceSize>(swapchain_extent.width) * swapchain_extent.height * 4u;
+             VkBufferCreateInfo buffer_info{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+             buffer_info.size = bytes;
+@@ -7977,7 +7983,9 @@ bool VulkanRenderer::Impl::present_between(const pacing::PresentClock::Present &
+         }
+     }
+     ui_draw_data = frame_ui;
++    presenting_blended = blended;
+     submit_and_present(commands, fence, image, true, false);
++    presenting_blended = false;
+     // <prefix>_INTERPOLATION_EXTRA_MS: busy CPU time added to each blended
+     // present, to try the step-down on a fast machine as if it were a slow one.
+     static const double extra_ms = [] {
+-- 
+2.53.0.windows.1
+

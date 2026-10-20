@@ -1,7 +1,7 @@
 From f549e27ab374e34fcf97c5344ed701d53c12cc0e Mon Sep 17 00:00:00 2001
 From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
 Date: Sun, 18 Oct 2026 18:32:28 +1030
-Subject: [PATCH 06/31] sceFontGetFontInfo: report the glyphs' bits per pixel
+Subject: [PATCH 06/39] sceFontGetFontInfo: report the glyphs' bits per pixel
 
 SceFontInfo ends with the font style and then the bits per pixel of the
 glyph bitmaps (byte 260), which was left as the game had it, zero. A game

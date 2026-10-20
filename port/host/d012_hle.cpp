@@ -5,6 +5,7 @@
 #include "d012_camera.hpp"
 #include "d012_hle.hpp"
 #include "d012_mods.hpp"
+#include "d012_test_switches.hpp"
 
 #include "hle/hle_common.hpp"
 #include "profile.hpp"
@@ -98,6 +99,8 @@ void register_extra_hle(portablekit::HleRegistrar &hle) {
     playlist::install(hle);
     // The right-stick battle camera and R3 (d012_camera.cpp).
     camera::install(hle);
+    // Test switches, off by default (d012_test_switches.cpp).
+    test_switches::install(hle);
 }
 
 void patch_loaded_image(psprecomp::Runtime &runtime, const psprecomp::Elf32Image &elf) {

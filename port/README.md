@@ -25,6 +25,7 @@ the menus to Quick Battles, with the HUD's HP bars, billboarded particles and si
 | `host/d012_json.cpp`, `.hpp` | A small JSON reader for the manifests |
 | `host/d012_bgm_playlist.cpp`, `.hpp` | The BGM playlist: the loading screen's music choice by series and track, L2/R2 to switch the D-pad between the screen's menu and the music, mod tracks as rows of the game's BGM table, the pad-read wrapper, the series in the BATTLE BGM box and the track wheel under it ([docs/port/bgm-playlist-design.md](../docs/port/bgm-playlist-design.md), sections 10 and 11) |
 | `host/d012_loading_layout.cpp`, `.hpp` | The loading screen's right-half pages moved down and made shorter for the track wheel, by checked edits of the screen's layout data in memory (section 11) |
+| `host/d012_test_switches.cpp`, `.hpp` | Test switches, off by default: `D012_TEST_UNLOCK_FIGHTERS`, `D012_TEST_EX_FULL` ([docs/port/graphics-triage.md](../docs/port/graphics-triage.md)) |
 | `host/d012_crash_report.cpp` | `D012_CRASH_DUMP=<dir>`: a minidump and a symbolised stack on an unhandled exception, for diagnosis ([docs/port/quit-crash.md](../docs/port/quit-crash.md)) |
 | `host/d012_decomp_harness.cpp`, `.hpp`, `host/d012_decomp_bgm.cpp` | Decompiled functions as native overrides, and the differential test against the recompiled originals |
 | `decomp/` | The decompiled BGM functions (C) |
@@ -46,6 +47,8 @@ Outside this directory:
 | `tools/port/overlay_meta.py` | Writes PortableKit's `meta.txt` for the three overlays (and can run `psp_recomp` on them) |
 | `tools/port/shots_to_png.py` | Converts a run's BMP captures to PNG, optionally as a contact sheet |
 | `tools/port/ge_list_summary.py` | Folds a `D012_TRACE_GE_LIST` dump into one line per draw state (targets, textures, stencil, masks); `--detail` adds depth function, blend, texture function, alpha and colour tests, cull |
+| `tools/port/gfx_triage.py` | Runs one scripted scene (world map, gateway, orb, Quick Battle stages, Kuja, an EX Burst) on the recompiled build with A/B switches and converts the captures ([docs/port/graphics-triage.md](../docs/port/graphics-triage.md)) |
+| `tools/port/gfx_tour.py` | The graphics tour: scripted routes through menus, the world map and a gateway, five Quick Battle stages, EX Mode and EX Burst, Kuja and the results screen, in three variants (owner's settings with the frame-replay check, 30 fps, 1x), with the GE census per scene and captures compared with a local baseline ([docs/port/graphics-census.md](../docs/port/graphics-census.md)) |
 | `tools/port/check_quit_crash.py` | Runs the recompiled build to a battle or the world map and quits, N times, camera on and off, and counts the runs that crash on the way out ([docs/port/quit-crash.md](../docs/port/quit-crash.md)) |
 
 ## Build
@@ -124,6 +127,8 @@ The profile's own switches:
 | `D012_TRACE_BGM_PLAYLIST=1` | Log every mod row and every choice of the selector with its series, id, volume and file |
 | `D012_TEST_BGM_START=<id>` | Test only: the selector starts on that track (a BGM id, or a mod track's id text) instead of the game's random default |
 | `D012_DECOMP_BGM=1`, `D012_DECOMP_VERIFY=1` | All twelve decompiled BGM functions in the game; the differential test of them (bgm-playlist-design.md, section 2) |
+| `D012_TEST_UNLOCK_FIGHTERS=1` | Test only: every fighter can be picked on the select screens (the unlock flags are set in the running game; an autosave keeps them, so use a copy of the data directory) |
+| `D012_TEST_EX_FULL=1` | Test only: in battle the player's EX gauge is kept full (R + square enters EX Mode; the next HP attack that lands is an EX Burst) |
 | `D012_CRASH_DUMP=<dir>` | On an unhandled exception, write `<dir>/crash_<pid>.dmp` and log the faulting stack (names from `D012Native.pdb` when the build links with `/DEBUG`) |
 
 And the framework changes' off switches, each restoring the old behaviour: `D012_NO_COLOR_DOUBLING=1` (colour
@@ -132,7 +137,12 @@ doubling), `D012_NO_PIXEL_MASK=1` (pixel mask), `D012_NO_VBLANK_CALLBACKS=1` (ca
 `D012_NO_THROUGH_DEPTH=1` (depth in through mode), `D012_NO_SCREEN_SPRITES=1` (transformed sprites upright on the
 screen), `D012_NO_SAVEDATA_LIST_STAR=1` (`*` in LIST patterns), `D012_NO_HOST_AUDIO=1` (host audio files: no mod
 music is decoded or served), `D012_NO_EXTRA_BUTTONS=1` (L2/R2 never reach the port; the triggers press L and R), `D012_NO_STICK_SQUARE=1`
-(the left stick's circle passed on as it is, as the menu's "Full diagonals" off does).
+(the left stick's circle passed on as it is, as the menu's "Full diagonals" off does), `D012_NO_FB_SNAPSHOTS=1`
+(interpolated frames sample a render target's one copy), `D012_NO_DOUBLE_ALPHA=1` (blend factors 6 and 7 read the
+plain alpha), `D012_NO_TEXTURE_RGB=1` (the texture's alpha is used even when TCC says colour only), `D012_CLUT_FIRST_WORD_KEY=1` (palette textures
+cached by their palette's first word, as before). For tests:
+`D012_CAPTURE_BLENDED=1` makes a `shot` wait for an interpolated present; `D012_GE_CENSUS=<file>` writes the GE
+census, the input script's `scene NAME` naming its scenes ([graphics-census.md](../docs/port/graphics-census.md)).
 
 ## Overlays
 
@@ -190,13 +200,22 @@ fresh clone of `33800c4`, apply them with `git checkout -b dissidia 33800c4` and
 | 0028 | The left stick as the nub: dead zones on the vector's length, full from 0.95 of the radius, then circle to square, so a full push in any direction reaches the edge of the nub's square range and a full diagonal its corner; each axis rounded to the nearest step, full left/up now 0 rather than 1 (`host/input/stick.*`, `host/gpu/vulkan_renderer.cpp`, `host/settings/settings.*`, `host/ui/menu.cpp`; checks in `tests/input_tests.cpp`). On by default; the controls page's "Full diagonals" (`input.stick_square`) or `<prefix>_NO_STICK_SQUARE` turns the square off | A round stick's full diagonal reached the nub as about 0.71 per axis (bytes 217/39). The game's pad module drops each axis within 100 of 127.5 (`docs/research/pad-module.md`), so every full diagonal read as no input and 22.5 degrees off a straight push as 0.64 of one |
 | 0030 | The render targets are destroyed before the descriptor pool at shutdown, and the pool's handle is cleared (`host/gpu/vulkan_renderer.cpp`) | `destroy_target` frees a sampled target's descriptor sets from that pool; after the pool was destroyed, about 1 quit in 13 faulted in the AMD driver ([docs/port/quit-crash.md](../docs/port/quit-crash.md)) |
 | 0031 | Exit status 0 after closing the window, Quit in the menu or the game's `sceKernelExitGame`; 4 only after an error stop (`host/system.hpp`, `host/main.cpp`, `host/hle/hle_media.cpp`, `host/hle/hle_system.cpp`) | Every run exited with 4, an error's code, however it ended |
+| 0032 | `<prefix>_CAPTURE_BLENDED`: a window capture waits for a present frame interpolation blended (`host/gpu/vulkan_renderer.cpp`, `docs/BRINGING_UP_A_GAME.md`) | Interpolation faults show only on in-between frames ([graphics-triage.md](../docs/port/graphics-triage.md)) |
+| 0033 | While frames are recorded for interpolation, a draw into the shown framebuffer that samples a render target samples a snapshot of the part it reads, kept three flips (`host/gpu/vulkan_renderer.cpp`); `<prefix>_NO_FB_SNAPSHOTS` turns it off | In-between frames composited a later pass's picture of a reused scratch buffer: a scene miniature top-left in battle, the glow and blur strobing on the world map; 43 to 86% of a replayed battle frame's pixels differed, now 0 |
+| 0034 | GE blend factors 6 and 7 (twice the source alpha, one minus it): the shader doubles the alpha it hands the blender, the alpha written is halved back through the blend constant (`host/gpu/vulkan_renderer.cpp`, `host/gpu/shaders/ge.frag`); `<prefix>_NO_DOUBLE_ALPHA` turns it off | Additive effects (Kuja's orbs, hit flashes) came out at half strength |
+| 0035 | The texture function's TCC bit: colour-only textures keep the fragment's alpha (`host/gpu/vulkan_renderer.cpp`, `host/gpu/shaders/ge.frag`); `<prefix>_NO_TEXTURE_RGB` turns it off | The world map's swirl into a gateway blends the previous frame by the vertex alpha; the framebuffer's stencil alpha (0) hid it |
+| 0036 | GE census: `<prefix>_GE_CENSUS=<file>` checks every draw against 76 features the renderer approximates or ignores and writes their counts per scene, first frame and an example draw as JSON; input script step `scene NAME` (`host/gpu/ge_census.*`, one-line hooks in `host/gpu/ge_state.cpp`, `host/gpu/vulkan_renderer.cpp`, `host/main.cpp`, `host/ui/input_script.*`; `docs/BRINGING_UP_A_GAME.md`). Nothing changes without the variable | A systematic list of what to fix before the owner meets it ([graphics-census.md](../docs/port/graphics-census.md)) |
+| 0037 | The census describes a draw only at a feature's first hit and writes every 600 frames (`host/gpu/ge_census.*`) | Formatting every draw slowed a battle to real time |
+| 0038 | A palette texture's cache key takes the bytes its last CLUT load read and its index shift, mask and start, as does the per-list lookup (`host/gpu/texture_decode.cpp`, `host/gpu/vulkan_renderer.cpp`); `<prefix>_CLUT_FIRST_WORD_KEY` turns it off | EX Revenge reads one framebuffer through three index shifts of one CLUT, which shared one decode; battle palettes changed after their first entry kept the old one |
+| 0039 | The census counts blend factors 6/7 and TCC as handled, and as approximations only with their off switches (`host/gpu/ge_census.cpp`) | Patches 0034 and 0035 |
 
 Patches 0012 and 0013 were made on a separate worktree branch during the recompiled-build work and merged onto
 `dissidia` on 18 October 2026; patches 0014 and 0015 followed the same day (bring-up log, section "Stencil"), and
 patches 0016 to 0022 that evening (section "HP bar, orbs and saves"), patches 0023 to 0025 on 19 October for mods
 ([mod-folder.md](../docs/port/mod-folder.md)), and patches 0026 and 0027 the same day for the BGM playlist
 ([bgm-playlist-design.md](../docs/port/bgm-playlist-design.md), section 10); patch 0028 that evening, for analog
-diagonals that felt dead on a real controller.
+diagonals that felt dead on a real controller. Patches 0036 to 0039 came on 20 October with the graphics census
+([graphics-census.md](../docs/port/graphics-census.md)).
 PortableKit's 21 framework tests pass on the branch and `portablekit_host_check` builds.
 
 ## Recompiled build

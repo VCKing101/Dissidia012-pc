@@ -1,0 +1,1160 @@
+From d521802c7e94c6e9cb1b8adb7972c2da3663e396 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Tue, 20 Oct 2026 21:12:21 +1030
+Subject: [PATCH 36/39] GE census: what a game's draws ask of the GE that the
+ renderer approximates
+
+<prefix>_GE_CENSUS=<file> checks every draw against a list of features the
+renderer does not reproduce exactly and counts the hits per scene, with the
+frame and scene each was first seen in and the first draw's state words as
+an example, into one JSON file (written at exit, at each scene change and
+every 1,800 frames). The list was read off the renderer: state the GE state
+machine ignores (logic op, colour test, dither, depth range, depth clamp,
+texture map modes, mipmaps and level modes, flat shading, morph weights),
+modes the shader approximates (texture functions BLEND and ADD, a texture's
+alpha used whatever TCC says, doubled-alpha blend factors, two fixed blend
+colours, ABS), primitives not drawn (points, lines), texture cache keys that
+miss a change (a CLUT's contents past its first word, CLUT shift, mask and
+start, large textures keyed by a sample), render-to-texture read from guest
+memory instead of the target (palette or swizzled views, other pixel sizes
+or row lengths), targets that change layout or overlap, block transfers and
+DMA copies into and out of targets, and draws the renderer dropped.
+
+The input script's new step `scene NAME` starts the next scene. Hooks are
+one line each in ge_state.cpp, vulkan_renderer.cpp, main.cpp and
+input_script.cpp; with the variable unset each returns at its first test
+and nothing changes what is drawn.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ cmake/PortableKit.cmake      |   1 +
+ docs/BRINGING_UP_A_GAME.md   |   1 +
+ host/gpu/ge_census.cpp       | 876 +++++++++++++++++++++++++++++++++++
+ host/gpu/ge_census.hpp       |  52 +++
+ host/gpu/ge_state.cpp        |   6 +
+ host/gpu/vulkan_renderer.cpp |   7 +
+ host/main.cpp                |   2 +
+ host/ui/input_script.cpp     |   3 +
+ host/ui/input_script.hpp     |   2 +
+ 9 files changed, 950 insertions(+)
+ create mode 100644 host/gpu/ge_census.cpp
+ create mode 100644 host/gpu/ge_census.hpp
+
+diff --git a/cmake/PortableKit.cmake b/cmake/PortableKit.cmake
+index 0e7f237..4eba93b 100644
+--- a/cmake/PortableKit.cmake
++++ b/cmake/PortableKit.cmake
+@@ -36,6 +36,7 @@ set(PORTABLEKIT_HOST_SOURCES
+     host/camera_probe.cpp
+     host/camera/camera_input.cpp
+     host/gpu/ge_state.cpp
++    host/gpu/ge_census.cpp
+     host/gpu/texture_decode.cpp
+     host/input/bindings.cpp
+     host/input/stick.cpp
+diff --git a/docs/BRINGING_UP_A_GAME.md b/docs/BRINGING_UP_A_GAME.md
+index 523073e..8e62375 100644
+--- a/docs/BRINGING_UP_A_GAME.md
++++ b/docs/BRINGING_UP_A_GAME.md
+@@ -82,6 +82,7 @@ Every one of these takes the profile's own prefix, so `TENKAWA_TRACE_KERNEL` for
+ | `<PREFIX>_TRACE_SYNC` | Every kernel object a thread waits on, which is how a deadlock is read |
+ | `<PREFIX>_TRACE_GE_LIST=N[:M[:W]]` | Every command word of display-list runs N to N+M-1, the first W of each (20000 by default): what a screen that draws nothing is built from |
+ | `<PREFIX>_CAPTURE_BLENDED` | A window capture (the input script's `shot`) waits for a present that frame interpolation blended, to look at an in-between frame; with `<PREFIX>_FRAME_RATE_AUTO=0` the rate does not step down while captures stall the frames |
++| `<PREFIX>_GE_CENSUS=<file>` | A JSON census of the GE features the game's draws use that the renderer does not reproduce exactly (ignored state, approximated texture and blend modes, render-to-texture read from guest memory, transfers between targets), counted per scene with the first frame and an example draw's state words; the input script's `scene NAME` starts a new scene (`host/gpu/ge_census.hpp`) |
+ | `<PREFIX>_TRACE_SAS` | SAS voices set, keyed on and off, and each change of the end flags a game polls |
+ | `<PREFIX>_NO_BUSY_CLOCK` | Keep emulated time still for a thread that never waits, as before the busy clock (`Kernel::charge_busy_time`) |
+ | `PSPRECOMP_NO_INTERPRETER=1` | Turn the interpreter off. Nothing runs without a corpus; with one, the runtime stops at the first address the recompiler missed and names it |
+diff --git a/host/gpu/ge_census.cpp b/host/gpu/ge_census.cpp
+new file mode 100644
+index 0000000..6bb348a
+--- /dev/null
++++ b/host/gpu/ge_census.cpp
+@@ -0,0 +1,876 @@
++#include "ge_census.hpp"
++
++#include "../profile.hpp"
++
++#include <algorithm>
++#include <cmath>
++#include <cstdio>
++#include <cstring>
++#include <filesystem>
++#include <fstream>
++#include <iostream>
++#include <map>
++#include <mutex>
++#include <set>
++#include <sstream>
++#include <string>
++#include <tuple>
++#include <vector>
++
++namespace portablekit::gpu::census {
++namespace {
++
++using psprecomp::GuestMemory;
++
++// What a feature is, how much it is likely to show, and what the renderer
++// does instead. Impact: "high" (a whole draw or effect is wrong or missing),
++// "medium" (colours, edges or a layer are off), "low" (rarely visible),
++// "info" (counted for context: done right, or a cost rather than an error).
++struct FeatureInfo {
++    const char *name;
++    const char *category;
++    const char *impact;
++    const char *description;
++};
++
++constexpr FeatureInfo kFeatures[] = {
++    // Primitives and vertices.
++    {"prim.points", "primitive", "high", "Point primitives: not drawn at all"},
++    {"prim.lines", "primitive", "high", "Line and line-strip primitives: not drawn at all"},
++    {"vertex.morph", "vertex", "high", "Morph targets (vertex type bits 18-20): only the first target is decoded, the weights 0x2C-0x33 ignored"},
++    {"shade.flat", "vertex", "medium", "Flat shading (0x50 bit 0 clear) on coloured triangles or lines: drawn smooth (sprites are flat already)"},
++    // Per-fragment tests and operations.
++    {"alpha_test.never", "fragment", "high", "Alpha test NEVER (0xDB function 0): the renderer draws without a test, the GE draws nothing"},
++    {"alpha_test.always", "fragment", "high", "Alpha test ALWAYS (0xDB function 1): the shader takes function 1 for NEVER and discards the whole draw"},
++    {"alpha_test.mask", "fragment", "medium", "Alpha test mask (0xDB bits 16-23) other than 0xFF: ignored, the whole alpha byte compared"},
++    {"alpha_test.equality", "fragment", "low", "Alpha test EQUAL/NOTEQUAL: compared in floating point with a tolerance"},
++    {"color_test", "fragment", "medium", "Colour test (0x27, 0xD8-0xDA): ignored, every fragment passes"},
++    {"logic_op", "fragment", "high", "Logical operation (0x28, 0xE6) other than COPY: ignored, the fragment is written as is"},
++    {"dither.16bit_target", "fragment", "low", "Dithering (0x20, 0xE2-0xE5) into a 16-bit target: not dithered (targets are kept at 8 bits a channel)"},
++    {"antialias", "fragment", "low", "Antialiasing enable (0x25): ignored"},
++    {"depth.range_minz_maxz", "depth", "medium", "Depth range clip (0xD6/0xD7) narrower than the viewport's depth range: fragments outside it are not discarded"},
++    {"clip.depth_clamp_far", "depth", "medium", "Depth clamp (0x1C) on a transformed draw with vertices past the far plane: Vulkan clips them away, the GE clamps their depth and draws them (not verified on hardware)"},
++    {"clip.depth_clamp_near", "depth", "low", "Depth clamp (0x1C) on a transformed draw with vertices past the near plane: Vulkan clips at the plane (the GE's own near handling not verified)"},
++    {"viewport.z_scale_zero", "depth", "low", "Viewport z scale 0 on a transformed draw: the renderer keeps the default depth range"},
++    {"viewport.depth_clamped", "depth", "medium", "Viewport z range beyond 0..65535: clamped into Vulkan's 0..1, which changes the depth mapping"},
++    {"target.beyond_480x272", "target", "medium", "A draw that reaches past 480x272 of its target (scissor or vertices): cut off, every target holds 480x272"},
++    // Blending.
++    {"blend.abs_diff", "blend", "high", "Blend equation ABS (5): drawn as ADD"},
++    {"blend.doubled_alpha_factor", "blend", "high", "Blend factors 2x source/destination alpha (6-9): drawn as the single-alpha factors"},
++    {"blend.two_fixed_colors", "blend", "medium", "Both blend factors FIX with colours that are not complements: one constant serves both, the source's"},
++    {"blend.dst_alpha_16bit_target", "blend", "medium", "Blending by destination alpha on a 5551/4444 target: the renderer's alpha has 8 bits, the GE's 1 or 4"},
++    {"blend.dst_alpha_5650_target", "blend", "medium", "Blending by destination alpha on a 5650 target, which has no alpha on the GE"},
++    // Texturing.
++    {"tfx.blend_env_color", "texture", "high", "Texture function BLEND (2): mixed by the texel instead of with the environment colour 0xCA"},
++    {"tfx.add", "texture", "high", "Texture function ADD (4): drawn as REPLACE"},
++    {"tfx.invalid", "texture", "low", "Texture function 5-7: drawn as REPLACE"},
++    {"tfx.tcc_rgb", "texture", "high", "Texture colour component RGB (0xC9 bit 8 clear) on a texture with alpha: the renderer still takes the texel's alpha"},
++    {"texmap.projection", "texture", "high", "Texture map mode 1 (0xC0): texture coordinates from the texture matrix and position/UV/normal; the renderer ignores the matrix"},
++    {"texmap.projection_identity_uv", "texture", "info", "Texture map mode 1 with UV as the source and an identity texture matrix: the same as mode 0"},
++    {"texmap.env_map", "texture", "high", "Texture map mode 2 (0xC0): environment (shade) mapping from the lights 0xC1; the renderer uses the vertex UVs"},
++    {"tex.mipmaps", "texture", "low", "Mipmapped texture (0xC2 levels > 0): level 0 only"},
++    {"tex.lod_const_level", "texture", "medium", "Texture level mode CONST (0xC8) with a bias that selects a level above 0: level 0 drawn"},
++    {"tex.lod_slope", "texture", "low", "Texture level mode SLOPE (0xC8) with mipmaps: level 0 only"},
++    {"tex.filter_nearest_ignored", "texture", "low", "A nearest-filtered texture (0xC6): the renderer filters every texture by the player's setting"},
++    {"tex.size_over_512", "texture", "low", "Texture width or height over 512 (0xB8)"},
++    {"tex.bufw_below_width", "texture", "low", "Texture buffer width (0xA8) below the texture width"},
++    {"tex.vram_mirror_address", "texture", "medium", "Texture address in a VRAM mirror (0x0420_0000 and up: the depth views)"},
++    {"tex.reads_depth_buffer", "texture", "high", "Texture over a depth buffer: depth is not in guest memory, so the texture is whatever memory holds"},
++    {"tex.large_change_missed_by_key", "texture", "high", "A texture over 64 KiB whose contents changed where the cache key's sampled words did not: the old picture is drawn"},
++    {"clut.shift_mask_offset", "texture", "info", "CLUT index shift, mask or start (0xC5) other than the defaults: decoded right"},
++    {"clut.variant_cache_collision", "texture", "high", "One texture and CLUT drawn with different CLUT shift/mask/start: the texture cache key ignores them, the first decode is reused"},
++    {"clut.change_missed_by_key", "texture", "high", "A CLUT's contents changed but not its first word: the cache key hashes only the first word, the old colours are drawn"},
++    // Render to texture.
++    {"fbtex.sampled", "render-to-texture", "info", "A texture read from a render target (done on the GPU)"},
++    {"fbtex.self_sample", "render-to-texture", "info", "A draw sampling its own target: read from a copy made before the draw"},
++    {"fbtex.format_reinterpreted", "render-to-texture", "medium", "A render target sampled as another format of the same size (e.g. 4444 of a 5551 target): read as the target's colours"},
++    {"fbtex.alpha_from_16bit_target", "render-to-texture", "low", "Alpha sampled from a 5551/4444 target: 8 bits in the renderer, 1 or 4 on the GE"},
++    {"fbtex.samples_beyond_480x272", "render-to-texture", "medium", "Texture coordinates past the 480x272 a render target holds: clamped to its edge (the GE reads on into VRAM)"},
++    {"fbtex.repeat_wrap", "render-to-texture", "medium", "A render target sampled with wrap REPEAT and coordinates outside the texture: clamped instead"},
++    {"fbtex.miss_clut_view", "render-to-texture", "high", "A CLUT texture over a render target (a palette view of rendered pixels): decoded from guest memory, which does not hold the render"},
++    {"fbtex.miss_swizzled", "render-to-texture", "high", "A swizzled texture over a render target: decoded from guest memory, which does not hold the render"},
++    {"fbtex.miss_bpp_mismatch", "render-to-texture", "high", "A texture over a render target with another pixel size: decoded from guest memory, which does not hold the render"},
++    {"fbtex.miss_stride_mismatch", "render-to-texture", "high", "A texture over a render target with another row length: decoded from guest memory, which does not hold the render"},
++    {"fbtex.miss_other_format", "render-to-texture", "high", "A DXT texture over a render target: decoded from guest memory"},
++    {"fbtex.miss_guest_memory", "render-to-texture", "medium", "A texture over a render target whose guest memory changed since it was drawn (a CPU write, a copy, or the 1x write-back): decoded from memory"},
++    {"target.format_changed", "render-to-texture", "medium", "A target address drawn with another pixel format than last time: the image is reused, not reinterpreted"},
++    {"target.stride_changed", "render-to-texture", "medium", "A target address drawn with another row length than last time: the image is reused, not relaid"},
++    {"target.inside_other_target", "render-to-texture", "medium", "A target that starts inside another target drawn this frame or the last: separate images, shared memory on the GE"},
++    {"target.on_depth_buffer", "render-to-texture", "medium", "A colour target over a depth buffer in use: separate images, shared memory on the GE"},
++    {"target.depth_stride_mismatch", "depth", "low", "Depth buffer row length other than the colour target's: depth is not shared between targets"},
++    {"target.odd_stride", "target", "low", "Target row length that is not 64, 128, 256 or 512"},
++    {"transfer.from_target", "transfer", "medium", "Block transfer out of a render target: read back to guest memory at 480x272 (1x), waiting for the GPU"},
++    {"transfer.into_target", "transfer", "high", "Block transfer into a render target: guest memory changes, the target's image does not"},
++    {"transfer.overlapping", "transfer", "low", "Block transfer whose source and destination overlap"},
++    {"transfer.bpp_vs_target", "transfer", "medium", "Block transfer with another pixel size than the target it touches"},
++    {"dma.copy_from_target", "transfer", "medium", "DMA copy out of a render target: guest memory holds the 1x write-back of the shown frame at best"},
++    {"dma.copy_into_target", "transfer", "high", "DMA copy into a render target: the target's image does not change"},
++    // Things the state machine or the renderer skip.
++    {"bbox.ignored", "list", "low", "Bounding box (0x07) and conditional jump: never evaluated, the geometry is always drawn"},
++    {"immediate_draw.ignored", "list", "high", "Immediate vertex commands (0xF0-0xF9): ignored, nothing drawn"},
++    {"signal.unhandled", "list", "medium", "SIGNAL list-flow behaviours other than 0x10-0x12: ignored"},
++    {"render.vertex_space_full", "renderer", "high", "The frame's vertex space was full: a draw was dropped"},
++    {"render.texture_decode_failed", "renderer", "high", "A texture could not be decoded: drawn white"},
++    // Frame interpolation.
++    {"interp.offscreen_perspective", "interpolation", "info", "A perspective draw into a target other than the shown one: not blended by frame interpolation (updates at the game's rate)"},
++};
++
++const FeatureInfo *find_info(const std::string &name) {
++    for (const FeatureInfo &info : kFeatures)
++        if (name == info.name) return &info;
++    return nullptr;
++}
++
++std::string hex(std::uint32_t value, int digits = 8) {
++    char text[16];
++    std::snprintf(text, sizeof(text), "0x%0*X", digits, value);
++    return text;
++}
++
++std::string quoted(const std::string &text) {
++    std::string out = "\"";
++    for (const char c : text) {
++        if (c == '"' || c == '\\') out += '\\';
++        if (static_cast<unsigned char>(c) < 0x20u) continue;
++        out += c;
++    }
++    return out + "\"";
++}
++
++struct Example {
++    std::uint64_t frame{};
++    std::string scene;
++    std::string detail;
++    std::vector<std::pair<std::uint32_t, std::uint32_t>> words;  // command, data
++};
++
++struct Feature {
++    std::uint64_t count{};
++    std::uint64_t first_frame{};
++    std::string first_scene;
++    std::map<std::string, std::uint64_t> variants;
++    Example example;
++};
++
++struct Scene {
++    std::uint64_t first_frame{};
++    std::uint64_t last_frame{};
++    std::uint64_t frames{};
++    std::uint64_t draws{};
++    std::map<std::string, std::uint64_t> features;
++    std::map<std::uint32_t, std::uint64_t> unhandled;
++};
++
++struct TargetSeen {
++    std::uint32_t stride{};
++    std::uint32_t format{};
++    std::uint64_t last_frame{};
++    std::uint32_t rows{};  // the most rows a draw reached, up to 272
++};
++
++struct State {
++    std::mutex lock;
++    std::string path;
++    std::string scene{"start"};
++    std::vector<std::string> scene_order;
++    std::map<std::string, Scene> scenes;
++    std::map<std::string, Feature> features;
++    std::map<std::uint32_t, std::uint64_t> unhandled;
++    std::uint64_t frame{};
++    std::uint64_t draws{};
++    std::set<std::uint32_t> displayed;  // every address a frame was shown from
++    std::map<std::uint32_t, TargetSeen> targets;      // by canonical colour address
++    std::map<std::uint32_t, std::uint64_t> depths;   // canonical depth address, last frame used
++    std::map<std::uint32_t, std::uint32_t> depth_strides;
++    // CLUT variants per texture, and the last CLUT contents per address.
++    std::map<std::tuple<std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t>, std::uint32_t>
++        clut_variants;
++    struct ClutSeen {
++        std::uint64_t hash{};
++        std::uint32_t first_word{};
++    };
++    std::map<std::uint32_t, ClutSeen> cluts;
++    struct LargeSeen {
++        std::uint64_t full{};
++        std::uint64_t sampled{};
++        std::uint64_t frame{~0ull};
++    };
++    std::map<std::uint32_t, LargeSeen> large_textures;
++    // The draw being recorded, for the renderer's notes.
++    std::array<std::uint32_t, 256> registers{};
++    std::uint32_t draw_target{};
++    std::uint32_t draw_texture{};
++    std::uint64_t last_write_frame{};
++};
++
++State &state() {
++    static State s;
++    return s;
++}
++
++bool start() {
++    const char *path = portablekit::env("GE_CENSUS");
++    if (path == nullptr || *path == '\0') return false;
++    State &s = state();
++    s.path = path;
++    if (const char *scene = portablekit::env("GE_CENSUS_SCENE"); scene != nullptr && *scene != '\0') s.scene = scene;
++    s.scene_order.push_back(s.scene);
++    s.scenes[s.scene];
++    std::cout << "[census] GE census to " << s.path << ", scene " << s.scene << std::endl;
++    return true;
++}
++
++// The commands a draw's example shows, besides the feature's own.
++constexpr std::uint32_t kDrawWords[] = {
++    0x12, 0x9C, 0x9D, 0xD2, 0x9E, 0x9F, 0xD3, 0x1E, 0xA0, 0xA8, 0xB8, 0xC0, 0xC2, 0xC3, 0xC5, 0xB0, 0xB1, 0xC6, 0xC7,
++    0xC8, 0xC9, 0xCA, 0x21, 0xDF, 0xE0, 0xE1, 0x22, 0xDB, 0x23, 0xDE, 0xE7, 0x24, 0xDC, 0xDD, 0x27, 0xD8, 0xD9,
++    0xDA, 0x28, 0xE6, 0x20, 0x1C, 0xD6, 0xD7, 0xE8, 0xE9, 0x50, 0x17, 0x1F};
++constexpr std::uint32_t kTransferWords[] = {0xB2, 0xB3, 0xB4, 0xB5, 0xEB, 0xEC, 0xEE, 0xEA};
++
++void hit(State &s, const std::string &name, const std::string &variant, const std::string &detail,
++         const std::uint32_t *words, std::size_t word_count) {
++    Feature &feature = s.features[name];
++    if (feature.count == 0u) {
++        feature.first_frame = s.frame;
++        feature.first_scene = s.scene;
++        feature.example.frame = s.frame;
++        feature.example.scene = s.scene;
++        feature.example.detail = detail;
++        for (std::size_t i = 0; i < word_count; ++i)
++            feature.example.words.emplace_back(words[i], s.registers[words[i]] & 0x00FFFFFFu);
++        if (find_info(name) == nullptr) std::cout << "[census] feature without a description: " << name << std::endl;
++    }
++    ++feature.count;
++    if (!variant.empty()) ++feature.variants[variant];
++    ++s.scenes[s.scene].features[name];
++}
++
++void hit_draw(State &s, const std::string &name, const std::string &variant, const std::string &detail) {
++    hit(s, name, variant, detail, kDrawWords, std::size(kDrawWords));
++}
++
++std::uint32_t bytes_per_pixel(std::uint32_t format) { return format == 3u ? 4u : 2u; }
++
++std::uint32_t texture_bits(TextureFormat format) {
++    switch (format) {
++    case TextureFormat::Rgba8888:
++    case TextureFormat::Clut32: return 32u;
++    case TextureFormat::Clut8:
++    case TextureFormat::Dxt3:
++    case TextureFormat::Dxt5: return 8u;
++    case TextureFormat::Clut4:
++    case TextureFormat::Dxt1: return 4u;
++    default: return 16u;
++    }
++}
++
++bool is_clut(TextureFormat format) {
++    return format == TextureFormat::Clut4 || format == TextureFormat::Clut8 || format == TextureFormat::Clut16 ||
++           format == TextureFormat::Clut32;
++}
++
++bool is_dxt(TextureFormat format) {
++    return format == TextureFormat::Dxt1 || format == TextureFormat::Dxt3 || format == TextureFormat::Dxt5;
++}
++
++// The target (canonical address) whose 480x272 bytes hold `address`, drawn
++// within `recent` frames; 0 when none.
++std::uint32_t target_holding(const State &s, std::uint32_t address, std::uint64_t recent = ~0ull) {
++    const std::uint32_t wanted = GuestMemory::canonical(address);
++    std::uint32_t found = 0u;
++    for (const auto &[base, target] : s.targets) {
++        if (recent != ~0ull && s.frame - target.last_frame > recent) continue;
++        const std::uint32_t rows = target.rows != 0u ? target.rows : 272u;
++        const std::uint32_t bytes = target.stride * rows * bytes_per_pixel(target.format);
++        if (wanted >= base && wanted - base < bytes) {
++            if (found == 0u || base > found) found = base;  // the innermost start
++        }
++    }
++    return found;
++}
++
++std::uint64_t hash_bytes(const std::uint8_t *data, std::size_t size, std::size_t step = 1u) {
++    std::uint64_t key = 0xCBF29CE484222325ull;
++    if (step == 1u) {
++        for (std::size_t i = 0; i < size; ++i) key = (key ^ data[i]) * 0x100000001B3ull;
++    } else {
++        for (std::size_t i = 0; i + 4u <= size; i += step) {
++            std::uint32_t word{};
++            std::memcpy(&word, data + i, sizeof(word));
++            key = (key ^ word) * 0x100000001B3ull;
++        }
++    }
++    return key;
++}
++
++// The texel rectangle a draw's vertices reach, or false for a draw whose
++// vertices were not decoded on the CPU.
++bool texel_bounds(const DrawCall &call, float &u0, float &v0, float &u1, float &v1) {
++    if (call.vertices.empty()) return false;
++    u0 = v0 = 1e30f;
++    u1 = v1 = -1e30f;
++    const float width = static_cast<float>(call.texture.width);
++    const float height = static_cast<float>(call.texture.height);
++    for (const Vertex &vertex : call.vertices) {
++        float u = vertex.texcoord[0];
++        float v = vertex.texcoord[1];
++        if (!call.through) {
++            u = (u * call.texture.scale_u + call.texture.offset_u) * width;
++            v = (v * call.texture.scale_v + call.texture.offset_v) * height;
++        }
++        u0 = std::min(u0, u);
++        v0 = std::min(v0, v);
++        u1 = std::max(u1, u);
++        v1 = std::max(v1, v);
++    }
++    return true;
++}
++
++bool identity(const std::array<float, 16> &m) {
++    for (std::size_t i = 0; i < 16u; ++i) {
++        const float want = (i % 5u == 0u) ? 1.0f : 0.0f;
++        if (std::abs(m[i] - want) > 1e-5f) return false;
++    }
++    return true;
++}
++
++std::string target_detail(const DrawCall &call) {
++    std::ostringstream out;
++    out << "target " << hex(call.target.color_address) << " fmt " << call.target.color_format << " stride "
++        << call.target.color_stride << " prim " << static_cast<int>(call.primitive) << " count "
++        << call.primitive_count << (call.through ? " through" : " transformed");
++    if (call.blend.enabled)
++        out << " blend " << call.blend.source_factor << "/" << call.blend.destination_factor << " eq "
++            << call.blend.equation;
++    if (!call.vertices.empty()) out << " colour0 " << hex(call.vertices.front().color);
++    if (call.texture.enabled)
++        out << " texture " << hex(call.texture.address) << " fmt " << static_cast<int>(call.texture.format) << " "
++            << call.texture.width << "x" << call.texture.height << " bufw " << call.texture.buffer_width;
++    return out.str();
++}
++
++void write_locked(State &s) {
++    std::ostringstream out;
++    out << "{\n  \"frames\": " << s.frame << ",\n  \"draws\": " << s.draws << ",\n  \"scenes\": [\n";
++    for (std::size_t i = 0; i < s.scene_order.size(); ++i) {
++        const std::string &name = s.scene_order[i];
++        const Scene &scene = s.scenes[name];
++        out << "    {\"name\": " << quoted(name) << ", \"first_frame\": " << scene.first_frame
++            << ", \"last_frame\": " << scene.last_frame << ", \"frames\": " << scene.frames
++            << ", \"draws\": " << scene.draws << ", \"features\": {";
++        bool first = true;
++        for (const auto &[feature, count] : scene.features) {
++            out << (first ? "" : ", ") << quoted(feature) << ": " << count;
++            first = false;
++        }
++        out << "}, \"unhandled_commands\": {";
++        first = true;
++        for (const auto &[command, count] : scene.unhandled) {
++            out << (first ? "" : ", ") << quoted(hex(command, 2)) << ": " << count;
++            first = false;
++        }
++        out << "}}" << (i + 1u < s.scene_order.size() ? "," : "") << "\n";
++    }
++    out << "  ],\n  \"features\": [\n";
++    std::vector<std::pair<std::string, const Feature *>> sorted;
++    for (const auto &[name, feature] : s.features) sorted.emplace_back(name, &feature);
++    std::sort(sorted.begin(), sorted.end(),
++              [](const auto &a, const auto &b) { return a.second->count > b.second->count; });
++    for (std::size_t i = 0; i < sorted.size(); ++i) {
++        const auto &[name, feature] = sorted[i];
++        const FeatureInfo *info = find_info(name);
++        out << "    {\"feature\": " << quoted(name) << ", \"category\": " << quoted(info ? info->category : "")
++            << ", \"impact\": " << quoted(info ? info->impact : "") << ", \"count\": " << feature->count
++            << ", \"first_frame\": " << feature->first_frame << ", \"first_scene\": " << quoted(feature->first_scene)
++            << ",\n     \"description\": " << quoted(info ? info->description : "") << ",\n     \"scenes\": {";
++        bool first = true;
++        for (const std::string &scene : s.scene_order) {
++            const auto found = s.scenes[scene].features.find(name);
++            if (found == s.scenes[scene].features.end()) continue;
++            out << (first ? "" : ", ") << quoted(scene) << ": " << found->second;
++            first = false;
++        }
++        out << "},\n     \"variants\": {";
++        first = true;
++        for (const auto &[variant, count] : feature->variants) {
++            out << (first ? "" : ", ") << quoted(variant) << ": " << count;
++            first = false;
++        }
++        out << "},\n     \"example\": {\"frame\": " << feature->example.frame
++            << ", \"scene\": " << quoted(feature->example.scene) << ", \"draw\": " << quoted(feature->example.detail)
++            << ", \"words\": {";
++        first = true;
++        for (const auto &[command, data] : feature->example.words) {
++            out << (first ? "" : ", ") << quoted(hex(command, 2)) << ": " << quoted(hex(command << 24u | data));
++            first = false;
++        }
++        out << "}}}" << (i + 1u < sorted.size() ? "," : "") << "\n";
++    }
++    out << "  ],\n  \"unhandled_commands\": {";
++    bool first = true;
++    for (const auto &[command, count] : s.unhandled) {
++        out << (first ? "" : ", ") << quoted(hex(command, 2)) << ": " << count;
++        first = false;
++    }
++    out << "}\n}\n";
++    const std::string temporary = s.path + ".tmp";
++    {
++        std::ofstream file(temporary, std::ios::binary | std::ios::trunc);
++        if (!file) return;
++        file << out.str();
++    }
++    std::error_code ec;
++    std::filesystem::rename(temporary, s.path, ec);
++    s.last_write_frame = s.frame;
++}
++
++} // namespace
++
++// Read on first use, not at static initialisation: the variable's prefix
++// comes from the game profile.
++bool enabled() noexcept {
++    static const bool on = start();
++    return on;
++}
++
++void set_scene(const std::string &name) {
++    if (!enabled()) return;
++    State &s = state();
++    std::lock_guard guard(s.lock);
++    if (name == s.scene) return;
++    s.scene = name;
++    if (s.scenes.find(name) == s.scenes.end()) {
++        s.scene_order.push_back(name);
++        s.scenes[name].first_frame = s.frame;
++    }
++    std::cout << "[census] scene " << name << " from frame " << s.frame << std::endl;
++    write_locked(s);
++}
++
++void note_frame(std::uint32_t display_address) {
++    if (!enabled()) return;
++    State &s = state();
++    std::lock_guard guard(s.lock);
++    ++s.frame;
++    s.displayed.insert(GuestMemory::canonical(display_address));
++    Scene &scene = s.scenes[s.scene];
++    if (scene.frames == 0u) scene.first_frame = s.frame;
++    ++scene.frames;
++    scene.last_frame = s.frame;
++    if (s.frame - s.last_write_frame >= 1800u) write_locked(s);
++}
++
++void note_draw(const GuestMemory &memory, const DrawCall &call, const std::array<std::uint32_t, 256> &registers) {
++    if (!enabled()) return;
++    State &s = state();
++    std::lock_guard guard(s.lock);
++    s.registers = registers;
++    ++s.draws;
++    ++s.scenes[s.scene].draws;
++    const auto reg = [&](std::uint32_t command) { return registers[command] & 0x00FFFFFFu; };
++    const auto on = [&](std::uint32_t command) { return (registers[command] & 1u) != 0u; };
++    const bool clear = call.clear_mode;
++    const std::string detail = target_detail(call);
++    const std::uint32_t target = GuestMemory::canonical(call.target.color_address);
++    s.draw_target = target;
++    s.draw_texture = call.texture.enabled ? call.texture.address : 0u;
++
++    // Targets: their layout over time, and how they share memory.
++    {
++        const auto found = s.targets.find(target);
++        if (found != s.targets.end()) {
++            if (found->second.format != call.target.color_format)
++                hit_draw(s, "target.format_changed", std::to_string(found->second.format) + "->" +
++                                                         std::to_string(call.target.color_format), detail);
++            if (found->second.stride != call.target.color_stride)
++                hit_draw(s, "target.stride_changed", std::to_string(found->second.stride) + "->" +
++                                                         std::to_string(call.target.color_stride), detail);
++        }
++        if (const std::uint32_t outer = target_holding(s, target, 1u); outer != 0u && outer != target)
++            hit_draw(s, "target.inside_other_target", hex(outer) + " holds " + hex(target), detail);
++        for (const auto &[depth, last] : s.depths) {
++            if (s.frame - last > 1u) continue;
++            const std::uint32_t stride = s.depth_strides[depth];
++            if (target >= depth && target - depth < stride * 272u * 2u) {
++                hit_draw(s, "target.on_depth_buffer", hex(depth), detail);
++                break;
++            }
++        }
++        const std::uint32_t stride = call.target.color_stride;
++        if (stride != 64u && stride != 128u && stride != 256u && stride != 512u)
++            hit_draw(s, "target.odd_stride", std::to_string(stride), detail);
++        // The rows the draw can reach: the scissor, and within it the
++        // vertices of a through-mode draw or the viewport of another.
++        float bottom = static_cast<float>(call.viewport.scissor_y2 + 1u);
++        if (call.through && !call.vertices.empty()) {
++            float lowest = 0.0f;
++            for (const Vertex &vertex : call.vertices) lowest = std::max(lowest, vertex.position[1]);
++            bottom = std::min(bottom, lowest);
++        } else if (!call.through && call.viewport.y_scale != 0.0f) {
++            bottom = std::min(bottom, call.viewport.y_offset - call.viewport.offset_y + std::abs(call.viewport.y_scale));
++        }
++        const auto rows = static_cast<std::uint32_t>(std::clamp(bottom + 0.5f, 1.0f, 272.0f));
++        TargetSeen &seen_target = s.targets[target];
++        const bool relaid = seen_target.stride != call.target.color_stride || seen_target.format != call.target.color_format;
++        seen_target.rows = relaid ? rows : std::max(seen_target.rows, rows);
++        seen_target.stride = call.target.color_stride;
++        seen_target.format = call.target.color_format;
++        seen_target.last_frame = s.frame;
++        const bool depth_used = !clear ? call.depth.test_enabled : (call.clear_flags & 4u) != 0u;
++        if (depth_used) {
++            const std::uint32_t depth = GuestMemory::canonical(call.target.depth_address);
++            s.depths[depth] = s.frame;
++            s.depth_strides[depth] = call.target.depth_stride;
++            if (call.target.depth_stride != call.target.color_stride)
++                hit_draw(s, "target.depth_stride_mismatch",
++                         std::to_string(call.target.depth_stride) + " vs " + std::to_string(call.target.color_stride),
++                         detail);
++        }
++    }
++
++    // Primitives and vertices.
++    if (call.primitive == PrimitiveType::Points) hit_draw(s, "prim.points", call.through ? "through" : "transformed", detail);
++    if (call.primitive == PrimitiveType::Lines || call.primitive == PrimitiveType::LineStrip)
++        hit_draw(s, "prim.lines", call.through ? "through" : "transformed", detail);
++    if (((call.vertex_type >> 18u) & 7u) != 0u)
++        hit_draw(s, "vertex.morph", std::to_string(((call.vertex_type >> 18u) & 7u) + 1u) + " targets", detail);
++    if (!clear && (reg(0x50) & 1u) == 0u && call.has_vertex_color && call.primitive != PrimitiveType::Sprites &&
++        call.primitive != PrimitiveType::Points)
++        hit_draw(s, "shade.flat", "", detail);
++
++    // Viewport, depth range, the 480x272 limit.
++    if (!clear) {
++        const auto minz = static_cast<float>(reg(0xD6) & 0xFFFFu);
++        const auto maxz = static_cast<float>(reg(0xD7) & 0xFFFFu);
++        if (!call.through) {
++            const ViewportState &vp = call.viewport;
++            if (vp.z_scale == 0.0f) {
++                hit_draw(s, "viewport.z_scale_zero", "", detail);
++            } else {
++                const float low = vp.z_offset - std::abs(vp.z_scale);
++                const float high = vp.z_offset + std::abs(vp.z_scale);
++                if (low < -0.5f || high > 65535.5f) hit_draw(s, "viewport.depth_clamped", "", detail);
++                if (minz > std::max(low, 0.0f) + 0.5f || maxz < std::min(high, 65535.0f) - 0.5f)
++                    hit_draw(s, "depth.range_minz_maxz", "narrower than the viewport", detail);
++            }
++            if (on(0x1C) && !call.vertices.empty()) {
++                // Clip-space depth of every vertex; past the planes is where
++                // clipping and clamping differ.
++                std::array<float, 16> m{};
++                const auto multiply = [](const std::array<float, 16> &a, const std::array<float, 16> &b) {
++                    std::array<float, 16> out{};
++                    for (std::size_t c = 0; c < 4u; ++c)
++                        for (std::size_t r = 0; r < 4u; ++r)
++                            for (std::size_t k = 0; k < 4u; ++k) out[c * 4u + r] += a[k * 4u + r] * b[c * 4u + k];
++                    return out;
++                };
++                m = multiply(call.projection, multiply(call.view, call.world));
++                bool far = false, near = false;
++                for (const Vertex &vertex : call.vertices) {
++                    const float x = vertex.position[0], y = vertex.position[1], z = vertex.position[2];
++                    const float cz = m[2] * x + m[6] * y + m[10] * z + m[14];
++                    const float cw = m[3] * x + m[7] * y + m[11] * z + m[15];
++                    if (cz > cw) far = true;
++                    if (cz < -cw) near = true;
++                }
++                if (far) hit_draw(s, "clip.depth_clamp_far", near ? "also near" : "", detail);
++                else if (near) hit_draw(s, "clip.depth_clamp_near", "", detail);
++            }
++        }
++    }
++    {
++        bool beyond = false;
++        const ViewportState &vp = call.viewport;
++        const bool scissor_beyond = vp.scissor_x2 > 479u || vp.scissor_y2 > 271u;
++        if (scissor_beyond && call.through && !call.vertices.empty()) {
++            for (const Vertex &vertex : call.vertices)
++                if (vertex.position[0] > 480.5f || vertex.position[1] > 272.5f) beyond = true;
++        } else if (scissor_beyond && !call.through && vp.x_scale != 0.0f) {
++            const float right = vp.x_offset - vp.offset_x + std::abs(vp.x_scale);
++            const float bottom = vp.y_offset - vp.offset_y + std::abs(vp.y_scale);
++            beyond = right > 480.5f || bottom > 272.5f;
++        }
++        if (beyond) hit_draw(s, "target.beyond_480x272", call.through ? "through" : "transformed", detail);
++    }
++
++    if (clear) return;  // nothing below applies in clear mode
++
++    // Fragment tests and operations.
++    if (call.alpha_test.enabled) {
++        const std::uint32_t function = call.alpha_test.function;
++        if (function == 0u) hit_draw(s, "alpha_test.never", "", detail);
++        if (function == 1u) hit_draw(s, "alpha_test.always", "", detail);
++        if (call.alpha_test.mask != 0xFFu) hit_draw(s, "alpha_test.mask", hex(call.alpha_test.mask, 2), detail);
++        if (function == 2u || function == 3u) hit_draw(s, "alpha_test.equality", function == 2u ? "equal" : "notequal", detail);
++    }
++    if (on(0x27)) {
++        static const char *kNames[] = {"never", "always", "equal", "notequal"};
++        hit_draw(s, "color_test", kNames[reg(0xD8) & 3u], detail);
++    }
++    if (on(0x28) && (reg(0xE6) & 0xFu) != 3u) {
++        static const char *kOps[] = {"clear", "and", "and_reverse", "copy", "and_inverted", "noop", "xor", "or",
++                                     "nor", "equiv", "inverted", "or_reverse", "copy_inverted", "or_inverted",
++                                     "nand", "set"};
++        hit_draw(s, "logic_op", kOps[reg(0xE6) & 0xFu], detail);
++    }
++    if (on(0x20) && call.target.color_format != 3u) hit_draw(s, "dither.16bit_target", "", detail);
++    if (on(0x25)) hit_draw(s, "antialias", "", detail);
++
++    // Blending.
++    if (call.blend.enabled) {
++        const BlendState &blend = call.blend;
++        if (blend.equation == 5u) hit_draw(s, "blend.abs_diff", "", detail);
++        const auto doubled = [](std::uint32_t factor) { return factor >= 6u && factor <= 9u; };
++        if (blend.equation < 3u && (doubled(blend.source_factor) || doubled(blend.destination_factor)))
++            hit_draw(s, "blend.doubled_alpha_factor",
++                     std::to_string(blend.source_factor) + "/" + std::to_string(blend.destination_factor), detail);
++        const auto plain = [](std::uint32_t color) {
++            color &= 0x00FFFFFFu;
++            return color == 0u || color == 0x00FFFFFFu;
++        };
++        if (blend.equation < 3u && blend.source_factor == 10u && blend.destination_factor == 10u &&
++            !plain(blend.fixed_source) && !plain(blend.fixed_destination) &&
++            ((blend.fixed_source + blend.fixed_destination) & 0x00FFFFFFu) != 0x00FFFFFFu)
++            hit_draw(s, "blend.two_fixed_colors", hex(blend.fixed_source, 6) + "/" + hex(blend.fixed_destination, 6),
++                     detail);
++        const auto destination_alpha = [](std::uint32_t factor) {
++            return factor == 4u || factor == 5u || factor == 8u || factor == 9u;
++        };
++        if (blend.equation < 3u && (destination_alpha(blend.source_factor) || destination_alpha(blend.destination_factor))) {
++            if (call.target.color_format == 0u) hit_draw(s, "blend.dst_alpha_5650_target", "", detail);
++            else if (call.target.color_format != 3u)
++                hit_draw(s, "blend.dst_alpha_16bit_target", std::to_string(call.target.color_format), detail);
++        }
++    }
++
++    if (!call.texture.enabled) return;
++    const TextureState &texture = call.texture;
++
++    // Texture function.
++    const std::uint32_t function = texture.function;
++    if (function == 2u) hit_draw(s, "tfx.blend_env_color", hex(reg(0xCA), 6), detail);
++    if (function == 4u) hit_draw(s, "tfx.add", "", detail);
++    if (function > 4u) hit_draw(s, "tfx.invalid", std::to_string(function), detail);
++    const bool texture_has_alpha = !(texture.format == TextureFormat::Rgba5650 ||
++                                     (is_clut(texture.format) && texture.clut_format == 0u));
++    if (!texture.alpha_from_texture && texture_has_alpha) {
++        static const char *kFunctions[] = {"modulate", "decal", "blend", "replace", "add", "5", "6", "7"};
++        hit_draw(s, "tfx.tcc_rgb", kFunctions[function & 7u], detail);
++    }
++
++    // Texture coordinate generation.
++    const std::uint32_t map_mode = reg(0xC0) & 3u;
++    if (map_mode == 1u) {
++        static const char *kSources[] = {"position", "uv", "normalized_normal", "normal"};
++        const std::uint32_t source = (reg(0xC0) >> 8u) & 3u;
++        if (source == 1u && identity(call.texture_matrix))
++            hit_draw(s, "texmap.projection_identity_uv", "", detail);
++        else
++            hit_draw(s, "texmap.projection", kSources[source], detail);
++    } else if (map_mode == 2u) {
++        hit_draw(s, "texmap.env_map", "lights " + std::to_string(reg(0xC1) & 3u) + "," +
++                                          std::to_string((reg(0xC1) >> 8u) & 3u), detail);
++    }
++
++    // Levels and filtering.
++    const std::uint32_t levels = (reg(0xC2) >> 16u) & 7u;
++    const std::uint32_t level_mode = reg(0xC8) & 3u;
++    const auto bias = static_cast<std::int8_t>((reg(0xC8) >> 16u) & 0xFFu);
++    if (levels > 0u) {
++        hit_draw(s, "tex.mipmaps", std::to_string(levels + 1u) + " levels", detail);
++        if (level_mode == 1u && bias >= 16) hit_draw(s, "tex.lod_const_level", std::to_string(bias / 16), detail);
++        if (level_mode == 2u) hit_draw(s, "tex.lod_slope", "", detail);
++    }
++    if (texture.mag_filter == 0u || texture.min_filter == 0u || texture.min_filter == 4u || texture.min_filter == 6u)
++        hit_draw(s, "tex.filter_nearest_ignored", std::to_string(texture.min_filter) + "/" + std::to_string(texture.mag_filter), detail);
++
++    // Size, layout and address.
++    if (texture.width > 512u || texture.height > 512u)
++        hit_draw(s, "tex.size_over_512", std::to_string(texture.width) + "x" + std::to_string(texture.height), detail);
++    if (!is_dxt(texture.format) && texture.buffer_width < texture.width)
++        hit_draw(s, "tex.bufw_below_width", std::to_string(texture.buffer_width) + "<" + std::to_string(texture.width), detail);
++    if ((texture.address & 0x0F000000u) == 0x04000000u && (texture.address & 0x00E00000u) != 0u)
++        hit_draw(s, "tex.vram_mirror_address", hex(texture.address), detail);
++    {
++        const std::uint32_t wanted = GuestMemory::canonical(texture.address);
++        for (const auto &[depth, last] : s.depths) {
++            if (s.frame - last > 2u) continue;
++            const std::uint32_t stride = s.depth_strides[depth];
++            if (wanted >= depth && wanted - depth < stride * 272u * 2u) {
++                hit_draw(s, "tex.reads_depth_buffer", hex(depth), detail);
++                break;
++            }
++        }
++    }
++
++    // Texture cache keys (texture_decode.cpp, texture_key).
++    const std::uint32_t texture_bytes =
++        std::max<std::uint32_t>(texture.buffer_width, texture.width) * texture.height * texture_bits(texture.format) / 8u;
++    if (is_clut(texture.format)) {
++        if (texture.clut_shift != 0u || texture.clut_mask != 0xFFu || texture.clut_offset != 0u)
++            hit_draw(s, "clut.shift_mask_offset",
++                     "shift " + std::to_string(texture.clut_shift) + " mask " + hex(texture.clut_mask, 2) +
++                         " start " + std::to_string(texture.clut_offset),
++                     detail);
++        const auto key = std::make_tuple(texture.address, static_cast<std::uint32_t>(texture.width) << 16u | texture.height,
++                                         static_cast<std::uint32_t>(texture.format), texture.clut_address,
++                                         texture.clut_format);
++        const std::uint32_t variant = texture.clut_shift | texture.clut_mask << 8u | texture.clut_offset << 16u;
++        const auto [entry, inserted] = s.clut_variants.try_emplace(key, variant);
++        if (!inserted && entry->second != variant)
++            hit_draw(s, "clut.variant_cache_collision", hex(entry->second, 6) + " then " + hex(variant, 6), detail);
++        const std::uint32_t clut_bytes = std::max<std::uint32_t>(texture.clut_load_bytes, 4u);
++        if (const std::uint8_t *clut = memory.raw_pointer(texture.clut_address, clut_bytes)) {
++            std::uint32_t first_word{};
++            std::memcpy(&first_word, clut, sizeof(first_word));
++            const std::uint64_t hash = hash_bytes(clut, clut_bytes);
++            auto &seen = s.cluts[GuestMemory::canonical(texture.clut_address)];
++            if (seen.hash != 0u && seen.hash != hash && seen.first_word == first_word)
++                hit_draw(s, "clut.change_missed_by_key", hex(texture.clut_address), detail);
++            seen = {hash, first_word};
++        }
++    } else if (!is_dxt(texture.format) && texture_bytes > 64u * 1024u) {
++        // Large textures are keyed by one word in every 256 bytes. Checked
++        // once a frame per address, against a hash of every byte.
++        auto &seen = s.large_textures[GuestMemory::canonical(texture.address)];
++        if (seen.frame != s.frame && target_holding(s, texture.address, 1u) == 0u) {
++            if (const std::uint8_t *data = memory.raw_pointer(texture.address, texture_bytes)) {
++                const std::uint64_t full = hash_bytes(data, texture_bytes, 4u);
++                const std::uint64_t sampled = hash_bytes(data, texture_bytes, 256u);
++                if (seen.frame != ~0ull && full != seen.full && sampled == seen.sampled)
++                    hit_draw(s, "tex.large_change_missed_by_key", hex(texture.address), detail);
++                seen = {full, sampled, s.frame};
++            }
++        }
++    }
++
++    // Interpolation: perspective draws the in-between frames will not move.
++    if (!call.through && s.displayed.count(target) == 0u && call.projection[11] != 0.0f)
++        hit_draw(s, "interp.offscreen_perspective", hex(target), detail);
++}
++
++void note_texture_source(const DrawCall &call, bool from_target, std::uint32_t x, std::uint32_t y) {
++    if (!enabled() || !call.texture.enabled || call.clear_mode) return;
++    State &s = state();
++    std::lock_guard guard(s.lock);
++    const TextureState &texture = call.texture;
++    const std::string detail = target_detail(call);
++    // A miss counts only against a target drawn this frame or the last: VRAM
++    // a target used long ago may hold an ordinary texture now.
++    const std::uint32_t holder = target_holding(s, texture.address, from_target ? ~0ull : 1u);
++    if (holder == 0u && !from_target) return;
++    const std::uint32_t draw_target = GuestMemory::canonical(call.target.color_address);
++    if (!from_target) {
++        const TargetSeen &seen = s.targets[holder];
++        const std::string variant = "target " + hex(holder) + " fmt " + std::to_string(seen.format) + ", texture fmt " +
++                                    std::to_string(static_cast<int>(texture.format));
++        if (texture.swizzled) hit_draw(s, "fbtex.miss_swizzled", variant, detail);
++        else if (is_clut(texture.format)) hit_draw(s, "fbtex.miss_clut_view", variant, detail);
++        else if (is_dxt(texture.format)) hit_draw(s, "fbtex.miss_other_format", variant, detail);
++        else if (texture_bits(texture.format) != bytes_per_pixel(seen.format) * 8u)
++            hit_draw(s, "fbtex.miss_bpp_mismatch", variant, detail);
++        else if (texture.buffer_width != seen.stride)
++            hit_draw(s, "fbtex.miss_stride_mismatch", variant + " bufw " + std::to_string(texture.buffer_width) +
++                                                          " stride " + std::to_string(seen.stride), detail);
++        else hit_draw(s, "fbtex.miss_guest_memory", variant, detail);
++        return;
++    }
++    const TargetSeen &seen = s.targets[holder != 0u ? holder : GuestMemory::canonical(texture.address)];
++    hit_draw(s, "fbtex.sampled", "fmt " + std::to_string(seen.format) + " as " + std::to_string(static_cast<int>(texture.format)), detail);
++    if (holder == draw_target) hit_draw(s, "fbtex.self_sample", "", detail);
++    if (static_cast<std::uint32_t>(texture.format) != seen.format && texture.format != TextureFormat::Rgba5650)
++        hit_draw(s, "fbtex.format_reinterpreted",
++                 std::to_string(seen.format) + " as " + std::to_string(static_cast<int>(texture.format)), detail);
++    if ((seen.format == 1u || seen.format == 2u) && texture.format != TextureFormat::Rgba5650 &&
++        (call.blend.enabled || call.alpha_test.enabled) && texture.alpha_from_texture)
++        hit_draw(s, "fbtex.alpha_from_16bit_target", std::to_string(seen.format), detail);
++    float u0 = 0, v0 = 0, u1 = 0, v1 = 0;
++    if (texel_bounds(call, u0, v0, u1, v1)) {
++        if (static_cast<float>(x) + u1 > 480.5f || static_cast<float>(y) + v1 > 272.5f)
++            hit_draw(s, "fbtex.samples_beyond_480x272", call.through ? "through" : "transformed", detail);
++        const bool outside_u = u0 < -0.5f || u1 > static_cast<float>(texture.width) + 0.5f;
++        const bool outside_v = v0 < -0.5f || v1 > static_cast<float>(texture.height) + 0.5f;
++        if ((texture.wrap_s == 0u && outside_u) || (texture.wrap_t == 0u && outside_v))
++            hit_draw(s, "fbtex.repeat_wrap", "", detail);
++    }
++}
++
++void note_transfer(const BlockTransfer &transfer, const std::array<std::uint32_t, 256> &registers) {
++    if (!enabled()) return;
++    State &s = state();
++    std::lock_guard guard(s.lock);
++    s.registers = registers;
++    std::ostringstream detail;
++    detail << "transfer " << hex(transfer.source) << " (" << transfer.source_x << "," << transfer.source_y << " row "
++           << transfer.source_stride << ") -> " << hex(transfer.destination) << " (" << transfer.destination_x << ","
++           << transfer.destination_y << " row " << transfer.destination_stride << ") " << transfer.width << "x"
++           << transfer.height << " x" << transfer.bytes_per_pixel;
++    const auto first_byte = [&](std::uint32_t base, std::uint32_t x, std::uint32_t y, std::uint32_t stride) {
++        return base + (y * stride + x) * transfer.bytes_per_pixel;
++    };
++    const std::uint32_t from = first_byte(transfer.source, transfer.source_x, transfer.source_y, transfer.source_stride);
++    const std::uint32_t to = first_byte(transfer.destination, transfer.destination_x, transfer.destination_y,
++                                        transfer.destination_stride);
++    const std::uint32_t from_target = target_holding(s, from);
++    const std::uint32_t to_target = target_holding(s, to);
++    if (from_target != 0u) {
++        hit(s, "transfer.from_target", hex(from_target), detail.str(), kTransferWords, std::size(kTransferWords));
++        if (bytes_per_pixel(s.targets[from_target].format) != transfer.bytes_per_pixel)
++            hit(s, "transfer.bpp_vs_target", "source", detail.str(), kTransferWords, std::size(kTransferWords));
++    }
++    if (to_target != 0u) {
++        hit(s, "transfer.into_target", hex(to_target), detail.str(), kTransferWords, std::size(kTransferWords));
++        if (bytes_per_pixel(s.targets[to_target].format) != transfer.bytes_per_pixel)
++            hit(s, "transfer.bpp_vs_target", "destination", detail.str(), kTransferWords, std::size(kTransferWords));
++    }
++    const std::uint32_t span_from = transfer.source_stride * transfer.height * transfer.bytes_per_pixel;
++    const std::uint32_t span_to = transfer.destination_stride * transfer.height * transfer.bytes_per_pixel;
++    const std::uint32_t a = GuestMemory::canonical(from);
++    const std::uint32_t b = GuestMemory::canonical(to);
++    if (a < b + span_to && b < a + span_from)
++        hit(s, "transfer.overlapping", "", detail.str(), kTransferWords, std::size(kTransferWords));
++}
++
++void note_unhandled(std::uint32_t command, std::uint32_t data) {
++    if (!enabled()) return;
++    State &s = state();
++    std::lock_guard guard(s.lock);
++    ++s.unhandled[command];
++    ++s.scenes[s.scene].unhandled[command];
++    const std::uint32_t none[] = {0u};
++    const std::string detail = "command " + hex(command, 2) + " data " + hex(data, 6);
++    if (command == 0x07u) hit(s, "bbox.ignored", "", detail, none, 0u);
++    else if (command >= 0xF0u && command <= 0xF9u) hit(s, "immediate_draw.ignored", hex(command, 2), detail, none, 0u);
++    else if (command >= 0x0E00u) hit(s, "signal.unhandled", hex(command & 0xFFu, 2), detail, none, 0u);
++}
++
++void note_vram_copy(std::uint32_t destination, std::uint32_t source, std::uint32_t size) {
++    if (!enabled()) return;
++    State &s = state();
++    std::lock_guard guard(s.lock);
++    const std::uint32_t none[] = {0u};
++    std::ostringstream detail;
++    detail << "dma " << hex(source) << " -> " << hex(destination) << " " << size << " bytes";
++    if (const std::uint32_t target = target_holding(s, source); target != 0u)
++        hit(s, "dma.copy_from_target", hex(target), detail.str(), none, 0u);
++    if (const std::uint32_t target = target_holding(s, destination); target != 0u)
++        hit(s, "dma.copy_into_target", hex(target), detail.str(), none, 0u);
++}
++
++void note_renderer(const char *feature) {
++    if (!enabled()) return;
++    State &s = state();
++    std::lock_guard guard(s.lock);
++    hit_draw(s, feature, "", "target " + hex(s.draw_target) + " texture " + hex(s.draw_texture));
++}
++
++void write() {
++    if (!enabled()) return;
++    State &s = state();
++    std::lock_guard guard(s.lock);
++    write_locked(s);
++    std::cout << "[census] " << s.features.size() << " features over " << s.frame << " frames and " << s.draws
++              << " draws written to " << s.path << std::endl;
++}
++
++} // namespace portablekit::gpu::census
+diff --git a/host/gpu/ge_census.hpp b/host/gpu/ge_census.hpp
+new file mode 100644
+index 0000000..ea179ec
+--- /dev/null
++++ b/host/gpu/ge_census.hpp
+@@ -0,0 +1,52 @@
++#pragma once
++
++#include "ge_state.hpp"
++
++#include <array>
++#include <cstdint>
++#include <string>
++
++// <prefix>_GE_CENSUS=<file>: a census of the GE features a game's draws use
++// that this renderer does not reproduce exactly. Every draw is checked against
++// a list of such features (state the GE state machine ignores, modes the shader
++// approximates, render-to-texture cases the renderer reads from guest memory
++// instead of from the render target, block transfers between targets, ...);
++// each hit is counted, per scene and for the whole run, with the frame and
++// scene it was first seen in and the first draw's state words as an example.
++// The result is one JSON file, written at exit, at each scene change and every
++// 1,800 frames, so a run cut short still leaves one.
++//
++// Scenes: `<prefix>_GE_CENSUS_SCENE` names the first one ("start" by default);
++// the input script's `scene NAME` step starts the next.
++//
++// Nothing here changes what is drawn. With the variable unset every hook
++// returns at its first test.
++namespace portablekit::gpu::census {
++
++[[nodiscard]] bool enabled() noexcept;
++
++// The scene the counts from here on belong to.
++void set_scene(const std::string &name);
++// A game frame was shown from `display_address`.
++void note_frame(std::uint32_t display_address);
++// A draw as the GE state machine hands it to the renderer, with the raw
++// command registers it was made with (registers[command] = the command's
++// 24-bit data).
++void note_draw(const psprecomp::GuestMemory &memory, const DrawCall &call,
++               const std::array<std::uint32_t, 256> &registers);
++// The renderer's choice of texture source for the draw just noted: the render
++// target (`from_target`, its first texel at pixel x, y of it) or guest memory.
++void note_texture_source(const DrawCall &call, bool from_target, std::uint32_t x, std::uint32_t y);
++// A GE block transfer.
++void note_transfer(const BlockTransfer &transfer, const std::array<std::uint32_t, 256> &registers);
++// A command the GE state machine ignored.
++void note_unhandled(std::uint32_t command, std::uint32_t data);
++// A DMA copy out of or into VRAM.
++void note_vram_copy(std::uint32_t destination, std::uint32_t source, std::uint32_t size);
++// Something the renderer dropped or replaced for the draw being recorded
++// ("render.vertex_space_full", "render.texture_decode_failed").
++void note_renderer(const char *feature);
++// Writes the JSON now (also done at exit by the host).
++void write();
++
++} // namespace portablekit::gpu::census
+diff --git a/host/gpu/ge_state.cpp b/host/gpu/ge_state.cpp
+index 265b664..48b8c1f 100644
+--- a/host/gpu/ge_state.cpp
++++ b/host/gpu/ge_state.cpp
+@@ -1,5 +1,6 @@
+ #include "../profile.hpp"
+ #include "ge_state.hpp"
++#include "ge_census.hpp"
+ 
+ #include "perf/frame_stats.hpp"
+ #include "psprecomp/common.hpp"
+@@ -866,6 +867,7 @@ void GeState::handle_command(const GuestMemory &memory, std::uint32_t command, s
+                       << ") -> 0x" << std::hex << transfer.destination << std::dec << " (" << transfer.destination_x
+                       << "," << transfer.destination_y << " row " << transfer.destination_stride << ") "
+                       << transfer.width << "x" << transfer.height << " x" << transfer.bytes_per_pixel << " bytes\n";
++        census::note_transfer(transfer, registers_);
+         if (transfer_sink_) transfer_sink_(transfer);
+         break;
+     }
+@@ -932,6 +934,7 @@ std::vector<VramCopy> &vram_copies() {
+ } // namespace
+ 
+ void note_vram_copy(std::uint32_t destination, std::uint32_t source, std::uint32_t size) {
++    census::note_vram_copy(destination, source, size);
+     std::vector<VramCopy> &copies = vram_copies();
+     copies.erase(std::remove_if(copies.begin(), copies.end(),
+                                 [&](const VramCopy &copy) { return copy.destination == destination; }),
+@@ -968,6 +971,7 @@ std::map<std::uint32_t, IgnoredCommand> &ignored_commands() {
+ } // namespace
+ 
+ void GeState::trace_unhandled(std::uint32_t command, std::uint32_t data) {
++    census::note_unhandled(command, data);
+     IgnoredCommand &entry = ignored_commands()[command];
+     if (entry.count == 0u) entry.first_value = data;
+     ++entry.count;
+@@ -1139,6 +1143,7 @@ void GeState::draw_primitive(const GuestMemory &memory, std::uint32_t data) {
+ 
+     ++draw_count_;
+     vertex_count_ += call.raw_vertices != nullptr ? call.raw_count : call.vertices.size();
++    census::note_draw(memory, call, registers_);
+     if (draw_sink_) draw_sink_(call);
+ }
+ 
+@@ -1368,6 +1373,7 @@ void GeState::draw_patch(const GuestMemory &memory, std::uint32_t command, std::
+     }
+     ++draw_count_;
+     vertex_count_ += call.vertices.size();
++    census::note_draw(memory, call, registers_);
+     if (draw_sink_) draw_sink_(call);
+ }
+ 
+diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
+index 6a83f0c..bbe3b23 100644
+--- a/host/gpu/vulkan_renderer.cpp
++++ b/host/gpu/vulkan_renderer.cpp
+@@ -4,6 +4,7 @@
+ #include "vulkan_renderer.hpp"
+ 
+ #include "frame_interpolation.hpp"
++#include "ge_census.hpp"
+ #include "frame_pacing.hpp"
+ #include "replacement_textures.hpp"
+ #include "texture_decode.hpp"
+@@ -103,6 +104,7 @@ constexpr VkDeviceSize kIndexBufferTotal = kFrameRegions * kIndexBufferBytes;
+ // Says, once in a while, that a frame's geometry did not fit and some of its
+ // draws were left out, instead of dropping them silently.
+ void report_frame_space_full(const char *what) {
++    census::note_renderer("render.vertex_space_full");
+     static std::uint64_t count = 0;
+     if (count++ % 600u == 0u)
+         std::cout << "[render] a frame ran out of " << what << " space; the draws past it are not drawn (" << count
+@@ -4615,6 +4617,7 @@ VulkanRenderer::Impl::Texture &VulkanRenderer::Impl::texture_for(const GuestMemo
+     if (!job && (!decode_texture(memory, state, pixels) || pixels.empty())) {
+         // <prefix>_TRACE_WHITE_TEXTURES: each texture that could not be decoded
+         // and is drawn white instead, once.
++        census::note_renderer("render.texture_decode_failed");
+         static const bool trace_white = portablekit::env("TRACE_WHITE_TEXTURES") != nullptr;
+         static std::set<std::uint64_t> reported;
+         if (trace_white && reported.insert(key).second) {
+@@ -7144,6 +7147,9 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+         call.texture.enabled && !call.clear_mode && !no_fb_textures
+             ? impl.find_framebuffer_texture(memory, call.texture)
+             : Impl::FramebufferTexture{};
++    if (census::enabled())
++        census::note_texture_source(call, framebuffer_source.target != nullptr, framebuffer_source.x,
++                                    framebuffer_source.y);
+ 
+     // Under Fill the game's 480x272 screen is spread over a target of the
+     // window's shape, which suits the 3D view the game now draws at that
+@@ -8681,6 +8687,7 @@ bool VulkanRenderer::present(std::uint32_t display_address,
+                              std::optional<std::chrono::steady_clock::time_point> moment) {
+     Impl &impl = *impl_;
+     if (!impl.ready) return false;
++    census::note_frame(display_address);
+     if (!impl.recording) begin_frame();
+     impl.end_pass();
+ 
+diff --git a/host/main.cpp b/host/main.cpp
+index 94aaa48..191a82f 100644
+--- a/host/main.cpp
++++ b/host/main.cpp
+@@ -12,6 +12,7 @@
+ #include "profile.hpp"
+ #include "install/installer.hpp"
+ #include "install/user_data.hpp"
++#include "gpu/ge_census.hpp"
+ #include "gpu/ge_state.hpp"
+ #include "kernel/kernel.hpp"
+ 
+@@ -439,6 +440,7 @@ int main(int argc, char **argv) {
+         std::cout << portablekit::kernel().describe_threads() << "\n";
+         runtime.report_hle_histogram();
+         portablekit::gpu::GeState::report_ignored_commands();
++        portablekit::gpu::census::write();
+         // A quit the player or the game asked for is a success; any other stop
+         // (no runnable thread, an unmapped address, a missing import) is not.
+         return portablekit::is_requested_stop(runtime.stop_reason()) ? 0 : 4;
+diff --git a/host/ui/input_script.cpp b/host/ui/input_script.cpp
+index 23bde16..891f4f8 100644
+--- a/host/ui/input_script.cpp
++++ b/host/ui/input_script.cpp
+@@ -3,6 +3,7 @@
+ 
+ #include "ui/layer.hpp"
+ 
++#include "gpu/ge_census.hpp"
+ #include "gpu/vulkan_renderer.hpp"
+ #include "settings/settings.hpp"
+ 
+@@ -209,6 +210,8 @@ void run(const Step &step) {
+         const std::string name = step.argument.empty() ? "frame_" + std::to_string(s.frame) : step.argument;
+         Layer::get().renderer().capture_window((dir != nullptr ? std::string(dir) : std::string(".")) + "/" + name +
+                                                ".bmp");
++    } else if (step.action == "scene") {
++        gpu::census::set_scene(step.argument);
+     } else if (step.action == "speed") {
+         // Not saved: the run's settings.ini keeps the player's choice.
+         settings::current().unthrottled = step.argument == "unlimited";
+diff --git a/host/ui/input_script.hpp b/host/ui/input_script.hpp
+index 3801e24..4b69a74 100644
+--- a/host/ui/input_script.hpp
++++ b/host/ui/input_script.hpp
+@@ -31,6 +31,8 @@
+ //   speed unlimited|normal  run the game as fast as it can or at real time from
+ //                     here on, as the Game speed option does, without saving
+ //                     it: a run can reach a scene fast and then watch it
++//   scene NAME        start counting the GE census (<prefix>_GE_CENSUS, see
++//                     host/gpu/ge_census.hpp) into scene NAME
+ //   quit              close the window
+ //
+ // For example: <prefix>_INPUT_SCRIPT="300:key Escape;330:shot menu;360:pad leftstick+rightstick"
+-- 
+2.53.0.windows.1
+

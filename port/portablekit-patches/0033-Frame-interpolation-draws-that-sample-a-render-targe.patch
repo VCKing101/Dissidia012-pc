@@ -1,0 +1,343 @@
+From eae3f6f9e0362f4dcacf4bcdd6d8f74601f5ff9e Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Tue, 20 Oct 2026 20:51:51 +1030
+Subject: [PATCH 33/39] Frame interpolation: draws that sample a render target
+ read a snapshot
+
+An in-between present draws the older frame's draws into the shown
+framebuffer again. A draw that samples another render target (a blur, a
+glow, a shadow or screen composite) named the target's one sampled copy,
+and by then that copy held the target's last picture: a later pass's, or
+the next frame's. Games reuse one scratch buffer for several passes a
+frame, so every in-between frame composited the wrong picture. Measured
+with <prefix>_CHECK_REPLAY on a game that does this (one battle stage):
+43 to 86% of the pixels of a frame drawn again differed from the frame as
+drawn; a downsampled copy of the scene showed in the top-left corner and
+the glow and blur passes changed every other present.
+
+While frames are recorded for drawing again, a draw into a shown
+framebuffer that samples a render target now samples a snapshot of the
+part of the target it reads (the texture's rectangle and a pixel of
+margin), taken when it draws and kept until no recorded frame can name it
+(three flips). Snapshots that hold the same pixels are shared, images are
+reused, and there are at most 48. The same check now finds 0 pixels that
+differ. Draws into other targets, and every draw without interpolation,
+sample the target's copy as before.
+
+<prefix>_NO_FB_SNAPSHOTS samples the one copy, as before.
+---
+ host/gpu/vulkan_renderer.cpp | 236 ++++++++++++++++++++++++++++++++---
+ 1 file changed, 222 insertions(+), 14 deletions(-)
+
+diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
+index 16784c7..1407a06 100644
+--- a/host/gpu/vulkan_renderer.cpp
++++ b/host/gpu/vulkan_renderer.cpp
+@@ -112,6 +112,9 @@ constexpr std::size_t kMaxCachedTextures = 1024u;
+ // Descriptor sets for sampling render targets as textures: two per target
+ // (with its alpha, and with alpha forced to one for 5650 textures).
+ constexpr std::size_t kMaxFramebufferTextureSets = 64u;
++// Snapshots of render targets for frame interpolation (Target::Snapshot), in
++// all; each has two sets as well.
++constexpr std::size_t kMaxFramebufferSnapshots = 48u;
+ // GPU timestamps: a pair around each command buffer a frame submits. A frame
+ // normally submits one; each GE block transfer that reads a framebuffer back
+ // splits it once more.
+@@ -1344,6 +1347,28 @@ struct VulkanRenderer::Impl {
+         VkImageView copy_view{};
+         VkImageView copy_opaque_view{};
+         std::array<VkDescriptorSet, 2> copy_descriptors{};
++        // Frame interpolation draws a recorded frame again after the game has
++        // drawn on. A draw into the shown framebuffer that samples this target
++        // (a blur, a glow, a shadow composite) would then read `copy` as it is
++        // at that present: the picture of a later pass, often another picture
++        // altogether, since games reuse one scratch buffer for several passes
++        // a frame. While frames are recorded, such draws sample a snapshot of
++        // the part of the target they read instead, kept until no recorded
++        // frame can name it (framebuffer_snapshot()).
++        struct Snapshot {
++            VkImage image{};
++            VkDeviceMemory memory{};
++            VkImageView view{};
++            VkImageView opaque_view{};
++            std::array<VkDescriptorSet, 2> descriptors{};
++            VkExtent2D extent{};         // of the image
++            VkOffset2D origin{};         // where in the target its first pixel was taken
++            VkExtent2D taken{};          // how much of the target it holds
++            std::uint64_t serial{};      // the target's draw_serial when taken
++            std::uint64_t used_frame{};  // the last frame that drew with it
++            bool valid{};
++        };
++        std::vector<Snapshot> snapshots;
+         std::uint64_t copy_serial{};
+         bool copy_valid{};
+         // The guest address the target stands for.
+@@ -2283,6 +2308,15 @@ struct VulkanRenderer::Impl {
+     [[nodiscard]] FramebufferTexture find_framebuffer_texture(const GuestMemory &memory,
+                                                               const TextureState &texture);
+     VkDescriptorSet framebuffer_descriptor(Target &target, bool opaque);
++    // A snapshot of the target's pixels under guest rectangle (x, y, width,
++    // height) for a draw recorded for frame interpolation (Target::Snapshot).
++    // `mapping` receives how a guest pixel position in the target becomes a
++    // coordinate in the snapshot: u = x * mapping[0] + mapping[2], v = y *
++    // mapping[1] + mapping[3]. Null when no snapshot can be made.
++    VkDescriptorSet framebuffer_snapshot(Target &target, bool opaque, std::uint32_t x, std::uint32_t y,
++                                         std::uint32_t width, std::uint32_t height, std::array<float, 4> &mapping);
++    void destroy_snapshot(Target::Snapshot &snapshot);
++    std::size_t snapshot_count{};
+     // Stencil and alpha (Target::stencil_sync). One screen-sized quad into
+     // the target of the pass in progress, in through mode, with `key`, the
+     // texture `texture`, vertex colour `color` and the fragment shader's
+@@ -2759,13 +2793,15 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
+     // the pool has room for a second cache's worth.
+     const std::array<VkDescriptorPoolSize, 3> pool_sizes{
+         VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+-                             static_cast<std::uint32_t>(2u * kMaxCachedTextures + 1u + kMaxFramebufferTextureSets)},
++                             static_cast<std::uint32_t>(2u * kMaxCachedTextures + 1u + kMaxFramebufferTextureSets +
++                                                        2u * kMaxFramebufferSnapshots)},
+         VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 3u},
+         VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 2u},
+     };
+     VkDescriptorPoolCreateInfo pool_info{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+     pool_info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+-    pool_info.maxSets = static_cast<std::uint32_t>(2u * kMaxCachedTextures + 2u + kMaxFramebufferTextureSets);
++    pool_info.maxSets = static_cast<std::uint32_t>(2u * kMaxCachedTextures + 2u + kMaxFramebufferTextureSets +
++                                                   2u * kMaxFramebufferSnapshots);
+     pool_info.poolSizeCount = static_cast<std::uint32_t>(pool_sizes.size());
+     pool_info.pPoolSizes = pool_sizes.data();
+     if (!check(vkCreateDescriptorPool(impl.device, &pool_info, nullptr, &impl.descriptor_pool),
+@@ -4050,7 +4086,21 @@ void VulkanRenderer::Impl::write_capture(VkFence fence) {
+     capture_path.clear();
+ }
+ 
++void VulkanRenderer::Impl::destroy_snapshot(Target::Snapshot &snapshot) {
++    const bool counted = snapshot.image != VK_NULL_HANDLE;
++    for (VkDescriptorSet &descriptor : snapshot.descriptors)
++        if (descriptor != VK_NULL_HANDLE) vkFreeDescriptorSets(device, descriptor_pool, 1u, &descriptor);
++    vkDestroyImageView(device, snapshot.opaque_view, nullptr);
++    vkDestroyImageView(device, snapshot.view, nullptr);
++    vkDestroyImage(device, snapshot.image, nullptr);
++    vkFreeMemory(device, snapshot.memory, nullptr);
++    snapshot = Target::Snapshot{};
++    if (counted && snapshot_count != 0u) --snapshot_count;
++}
++
+ void VulkanRenderer::Impl::destroy_target(Target &target) {
++    for (Target::Snapshot &snapshot : target.snapshots) destroy_snapshot(snapshot);
++    target.snapshots.clear();
+     for (VkDescriptorSet &descriptor : target.copy_descriptors)
+         if (descriptor != VK_NULL_HANDLE) vkFreeDescriptorSets(device, descriptor_pool, 1u, &descriptor);
+     vkDestroyImageView(device, target.copy_opaque_view, nullptr);
+@@ -5022,6 +5072,137 @@ VkDescriptorSet VulkanRenderer::Impl::framebuffer_descriptor(Target &target, boo
+     return target.copy_descriptors[opaque ? 1u : 0u];
+ }
+ 
++VkDescriptorSet VulkanRenderer::Impl::framebuffer_snapshot(Target &target, bool opaque, std::uint32_t x,
++                                                           std::uint32_t y, std::uint32_t width, std::uint32_t height,
++                                                           std::array<float, 4> &mapping) {
++    const perf::SplitScope split(perf::Split::Texture);
++    if (x >= kPspWidth || y >= kPspHeight || width == 0u || height == 0u) return VK_NULL_HANDLE;
++    // The guest rectangle with a pixel of margin for filtering, in the
++    // target's pixels.
++    const float scale_x = static_cast<float>(target_extent.width) / static_cast<float>(kPspWidth);
++    const float scale_y = static_cast<float>(target_extent.height) / static_cast<float>(kPspHeight);
++    const auto clamp_to = [](float value, std::uint32_t limit) {
++        return static_cast<std::int32_t>(std::clamp(value, 0.0f, static_cast<float>(limit)));
++    };
++    const std::int32_t left = clamp_to(std::floor((static_cast<float>(x) - 1.0f) * scale_x), target_extent.width);
++    const std::int32_t top = clamp_to(std::floor((static_cast<float>(y) - 1.0f) * scale_y), target_extent.height);
++    const std::int32_t right =
++        clamp_to(std::ceil(static_cast<float>(std::min(x + width, kPspWidth) + 1u) * scale_x), target_extent.width);
++    const std::int32_t bottom =
++        clamp_to(std::ceil(static_cast<float>(std::min(y + height, kPspHeight) + 1u) * scale_y), target_extent.height);
++    if (right <= left || bottom <= top) return VK_NULL_HANDLE;
++    const VkOffset2D origin{left, top};
++    const VkExtent2D taken{static_cast<std::uint32_t>(right - left), static_cast<std::uint32_t>(bottom - top)};
++    const auto map = [&](const Target::Snapshot &snapshot) {
++        mapping = {scale_x / static_cast<float>(snapshot.extent.width),
++                   scale_y / static_cast<float>(snapshot.extent.height),
++                   -static_cast<float>(snapshot.origin.x) / static_cast<float>(snapshot.extent.width),
++                   -static_cast<float>(snapshot.origin.y) / static_cast<float>(snapshot.extent.height)};
++        return snapshot.descriptors[opaque ? 1u : 0u];
++    };
++    // The same pixels taken already, by this frame or one still recorded.
++    for (Target::Snapshot &snapshot : target.snapshots) {
++        if (snapshot.valid && snapshot.serial == target.draw_serial && snapshot.origin.x == origin.x &&
++            snapshot.origin.y == origin.y && snapshot.taken.width == taken.width &&
++            snapshot.taken.height == taken.height) {
++            snapshot.used_frame = frames;
++            return map(snapshot);
++        }
++    }
++    // A snapshot no recorded frame names any more: the frame drawing now,
++    // the newer and the older of the pair being blended keep theirs.
++    Target::Snapshot *slot = nullptr;
++    for (Target::Snapshot &snapshot : target.snapshots) {
++        const bool free = !snapshot.valid || snapshot.used_frame + 3u <= frames;
++        if (free && snapshot.extent.width >= taken.width && snapshot.extent.height >= taken.height &&
++            (slot == nullptr ||
++             snapshot.extent.width * snapshot.extent.height < slot->extent.width * slot->extent.height))
++            slot = &snapshot;
++    }
++    if (slot == nullptr) {
++        if (snapshot_count >= kMaxFramebufferSnapshots) {
++            static bool told = false;
++            if (!told) {
++                told = true;
++                std::cout << "[render] frame interpolation: no room for more snapshots of render targets; "
++                             "in-between frames may show a later pass's picture\n";
++            }
++            return VK_NULL_HANDLE;
++        }
++        Target::Snapshot added{};
++        // Some room to spare, so that strips and tiles of a few sizes share
++        // images.
++        added.extent = {std::max(taken.width, std::min(target_extent.width, taken.width * 2u)),
++                        std::max(taken.height, std::min(target_extent.height, taken.height * 2u))};
++        std::string error;
++        if (!create_image(added.extent.width, added.extent.height, VK_FORMAT_R8G8B8A8_UNORM,
++                          VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, added.image, added.memory,
++                          added.view, VK_IMAGE_ASPECT_COLOR_BIT, error)) {
++            std::cout << "[render] cannot snapshot a render target: " << error << "\n";
++            destroy_snapshot(added);
++            return VK_NULL_HANDLE;
++        }
++        ++snapshot_count;
++        VkImageViewCreateInfo view_info{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
++        view_info.image = added.image;
++        view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
++        view_info.format = VK_FORMAT_R8G8B8A8_UNORM;
++        view_info.components.a = VK_COMPONENT_SWIZZLE_ONE;
++        view_info.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0u, 1u, 0u, 1u};
++        bool made = vkCreateImageView(device, &view_info, nullptr, &added.opaque_view) == VK_SUCCESS;
++        for (std::size_t i = 0; made && i < added.descriptors.size(); ++i) {
++            VkDescriptorSetAllocateInfo descriptor_info{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
++            descriptor_info.descriptorPool = descriptor_pool;
++            descriptor_info.descriptorSetCount = 1u;
++            descriptor_info.pSetLayouts = &descriptor_layout;
++            if (vkAllocateDescriptorSets(device, &descriptor_info, &added.descriptors[i]) != VK_SUCCESS) {
++                added.descriptors[i] = VK_NULL_HANDLE;
++                made = false;
++                break;
++            }
++            VkDescriptorImageInfo image_info{framebuffer_sampler(), i == 0u ? added.view : added.opaque_view,
++                                             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
++            VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
++            write.dstSet = added.descriptors[i];
++            write.descriptorCount = 1u;
++            write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
++            write.pImageInfo = &image_info;
++            vkUpdateDescriptorSets(device, 1u, &write, 0u, nullptr);
++        }
++        if (!made) {
++            destroy_snapshot(added);
++            return VK_NULL_HANDLE;
++        }
++        target.snapshots.push_back(added);
++        slot = &target.snapshots.back();
++    }
++    bring_alpha_up_to_date(target);
++    end_pass();
++    transition(command_buffer, target.color, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
++               VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
++    transition(command_buffer, slot->image,
++               slot->valid ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL : VK_IMAGE_LAYOUT_UNDEFINED,
++               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
++    VkImageCopy region{};
++    region.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0u, 0u, 1u};
++    region.dstSubresource = region.srcSubresource;
++    region.srcOffset = {origin.x, origin.y, 0};
++    region.extent = {taken.width, taken.height, 1u};
++    vkCmdCopyImage(command_buffer, target.color, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, slot->image,
++                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1u, &region);
++    perf::count_target_copy();
++    transition(command_buffer, slot->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
++               VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
++    transition(command_buffer, target.color, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
++               VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
++    slot->origin = origin;
++    slot->taken = taken;
++    slot->serial = target.draw_serial;
++    slot->used_frame = frames;
++    slot->valid = true;
++    return map(*slot);
++}
++
+ bool VulkanRenderer::Impl::draw_screen_quad(const PipelineKey &key, VkDescriptorSet texture, std::uint32_t color,
+                                             const std::array<float, 4> &texture_params) {
+     const VkPipeline pipeline = pipeline_for(key);
+@@ -6104,6 +6285,20 @@ void VulkanRenderer::set_sharp_textures(bool sharp) {
+             write.pImageInfo = &image_info;
+             vkUpdateDescriptorSets(impl.device, 1u, &write, 0u, nullptr);
+         }
++        for (Impl::Target::Snapshot &snapshot : target.snapshots) {
++            for (std::size_t i = 0; i < snapshot.descriptors.size(); ++i) {
++                if (snapshot.descriptors[i] == VK_NULL_HANDLE) continue;
++                VkDescriptorImageInfo image_info{impl.framebuffer_sampler(),
++                                                 i == 0u ? snapshot.view : snapshot.opaque_view,
++                                                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
++                VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
++                write.dstSet = snapshot.descriptors[i];
++                write.descriptorCount = 1u;
++                write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
++                write.pImageInfo = &image_info;
++                vkUpdateDescriptorSets(impl.device, 1u, &write, 0u, nullptr);
++            }
++        }
+     }
+ }
+ 
+@@ -7170,25 +7365,38 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+     VkDescriptorSet texture_descriptor = impl.white_texture.descriptor;
+     if (call.texture.enabled && !call.clear_mode) {
+         const Impl::FramebufferTexture &source = framebuffer_source;
+-        const VkDescriptorSet copy =
+-            source.target != nullptr
+-                ? impl.framebuffer_descriptor(*source.target, call.texture.format == TextureFormat::Rgba5650)
+-                : VK_NULL_HANDLE;
++        const bool opaque = call.texture.format == TextureFormat::Rgba5650;
++        // How a guest pixel position in the target becomes a coordinate in
++        // the image sampled; the whole target's copy holds 480x272 guest
++        // pixels at any internal scale.
++        std::array<float, 4> mapping{1.0f / static_cast<float>(kPspWidth), 1.0f / static_cast<float>(kPspHeight),
++                                     0.0f, 0.0f};
++        VkDescriptorSet copy = VK_NULL_HANDLE;
++        // A draw into the shown framebuffer recorded for frame interpolation
++        // samples a snapshot (Target::Snapshot); <prefix>_NO_FB_SNAPSHOTS
++        // samples the target's one copy, as before.
++        static const bool no_snapshots = portablekit::env("NO_FB_SNAPSHOTS") != nullptr;
++        if (source.target != nullptr && impl.interpolating && !no_snapshots &&
++            impl.shows(call.target.color_address))
++            copy = impl.framebuffer_snapshot(*source.target, opaque, source.x, source.y, call.texture.width,
++                                             call.texture.height, mapping);
++        if (source.target != nullptr && copy == VK_NULL_HANDLE) {
++            mapping = {1.0f / static_cast<float>(kPspWidth), 1.0f / static_cast<float>(kPspHeight), 0.0f, 0.0f};
++            copy = impl.framebuffer_descriptor(*source.target, opaque);
++        }
+         if (copy != VK_NULL_HANDLE) {
+             // Texture coordinates address the game's texture, whose first texel
+-            // is pixel (x, y) of a target that holds 480x272 guest pixels at
+-            // any internal scale.
++            // is pixel (x, y) of the target.
+             texture_descriptor = copy;
+-            // The copy's sampler clamps at the target's edges; the shader's
+-            // clamp would take the whole target for the texture.
++            // The copy's sampler clamps at the image's edges; the shader's
++            // clamp would take the whole image for the texture.
+             push.texture_params[0] = 1.0f;
+             const float width = static_cast<float>(call.texture.width);
+             const float height = static_cast<float>(call.texture.height);
+             const std::array<float, 4> uv = push.uv_transform;
+-            push.uv_transform = {uv[0] * width / static_cast<float>(kPspWidth),
+-                                 uv[1] * height / static_cast<float>(kPspHeight),
+-                                 (uv[2] * width + static_cast<float>(source.x)) / static_cast<float>(kPspWidth),
+-                                 (uv[3] * height + static_cast<float>(source.y)) / static_cast<float>(kPspHeight)};
++            push.uv_transform = {uv[0] * width * mapping[0], uv[1] * height * mapping[1],
++                                 (uv[2] * width + static_cast<float>(source.x)) * mapping[0] + mapping[2],
++                                 (uv[3] * height + static_cast<float>(source.y)) * mapping[1] + mapping[3]};
+         } else {
+             texture_descriptor = impl.texture_descriptor(memory, call);
+         }
+-- 
+2.53.0.windows.1
+

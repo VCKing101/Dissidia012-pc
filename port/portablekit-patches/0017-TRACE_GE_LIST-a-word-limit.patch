@@ -1,7 +1,7 @@
 From d262a6980b69d0a3d327237dcdee6695a88ca19a Mon Sep 17 00:00:00 2001
 From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
 Date: Sun, 18 Oct 2026 22:00:56 +1030
-Subject: [PATCH 17/31] TRACE_GE_LIST: a word limit
+Subject: [PATCH 17/39] TRACE_GE_LIST: a word limit
 
 <prefix>_TRACE_GE_LIST=N[:M[:W]] dumps the first W words of each list run
 (default 20000, as before). A 3D battle frame with its interface takes about

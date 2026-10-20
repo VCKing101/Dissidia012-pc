@@ -1,7 +1,7 @@
 From 73c86e3e3a27683c9cbd09ff4a83e335b77a024e Mon Sep 17 00:00:00 2001
 From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
 Date: Sun, 18 Oct 2026 22:00:56 +1030
-Subject: [PATCH 18/31] GE: depth test and writes for through-mode draws
+Subject: [PATCH 18/39] GE: depth test and writes for through-mode draws
 
 Through-mode vertices carry their own depth (z, 0 to 65535), and the GE
 tests and writes it as for any transformed draw. The renderer turned the
