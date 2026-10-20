@@ -16,10 +16,17 @@
 // lacks, presses SELECT, the game's own recentre, while a battle camera takes
 // input.
 //
+// The free camera's auto-follow, which turns the Story Mode world map camera
+// toward where the walker faces, gets an angular dead zone while the port's
+// analog stick steers the walker (docs/port/analog-movement.md, "Camera
+// follow"): the free input (battle 0x08B3F7F4) runs as decompiled C, reached
+// from the decompiled free update.
+//
 // MIT licence; see port/README.md.
 
 #include "d012_camera.hpp"
 #include "d012_decomp_harness.hpp"
+#include "d012_decomp_pad.hpp"
 
 #include "../decomp/battle_camera.h"
 
@@ -35,6 +42,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <vector>
 
 namespace d012::camera {
 namespace {
@@ -77,6 +85,10 @@ struct Options {
     // The differential test checks the hooked updates themselves rather than
     // the plain decompiled ones: SAME while the stick is centred.
     bool verify_hook = false;
+    // The follow's angular dead zone, degrees each side of straight ahead;
+    // 0: the game's follow.
+    float follow_dead_zone = 22.5f;
+    bool trace_follow = false;
 };
 
 const Options &options() {
@@ -89,6 +101,8 @@ const Options &options() {
         v.invert_y = flag("D012_CAMERA_INVERT_Y");
         v.trace = flag("D012_TRACE_STICK_CAMERA");
         v.verify_hook = flag("D012_CAMERA_VERIFY_HOOK");
+        v.follow_dead_zone = number("D012_CAMERA_FOLLOW_DEADZONE", v.follow_dead_zone, 0.0f, 60.0f);
+        v.trace_follow = flag("D012_TRACE_CAMERA_FOLLOW");
         return v;
     }();
     return o;
@@ -240,6 +254,78 @@ void lock_hook(Guest *g, gaddr mode, gaddr camera) {
 
 namespace decomp = d012::decomp;
 
+// ---- The auto-follow's dead zone -----------------------------------------------
+
+// On with the smooth stick (D012_NO_SMOOTH_STICK=1 is the game's) and a zone.
+bool follow_zone_on() {
+    static const bool on = decomp::smooth_stick_on() && options().follow_dead_zone > 0.0f;
+    return on;
+}
+
+void trace_follow(Guest *g, gaddr mode, gaddr camera, const CameraFollowTrace &t, bool zoned, bool analog,
+                  const PadAnalog &stick) {
+    static std::uint32_t calls = 0, lines = 0;
+    ++calls;
+    if (lines >= 40000u) return;
+    ++lines;
+    const gaddr owner = g_ld32(g, camera + CAM_OWNER);
+    const float yaw = ldf(g, mode + FREE_YAW);
+    // The stick's angle from straight ahead (up), right positive.
+    const float stick_angle = std::atan2(stick.x, -stick.y) / kDegrees;
+    if (t.followed)
+        std::printf("[follow] %u cam %08X step %u yaw %+9.4f deg in %+9.4f target %+9.4f diff %+9.4f fed %+9.4f "
+                    "turn %+8.4f %s stick %s %+7.2f %.2f pos (%.3f, %.3f)\n",
+                    calls, camera, static_cast<unsigned>(g_ld32s(g, camera + CAM_STEP_SOURCE)), yaw / kDegrees,
+                    t.yaw_in / kDegrees, t.target / kDegrees, t.diff / kDegrees, t.fed / kDegrees,
+                    std::remainder(t.yaw_out - t.yaw_in, 2.0f * kPi) / kDegrees, zoned ? "zone" : "game", analog ? "port" : "none",
+                    stick_angle, stick.magnitude, ldf(g, owner + 0x30u), ldf(g, owner + 0x38u));
+    else
+        std::printf("[follow] %u cam %08X step %u yaw %+9.4f deg (no follow) stick %s %+7.2f %.2f pos (%.3f, %.3f)\n",
+                    calls, camera, static_cast<unsigned>(g_ld32s(g, camera + CAM_STEP_SOURCE)), yaw / kDegrees,
+                    analog ? "port" : "none", stick_angle, stick.magnitude, ldf(g, owner + 0x30u),
+                    ldf(g, owner + 0x38u));
+}
+
+// battle 0x08B3F7F4, the free input: the zone applies while the camera's
+// owner is walked by the port's stick (so not in battle, and not with the
+// D-pad control option). Reached from the decompiled free update below.
+void check_free_input(Guest *g, const decomp::CallState &in, GuestRegs &);
+
+// Whether the follow's gates are open for this call (as battle 0x08B3FAA4
+// tests them): the differential test checks those calls as a probe of
+// their own, the first calls being at rest.
+bool following(Guest *g, gaddr camera) {
+    if (g_ld8(g, camera + CAM_MANUAL) == 0 || g_ld8(g, camera + CAM_FOLLOW) != 1u) return false;
+    const gaddr owner = g_ld32(g, camera + CAM_OWNER);
+    return g_ld8(g, owner + 0x542u) <= 1u && (g_ld8(g, owner + 0x5B0u) & 0x08u) != 0;
+}
+
+void run_free_input(Guest *g, const decomp::CallState &in, GuestRegs &) {
+    const gaddr mode = in.gpr[4], camera = in.gpr[5];
+    if (decomp::verifying() && following(g, camera)) {
+        GuestRegs args{};
+        args.a[0] = mode;
+        args.a[1] = camera;
+        decomp::verify_probe("camera_free_input (following)", F_FREE_INPUT, decomp::Returns::Nothing,
+                             &check_free_input, in, args);
+    }
+    PadAnalog stick{};
+    const bool analog = decomp::analog_walker(g_ld32(g, camera + CAM_OWNER), &stick);
+    const Options &o = options();
+    const bool zoned = follow_zone_on() && analog;
+    // The ramp, half the zone, ends (33.75 degrees by default) short of
+    // where the game's follow settles for a diagonal push (about 35 degrees,
+    // the walker's facing lagging its walk while the camera turns), so a
+    // diagonal still turns at the game's full rate.
+    const CameraFollowZone zone{o.follow_dead_zone * kDegrees, o.follow_dead_zone * 0.5f * kDegrees};
+    CameraFollowTrace t{};
+    camera_free_input(g, mode, camera, zoned ? &zone : nullptr, &t);
+    if (o.trace_follow) trace_follow(g, mode, camera, t, zoned, analog, stick);
+}
+void check_free_input(Guest *g, const decomp::CallState &in, GuestRegs &) {
+    camera_free_input(g, in.gpr[4], in.gpr[5], nullptr, nullptr);
+}
+
 void run_free(Guest *g, const decomp::CallState &in, GuestRegs &) {
     camera_free_update(g, in.gpr[4], in.gpr[5], &free_hook);
 }
@@ -260,17 +346,30 @@ void check_lock(Guest *g, const decomp::CallState &in, GuestRegs &) {
 struct Install {
     Install() {
         const Options &o = options();
-        if (!o.enabled) {
-            decomp::add_overrides(nullptr, 0, false);
-            return;
+        // The free input only through the decompiled free update, which
+        // calls it by lookup; the original update calls it inline.
+        const bool follow = follow_zone_on() || o.trace_follow;
+        std::vector<decomp::Override> overrides;
+        if (o.enabled) {
+            overrides.push_back({F_FREE_UPDATE, "camera_free_update", decomp::Module::BattleOverlay,
+                                 decomp::Returns::Nothing, &run_free, true, nullptr,
+                                 o.verify_hook ? nullptr : &check_free});
+            overrides.push_back({F_LOCK_UPDATE, "camera_lock_update", decomp::Module::BattleOverlay,
+                                 decomp::Returns::Nothing, &run_lock, true, nullptr,
+                                 o.verify_hook ? nullptr : &check_lock});
+        } else if (follow) {
+            overrides.push_back({F_FREE_UPDATE, "camera_free_update", decomp::Module::BattleOverlay,
+                                 decomp::Returns::Nothing, &check_free});
         }
-        const decomp::Override overrides[] = {
-            {F_FREE_UPDATE, "camera_free_update", decomp::Module::BattleOverlay, decomp::Returns::Nothing, &run_free,
-             true, nullptr, o.verify_hook ? nullptr : &check_free},
-            {F_LOCK_UPDATE, "camera_lock_update", decomp::Module::BattleOverlay, decomp::Returns::Nothing, &run_lock,
-             true, nullptr, o.verify_hook ? nullptr : &check_lock},
-        };
-        decomp::add_overrides(overrides, sizeof overrides / sizeof overrides[0], true);
+        if (follow) {
+            overrides.push_back({F_FREE_INPUT, "camera_free_input", decomp::Module::BattleOverlay,
+                                 decomp::Returns::Nothing, &run_free_input, true, nullptr, &check_free_input});
+            if (follow_zone_on())
+                std::printf("[camera] follow dead zone %.1f degrees each side of straight ahead "
+                            "(D012_CAMERA_FOLLOW_DEADZONE)\n",
+                            o.follow_dead_zone);
+        }
+        decomp::add_overrides(overrides.data(), overrides.size(), !overrides.empty());
     }
 } install_overrides;
 

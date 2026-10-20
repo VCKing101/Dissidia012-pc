@@ -123,12 +123,14 @@ dead-zone probes differ although the function was right).
 
 | Variable | What it does |
 | --- | --- |
-| `D012_NO_SMOOTH_STICK=1` | Off: neither override is registered; the game's own functions run (through the lookup, as above) |
+| `D012_NO_SMOOTH_STICK=1` | Off: neither override is registered; the game's own functions run (through the lookup, as above). Also turns off the camera follow's dead zone (section 7) |
 | `D012_STICK_DEAD_ZONE=F` | The radial dead zone, a fraction of the nub's range; default 0.1 |
 | `D012_SMOOTH_STICK_BATTLE=1` | Also in battle. **Off by default**: a battle records its replay as the eight-way bits only (main `0x08889628` -> `0x088CA680`, 15 bits a frame), so a fighter steered by the stick's real angle walks elsewhere when the saved replay is played back. Netplay would be safe (both pads are fed the same synchronised 0/0x80/0xFF bytes) |
 | `D012_TRACE_WALK=1` | Logs every moving frame of the walk (and the pad's action table once) |
 | `D012_TRACE_PAD_CALLS=1` | Puts the pad accessors in as decompiled C and logs each caller and mask once |
 | `D012_DECOMP_PAD=1` | The accessors in as well; with `D012_NO_SMOOTH_STICK=1` also the faithful dead zone and walk |
+| `D012_CAMERA_FOLLOW_DEADZONE=<deg>` | The camera follow's angular dead zone each side of straight ahead (section 7); default 22.5, 0 to 60. 0 is the game's follow at the walker's true angle |
+| `D012_TRACE_CAMERA_FOLLOW=1` | Logs every free-camera input call: yaw, the follow's angle, what it was fed, the turn, the stick, the walker's position. Puts the free input in as decompiled C even with the zone off |
 
 Battle is a fighter of the battle object (`*(0x089D6A10)+0x38/+0x3C`); on the world map the object has no
 fighters (V: both zero), so the test is exact.
@@ -168,6 +170,109 @@ All runs `PSPRECOMP_NO_INTERPRETER=1` (no fallback in any run), `D012_UNTHROTTLE
   stall watchdog's "no frame for 6-11 s" message, every one with the right-stick camera code present; none in 5 long
   runs with `D012_NO_RIGHT_STICK_CAMERA=1`; two of the five had `D012_NO_SMOOTH_STICK=1`.
 
+## 7. Camera follow: an angular dead zone
+
+> 20 October 2026. The owner's report: with the analog walk, a push a few degrees off straight up makes the world map
+> camera turn, so the walker veers; with the eight-way walk a small angle snapped to straight up and the camera stayed.
+
+### 7.1 How the game's follow works (V)
+
+The world map camera is the battle overlay's free camera (mode 0, `docs/port/right-stick-camera.md` section 5), with
+auto-follow on (`cam+0xF4 = 1`). Its input function, battle `0x08B3F7F4`, called once a frame from the mode's update
+`0x08B3F40C`, ends with the follow (`0x08B3FAA4..0x08B3FC08`):
+
+- **Gates:** `cam+0xF4 == 1`, the owner's `+0x542` is 0 or 1 (main `0x0883739C`), and the owner moved this frame
+  (`owner+0x5B0` bit 3, battle `0x08B2F9BC`; I: set by the move routine `0x08B2D2CC` while the walker's velocity is
+  not zero). So no
+  follow while standing.
+- **Input:** the owner's **facing** vector `owner+0x90`, not the stick, the walk bits or `+0x550`:
+  `target = atan2(-facing.x, -facing.z)` (main `0x089A457C`), the yaw that puts the camera behind it.
+- **Turn:** `diff = wrap(target - yaw)` (fmodf with 2 pi, main `0x089941C0`), then
+  `yaw += clamp(diff, -row[0x20], +row[0x20])`, wrapped. `row[0x20]` is 0.05 rad (2.865 degrees) **a frame**. There is
+  no dead zone: the follow turns by the whole angle up to that cap, which it reaches at 2.9 degrees.
+- **The facing** follows the walk direction quickly (it turns up to 24 degrees a frame), and the walk direction is
+  camera-relative, so the two chase each other. Measured (`D012_TRACE_CAMERA_FOLLOW=1`, game's follow): a push
+  5 degrees off straight up settles at `diff` = 1.12 degrees and turns the camera 1.12 degrees a frame for as long as
+  it is held (273 degrees in 4 s); at 15 degrees and more it settles past the cap and turns 2.865 degrees a frame
+  (172 degrees a second; 685 degrees in 4 s). Straight up gives `diff` = 0: no turn. With the eight-way walk only 0,
+  45, 90 ... occur, so a near-straight push never turned it.
+- **Moving toward the camera: it turns, it does not flip.** With the eight-way walk (`D012_NO_SMOOTH_STICK=1`, stick
+  held down, `orig8_back.log`) the facing swings round (24 degrees the first frame), the follow chases it, and the
+  camera then turns at the cap for as long as down is held: `diff` settles at -170.24 degrees (the facing 9.76 degrees
+  behind the camera's turn), 685 degrees in 4 s, the walker running a circle. The way it turns is whichever way the
+  facing swung. At 175, 180 and -170 degrees with the analog walk it is the same, at the same rate. Straight back is
+  therefore not a still direction that small deviations disturb, and a dead zone there would stop the turn the game
+  makes at straight back itself. **There is no dead zone around straight back**; near it the port does what the game
+  does.
+
+### 7.2 The fix
+
+The follow is fed a reduced angle; the walker's movement, its facing and everything else are untouched.
+
+- **Battle `0x08B3F7F4` is decompiled** (`camera_free_input`, `port/decomp/battle_camera.c`): D-pad turn, distance,
+  follow, recentre and distance clamp, with the game's wraps through its own fmodf and atan2. The only change is
+  where the follow's clamped angle comes from: `fed = camera_follow_angle(diff, cap, zone)` in place of `diff`.
+- **`camera_follow_angle`**: `|diff| <= 22.5` degrees: 0. From 22.5 to 33.75 degrees (the zone plus a ramp of half the
+  zone, at least the cap) it rises linearly from 0 to the cap: `cap * (|diff| - 22.5) / 11.25`, with diff's sign. Past
+  that, `diff` itself, which the game's clamp caps. A plain `|diff| - 22.5` would reach the cap 2.9 degrees past the
+  edge, nearly a step; the ramp makes the steady turn rate grow with the push (table below). The ramp ends short of
+  where the game's follow settles for a diagonal push (35.5 degrees: 45 less the facing's 9.76-degree lag at the cap),
+  so the diagonal, the side and straight back turn exactly as in the game; straight up does not turn in either.
+- **Only for a walker the port's stick steers**: the zone applies when the camera's owner had its last walk input
+  (battle `0x08B38A0C`) through the analog path's checks (`d012_decomp_pad.cpp`, `analog_walker`): pad mapped to the
+  stick, not muted, the stick vector current, and not a battle fighter (unless `D012_SMOOTH_STICK_BATTLE=1`). Battle
+  (whose free camera also follows) and the "move with the D-pad" option keep the game's follow.
+- **Reaching it.** `0x08B3F7F4` is called inline from its own unit, but its only caller, the free update `0x08B3F40C`,
+  is already decompiled and reached through the mode's vtable (right-stick camera). The decompiled update calls the
+  input through the runtime's lookup, so the override `camera_free_input` takes it. With `D012_NO_RIGHT_STICK_CAMERA=1`
+  the free update is still put in (without the stick hook) while the zone is on. **No corpus regeneration and no
+  framework change were needed.** `D012_NO_SMOOTH_STICK=1` registers neither (V: 4 overrides in all, the BGM
+  playlist's and the camera updates).
+
+### 7.3 Measurements (V)
+
+World map, Cornelia Plains, `build/port/data-follow-test`, scripted left stick (full push), 240 frames a push, yaw
+logged every frame (`build/port/follow/logs/*.log`, as CSV in `build/port/follow/yaw/`). Where a push followed a
+180-degree right-stick turn of the camera, the first 15 frames are the walker turning round (the follow chases the
+swinging facing, 10 to 14 degrees); the zone column is frames 15 to 240 there (`a_zone`, `c_zone`); in
+`angles_zone`, with no camera turn before, all 240 frames of 5, 15 and 20 degrees gave the same 0.
+
+| Stick (deg off straight up) | Game's follow: camera turn in 240 frames | Zone 22.5: camera turn | Zone: largest turn a frame |
+| ---: | ---: | ---: | ---: |
+| 0 | 0 | 0 | 0 |
+| +5 / -5 | -273.5 / +253.7 | **0.000 / 0.000** | 0 |
+| +15 / -15 | -684.7 / not run | **0.000 / 0.000** | 0 |
+| +20 / -20 | -684.7 / +684.7 | **0.000 / 0.000** | 0 |
+| 25 | -684.7 | -86.5 | 0.67 |
+| 27.5 | -684.7 | -168.3 | 1.31 |
+| 30 | -684.7 | -247.9 | 1.94 |
+| 35 | -684.7 | -416.5 | 2.865 |
+| 40 | -684.7 | -583.7 | 2.865 |
+| 45, 90, -45 | -684.7, -684.7, +676.4 | -684.7, -684.7, +675.1 (the same) | 2.865 |
+| 180, 175, -170 | +684.7, -684.7, +684.7 | the same | 2.865 |
+
+- With the zone the walker still walks at the stick's angle: the facing holds at -4.99, -15.11, -20.07, +20.33 and
+  +4.96 degrees from the camera for 5, 15, 20, -20 and -5, and where nothing was in the way the per-frame walk was
+  15.1, 20.0, -20.4, -5.1 and -15.0 degrees from the camera's forward at the full 0.28 a frame: it drifts sideways
+  while the camera stays.
+- **Right stick on the world map** (`c_zone`): 0.1047 rad (6 degrees) a frame, as before.
+- **Battle** (`battle_zone`, `battle_orig`, Quick Battle in free mode with pushes at 10, 30, 45 and 175 degrees): the
+  battle free camera follows too, and in 350 followed calls the zone never applied (every call the game's follow):
+  battle fighters are not analog walkers. (The two runs reached different battles, so they are not compared frame for
+  frame.)
+- **Differential test** (`verify_on`, `verify_spin`, `verify_off`, `D012_DECOMP_VERIFY=1`, limit 300): all SAME, 0
+  different, 0 inconclusive. `camera_free_input` 300 (the faithful decompiled input against the original), a probe
+  `camera_free_input (following)` 300 checked only where the follow's gates are open (in `verify_spin`, while the
+  camera spun walking toward it: 124 of them through the angle's wrap and 2 through the yaw's), `camera_free_update`
+  300, and the pad module's as before. `verify_off` is the same with `D012_NO_SMOOTH_STICK=1`. No run logged an
+  interpreter fallback (`PSPRECOMP_NO_INTERPRETER=1`).
+
+### 7.4 Not verified
+
+- A real gamepad (the script's virtual pad only).
+- The recentre (SELECT) and the free input's own D-pad turn masks on the world map: decompiled as the original, and
+  in the differential test only as far as its calls took those paths.
+
 ## Reproduce
 
 ```powershell
@@ -186,6 +291,10 @@ $route = "460:pad a;1080:pad a;1500:pad a;1650:pad a;1900:pad a;2100:pad a;3000:
     --env D012_UNTHROTTLED=1 --env D012_MSGDIALOG_ANSWERS=ok --env D012_TRACE_WALK=1 --env "D012_INPUT_SCRIPT=$route"
 # add --env D012_NO_SMOOTH_STICK=1 for the game's walk; --env D012_DECOMP_PAD=1 --env D012_DECOMP_VERIFY=1 to test
 ```
+
+Camera follow (section 7): the routes are in `build/port/follow/route_*.txt` (the same prefix, then `axis` steps;
+`axis rightx 1` for 30 frames turns the camera round). Run as above with `--data-dir build/port/data-follow-test`
+and `--env D012_TRACE_CAMERA_FOLLOW=1`; `--env D012_CAMERA_FOLLOW_DEADZONE=0` gives the game's follow.
 
 The route's frame numbers depend on load times; the world map appears around frame 3200. The Quick Battle route
 used is in `build/port/smooth/battle_prefix.txt` (without the 1650 press, which picks Story Mode when the menu comes

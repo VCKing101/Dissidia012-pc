@@ -20,6 +20,7 @@
 //                          result, the walker's position.
 
 #include "d012_decomp_harness.hpp"
+#include "d012_decomp_pad.hpp"
 
 #include "../decomp/pad_types.h"
 
@@ -154,6 +155,17 @@ bool walk_stick(Guest *g, gaddr walker, gaddr pad, PadAnalog &analog) {
     return true;
 }
 
+// The last walk input of each walker: whether it took the port's stick, for
+// the camera's follow (d012_camera.cpp).
+struct Walk {
+    bool analog = false;
+    PadAnalog stick{};
+};
+std::map<gaddr, Walk> &walks() {
+    static std::map<gaddr, Walk> m;
+    return m;
+}
+
 // ---- D012_TRACE_WALK -------------------------------------------------------------
 
 bool tracing_walk() {
@@ -231,6 +243,7 @@ void run_walk(Guest *g, const CallState &in, GuestRegs &) {
                          args_of(in));
     }
     wm_walk_input(g, a(in, 0), a(in, 1), a(in, 2), a(in, 3), nullptr);
+    walks()[a(in, 1)] = Walk{};
     if (tracing_walk()) {
         PadAnalog analog{};  // shown, not used
         (void)walk_stick(g, a(in, 1), a(in, 2), analog);
@@ -244,6 +257,7 @@ void run_walk_smooth(Guest *g, const CallState &in, GuestRegs &) {
     if (verifying() && analog.magnitude > 0.0f)
         verify_probe("wm_walk_input (stick pushed)", F_WM_WALK_INPUT, Returns::Nothing, check_walk, in, args_of(in));
     wm_walk_input(g, a(in, 0), a(in, 1), a(in, 2), a(in, 3), used ? &analog : nullptr);
+    walks()[a(in, 1)] = Walk{used, used ? analog : PadAnalog{}};
     if (tracing_walk()) trace_walk(g, in, used && analog.magnitude > 0.0f, analog);
 }
 
@@ -359,4 +373,14 @@ struct Install {
 } install;
 
 } // namespace
+
+bool smooth_stick_on() { return smooth(); }
+
+bool analog_walker(std::uint32_t walker, PadAnalog *stick) {
+    const auto found = walks().find(walker);
+    if (found == walks().end() || !found->second.analog) return false;
+    if (stick != nullptr) *stick = found->second.stick;
+    return true;
+}
+
 } // namespace d012::decomp

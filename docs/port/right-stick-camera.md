@@ -109,7 +109,7 @@ Limits, all from the stock game:
 
 | Variable | Effect |
 | --- | --- |
-| `D012_NO_RIGHT_STICK_CAMERA=1` | The game's own camera: no overrides, no pad wrapper, and R3 does nothing |
+| `D012_NO_RIGHT_STICK_CAMERA=1` | The game's own camera: no stick hook, no pad wrapper, and R3 does nothing. The free update stays in, without the hook, while the world map's camera-follow dead zone is on ([analog-movement.md](analog-movement.md) section 7) |
 | `D012_CAMERA_SENSITIVITY=<f>` | Full deflection as a share of the stock D-pad step; default 1.0, from 0.05 to 4. Lock-on still caps at 1 |
 | `D012_CAMERA_DEAD_ZONE=<f>` | The per-axis dead zone; default 0.18 (the plugin's), from 0 to 0.9 |
 | `D012_CAMERA_INVERT_X=1`, `D012_CAMERA_INVERT_Y=1` | Turn the other way / move the other way vertically; added to the menu's inversion and the game's options |
