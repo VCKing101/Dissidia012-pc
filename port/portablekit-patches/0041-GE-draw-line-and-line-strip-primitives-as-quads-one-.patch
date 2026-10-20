@@ -1,0 +1,600 @@
+From 1a272088d97cb328b65762ceea63906cd8ca2a5e Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Wed, 21 Oct 2026 07:34:42 +1030
+Subject: [PATCH 41/41] GE: draw line and line-strip primitives as quads one
+ PSP pixel wide
+
+Lines were skipped. Each segment now becomes two triangles through the
+draw's own pipeline (blending, depth, stencil, masks), so no new topology:
+one PSP pixel wide along the minor axis (the coverage of the GE's line, so
+an additive line adds the same light per length and keeps its width at any
+internal scale), no caps (a strip's shared end is not drawn twice), colour,
+texture coordinates and depth per end. Transformed segments are cut at the
+near plane and their corners handed back in object space, as transformed
+sprites are, so frame interpolation blends them like any other draw.
+Through-mode segments are centred half a pixel in, the pixel a coordinate
+names. Culling is off for lines.
+
+<prefix>_NO_LINES skips lines as before; <prefix>_TRACE_LINES[=N] logs line
+draws and per-frame counts. The census counts lines as drawn
+(prim.lines_drawn) unless the switch is set. Tests in render_tests.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ docs/BRINGING_UP_A_GAME.md   |   1 +
+ host/gpu/ge_census.cpp       |   9 +-
+ host/gpu/line_quads.hpp      | 230 +++++++++++++++++++++++++++++++++++
+ host/gpu/vulkan_renderer.cpp |  96 ++++++++++++++-
+ tests/render_tests.cpp       | 129 +++++++++++++++++++-
+ 5 files changed, 459 insertions(+), 6 deletions(-)
+ create mode 100644 host/gpu/line_quads.hpp
+
+diff --git a/docs/BRINGING_UP_A_GAME.md b/docs/BRINGING_UP_A_GAME.md
+index 3d95545..780e8ea 100644
+--- a/docs/BRINGING_UP_A_GAME.md
++++ b/docs/BRINGING_UP_A_GAME.md
+@@ -85,6 +85,7 @@ Every one of these takes the profile's own prefix, so `TENKAWA_TRACE_KERNEL` for
+ | `<PREFIX>_GE_CENSUS=<file>` | A JSON census of the GE features the game's draws use that the renderer does not reproduce exactly (ignored state, approximated texture and blend modes, render-to-texture read from guest memory, transfers between targets), counted per scene with the first frame and an example draw's state words; the input script's `scene NAME` starts a new scene (`host/gpu/ge_census.hpp`) |
+ | `<PREFIX>_TRACE_FB_CLUT` | The first 400 palette views of render targets (a CLUT texture over rendered pixels, decoded on the GPU): the target, the index format, the CLUT's address, format, shift, mask and start and its first entries, the draw's blend and vertices |
+ | `<PREFIX>_NO_FB_CLUT` | Decode a palette texture over a render target from guest memory, as before palette views (`palette_view()` in `host/gpu/vulkan_renderer.cpp`) |
++| `<PREFIX>_TRACE_LINES[=N]` | The first N line and line-strip draws (200 by default) with their state and their ends on the screen, and how many line draws and segments each frame drew. Lines are drawn as quads one PSP pixel wide (`host/gpu/line_quads.hpp`); `<PREFIX>_NO_LINES` skips them, as before |
+ | `<PREFIX>_TRACE_SAS` | SAS voices set, keyed on and off, and each change of the end flags a game polls |
+ | `<PREFIX>_NO_BUSY_CLOCK` | Keep emulated time still for a thread that never waits, as before the busy clock (`Kernel::charge_busy_time`) |
+ | `PSPRECOMP_NO_INTERPRETER=1` | Turn the interpreter off. Nothing runs without a corpus; with one, the runtime stops at the first address the recompiler missed and names it |
+diff --git a/host/gpu/ge_census.cpp b/host/gpu/ge_census.cpp
+index a6d631b..a37b2b0 100644
+--- a/host/gpu/ge_census.cpp
++++ b/host/gpu/ge_census.cpp
+@@ -36,7 +36,8 @@ struct FeatureInfo {
+ constexpr FeatureInfo kFeatures[] = {
+     // Primitives and vertices.
+     {"prim.points", "primitive", "high", "Point primitives: not drawn at all"},
+-    {"prim.lines", "primitive", "high", "Line and line-strip primitives: not drawn at all"},
++    {"prim.lines", "primitive", "high", "Line and line-strip primitives with <prefix>_NO_LINES: not drawn at all"},
++    {"prim.lines_drawn", "primitive", "info", "Line and line-strip primitives: drawn as quads one PSP pixel wide (flat shading, antialiasing and the GE's exact pixel choice not reproduced)"},
+     {"vertex.morph", "vertex", "high", "Morph targets (vertex type bits 18-20): only the first target is decoded, the weights 0x2C-0x33 ignored"},
+     {"shade.flat", "vertex", "medium", "Flat shading (0x50 bit 0 clear) on coloured triangles or lines: drawn smooth (sprites are flat already)"},
+     // Per-fragment tests and operations.
+@@ -554,8 +555,10 @@ void note_draw(const GuestMemory &memory, const DrawCall &call, const std::array
+ 
+     // Primitives and vertices.
+     if (call.primitive == PrimitiveType::Points) hit_draw(s, "prim.points", call.through ? "through" : "transformed", detail);
+-    if (call.primitive == PrimitiveType::Lines || call.primitive == PrimitiveType::LineStrip)
+-        hit_draw(s, "prim.lines", call.through ? "through" : "transformed", detail);
++    if (call.primitive == PrimitiveType::Lines || call.primitive == PrimitiveType::LineStrip) {
++        static const bool no_lines = portablekit::env("NO_LINES") != nullptr;
++        hit_draw(s, no_lines ? "prim.lines" : "prim.lines_drawn", call.through ? "through" : "transformed", detail);
++    }
+     if (((call.vertex_type >> 18u) & 7u) != 0u)
+         hit_draw(s, "vertex.morph", std::to_string(((call.vertex_type >> 18u) & 7u) + 1u) + " targets", detail);
+     if (!clear && (reg(0x50) & 1u) == 0u && call.has_vertex_color && call.primitive != PrimitiveType::Sprites &&
+diff --git a/host/gpu/line_quads.hpp b/host/gpu/line_quads.hpp
+new file mode 100644
+index 0000000..c167f1e
+--- /dev/null
++++ b/host/gpu/line_quads.hpp
+@@ -0,0 +1,230 @@
++#pragma once
++
++#include "ge_state.hpp"
++
++#include <array>
++#include <cmath>
++#include <cstddef>
++#include <cstdint>
++#include <utility>
++#include <vector>
++
++// GE lines (primitive types 1 and 2) drawn as thin quads.
++//
++// The GE rasterises a line one pixel wide: one pixel for each step along the
++// line's major axis, the way a DDA line is drawn. Vulkan's own line topology
++// draws one framebuffer pixel wide, which at four times the PSP's resolution
++// is a quarter of the line the game drew, and wide lines are an optional
++// feature with their own rules at the ends. So each segment becomes two
++// triangles instead, through the same pipelines, blending, depth and stencil
++// state as any other triangle.
++//
++// The quad is one *PSP* pixel wide, measured along the minor axis, not across
++// the line: a mostly horizontal segment is 1 PSP pixel tall in every column
++// it spans, and a mostly vertical one 1 PSP pixel wide in every row. That is
++// the coverage of the GE's line at 1x (a 45-degree line covers one pixel per
++// column, not 1.41), so an additive line adds the same light per unit of
++// length as on the handheld, and at internal scale N it covers N target
++// pixels across, the same share of the screen. A one-target-pixel line would
++// be a quarter as bright at 4x and break up into dots when anti-aliased away.
++//
++// Ends: the quad runs from one end to the other and stops there, with no cap.
++// The consecutive segments of a strip meet without covering their shared end
++// twice, which matters for the additive lines games draw; at 1x it is the
++// usual half-open rule (the last pixel of a segment is the next one's first).
++//
++// Colour, texture coordinates and depth: each end's two corners carry that
++// end's vertex, so the GPU interpolates them along the line as the GE
++// interpolates a Gouraud-shaded line.
++namespace portablekit::gpu {
++
++namespace line_detail {
++
++inline std::uint32_t lerp_color(std::uint32_t a, std::uint32_t b, double t) {
++    std::uint32_t out = 0u;
++    for (std::uint32_t shift = 0u; shift < 32u; shift += 8u) {
++        const double from = static_cast<double>((a >> shift) & 0xFFu);
++        const double to = static_cast<double>((b >> shift) & 0xFFu);
++        const auto value = static_cast<std::uint32_t>(std::lround(from + (to - from) * t));
++        out |= (value > 255u ? 255u : value) << shift;
++    }
++    return out;
++}
++
++// The vertex a fraction t of the way from a to b: what a segment cut at the
++// near plane starts from. Clip coordinates are linear in the vertex's, so
++// cutting the vertex there cuts the clip-space segment at the same place.
++inline Vertex lerp(const Vertex &a, const Vertex &b, double t) {
++    Vertex out = a;
++    const auto mix = [t](float from, float to) {
++        return static_cast<float>(static_cast<double>(from) + (static_cast<double>(to) - from) * t);
++    };
++    for (std::size_t i = 0; i < 4u; ++i) out.position[i] = mix(a.position[i], b.position[i]);
++    for (std::size_t i = 0; i < 3u; ++i) out.normal[i] = mix(a.normal[i], b.normal[i]);
++    for (std::size_t i = 0; i < 2u; ++i) out.texcoord[i] = mix(a.texcoord[i], b.texcoord[i]);
++    out.color = lerp_color(a.color, b.color, t);
++    return out;
++}
++
++// The inverse of a column-major 4x4 matrix by Gauss-Jordan elimination with
++// partial pivoting; false when it has none.
++inline bool invert(const std::array<double, 16> &m, std::array<double, 16> &out) {
++    // Row-major working copy [A | I].
++    double a[4][8]{};
++    for (std::size_t row = 0; row < 4u; ++row) {
++        for (std::size_t column = 0; column < 4u; ++column) a[row][column] = m[column * 4u + row];
++        a[row][4u + row] = 1.0;
++    }
++    for (std::size_t column = 0; column < 4u; ++column) {
++        std::size_t pivot = column;
++        for (std::size_t row = column + 1u; row < 4u; ++row)
++            if (std::fabs(a[row][column]) > std::fabs(a[pivot][column])) pivot = row;
++        if (!(std::fabs(a[pivot][column]) > 1e-30)) return false;
++        if (pivot != column)
++            for (std::size_t k = 0; k < 8u; ++k) std::swap(a[pivot][k], a[column][k]);
++        const double scale = 1.0 / a[column][column];
++        for (std::size_t k = 0; k < 8u; ++k) a[column][k] *= scale;
++        for (std::size_t row = 0; row < 4u; ++row) {
++            if (row == column || a[row][column] == 0.0) continue;
++            const double factor = a[row][column];
++            for (std::size_t k = 0; k < 8u; ++k) a[row][k] -= factor * a[column][k];
++        }
++    }
++    for (std::size_t row = 0; row < 4u; ++row)
++        for (std::size_t column = 0; column < 4u; ++column) out[column * 4u + row] = a[row][4u + column];
++    return true;
++}
++
++// Two triangles over the quad whose corners are a0, a1 at one end and b0, b1
++// at the other (a0 and b0 on the same side). Culling is off for lines, so the
++// winding does not matter.
++inline void push_quad(std::vector<Vertex> &out, const Vertex &a0, const Vertex &a1, const Vertex &b0,
++                      const Vertex &b1) {
++    out.push_back(a0);
++    out.push_back(b0);
++    out.push_back(b1);
++    out.push_back(a0);
++    out.push_back(b1);
++    out.push_back(a1);
++}
++
++} // namespace line_detail
++
++// Calls f(first, second) with the positions in the primitive (before the
++// index list) of each segment's two ends: pairs for lines, every consecutive
++// pair for a strip. Nothing for other primitives.
++template <typename F>
++void for_each_line_segment(PrimitiveType primitive, std::size_t count, F &&f) {
++    if (primitive == PrimitiveType::Lines) {
++        for (std::size_t i = 0; i + 1u < count; i += 2u) f(i, i + 1u);
++    } else if (primitive == PrimitiveType::LineStrip) {
++        for (std::size_t i = 0; i + 1u < count; ++i) f(i, i + 1u);
++    }
++}
++
++// A through-mode segment: positions are screen pixels, and the pixel a
++// coordinate names is the one whose top-left corner it is (a through-mode
++// sprite from (x, y) to (x + 1, y + 1) is pixel (x, y)), so the quad is centred
++// half a pixel in. `width` is in PSP pixels (1 as the GE draws). Appends six
++// vertices, none for a segment of no length.
++inline void expand_through_line(const Vertex &a, const Vertex &b, std::vector<Vertex> &out, float width = 1.0f) {
++    const float dx = b.position[0] - a.position[0];
++    const float dy = b.position[1] - a.position[1];
++    if (dx == 0.0f && dy == 0.0f) return;
++    const float half = 0.5f * width;
++    const bool x_major = std::fabs(dx) >= std::fabs(dy);
++    const float ox = x_major ? 0.0f : half;
++    const float oy = x_major ? half : 0.0f;
++    const auto corner = [&](const Vertex &v, float sign) {
++        Vertex c = v;
++        c.position[0] = v.position[0] + 0.5f + sign * ox;
++        c.position[1] = v.position[1] + 0.5f + sign * oy;
++        return c;
++    };
++    line_detail::push_quad(out, corner(a, -1.0f), corner(a, 1.0f), corner(b, -1.0f), corner(b, 1.0f));
++}
++
++// A transformed segment. `transform` is projection times view times world
++// (column-major), what the vertex shader multiplies object positions by;
++// `x_scale` and `y_scale` the GE viewport's, PSP pixels per unit of normalised
++// device coordinates (y negative). The segment is cut at the near plane
++// (z >= -w, before the renderer's depth remap); the corners are offset from
++// each projected end by half `width` PSP pixels along the minor axis on the
++// screen, at that end's own depth, and handed back in object space, so the
++// draw keeps its transform (and frame interpolation can blend it like any
++// other draw). Unlike through mode the quad is centred on the projected
++// line: a GE line lights the pixel each step lands in, which is centred on
++// the line on average, and the 3D scene the line belongs to is not snapped to
++// PSP pixels at a higher internal scale either. Appends six vertices; false
++// when nothing could be drawn (behind the eye, a degenerate viewport or a
++// transform without an inverse).
++inline bool expand_transformed_line(const std::array<float, 16> &transform, float x_scale, float y_scale,
++                                    const Vertex &first, const Vertex &second, std::vector<Vertex> &out,
++                                    float width = 1.0f) {
++    if (x_scale == 0.0f || y_scale == 0.0f) return false;
++    std::array<double, 16> m{};
++    for (std::size_t i = 0; i < 16u; ++i) m[i] = transform[i];
++    const auto clip = [&](const Vertex &v) {
++        std::array<double, 4> c{};
++        for (std::size_t row = 0; row < 4u; ++row)
++            c[row] = m[row] * v.position[0] + m[4u + row] * v.position[1] + m[8u + row] * v.position[2] +
++                     m[12u + row];
++        return c;
++    };
++    Vertex a = first, b = second;
++    std::array<double, 4> ca = clip(a), cb = clip(b);
++    // Cut at the near plane, and keep w positive for the division.
++    constexpr double kMinW = 1e-6;
++    const auto cut = [&](double da, double db) {
++        if (da < 0.0 && db < 0.0) return false;
++        if (da < 0.0 || db < 0.0) {
++            const double t = da / (da - db);
++            Vertex &moved = da < 0.0 ? a : b;
++            std::array<double, 4> &moved_clip = da < 0.0 ? ca : cb;
++            moved = line_detail::lerp(a, b, t);
++            for (std::size_t i = 0; i < 4u; ++i) moved_clip[i] = ca[i] + (cb[i] - ca[i]) * t;
++        }
++        return true;
++    };
++    if (!cut(ca[2] + ca[3], cb[2] + cb[3])) return false;
++    if (!cut(ca[3] - kMinW, cb[3] - kMinW)) return false;
++    if (!(ca[3] > 0.0) || !(cb[3] > 0.0)) return false;
++    std::array<double, 16> inverse{};
++    if (!line_detail::invert(m, inverse)) return false;
++
++    const double ax = ca[0] / ca[3], ay = ca[1] / ca[3];
++    const double bx = cb[0] / cb[3], by = cb[1] / cb[3];
++    const double screen_dx = (bx - ax) * x_scale;
++    const double screen_dy = (by - ay) * y_scale;
++    if (!(std::fabs(screen_dx) > 1e-9) && !(std::fabs(screen_dy) > 1e-9)) return true;
++    const double half = 0.5 * static_cast<double>(width);
++    const bool x_major = std::fabs(screen_dx) >= std::fabs(screen_dy);
++    // Half the width in normalised device coordinates.
++    const double ox = x_major ? 0.0 : half / x_scale;
++    const double oy = x_major ? half / y_scale : 0.0;
++    bool ok = true;
++    const auto corner = [&](const Vertex &v, const std::array<double, 4> &c, double sign) {
++        const std::array<double, 4> moved{c[0] + sign * ox * c[3], c[1] + sign * oy * c[3], c[2], c[3]};
++        std::array<double, 4> p{};
++        for (std::size_t row = 0; row < 4u; ++row)
++            p[row] = inverse[row] * moved[0] + inverse[4u + row] * moved[1] + inverse[8u + row] * moved[2] +
++                     inverse[12u + row] * moved[3];
++        Vertex out_vertex = v;
++        if (!(std::fabs(p[3]) > 1e-30)) {
++            ok = false;
++            return out_vertex;
++        }
++        for (std::size_t i = 0; i < 3u; ++i) {
++            out_vertex.position[i] = static_cast<float>(p[i] / p[3]);
++            if (!std::isfinite(out_vertex.position[i])) ok = false;
++        }
++        return out_vertex;
++    };
++    const Vertex a0 = corner(a, ca, -1.0), a1 = corner(a, ca, 1.0);
++    const Vertex b0 = corner(b, cb, -1.0), b1 = corner(b, cb, 1.0);
++    if (!ok) return false;
++    line_detail::push_quad(out, a0, a1, b0, b1);
++    return true;
++}
++
++} // namespace portablekit::gpu
+diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
+index 04d458a..1b880f9 100644
+--- a/host/gpu/vulkan_renderer.cpp
++++ b/host/gpu/vulkan_renderer.cpp
+@@ -6,6 +6,7 @@
+ #include "frame_interpolation.hpp"
+ #include "ge_census.hpp"
+ #include "frame_pacing.hpp"
++#include "line_quads.hpp"
+ #include "replacement_textures.hpp"
+ #include "texture_decode.hpp"
+ #include "triangle_indices.hpp"
+@@ -1998,6 +1999,8 @@ struct VulkanRenderer::Impl {
+     ListTexture *last_texture{};
+ 
+     std::vector<GpuVertex> scratch;
++    // The quads of a line draw's segments (line_quads.hpp), before conversion.
++    std::vector<Vertex> line_vertices;
+     // Kept from one use to the next instead of allocated each time, unless
+     // <prefix>_NO_BUFFER_REUSE: decoded texture pixels, a framebuffer read back
+     // for a block transfer, and the staging buffer and command buffer of
+@@ -7288,8 +7291,28 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+             }
+             break;
+         }
++        case PrimitiveType::Lines:
++        case PrimitiveType::LineStrip: {
++            // Each segment a quad one PSP pixel wide (line_quads.hpp), so it
++            // keeps its width at any internal scale and goes through the
++            // triangle pipelines. <prefix>_NO_LINES skips lines, as before.
++            static const bool no_lines = portablekit::env("NO_LINES") != nullptr;
++            if (no_lines) return false;
++            impl.line_vertices.clear();
++            const std::array<float, 16> line_transform =
++                call.through ? std::array<float, 16>{} : multiply(call.projection, multiply(call.view, call.world));
++            for_each_line_segment(call.primitive, count, [&](std::size_t first, std::size_t second) {
++                if (call.through)
++                    expand_through_line(vertex_at(first), vertex_at(second), impl.line_vertices);
++                else
++                    expand_transformed_line(line_transform, call.viewport.x_scale, call.viewport.y_scale,
++                                            vertex_at(first), vertex_at(second), impl.line_vertices);
++            });
++            for (const Vertex &vertex : impl.line_vertices) push_vertex(vertex);
++            break;
++        }
+         default:
+-            return false;  // points and lines are not drawn yet
++            return false;  // points are not drawn yet
+         }
+         return true;
+     };
+@@ -7370,6 +7393,73 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+     }
+ 
+ 
++    // <prefix>_TRACE_LINES[=N]: the first N line draws (200 by default) with
++    // their state and their ends on the screen in PSP pixels, and for each
++    // frame that drew lines, how many draws and segments.
++    static const std::uint64_t trace_lines = [] {
++        const char *text = portablekit::env("TRACE_LINES");
++        if (text == nullptr) return std::uint64_t{0};
++        const std::uint64_t value = std::strtoull(text, nullptr, 10);
++        return value != 0u ? value : std::uint64_t{200};
++    }();
++    if (trace_lines != 0u) {
++        static std::uint64_t line_frame = ~0ull, line_draws = 0u, line_segments = 0u, lines_traced = 0u;
++        if (impl.frames != line_frame) {
++            if (line_draws != 0u)
++                std::cout << "[lines] frame " << line_frame << ": " << line_draws << " draws, " << line_segments
++                          << " segments\n";
++            line_frame = impl.frames;
++            line_draws = line_segments = 0u;
++        }
++        if (call.primitive == PrimitiveType::Lines || call.primitive == PrimitiveType::LineStrip) {
++            ++line_draws;
++            line_segments += call.primitive == PrimitiveType::Lines ? count / 2u : (count > 0u ? count - 1u : 0u);
++            if (lines_traced < trace_lines) {
++                ++lines_traced;
++                const std::array<float, 16> m =
++                    call.through ? std::array<float, 16>{} : multiply(call.projection, multiply(call.view, call.world));
++                std::cout << "[lines] frame " << impl.frames << " prim=" << static_cast<int>(call.primitive)
++                          << " count=" << count << " vtype=0x" << std::hex << call.vertex_type << std::dec
++                          << (call.through ? " through" : " transform") << " target=0x" << std::hex
++                          << call.target.color_address << std::dec << " fmt=" << call.target.color_format
++                          << " tex=" << (call.texture.enabled ? 1 : 0);
++                if (call.texture.enabled)
++                    std::cout << " 0x" << std::hex << call.texture.address << std::dec << " "
++                              << call.texture.width << "x" << call.texture.height
++                              << " tfmt=" << static_cast<int>(call.texture.format);
++                std::cout << " blend=" << (call.blend.enabled ? 1 : 0) << " " << call.blend.source_factor << "/"
++                          << call.blend.destination_factor << " eq" << call.blend.equation << " fix=0x" << std::hex
++                          << call.blend.fixed_source << "/0x" << call.blend.fixed_destination << std::dec
++                          << " ztest=" << (call.depth.test_enabled ? 1 : 0) << "/" << call.depth.function
++                          << " zwrite=" << (call.depth.write_enabled ? 1 : 0)
++                          << " atest=" << (call.alpha_test.enabled ? 1 : 0) << "/" << call.alpha_test.function
++                          << " stencil=" << (call.stencil.test_enabled ? 1 : 0)
++                          << " lit=" << (call.lighting_enabled ? 1 : 0) << " fog=" << (call.fog.enabled ? 1 : 0)
++                          << " cull=" << (call.culling_enabled ? 1 : 0) << "\n";
++                for_each_line_segment(call.primitive, std::min<std::size_t>(count, 8u),
++                                      [&](std::size_t first, std::size_t second) {
++                    for (const std::size_t at : {first, second}) {
++                        const Vertex &v = vertex_at(at);
++                        float sx = v.position[0], sy = v.position[1], sz = v.position[2];
++                        if (!call.through) {
++                            float c[4]{};
++                            for (std::uint32_t row = 0; row < 4u; ++row)
++                                c[row] = m[row] * v.position[0] + m[4u + row] * v.position[1] +
++                                         m[8u + row] * v.position[2] + m[12u + row];
++                            const float w = c[3] != 0.0f ? c[3] : 1.0f;
++                            sx = c[0] / w * call.viewport.x_scale + call.viewport.x_offset - call.viewport.offset_x;
++                            sy = c[1] / w * call.viewport.y_scale + call.viewport.y_offset - call.viewport.offset_y;
++                            sz = c[3];
++                        }
++                        std::cout << "  " << (at == first ? "[" : " ") << sx << "," << sy << " "
++                                  << (call.through ? "z=" : "w=") << sz << " c=0x" << std::hex << v.color << std::dec
++                                  << " uv=" << v.texcoord[0] << "," << v.texcoord[1] << (at == first ? "" : "]\n");
++                    }
++                });
++            }
++        }
++    }
++
+     if (impl.frames == trace_sprites_frame && call.primitive != PrimitiveType::Sprites) {
+         float x0 = 1e9f, y0 = 1e9f, x1 = -1e9f, y1 = -1e9f, u0 = 1e9f, v0 = 1e9f, u1 = -1e9f, v1 = -1e9f;
+         for (std::size_t i = 0; i < count; ++i) {
+@@ -7822,7 +7912,9 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+         key.depth_test = call.depth.test_enabled && (!call.through || !no_through_depth);
+         key.depth_write = call.depth.write_enabled;
+         key.depth_function = call.depth.function;
+-        key.cull = call.culling_enabled && !call.through && call.primitive != PrimitiveType::Sprites;
++        // A line's quads face either way (line_quads.hpp); the GE culls no line.
++        key.cull = call.culling_enabled && !call.through && call.primitive != PrimitiveType::Sprites &&
++                   call.primitive != PrimitiveType::Lines && call.primitive != PrimitiveType::LineStrip;
+         key.cull_clockwise = call.cull_clockwise;
+     }
+     key.color_mask &= pixel_write_mask(call.target.color_format, call.pixel_mask_color, call.pixel_mask_alpha);
+diff --git a/tests/render_tests.cpp b/tests/render_tests.cpp
+index 7bca22a..3333b1f 100644
+--- a/tests/render_tests.cpp
++++ b/tests/render_tests.cpp
+@@ -1,9 +1,16 @@
+ // Renderer helpers that need no GPU: the index lists that let transformed
+ // draws skip expanding their vertices must name, position by position, the
+-// vertex the expansion would have written there.
++// vertex the expansion would have written there; and the quads GE lines are
++// drawn as (line_quads.hpp).
+ 
++#include "gpu/line_quads.hpp"
+ #include "gpu/triangle_indices.hpp"
+ 
++#include <algorithm>
++#include <array>
++#include <cmath>
++#include <utility>
++
+ #include <cstdint>
+ #include <iostream>
+ #include <random>
+@@ -108,12 +115,132 @@ void test_other_primitives() {
+     }
+ }
+ 
++using portablekit::gpu::Vertex;
++
++Vertex vertex_at(float x, float y, float z, std::uint32_t color = 0xFFFFFFFFu, float u = 0.0f, float v = 0.0f) {
++    Vertex out{};
++    out.position = {x, y, z, 1.0f};
++    out.color = color;
++    out.texcoord = {u, v};
++    return out;
++}
++
++struct Box {
++    float x0{1e30f}, y0{1e30f}, x1{-1e30f}, y1{-1e30f};
++};
++Box box_of(const std::vector<Vertex> &vertices, std::size_t first, std::size_t count) {
++    Box box;
++    for (std::size_t i = first; i < first + count; ++i) {
++        box.x0 = std::min(box.x0, vertices[i].position[0]);
++        box.x1 = std::max(box.x1, vertices[i].position[0]);
++        box.y0 = std::min(box.y0, vertices[i].position[1]);
++        box.y1 = std::max(box.y1, vertices[i].position[1]);
++    }
++    return box;
++}
++bool near(float a, float b, float tolerance = 1e-4f) { return std::fabs(a - b) <= tolerance; }
++
++void test_line_segments() {
++    std::vector<std::pair<std::size_t, std::size_t>> seen;
++    const auto collect = [&](std::size_t a, std::size_t b) { seen.emplace_back(a, b); };
++    portablekit::gpu::for_each_line_segment(PrimitiveType::Lines, 5u, collect);
++    expect(seen == std::vector<std::pair<std::size_t, std::size_t>>{{0u, 1u}, {2u, 3u}}, "lines pair their vertices");
++    seen.clear();
++    portablekit::gpu::for_each_line_segment(PrimitiveType::LineStrip, 4u, collect);
++    expect(seen == std::vector<std::pair<std::size_t, std::size_t>>{{0u, 1u}, {1u, 2u}, {2u, 3u}},
++           "a strip joins consecutive vertices");
++    seen.clear();
++    portablekit::gpu::for_each_line_segment(PrimitiveType::LineStrip, 1u, collect);
++    portablekit::gpu::for_each_line_segment(PrimitiveType::Triangles, 6u, collect);
++    expect(seen.empty(), "no segments from one vertex or from triangles");
++}
++
++void test_through_lines() {
++    std::vector<Vertex> out;
++    // Horizontal, (10, 5) to (20, 5): pixel row 5, columns 10 to 19 (pixel
++    // centres 10.5 to 19.5 inside, 20.5 on the excluded edge).
++    portablekit::gpu::expand_through_line(vertex_at(10, 5, 0, 0xFF0000FFu), vertex_at(20, 5, 0, 0xFFFF0000u), out);
++    expect(out.size() == 6u, "a through segment is two triangles");
++    Box box = box_of(out, 0u, out.size());
++    expect(near(box.x0, 10.5f) && near(box.x1, 20.5f) && near(box.y0, 5.0f) && near(box.y1, 6.0f),
++           "a horizontal through line covers its row, half-open along x");
++    for (const Vertex &v : out)
++        expect(v.color == (v.position[0] < 15.0f ? 0xFF0000FFu : 0xFFFF0000u), "each end keeps its colour");
++    // Steep: one pixel wide in x.
++    out.clear();
++    portablekit::gpu::expand_through_line(vertex_at(0, 0, 0), vertex_at(10, 20, 0), out);
++    box = box_of(out, 0u, out.size());
++    expect(near(box.x0, 0.0f) && near(box.x1, 11.0f) && near(box.y0, 0.5f) && near(box.y1, 20.5f),
++           "a steep through line is one pixel wide along x");
++    out.clear();
++    portablekit::gpu::expand_through_line(vertex_at(3, 3, 0), vertex_at(3, 3, 0), out);
++    expect(out.empty(), "a segment of no length draws nothing");
++}
++
++void test_transformed_lines() {
++    std::array<float, 16> identity{};
++    identity[0] = identity[5] = identity[10] = identity[15] = 1.0f;
++    std::vector<Vertex> out;
++    // Screen 480x272: x_scale 240, y_scale -136 (y up in device space).
++    expect(portablekit::gpu::expand_transformed_line(identity, 240.0f, -136.0f, vertex_at(-0.5f, 0.1f, 0.2f, 0xFF00FF00u, 0, 0),
++                                                     vertex_at(0.5f, 0.1f, 0.2f, 0xFFFFFFFFu, 1, 0), out),
++           "a transformed segment is drawn");
++    expect(out.size() == 6u, "a transformed segment is two triangles");
++    const Box box = box_of(out, 0u, out.size());
++    expect(near(box.x0, -0.5f) && near(box.x1, 0.5f), "the quad runs from end to end");
++    expect(near(box.y0, 0.1f - 0.5f / 136.0f) && near(box.y1, 0.1f + 0.5f / 136.0f),
++           "the quad is one PSP pixel tall, centred on the line");
++    for (const Vertex &v : out) {
++        expect(near(v.position[2], 0.2f), "depth is kept");
++        expect(v.color == (v.position[0] < 0.0f ? 0xFF00FF00u : 0xFFFFFFFFu), "each end keeps its colour");
++        expect(near(v.texcoord[0], v.position[0] < 0.0f ? 0.0f : 1.0f), "each end keeps its texture coordinates");
++    }
++    // A wider viewport (internal scale does not change it: the quad is in
++    // PSP pixels whatever the target's size).
++    out.clear();
++    expect(portablekit::gpu::expand_transformed_line(identity, 240.0f, -136.0f, vertex_at(0, -0.5f, 0),
++                                                     vertex_at(0.1f, 0.5f, 0), out),
++           "a steep transformed segment is drawn");
++    const Box steep = box_of(out, 0u, out.size());
++    expect(near(steep.x0, -0.5f / 240.0f) && near(steep.x1, 0.1f + 0.5f / 240.0f),
++           "a steep transformed line is one PSP pixel wide along x");
++
++    // A perspective projection, column-major: x' = x, y' = y, z' = -z - 2,
++    // w = -z. The near plane z' = -w is at z = -1.
++    std::array<float, 16> perspective{};
++    perspective[0] = 1.0f;
++    perspective[5] = 1.0f;
++    perspective[10] = -1.0f;
++    perspective[11] = -1.0f;
++    perspective[14] = -2.0f;
++    out.clear();
++    expect(portablekit::gpu::expand_transformed_line(perspective, 240.0f, -136.0f, vertex_at(1, 0, -5, 0xFF000000u),
++                                                     vertex_at(1, 0, 1, 0xFF0000FFu), out),
++           "a segment crossing the near plane is drawn");
++    expect(out.size() == 6u, "the cut segment is two triangles");
++    bool in_front = true, cut_colour = false;
++    for (const Vertex &v : out) {
++        in_front = in_front && v.position[2] <= -1.0f + 1e-3f;
++        if (v.position[2] > -1.5f) cut_colour = v.color == 0xFF0000AAu;
++    }
++    expect(in_front, "the segment is cut at the near plane");
++    expect(cut_colour, "the cut end takes the colour two thirds of the way");
++    out.clear();
++    expect(!portablekit::gpu::expand_transformed_line(perspective, 240.0f, -136.0f, vertex_at(0, 0, 1),
++                                                      vertex_at(1, 0, 2), out) &&
++               out.empty(),
++           "a segment behind the eye draws nothing");
++}
++
+ } // namespace
+ 
+ int main() {
+     test_matches_expansion();
+     test_large_mesh();
+     test_other_primitives();
++    test_line_segments();
++    test_through_lines();
++    test_transformed_lines();
+     std::cout << (failures ? "FAIL" : "PASS") << ": render helpers (" << failures << " failures)\n";
+     return failures ? 1 : 0;
+ }
+-- 
+2.53.0.windows.1
+

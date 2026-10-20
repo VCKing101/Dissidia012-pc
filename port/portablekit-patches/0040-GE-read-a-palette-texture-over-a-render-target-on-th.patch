@@ -1,0 +1,1004 @@
+From 9921d54ac41b9975af327578f028b70f935ad28b Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Wed, 21 Oct 2026 07:31:35 +1030
+Subject: [PATCH 40/41] GE: read a palette texture over a render target on the
+ GPU
+
+A game can texture from its own framebuffer through a palette: a CLUT4/8/16/32
+texture whose address and row length are a render target's reads the
+rendered pixels' bits as indices. One game grades its whole frame this way,
+one colour channel per pass through the CLUT index shift and mask. Such a
+texture was never matched to its render target, so it was decoded from guest
+memory, which holds at best the 1x write-back of an older frame: the effect
+drew a flat colour over the screen.
+
+A palette view is now found like any texture over a render target, when its
+rows are the target's rows and its index fits a whole number of times in a
+pixel, inside the part of the target its draws reached. A pass at the
+internal scale (shaders/fb_clut.frag) turns each pixel of the target's copy
+back into the guest pixel the GE would hold (5650, 5551, 4444 or 8888, the
+top bits of each channel, as the write-back stores them), takes the texel's
+index from its bits (the low bits first for indices smaller than a pixel),
+applies the CLUT's shift, mask and start, and looks the entry up in the
+palette: 512 decoded entries from guest memory, kept per distinct palette,
+or the render target the CLUT address lies in, read at the internal scale.
+The draw samples that picture as it samples any render target, so the
+filtering comes after the lookup. A picture made for a draw recorded for
+frame interpolation is kept until no recorded frame can name it, as the
+render-target snapshots are; others are reused at once, in command order.
+
+<prefix>_NO_FB_CLUT decodes guest memory, as before. <prefix>_TRACE_FB_CLUT
+logs the first 400 palette views with their CLUT, its first entries and the
+draw's blend and vertices. The GE census counts them as fbtex.clut_view
+(handled) and a CLUT read from a render target as clut.in_target, instead
+of fbtex.miss_clut_view and fbtex.format_reinterpreted.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ cmake/PortableKit.cmake       |   3 +-
+ docs/BRINGING_UP_A_GAME.md    |   2 +
+ host/gpu/ge_census.cpp        |  23 ++
+ host/gpu/ge_census.hpp        |   5 +
+ host/gpu/shaders/fb_clut.frag |  83 +++++
+ host/gpu/texture_decode.cpp   |  18 ++
+ host/gpu/texture_decode.hpp   |   6 +
+ host/gpu/vulkan_renderer.cpp  | 592 ++++++++++++++++++++++++++++++++--
+ 8 files changed, 705 insertions(+), 27 deletions(-)
+ create mode 100644 host/gpu/shaders/fb_clut.frag
+
+diff --git a/cmake/PortableKit.cmake b/cmake/PortableKit.cmake
+index 4eba93b..6a1eb13 100644
+--- a/cmake/PortableKit.cmake
++++ b/cmake/PortableKit.cmake
+@@ -320,7 +320,8 @@ function(portablekit_add_game target)
+                 "kGeCheckVertexShader=GE_RAW_VERTICES,GE_CHECK_DECODE@${PORTABLEKIT_ROOT}/host/gpu/shaders/ge.vert"
+                 "kGeFragmentShader=${PORTABLEKIT_ROOT}/host/gpu/shaders/ge.frag"
+                 "kLevelVertexShader=${PORTABLEKIT_ROOT}/host/gpu/shaders/level.vert"
+-                "kLevelFragmentShader=${PORTABLEKIT_ROOT}/host/gpu/shaders/level.frag")
++                "kLevelFragmentShader=${PORTABLEKIT_ROOT}/host/gpu/shaders/level.frag"
++                "kFbClutFragmentShader=${PORTABLEKIT_ROOT}/host/gpu/shaders/fb_clut.frag")
+             if(ANDROID)
+                 # Pre-rotation of the finished frame for a display turned sideways.
+                 list(APPEND shaders
+diff --git a/docs/BRINGING_UP_A_GAME.md b/docs/BRINGING_UP_A_GAME.md
+index 8e62375..3d95545 100644
+--- a/docs/BRINGING_UP_A_GAME.md
++++ b/docs/BRINGING_UP_A_GAME.md
+@@ -83,6 +83,8 @@ Every one of these takes the profile's own prefix, so `TENKAWA_TRACE_KERNEL` for
+ | `<PREFIX>_TRACE_GE_LIST=N[:M[:W]]` | Every command word of display-list runs N to N+M-1, the first W of each (20000 by default): what a screen that draws nothing is built from |
+ | `<PREFIX>_CAPTURE_BLENDED` | A window capture (the input script's `shot`) waits for a present that frame interpolation blended, to look at an in-between frame; with `<PREFIX>_FRAME_RATE_AUTO=0` the rate does not step down while captures stall the frames |
+ | `<PREFIX>_GE_CENSUS=<file>` | A JSON census of the GE features the game's draws use that the renderer does not reproduce exactly (ignored state, approximated texture and blend modes, render-to-texture read from guest memory, transfers between targets), counted per scene with the first frame and an example draw's state words; the input script's `scene NAME` starts a new scene (`host/gpu/ge_census.hpp`) |
++| `<PREFIX>_TRACE_FB_CLUT` | The first 400 palette views of render targets (a CLUT texture over rendered pixels, decoded on the GPU): the target, the index format, the CLUT's address, format, shift, mask and start and its first entries, the draw's blend and vertices |
++| `<PREFIX>_NO_FB_CLUT` | Decode a palette texture over a render target from guest memory, as before palette views (`palette_view()` in `host/gpu/vulkan_renderer.cpp`) |
+ | `<PREFIX>_TRACE_SAS` | SAS voices set, keyed on and off, and each change of the end flags a game polls |
+ | `<PREFIX>_NO_BUSY_CLOCK` | Keep emulated time still for a thread that never waits, as before the busy clock (`Kernel::charge_busy_time`) |
+ | `PSPRECOMP_NO_INTERPRETER=1` | Turn the interpreter off. Nothing runs without a corpus; with one, the runtime stops at the first address the recompiler missed and names it |
+diff --git a/host/gpu/ge_census.cpp b/host/gpu/ge_census.cpp
+index db8eaba..a6d631b 100644
+--- a/host/gpu/ge_census.cpp
++++ b/host/gpu/ge_census.cpp
+@@ -92,6 +92,8 @@ constexpr FeatureInfo kFeatures[] = {
+     {"fbtex.samples_beyond_480x272", "render-to-texture", "medium", "Texture coordinates past the 480x272 a render target holds: clamped to its edge (the GE reads on into VRAM)"},
+     {"fbtex.repeat_wrap", "render-to-texture", "medium", "A render target sampled with wrap REPEAT and coordinates outside the texture: clamped instead"},
+     {"fbtex.miss_clut_view", "render-to-texture", "high", "A CLUT texture over a render target (a palette view of rendered pixels): decoded from guest memory, which does not hold the render"},
++    {"fbtex.clut_view", "render-to-texture", "info", "A CLUT texture over a render target (a palette view of rendered pixels): the target's pixels as indices, looked up on the GPU"},
++    {"clut.in_target", "render-to-texture", "info", "A palette view's CLUT lies in a render target: its entries read from the render"},
+     {"fbtex.miss_swizzled", "render-to-texture", "high", "A swizzled texture over a render target: decoded from guest memory, which does not hold the render"},
+     {"fbtex.miss_bpp_mismatch", "render-to-texture", "high", "A texture over a render target with another pixel size: decoded from guest memory, which does not hold the render"},
+     {"fbtex.miss_stride_mismatch", "render-to-texture", "high", "A texture over a render target with another row length: decoded from guest memory, which does not hold the render"},
+@@ -808,6 +810,9 @@ void note_texture_source(const DrawCall &call, bool from_target, std::uint32_t x
+     const TargetSeen &seen = s.targets[holder != 0u ? holder : GuestMemory::canonical(texture.address)];
+     hit_draw(s, "fbtex.sampled", "fmt " + std::to_string(seen.format) + " as " + std::to_string(static_cast<int>(texture.format)), detail);
+     if (holder == draw_target) hit_draw(s, "fbtex.self_sample", "", detail);
++    // A palette view is the target's bits through a palette, not its colours
++    // in another format (note_palette_view()).
++    if (is_clut(texture.format)) return;
+     if (static_cast<std::uint32_t>(texture.format) != seen.format && texture.format != TextureFormat::Rgba5650)
+         hit_draw(s, "fbtex.format_reinterpreted",
+                  std::to_string(seen.format) + " as " + std::to_string(static_cast<int>(texture.format)), detail);
+@@ -825,6 +830,24 @@ void note_texture_source(const DrawCall &call, bool from_target, std::uint32_t x
+     }
+ }
+ 
++void note_palette_view(const DrawCall &call, std::uint32_t target, std::uint32_t format,
++                       std::uint32_t palette_target) {
++    if (!enabled()) return;
++    State &s = state();
++    std::lock_guard guard(s.lock);
++    LazyDetail detail{&call, {}};
++    const TextureState &texture = call.texture;
++    hit_draw(s, "fbtex.clut_view",
++             "target " + hex(GuestMemory::canonical(target)) + " fmt " + std::to_string(format) + ", texture fmt " +
++                 std::to_string(static_cast<int>(texture.format)) + ", CLUT fmt " +
++                 std::to_string(texture.clut_format) + " shift " + std::to_string(texture.clut_shift) + " mask " +
++                 hex(texture.clut_mask, 2) + " start " + std::to_string(texture.clut_offset),
++             detail);
++    if (palette_target != 0u)
++        hit_draw(s, "clut.in_target", hex(GuestMemory::canonical(palette_target)) + " at " + hex(texture.clut_address),
++                 detail);
++}
++
+ void note_transfer(const BlockTransfer &transfer, const std::array<std::uint32_t, 256> &registers) {
+     if (!enabled()) return;
+     State &s = state();
+diff --git a/host/gpu/ge_census.hpp b/host/gpu/ge_census.hpp
+index ef4e5c7..564c297 100644
+--- a/host/gpu/ge_census.hpp
++++ b/host/gpu/ge_census.hpp
+@@ -37,6 +37,11 @@ void note_draw(const psprecomp::GuestMemory &memory, const DrawCall &call,
+ // The renderer's choice of texture source for the draw just noted: the render
+ // target (`from_target`, its first texel at pixel x, y of it) or guest memory.
+ void note_texture_source(const DrawCall &call, bool from_target, std::uint32_t x, std::uint32_t y);
++// A palette texture over render target `target` (pixel format `format`)
++// decoded on the GPU; `palette_target`: the render target its CLUT was read
++// from, or 0 for guest memory.
++void note_palette_view(const DrawCall &call, std::uint32_t target, std::uint32_t format,
++                       std::uint32_t palette_target);
+ // A GE block transfer.
+ void note_transfer(const BlockTransfer &transfer, const std::array<std::uint32_t, 256> &registers);
+ // A command the GE state machine ignored.
+diff --git a/host/gpu/shaders/fb_clut.frag b/host/gpu/shaders/fb_clut.frag
+new file mode 100644
+index 0000000..1f0b3d8
+--- /dev/null
++++ b/host/gpu/shaders/fb_clut.frag
+@@ -0,0 +1,83 @@
++#version 450
++
++// A render target read as a palette texture (CLUT4/8/16/32 over rendered
++// pixels): each pixel of the target's copy, at the internal scale, is turned
++// back into the guest pixel the GE would hold in VRAM (5650, 5551, 4444 or
++// 8888), the texel's index is taken from its bits, shifted, masked and
++// offset as the CLUT format command says, and looked up in the palette. The
++// result is an ordinary RGBA8 picture of the texture at the internal scale,
++// which the draw then samples as it samples any render target.
++//
++// The output image is the target's size times the texels per pixel across:
++// output pixel x is texel coordinate (x + 0.5) / scale.x, in the target's
++// pixel (x / texels per pixel). One draw: the triangle of level.vert.
++
++layout(set = 0, binding = 0) uniform sampler2D source;   // the target's copy
++// The palette: 512 decoded entries in a row (mode 0), or the copy of the
++// render target that holds the CLUT (mode 1).
++layout(set = 1, binding = 0) uniform sampler2D palette;
++
++layout(push_constant) uniform Params {
++    ivec4 view;     // x: bits per texel (4, 8, 16, 32), y: the target's pixel format, z: texels per pixel, w: palette mode
++    ivec4 clut;     // x: index shift, y: index mask, z: start (already times 16), w: the CLUT's entry format
++    vec4 scale;     // x, y: image pixels per guest pixel
++    ivec4 clut_at;  // mode 1: the first entry's guest pixel x, y, the holding target's row length and pixel format
++} p;
++
++layout(location = 0) out vec4 color;
++
++// The guest pixel a rendered colour stands for. The renderer keeps 8 bits a
++// channel in every target; the GE stores the top bits of each, as the
++// write-back to guest memory does.
++uint pack_pixel(vec4 value, int format) {
++    uvec4 c = uvec4(clamp(value, 0.0, 1.0) * 255.0 + 0.5);
++    if (format == 0) return (c.r >> 3) | ((c.g >> 2) << 5) | ((c.b >> 3) << 11);
++    if (format == 1) return (c.r >> 3) | ((c.g >> 3) << 5) | ((c.b >> 3) << 10) | ((c.a >> 7) << 15);
++    if (format == 2) return (c.r >> 4) | ((c.g >> 4) << 4) | ((c.b >> 4) << 8) | ((c.a >> 4) << 12);
++    return c.r | (c.g << 8) | (c.b << 16) | (c.a << 24);
++}
++
++// A palette entry in its format, as a colour.
++vec4 unpack_entry(uint value, int format) {
++    if (format == 0)
++        return vec4(float(value & 31u) / 31.0, float((value >> 5) & 63u) / 63.0, float((value >> 11) & 31u) / 31.0, 1.0);
++    if (format == 1)
++        return vec4(float(value & 31u) / 31.0, float((value >> 5) & 31u) / 31.0, float((value >> 10) & 31u) / 31.0,
++                    float((value >> 15) & 1u));
++    if (format == 2)
++        return vec4(float(value & 15u), float((value >> 4) & 15u), float((value >> 8) & 15u),
++                    float((value >> 12) & 15u)) / 15.0;
++    return vec4(float(value & 255u), float((value >> 8) & 255u), float((value >> 16) & 255u),
++                float(value >> 24)) / 255.0;
++}
++
++void main() {
++    ivec2 at = ivec2(gl_FragCoord.xy);
++    int per_pixel = max(p.view.z, 1);
++    ivec2 limit = textureSize(source, 0) - 1;
++    ivec2 from = min(ivec2(at.x / per_pixel, at.y), limit);
++    uint word = pack_pixel(texelFetch(source, from, 0), p.view.y);
++
++    // Which of the pixel's texels this is: texels run from the low bits up.
++    int bits = p.view.x;
++    uint index = word;
++    if (bits < 32) {
++        int texel = int(floor((float(at.x) + 0.5) / p.scale.x));
++        int part = texel % per_pixel;
++        index = (word >> uint(part * bits)) & ((1u << uint(bits)) - 1u);
++    }
++    uint entry = (((index >> uint(p.clut.x)) & uint(p.clut.y)) | uint(p.clut.z)) & 511u;
++
++    if (p.view.w == 0) {
++        color = texelFetch(palette, ivec2(int(entry), 0), 0);
++        return;
++    }
++    // The CLUT lies in a render target: entry n is the guest pixel n after
++    // the first, read from the middle of that pixel at the internal scale.
++    int stride = max(p.clut_at.z, 1);
++    int linear = p.clut_at.y * stride + p.clut_at.x + int(entry);
++    vec2 guest = vec2(float(linear % stride), float(linear / stride)) + 0.5;
++    ivec2 holder_limit = textureSize(palette, 0) - 1;
++    ivec2 held = min(ivec2(guest * p.scale.xy), holder_limit);
++    color = unpack_entry(pack_pixel(texelFetch(palette, held, 0), p.clut_at.w), p.clut.w);
++}
+diff --git a/host/gpu/texture_decode.cpp b/host/gpu/texture_decode.cpp
+index 10b3ec6..6ad2486 100644
+--- a/host/gpu/texture_decode.cpp
++++ b/host/gpu/texture_decode.cpp
+@@ -545,4 +545,22 @@ std::uint64_t texture_key(const GuestMemory &memory, const TextureState &texture
+     return key;
+ }
+ 
++void decode_palette(const GuestMemory &memory, const TextureState &texture, std::uint32_t entries,
++                    std::uint32_t *out) {
++    const std::uint32_t size = texture.clut_format == 3u ? 4u : 2u;
++    for (std::uint32_t entry = 0; entry < entries; ++entry) {
++        const std::uint32_t address = texture.clut_address + entry * size;
++        if (!memory.contains(address, size)) {
++            out[entry] = 0u;
++            continue;
++        }
++        switch (texture.clut_format) {
++        case 0u: out[entry] = expand_5650(memory.load16(address)); break;
++        case 1u: out[entry] = expand_5551(memory.load16(address)); break;
++        case 2u: out[entry] = expand_4444(memory.load16(address)); break;
++        default: out[entry] = memory.load32(address); break;
++        }
++    }
++}
++
+ } // namespace portablekit::gpu
+diff --git a/host/gpu/texture_decode.hpp b/host/gpu/texture_decode.hpp
+index bb70e0a..131a4db 100644
+--- a/host/gpu/texture_decode.hpp
++++ b/host/gpu/texture_decode.hpp
+@@ -28,6 +28,12 @@ bool snapshot_texture(const GuestMemory &memory, const TextureState &texture, Te
+ // unswizzles the snapshot's texels in place.
+ bool decode_snapshot(TextureSnapshot &snapshot, std::vector<std::uint32_t> &out);
+ 
++// The first `entries` palette entries at the texture's CLUT address, decoded
++// to RGBA8888 as the indexed formats decode them, in entry order (no index
++// shift, mask or start): for a palette looked up on the GPU.
++void decode_palette(const GuestMemory &memory, const TextureState &texture, std::uint32_t entries,
++                    std::uint32_t *out);
++
+ // Key that identifies the decoded contents of a texture for caching.
+ [[nodiscard]] std::uint64_t texture_key(const GuestMemory &memory, const TextureState &texture);
+ 
+diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
+index 309f218..04d458a 100644
+--- a/host/gpu/vulkan_renderer.cpp
++++ b/host/gpu/vulkan_renderer.cpp
+@@ -54,6 +54,7 @@
+ #include <string>
+ #include <utility>
+ #include <set>
++#include <sstream>
+ #include <thread>
+ #include <vector>
+ 
+@@ -117,6 +118,11 @@ constexpr std::size_t kMaxFramebufferTextureSets = 64u;
+ // Snapshots of render targets for frame interpolation (Target::Snapshot), in
+ // all; each has two sets as well.
+ constexpr std::size_t kMaxFramebufferSnapshots = 48u;
++// Render targets read through a palette (palette_view()): the decoded
++// pictures, and the palettes from guest memory, in all; one set each.
++constexpr std::size_t kMaxPaletteViews = 24u;
++constexpr std::size_t kMaxPalettes = 32u;
++constexpr std::uint32_t kPaletteEntries = 512u;
+ // GPU timestamps: a pair around each command buffer a frame submits. A frame
+ // normally submits one; each GE block transfer that reads a framebuffer back
+ // splits it once more.
+@@ -1362,6 +1368,10 @@ struct VulkanRenderer::Impl {
+         // last drawn to. The renderer never writes guest memory, so a word that
+         // has changed since means the game put something else there.
+         std::vector<std::uint32_t> guest_words;
++        // The rectangle the draws since guest_words was read reached (their
++        // scissors), in guest pixels: what of the buffer holds the render.
++        std::uint32_t drawn_right{};
++        std::uint32_t drawn_bottom{};
+         // The copy that draws sample when the game textures from this buffer:
+         // a render pass cannot read its own attachment.
+         VkImage copy{};
+@@ -2322,11 +2332,17 @@ struct VulkanRenderer::Impl {
+     Texture &texture_for(const GuestMemory &memory, const DrawCall &call);
+     void trace_framebuffer_texture(const DrawCall &call);
+     // A render target the texture reads, with the texture's first texel as a
+-    // pixel position inside it; see framebuffer_texture().
++    // pixel position inside it; see framebuffer_texture(). A palette texture
++    // over a target (CLUT4/8/16/32, the target's pixels as indices) has
++    // `texels_per_pixel` set: one for an index the size of a pixel, 2, 4 or 8
++    // for smaller ones; its first texel is texel `texel_x` of row `y`, counted
++    // in texels from the row's start.
+     struct FramebufferTexture {
+         Target *target{};
+         std::uint32_t x{};
+         std::uint32_t y{};
++        std::uint32_t texels_per_pixel{};
++        std::uint32_t texel_x{};
+     };
+     [[nodiscard]] FramebufferTexture find_framebuffer_texture(const GuestMemory &memory,
+                                                               const TextureState &texture);
+@@ -2340,6 +2356,61 @@ struct VulkanRenderer::Impl {
+                                          std::uint32_t width, std::uint32_t height, std::array<float, 4> &mapping);
+     void destroy_snapshot(Target::Snapshot &snapshot);
+     std::size_t snapshot_count{};
++    // Palette views of render targets. The GE reads a palette texture over a
++    // framebuffer as the bytes of the rendered pixels: a game copies its frame
++    // through a palette to grade or desaturate it, one colour channel at a
++    // time through the index shift and mask. Guest memory never holds the
++    // render, so such a texture is decoded on the GPU: a pass turns the
++    // target's copy, at the internal scale, back into guest pixels, takes
++    // each texel's index from their bits and looks it up in the palette
++    // (shaders/fb_clut.frag); the draw then samples that picture like any
++    // render target. The palette comes from guest memory, or from the render
++    // target the CLUT address lies in. A picture is kept while a recorded
++    // frame may name it, as Target::Snapshot is. <prefix>_NO_FB_CLUT decodes
++    // guest memory, as before.
++    struct PaletteViewKey {
++        std::uint32_t target{};
++        std::uint64_t serial{};         // the target's draw_serial
++        std::uint64_t palette{};        // the palette's hash, or its target's serial
++        std::uint32_t palette_target{}; // 0: the palette from guest memory
++        std::uint32_t palette_at{};     // its first entry's pixel in that target
++        std::uint32_t format{};         // texture format, CLUT format, shift, mask and start
++        std::uint32_t clut{};
++        bool operator==(const PaletteViewKey &) const = default;
++    };
++    struct PaletteView {
++        VkImage image{};
++        VkDeviceMemory memory{};
++        VkImageView view{};
++        VkFramebuffer framebuffer{};
++        VkDescriptorSet descriptor{};
++        VkExtent2D extent{};
++        PaletteViewKey key{};
++        std::uint64_t held_frame{};  // the last frame recorded for drawing again that drew with it
++        bool held{};
++        bool valid{};
++    };
++    struct Palette {
++        Texture texture;
++        std::uint64_t hash{};
++        std::uint64_t used_frame{};
++    };
++    std::vector<PaletteView> palette_views;
++    std::vector<Palette> palettes;
++    VkRenderPass palette_render_pass{};
++    VkPipelineLayout palette_layout{};
++    VkPipeline palette_pipeline{};
++    VkShaderModule palette_fragment{};
++    VkShaderModule palette_vertex{};
++    bool palette_failed{};
++    bool create_palette_pipeline(std::string &error);
++    // The picture of `call`'s palette texture over `source`, or null (then the
++    // texture is decoded from guest memory).
++    VkDescriptorSet palette_view(const GuestMemory &memory, const FramebufferTexture &source, const DrawCall &call);
++    VkDescriptorSet palette_descriptor(const GuestMemory &memory, const TextureState &texture, std::uint64_t &hash);
++    void destroy_palette_view(PaletteView &view);
++    void destroy_palette_views();
++    void destroy_palette_pipeline();
+     // Stencil and alpha (Target::stencil_sync). One screen-sized quad into
+     // the target of the pass in progress, in through mode, with `key`, the
+     // texture `texture`, vertex colour `color` and the fragment shader's
+@@ -2817,14 +2888,16 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
+     const std::array<VkDescriptorPoolSize, 3> pool_sizes{
+         VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                              static_cast<std::uint32_t>(2u * kMaxCachedTextures + 1u + kMaxFramebufferTextureSets +
+-                                                        2u * kMaxFramebufferSnapshots)},
++                                                        2u * kMaxFramebufferSnapshots + kMaxPaletteViews +
++                                                        2u * kMaxPalettes)},
+         VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 3u},
+         VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 2u},
+     };
+     VkDescriptorPoolCreateInfo pool_info{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+     pool_info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+     pool_info.maxSets = static_cast<std::uint32_t>(2u * kMaxCachedTextures + 2u + kMaxFramebufferTextureSets +
+-                                                   2u * kMaxFramebufferSnapshots);
++                                                   2u * kMaxFramebufferSnapshots + kMaxPaletteViews +
++                                                   2u * kMaxPalettes);
+     pool_info.poolSizeCount = static_cast<std::uint32_t>(pool_sizes.size());
+     pool_info.pPoolSizes = pool_sizes.data();
+     if (!check(vkCreateDescriptorPool(impl.device, &pool_info, nullptr, &impl.descriptor_pool),
+@@ -4990,24 +5063,38 @@ void VulkanRenderer::Impl::snapshot_guest_words(const GuestMemory &memory, std::
+ // The render target a texture lies in, if the texture reads it the way it was
+ // drawn: the same row length, a direct colour format of the same pixel size,
+ // and guest memory under the texture unchanged since the target was last drawn
+-// to. Anything else (a palette or swizzled view of a framebuffer, or a texture
+-// the game has since put where a framebuffer was) is decoded from guest memory.
++// to. A palette texture (CLUT4/8/16/32) over a target reads the rendered
++// pixels' bits as indices: it is found too when its rows are the target's
++// rows and its index fits a whole number of times in a pixel (palette_view()
++// decodes it on the GPU); <prefix>_NO_FB_CLUT leaves it to guest memory.
++// Anything else (a swizzled view of a framebuffer, or a texture the game has
++// since put where a framebuffer was) is decoded from guest memory.
+ VulkanRenderer::Impl::FramebufferTexture VulkanRenderer::Impl::find_framebuffer_texture(
+     const GuestMemory &memory, const TextureState &texture) {
+-    if (texture.swizzled || static_cast<std::uint32_t>(texture.format) > 3u || texture.width == 0u ||
+-        texture.height == 0u)
++    static const bool no_fb_clut = portablekit::env("NO_FB_CLUT") != nullptr;
++    const bool indexed = texture.format == TextureFormat::Clut4 || texture.format == TextureFormat::Clut8 ||
++                         texture.format == TextureFormat::Clut16 || texture.format == TextureFormat::Clut32;
++    if (texture.swizzled || (static_cast<std::uint32_t>(texture.format) > 3u && !indexed) ||
++        (indexed && (no_fb_clut || palette_failed)) || texture.width == 0u || texture.height == 0u)
+         return {};
++    const std::uint32_t texture_bits = texture_bits_per_pixel(texture.format);
+     const std::uint32_t texture_address = GuestMemory::canonical(texture.address);
+     Target *best = nullptr;
+     std::uint32_t best_base = 0u;
+     for (auto &[address, target] : targets) {
+         if (!target.initialized || target.guest_words.empty()) continue;
+         const std::uint32_t bytes_per_pixel = framebuffer_bytes_per_pixel(target.format);
+-        if (texture_bits_per_pixel(texture.format) != bytes_per_pixel * 8u) continue;
++        const std::uint32_t pixel_bits = bytes_per_pixel * 8u;
++        // A direct colour texture reads whole pixels; an index may be part
++        // of one, as long as the rows line up.
++        if (indexed ? (texture_bits > pixel_bits || pixel_bits % texture_bits != 0u ||
++                       texture.buffer_width * texture_bits != target.stride * pixel_bits)
++                    : (texture_bits != pixel_bits || texture.buffer_width != target.stride))
++            continue;
+         const std::uint32_t base = GuestMemory::canonical(address);
+         const std::uint32_t bytes = target.stride * kPspHeight * bytes_per_pixel;
+         if (texture_address < base || texture_address - base >= bytes) continue;
+-        if (texture.buffer_width != target.stride || (texture_address - base) % bytes_per_pixel != 0u) continue;
++        if (!indexed && (texture_address - base) % bytes_per_pixel != 0u) continue;
+         if (best == nullptr || target.draw_serial > best->draw_serial) {
+             best = &target;
+             best_base = base;
+@@ -5017,15 +5104,23 @@ VulkanRenderer::Impl::FramebufferTexture VulkanRenderer::Impl::find_framebuffer_
+ 
+     const std::uint32_t bytes_per_pixel = framebuffer_bytes_per_pixel(best->format);
+     const std::uint64_t texture_end = static_cast<std::uint64_t>(texture_address) +
+-                                      static_cast<std::uint64_t>(texture.buffer_width) * texture.height *
+-                                          bytes_per_pixel;
++                                      static_cast<std::uint64_t>(best->stride) * texture.height * bytes_per_pixel;
+     for (std::size_t i = 0; i < best->guest_words.size(); ++i) {
+         const std::uint32_t word_address = best_base + static_cast<std::uint32_t>(i) * 256u;
+         if (word_address < texture_address || word_address >= texture_end) continue;
+         if (!memory.contains(word_address, 4u) || memory.load32(word_address) != best->guest_words[i]) return {};
+     }
+-    const std::uint32_t pixel = (texture_address - best_base) / bytes_per_pixel;
+-    FramebufferTexture found{best, pixel % best->stride, pixel / best->stride};
++    const std::uint32_t row_bytes = best->stride * bytes_per_pixel;
++    const std::uint32_t offset = texture_address - best_base;
++    FramebufferTexture found{best, (offset % row_bytes) / bytes_per_pixel, offset / row_bytes};
++    if (indexed) {
++        // Only where the target's draws reached: VRAM beside a small render
++        // (a quarter-size blur buffer in a 480x272 target's rows) holds
++        // ordinary palette textures, which guest memory has right.
++        if (found.x >= best->drawn_right || found.y >= best->drawn_bottom) return {};
++        found.texels_per_pixel = bytes_per_pixel * 8u / texture_bits;
++        found.texel_x = (offset % row_bytes) * 8u / texture_bits;
++    }
+     if (found.x >= kPspWidth || found.y >= kPspHeight) return {};
+     return found;
+ }
+@@ -5228,6 +5323,421 @@ VkDescriptorSet VulkanRenderer::Impl::framebuffer_snapshot(Target &target, bool
+     return map(*slot);
+ }
+ 
++// The pass of palette_view(): one triangle over the picture (level.vert),
++// shaders/fb_clut.frag with the target's copy in set 0 and the palette in
++// set 1, both in the renderer's one-texture set layout.
++bool VulkanRenderer::Impl::create_palette_pipeline(std::string &error) {
++    if (palette_pipeline != VK_NULL_HANDLE) return true;
++    VkAttachmentDescription attachment{};
++    attachment.format = VK_FORMAT_R8G8B8A8_UNORM;
++    attachment.samples = VK_SAMPLE_COUNT_1_BIT;
++    attachment.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;  // every pixel is written
++    attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
++    attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
++    attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
++    attachment.initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
++    attachment.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
++    VkAttachmentReference reference{0u, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
++    VkSubpassDescription subpass{};
++    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
++    subpass.colorAttachmentCount = 1u;
++    subpass.pColorAttachments = &reference;
++    VkRenderPassCreateInfo pass_info{VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
++    pass_info.attachmentCount = 1u;
++    pass_info.pAttachments = &attachment;
++    pass_info.subpassCount = 1u;
++    pass_info.pSubpasses = &subpass;
++    if (!check(vkCreateRenderPass(device, &pass_info, nullptr, &palette_render_pass), "vkCreateRenderPass", error))
++        return false;
++
++    VkPushConstantRange push{VK_SHADER_STAGE_FRAGMENT_BIT, 0u, 16u * sizeof(std::int32_t)};
++    const std::array<VkDescriptorSetLayout, 2> set_layouts{descriptor_layout, descriptor_layout};
++    VkPipelineLayoutCreateInfo layout_info{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
++    layout_info.setLayoutCount = static_cast<std::uint32_t>(set_layouts.size());
++    layout_info.pSetLayouts = set_layouts.data();
++    layout_info.pushConstantRangeCount = 1u;
++    layout_info.pPushConstantRanges = &push;
++    if (!check(vkCreatePipelineLayout(device, &layout_info, nullptr, &palette_layout), "vkCreatePipelineLayout", error))
++        return false;
++
++    const auto create_shader = [&](const std::uint32_t *code, std::size_t size, VkShaderModule &module) {
++        VkShaderModuleCreateInfo info{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
++        info.codeSize = size;
++        info.pCode = code;
++        return check(vkCreateShaderModule(device, &info, nullptr, &module), "vkCreateShaderModule", error);
++    };
++    if (!create_shader(kLevelVertexShader, sizeof(kLevelVertexShader), palette_vertex)) return false;
++    if (!create_shader(kFbClutFragmentShader, sizeof(kFbClutFragmentShader), palette_fragment)) return false;
++    std::array<VkPipelineShaderStageCreateInfo, 2> stages{};
++    stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
++    stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
++    stages[0].module = palette_vertex;
++    stages[0].pName = "main";
++    stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
++    stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
++    stages[1].module = palette_fragment;
++    stages[1].pName = "main";
++    VkPipelineVertexInputStateCreateInfo vertex_input{VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
++    VkPipelineInputAssemblyStateCreateInfo assembly{VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
++    assembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
++    VkPipelineViewportStateCreateInfo viewport{VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO};
++    viewport.viewportCount = 1u;
++    viewport.scissorCount = 1u;
++    VkPipelineRasterizationStateCreateInfo raster{VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO};
++    raster.polygonMode = VK_POLYGON_MODE_FILL;
++    raster.cullMode = VK_CULL_MODE_NONE;
++    raster.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
++    raster.lineWidth = 1.0f;
++    VkPipelineMultisampleStateCreateInfo multisample{VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
++    multisample.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
++    VkPipelineColorBlendAttachmentState blend_attachment{};
++    blend_attachment.colorWriteMask =
++        VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
++    VkPipelineColorBlendStateCreateInfo blend{VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
++    blend.attachmentCount = 1u;
++    blend.pAttachments = &blend_attachment;
++    const std::array<VkDynamicState, 2> dynamic_states{VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
++    VkPipelineDynamicStateCreateInfo dynamic{VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};
++    dynamic.dynamicStateCount = static_cast<std::uint32_t>(dynamic_states.size());
++    dynamic.pDynamicStates = dynamic_states.data();
++    VkGraphicsPipelineCreateInfo pipeline_info{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
++    pipeline_info.stageCount = static_cast<std::uint32_t>(stages.size());
++    pipeline_info.pStages = stages.data();
++    pipeline_info.pVertexInputState = &vertex_input;
++    pipeline_info.pInputAssemblyState = &assembly;
++    pipeline_info.pViewportState = &viewport;
++    pipeline_info.pRasterizationState = &raster;
++    pipeline_info.pMultisampleState = &multisample;
++    pipeline_info.pColorBlendState = &blend;
++    pipeline_info.pDynamicState = &dynamic;
++    pipeline_info.layout = palette_layout;
++    pipeline_info.renderPass = palette_render_pass;
++    return check(vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1u, &pipeline_info, nullptr, &palette_pipeline),
++                 "vkCreateGraphicsPipelines", error);
++}
++
++void VulkanRenderer::Impl::destroy_palette_view(PaletteView &view) {
++    if (view.descriptor != VK_NULL_HANDLE) vkFreeDescriptorSets(device, descriptor_pool, 1u, &view.descriptor);
++    if (view.framebuffer != VK_NULL_HANDLE) vkDestroyFramebuffer(device, view.framebuffer, nullptr);
++    if (view.view != VK_NULL_HANDLE) vkDestroyImageView(device, view.view, nullptr);
++    if (view.image != VK_NULL_HANDLE) vkDestroyImage(device, view.image, nullptr);
++    if (view.memory != VK_NULL_HANDLE) vkFreeMemory(device, view.memory, nullptr);
++    view = PaletteView{};
++}
++
++// With the device idle: on a change of the internal resolution, and at exit.
++void VulkanRenderer::Impl::destroy_palette_views() {
++    for (PaletteView &view : palette_views) destroy_palette_view(view);
++    palette_views.clear();
++}
++
++void VulkanRenderer::Impl::destroy_palette_pipeline() {
++    destroy_palette_views();
++    for (Palette &palette : palettes) destroy_texture(palette.texture);
++    palettes.clear();
++    if (palette_pipeline != VK_NULL_HANDLE) vkDestroyPipeline(device, palette_pipeline, nullptr);
++    if (palette_layout != VK_NULL_HANDLE) vkDestroyPipelineLayout(device, palette_layout, nullptr);
++    if (palette_vertex != VK_NULL_HANDLE) vkDestroyShaderModule(device, palette_vertex, nullptr);
++    if (palette_fragment != VK_NULL_HANDLE) vkDestroyShaderModule(device, palette_fragment, nullptr);
++    if (palette_render_pass != VK_NULL_HANDLE) vkDestroyRenderPass(device, palette_render_pass, nullptr);
++    palette_pipeline = VK_NULL_HANDLE;
++    palette_layout = VK_NULL_HANDLE;
++    palette_vertex = VK_NULL_HANDLE;
++    palette_fragment = VK_NULL_HANDLE;
++    palette_render_pass = VK_NULL_HANDLE;
++}
++
++// The texture's palette from guest memory as a 512x1 texture, decoded once
++// per distinct palette and kept while it is drawn with. `hash` receives what
++// tells palettes apart.
++VkDescriptorSet VulkanRenderer::Impl::palette_descriptor(const GuestMemory &memory, const TextureState &texture,
++                                                         std::uint64_t &hash) {
++    std::array<std::uint32_t, kPaletteEntries> entries{};
++    decode_palette(memory, texture, kPaletteEntries, entries.data());
++    hash = 0xCBF29CE484222325ull;
++    for (const std::uint32_t entry : entries) hash = (hash ^ entry) * 0x100000001B3ull;
++    for (Palette &palette : palettes) {
++        if (palette.hash == hash) {
++            palette.used_frame = frames;
++            return palette.texture.descriptor;
++        }
++    }
++    if (palettes.size() >= kMaxPalettes) {
++        // The palette drawn with longest ago goes, once no frame in flight
++        // or recorded for drawing again can name it.
++        auto oldest = palettes.end();
++        for (auto it = palettes.begin(); it != palettes.end(); ++it)
++            if (it->used_frame + 3u <= frames && (oldest == palettes.end() || it->used_frame < oldest->used_frame))
++                oldest = it;
++        if (oldest == palettes.end()) return VK_NULL_HANDLE;
++        slots[slot].retired_textures.push_back(oldest->texture);
++        palettes.erase(oldest);
++    }
++    Palette added;
++    added.texture = create_texture_image(kPaletteEntries, 1u);
++    if (added.texture.descriptor == VK_NULL_HANDLE) {
++        destroy_texture(added.texture);
++        return VK_NULL_HANDLE;
++    }
++    upload_texture(added.texture.image, kPaletteEntries, 1u, entries.data());
++    added.hash = hash;
++    added.used_frame = frames;
++    palettes.push_back(added);
++    return palettes.back().texture.descriptor;
++}
++
++VkDescriptorSet VulkanRenderer::Impl::palette_view(const GuestMemory &memory, const FramebufferTexture &source,
++                                                   const DrawCall &call) {
++    const perf::SplitScope split(perf::Split::Texture);
++    if (palette_failed || source.target == nullptr || source.texels_per_pixel == 0u) return VK_NULL_HANDLE;
++    if (palette_pipeline == VK_NULL_HANDLE) {
++        std::string error;
++        if (!create_palette_pipeline(error)) {
++            std::cout << "[render] cannot read render targets through a palette; they are decoded from guest "
++                         "memory: " << error << "\n";
++            destroy_palette_pipeline();
++            palette_failed = true;
++            return VK_NULL_HANDLE;
++        }
++    }
++    Target &target = *source.target;
++    const TextureState &texture = call.texture;
++    const std::uint32_t texture_bits = texture_bits_per_pixel(texture.format);
++
++    // The palette: in a render target when the CLUT lies in one whose pixels
++    // are the entries' size, drawn this frame or the last, inside the part
++    // its draws reached, and not written since by anything else; otherwise
++    // from guest memory.
++    Target *holder = nullptr;
++    std::uint32_t holder_pixel = 0u;
++    {
++        const std::uint32_t entry_bytes = texture.clut_format == 3u ? 4u : 2u;
++        const std::uint32_t clut_address = GuestMemory::canonical(texture.clut_address);
++        const std::uint32_t clut_bytes = std::max(texture.clut_load_bytes, entry_bytes);
++        for (auto &[address, candidate] : targets) {
++            if (!candidate.initialized || candidate.guest_words.empty() || candidate.stride == 0u ||
++                framebuffer_bytes_per_pixel(candidate.format) != entry_bytes ||
++                candidate.last_drawn_frame + 1u < frames)
++                continue;
++            const std::uint32_t base = GuestMemory::canonical(address);
++            if (clut_address < base || (clut_address - base) % entry_bytes != 0u) continue;
++            const std::uint32_t first = (clut_address - base) / entry_bytes;
++            const std::uint32_t last = (clut_address + clut_bytes - 1u - base) / entry_bytes;
++            const std::uint32_t first_row = first / candidate.stride;
++            const std::uint32_t last_row = last / candidate.stride;
++            // Every entry inside the rectangle the target's draws reached.
++            if (last_row >= candidate.drawn_bottom ||
++                (first_row == last_row ? last % candidate.stride >= candidate.drawn_right
++                                       : candidate.drawn_right < candidate.stride))
++                continue;
++            bool unchanged = true;
++            for (std::size_t i = 0; i < candidate.guest_words.size() && unchanged; ++i) {
++                const std::uint32_t word_address = base + static_cast<std::uint32_t>(i) * 256u;
++                if (word_address < clut_address || word_address >= clut_address + clut_bytes) continue;
++                unchanged = memory.contains(word_address, 4u) && memory.load32(word_address) == candidate.guest_words[i];
++            }
++            if (unchanged && (holder == nullptr || candidate.draw_serial > holder->draw_serial)) {
++                holder = &candidate;
++                holder_pixel = first;
++            }
++        }
++    }
++
++    PaletteViewKey key{};
++    key.target = target.address;
++    key.serial = target.draw_serial;
++    key.format = static_cast<std::uint32_t>(texture.format) | texture.clut_format << 8u | source.texels_per_pixel << 16u;
++    key.clut = texture.clut_shift | texture.clut_mask << 8u | texture.clut_offset << 16u;
++    VkDescriptorSet palette = VK_NULL_HANDLE;
++    if (holder != nullptr) {
++        key.palette = holder->draw_serial;
++        key.palette_target = holder->address;
++        key.palette_at = holder_pixel;
++    } else {
++        std::uint64_t hash = 0u;
++        palette = palette_descriptor(memory, texture, hash);
++        if (palette == VK_NULL_HANDLE) return VK_NULL_HANDLE;
++        key.palette = hash;
++    }
++    census::note_palette_view(call, target.address, target.format, holder != nullptr ? holder->address : 0u);
++
++    // <prefix>_TRACE_FB_CLUT: the first 400 palette views, with their CLUT,
++    // its first entries, the draw's blend and vertices.
++    static const bool trace = portablekit::env("TRACE_FB_CLUT") != nullptr;
++    static std::uint64_t traced = 0u;
++    if (trace && traced < 400u) {
++        ++traced;
++        std::ostringstream line;
++        line << "[fb-clut] frame " << frames << " draw into 0x" << std::hex << call.target.color_address << std::dec
++             << " fmt " << call.target.color_format << ": texture 0x" << std::hex << texture.address << std::dec
++             << " fmt " << static_cast<int>(texture.format) << " " << texture.width << "x" << texture.height
++             << " bufw " << texture.buffer_width << " over target 0x" << std::hex << target.address << std::dec
++             << " fmt " << target.format << " stride " << target.stride << " at texel (" << source.texel_x << ","
++             << source.y << "), " << source.texels_per_pixel << " a pixel; CLUT 0x" << std::hex
++             << texture.clut_address << std::dec << " fmt " << texture.clut_format << " shift "
++             << texture.clut_shift << " mask 0x" << std::hex << texture.clut_mask << std::dec << " start "
++             << texture.clut_offset << " loaded " << texture.clut_load_bytes << " bytes, "
++             << (holder != nullptr ? "in a target" : "in memory");
++        if (holder == nullptr) {
++            std::array<std::uint32_t, 32> entries{};
++            decode_palette(memory, texture, 32u, entries.data());
++            line << ", entries" << std::hex;
++            for (const std::uint32_t entry : entries) line << " " << entry;
++            line << std::dec;
++        }
++        line << "; tfx " << texture.function << " tcc " << (texture.alpha_from_texture ? 1 : 0) << " double "
++             << (texture.color_double ? 1 : 0) << " filter " << texture.min_filter << "/" << texture.mag_filter
++             << " blend " << (call.blend.enabled ? 1 : 0) << " " << call.blend.source_factor << "/"
++             << call.blend.destination_factor << " eq " << call.blend.equation << " fix 0x" << std::hex
++             << call.blend.fixed_source << "/0x" << call.blend.fixed_destination << std::dec << " alpha test "
++             << (call.alpha_test.enabled ? 1 : 0) << " " << (call.through ? "through" : "transformed") << " prim "
++             << static_cast<int>(call.primitive) << " material 0x" << std::hex << call.material_color << std::dec
++             << " vertex colour " << (call.has_vertex_color ? 1 : 0) << " vertices " << call.vertices.size() << ":";
++        for (std::size_t i = 0; i < std::min<std::size_t>(call.vertices.size(), 6u); ++i) {
++            const Vertex &vertex = call.vertices[i];
++            line << " (" << vertex.position[0] << "," << vertex.position[1] << " uv " << vertex.texcoord[0] << ","
++                 << vertex.texcoord[1] << " c " << std::hex << vertex.color << std::dec << ")";
++        }
++        std::cerr << line.str() << "\n";
++    }
++
++    // A draw recorded for drawing again in between frames keeps its picture
++    // until no recorded frame can name it (as Target::Snapshot); any other
++    // picture may be taken by the next palette view, which the barriers order
++    // after the draws that read it.
++    const bool hold = interpolating && shows(call.target.color_address);
++    const VkExtent2D extent{target_extent.width * source.texels_per_pixel, target_extent.height};
++    const auto use = [&](PaletteView &view) {
++        if (hold) {
++            view.held = true;
++            view.held_frame = frames;
++        }
++        return view.descriptor;
++    };
++    for (PaletteView &view : palette_views)
++        if (view.valid && view.key == key && view.extent.width == extent.width && view.extent.height == extent.height)
++            return use(view);
++
++    PaletteView *slot_view = nullptr;
++    for (PaletteView &view : palette_views) {
++        const bool free = !view.valid || !view.held || view.held_frame + 3u <= frames;
++        if (free && view.extent.width == extent.width && view.extent.height == extent.height) {
++            slot_view = &view;
++            break;
++        }
++    }
++    if (slot_view == nullptr) {
++        if (palette_views.size() >= kMaxPaletteViews) {
++            static bool told = false;
++            if (!told) {
++                told = true;
++                std::cout << "[render] no room for more palette views of render targets; some are decoded from "
++                             "guest memory\n";
++            }
++            return VK_NULL_HANDLE;
++        }
++        PaletteView added{};
++        added.extent = extent;
++        std::string error;
++        bool made = create_image(extent.width, extent.height, VK_FORMAT_R8G8B8A8_UNORM,
++                                 VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, added.image,
++                                 added.memory, added.view, VK_IMAGE_ASPECT_COLOR_BIT, error);
++        if (made) {
++            VkFramebufferCreateInfo framebuffer_info{VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
++            framebuffer_info.renderPass = palette_render_pass;
++            framebuffer_info.attachmentCount = 1u;
++            framebuffer_info.pAttachments = &added.view;
++            framebuffer_info.width = extent.width;
++            framebuffer_info.height = extent.height;
++            framebuffer_info.layers = 1u;
++            made = check(vkCreateFramebuffer(device, &framebuffer_info, nullptr, &added.framebuffer),
++                         "vkCreateFramebuffer", error);
++        }
++        if (made) {
++            VkDescriptorSetAllocateInfo descriptor_info{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
++            descriptor_info.descriptorPool = descriptor_pool;
++            descriptor_info.descriptorSetCount = 1u;
++            descriptor_info.pSetLayouts = &descriptor_layout;
++            made = check(vkAllocateDescriptorSets(device, &descriptor_info, &added.descriptor),
++                         "vkAllocateDescriptorSets", error);
++            if (!made) added.descriptor = VK_NULL_HANDLE;
++        }
++        if (!made) {
++            std::cout << "[render] cannot make a palette view of a render target: " << error << "\n";
++            destroy_palette_view(added);
++            return VK_NULL_HANDLE;
++        }
++        VkDescriptorImageInfo image_info{framebuffer_sampler(), added.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
++        VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
++        write.dstSet = added.descriptor;
++        write.descriptorCount = 1u;
++        write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
++        write.pImageInfo = &image_info;
++        vkUpdateDescriptorSets(device, 1u, &write, 0u, nullptr);
++        palette_views.push_back(added);
++        slot_view = &palette_views.back();
++    }
++
++    // The target's copy (and the palette holder's) brought up to date; each
++    // ends the pass in progress.
++    const VkDescriptorSet pixels = framebuffer_descriptor(target, false);
++    if (pixels == VK_NULL_HANDLE) return VK_NULL_HANDLE;
++    if (holder != nullptr) {
++        palette = framebuffer_descriptor(*holder, false);
++        if (palette == VK_NULL_HANDLE) return VK_NULL_HANDLE;
++    }
++    end_pass();
++
++    PaletteView &view = *slot_view;
++    transition(command_buffer, view.image,
++               view.valid ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL : VK_IMAGE_LAYOUT_UNDEFINED,
++               VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
++    VkRenderPassBeginInfo pass{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
++    pass.renderPass = palette_render_pass;
++    pass.framebuffer = view.framebuffer;
++    pass.renderArea = {{0, 0}, extent};
++    vkCmdBeginRenderPass(command_buffer, &pass, VK_SUBPASS_CONTENTS_INLINE);
++    perf::count_render_pass();
++    const VkViewport viewport{0.0f, 0.0f, static_cast<float>(extent.width), static_cast<float>(extent.height),
++                              0.0f, 1.0f};
++    const VkRect2D scissor{{0, 0}, extent};
++    vkCmdSetViewport(command_buffer, 0u, 1u, &viewport);
++    vkCmdSetScissor(command_buffer, 0u, 1u, &scissor);
++    vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, palette_pipeline);
++    const std::array<VkDescriptorSet, 2> sets{pixels, palette};
++    vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, palette_layout, 0u,
++                            static_cast<std::uint32_t>(sets.size()), sets.data(), 0u, nullptr);
++    const float scale_x = static_cast<float>(target_extent.width) / static_cast<float>(kPspWidth);
++    const float scale_y = static_cast<float>(target_extent.height) / static_cast<float>(kPspHeight);
++    std::array<std::int32_t, 16> push{};
++    push[0] = static_cast<std::int32_t>(texture_bits);
++    push[1] = static_cast<std::int32_t>(target.format);
++    push[2] = static_cast<std::int32_t>(source.texels_per_pixel);
++    push[3] = holder != nullptr ? 1 : 0;
++    push[4] = static_cast<std::int32_t>(texture.clut_shift);
++    push[5] = static_cast<std::int32_t>(texture.clut_mask);
++    push[6] = static_cast<std::int32_t>(texture.clut_offset << 4u);
++    push[7] = static_cast<std::int32_t>(texture.clut_format);
++    std::memcpy(&push[8], &scale_x, sizeof(float));
++    std::memcpy(&push[9], &scale_y, sizeof(float));
++    if (holder != nullptr) {
++        push[12] = static_cast<std::int32_t>(holder_pixel % holder->stride);
++        push[13] = static_cast<std::int32_t>(holder_pixel / holder->stride);
++        push[14] = static_cast<std::int32_t>(holder->stride);
++        push[15] = static_cast<std::int32_t>(holder->format);
++    }
++    vkCmdPushConstants(command_buffer, palette_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0u, sizeof(push), push.data());
++    vkCmdDraw(command_buffer, 3u, 1u, 0u, 0u);
++    vkCmdEndRenderPass(command_buffer);
++    transition(command_buffer, view.image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
++               VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
++    forget_bindings();
++    view.key = key;
++    view.valid = true;
++    view.held = false;
++    return use(view);
++}
++
+ bool VulkanRenderer::Impl::draw_screen_quad(const PipelineKey &key, VkDescriptorSet texture, std::uint32_t color,
+                                             const std::array<float, 4> &texture_params) {
+     const VkPipeline pipeline = pipeline_for(key);
+@@ -6171,6 +6681,7 @@ void VulkanRenderer::Impl::resize_targets(VkExtent2D extent) {
+         }
+     });
+     for (auto &[address, old_target] : old_targets) destroy_target(old_target);
++    destroy_palette_views();
+     // Recorded frames name the old targets and hold viewports of the old size.
+     reset_interpolation();
+     destroy_interpolation_targets();
+@@ -6299,6 +6810,16 @@ void VulkanRenderer::set_sharp_textures(bool sharp) {
+     };
+     rewrite(impl.white_texture);
+     for (auto &[key, texture] : impl.textures) rewrite(texture);
++    for (Impl::PaletteView &view : impl.palette_views) {
++        if (view.descriptor == VK_NULL_HANDLE) continue;
++        VkDescriptorImageInfo image_info{impl.framebuffer_sampler(), view.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
++        VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
++        write.dstSet = view.descriptor;
++        write.descriptorCount = 1u;
++        write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
++        write.pImageInfo = &image_info;
++        vkUpdateDescriptorSets(impl.device, 1u, &write, 0u, nullptr);
++    }
+     impl.replacements.set_sharp(sharp);
+     for (auto &[address, target] : impl.targets) {
+         for (std::size_t i = 0; i < target.copy_descriptors.size(); ++i) {
+@@ -7411,17 +7932,30 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+         std::array<float, 4> mapping{1.0f / static_cast<float>(kPspWidth), 1.0f / static_cast<float>(kPspHeight),
+                                      0.0f, 0.0f};
+         VkDescriptorSet copy = VK_NULL_HANDLE;
+-        // A draw into the shown framebuffer recorded for frame interpolation
+-        // samples a snapshot (Target::Snapshot); <prefix>_NO_FB_SNAPSHOTS
+-        // samples the target's one copy, as before.
+-        static const bool no_snapshots = portablekit::env("NO_FB_SNAPSHOTS") != nullptr;
+-        if (source.target != nullptr && impl.interpolating && !no_snapshots &&
+-            impl.shows(call.target.color_address))
+-            copy = impl.framebuffer_snapshot(*source.target, opaque, source.x, source.y, call.texture.width,
+-                                             call.texture.height, mapping);
+-        if (source.target != nullptr && copy == VK_NULL_HANDLE) {
+-            mapping = {1.0f / static_cast<float>(kPspWidth), 1.0f / static_cast<float>(kPspHeight), 0.0f, 0.0f};
+-            copy = impl.framebuffer_descriptor(*source.target, opaque);
++        // Where the texture's first texel lies in the picture sampled, in its
++        // texels: a pixel of the target, or for a palette view a texel of the
++        // decoded picture, which has texels_per_pixel across each pixel.
++        float first_x = static_cast<float>(source.x);
++        if (source.target != nullptr && source.texels_per_pixel != 0u) {
++            // A palette view: decoded on the GPU into a picture that serves
++            // as its own snapshot (palette_view()).
++            copy = impl.palette_view(memory, source, call);
++            mapping = {1.0f / static_cast<float>(kPspWidth * source.texels_per_pixel),
++                       1.0f / static_cast<float>(kPspHeight), 0.0f, 0.0f};
++            first_x = static_cast<float>(source.texel_x);
++        } else {
++            // A draw into the shown framebuffer recorded for frame interpolation
++            // samples a snapshot (Target::Snapshot); <prefix>_NO_FB_SNAPSHOTS
++            // samples the target's one copy, as before.
++            static const bool no_snapshots = portablekit::env("NO_FB_SNAPSHOTS") != nullptr;
++            if (source.target != nullptr && impl.interpolating && !no_snapshots &&
++                impl.shows(call.target.color_address))
++                copy = impl.framebuffer_snapshot(*source.target, opaque, source.x, source.y, call.texture.width,
++                                                 call.texture.height, mapping);
++            if (source.target != nullptr && copy == VK_NULL_HANDLE) {
++                mapping = {1.0f / static_cast<float>(kPspWidth), 1.0f / static_cast<float>(kPspHeight), 0.0f, 0.0f};
++                copy = impl.framebuffer_descriptor(*source.target, opaque);
++            }
+         }
+         if (copy != VK_NULL_HANDLE) {
+             // Texture coordinates address the game's texture, whose first texel
+@@ -7434,7 +7968,7 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+             const float height = static_cast<float>(call.texture.height);
+             const std::array<float, 4> uv = push.uv_transform;
+             push.uv_transform = {uv[0] * width * mapping[0], uv[1] * height * mapping[1],
+-                                 (uv[2] * width + static_cast<float>(source.x)) * mapping[0] + mapping[2],
++                                 (uv[2] * width + first_x) * mapping[0] + mapping[2],
+                                  (uv[3] * height + static_cast<float>(source.y)) * mapping[1] + mapping[3]};
+         } else {
+             texture_descriptor = impl.texture_descriptor(memory, call);
+@@ -7522,8 +8056,13 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+             drawn.stride != call.target.color_stride || drawn.format != call.target.color_format;
+         drawn.stride = call.target.color_stride;
+         drawn.format = call.target.color_format;
+-        if (layout_changed || drawn.guest_words.empty() || drawn.last_drawn_frame != impl.frames)
++        if (layout_changed || drawn.guest_words.empty() || drawn.last_drawn_frame != impl.frames) {
+             impl.snapshot_guest_words(memory, call.target.color_address, drawn);
++            drawn.drawn_right = 0u;
++            drawn.drawn_bottom = 0u;
++        }
++        drawn.drawn_right = std::max(drawn.drawn_right, std::min(call.viewport.scissor_x2 + 1u, drawn.stride));
++        drawn.drawn_bottom = std::max(drawn.drawn_bottom, std::min(call.viewport.scissor_y2 + 1u, kPspHeight));
+         drawn.last_drawn_frame = impl.frames;
+         drawn.draw_serial = ++impl.target_draw_counter;
+         if (impl.shared_depth && writes_depth) {
+@@ -9040,6 +9579,7 @@ void VulkanRenderer::shutdown() {
+     impl.ui_ready = false;
+     impl.destroy_swapchain_views();
+     impl.destroy_level_pipeline();
++    impl.destroy_palette_pipeline();
+ #if defined(__ANDROID__)
+     impl.destroy_rotation_pipeline();
+ #endif
+-- 
+2.53.0.windows.1
+

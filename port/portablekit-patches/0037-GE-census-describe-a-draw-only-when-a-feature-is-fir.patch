@@ -1,7 +1,7 @@
 From 6cbbc62493e1baa7ec12e0dc0907348d89937756 Mon Sep 17 00:00:00 2001
 From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
 Date: Tue, 20 Oct 2026 22:12:08 +1030
-Subject: [PATCH 37/39] GE census: describe a draw only when a feature is first
+Subject: [PATCH 37/41] GE census: describe a draw only when a feature is first
  seen
 
 Formatting every draw's description cost more than the draw: a battle ran

@@ -1,7 +1,7 @@
 From 18a73d27819bd0277febb7871510c82711c03bbc Mon Sep 17 00:00:00 2001
 From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
 Date: Mon, 19 Oct 2026 07:16:24 +1030
-Subject: [PATCH 25/39] Host audio tracks: a host audio file played as one of
+Subject: [PATCH 25/41] Host audio tracks: a host audio file played as one of
  the game's ATRAC tracks
 
 host/audio/host_audio.hpp lets a port play an audio file of the host's

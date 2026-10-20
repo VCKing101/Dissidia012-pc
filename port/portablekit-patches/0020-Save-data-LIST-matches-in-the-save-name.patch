@@ -1,7 +1,7 @@
 From 9b7c583cc26132da8522988ddce01bb5bbd6c813 Mon Sep 17 00:00:00 2001
 From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
 Date: Sun, 18 Oct 2026 22:00:56 +1030
-Subject: [PATCH 20/39] Save data: LIST matches '*' in the save name
+Subject: [PATCH 20/41] Save data: LIST matches '*' in the save name
 
 A game was traced asking LIST for "NAME*" to find its saves "NAME00" to
 "NAME19". The pattern matched '?' only, so LIST found none; the game took

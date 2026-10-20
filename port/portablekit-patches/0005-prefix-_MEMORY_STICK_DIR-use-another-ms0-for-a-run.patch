@@ -1,7 +1,7 @@
 From 1ee55eb5a0947a8f84433d4564bbc97610606d5e Mon Sep 17 00:00:00 2001
 From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
 Date: Sun, 18 Oct 2026 18:32:27 +1030
-Subject: [PATCH 05/39] <prefix>_MEMORY_STICK_DIR: use another ms0 for a run
+Subject: [PATCH 05/41] <prefix>_MEMORY_STICK_DIR: use another ms0 for a run
 
 The memory stick was always ms0/ next to the game (or in the data
 directory for an installation). A test run with fresh saves meant moving

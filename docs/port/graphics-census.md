@@ -27,7 +27,9 @@
 - **Top open findings**, by likely visual impact:
   1. **Palette views of the framebuffer** (`fbtex.miss_clut_view`, 1,340 draws): EX Revenge's greyscale reads the
      5551 frame as CLUT16 with index shifts 0, 5, 10. The renderer decodes guest memory instead of the render: the
-     whole scene turns flat grey for the effect's length (`evidence/ex_revenge_grey.png`).
+     whole scene turns flat grey for the effect's length (`evidence/ex_revenge_grey.png`). **Fixed 21 October**
+     (section 9): decoded on the GPU at the internal scale; the stage now shows as the game's high-contrast
+     greyscale negative (`evidence/ex_revenge_fixed.png`).
   2. **Lines are not drawn** (`prim.lines`, 25,063 draws, every battle from the intro on): additive (factor 6/FIX)
      orange line segments, two vertices each.
   3. **Environment mapping** (`texmap.env_map`, 24,696 draws, Orphan's Cradle only): drawn with the vertex UVs.
@@ -136,7 +138,7 @@ triage's patches 0033 to 0035 were merged.
 
 | # | Feature | Draws | Where | What the renderer does | Likely visible as | Status |
 | --- | --- | --- | --- | --- | --- | --- |
-| 1 | `fbtex.miss_clut_view` | 1,340 | EX Revenge, 335 frames (`qb_ex_revenge`; counted under `qb_ex_results` in the third tour, which then had the gauge switch) | The 5551 framebuffer (`0x04000000`/`0x04044000`) read as a 512x512 CLUT16 texture into `0x040CC000`, three passes with index shift 0, 5 and 10 and mask `0x1F` (one channel each), then composited. A palette texture is never matched to a render target, so it is decoded from guest memory, which holds at best the 1x write-back of an earlier shown frame | The greyscale of EX Revenge comes out flat grey: the stage disappears behind fighters, particles and HUD (`evidence/ex_revenge_grey.png`, `ex_revenge_grey_ex_fight2.png`, `_fight3.png`) | Open |
+| 1 | `fbtex.miss_clut_view` | 1,340 | EX Revenge, 335 frames (`qb_ex_revenge`; counted under `qb_ex_results` in the third tour, which then had the gauge switch) | The 5551 framebuffer (`0x04000000`/`0x04044000`) read as a 512x512 CLUT16 texture into `0x040CC000`, three passes with index shift 0, 5 and 10 and mask `0x1F` (one channel each), then composited. A palette texture is never matched to a render target, so it is decoded from guest memory, which holds at best the 1x write-back of an earlier shown frame | The greyscale of EX Revenge comes out flat grey: the stage disappears behind fighters, particles and HUD (`evidence/ex_revenge_grey.png`, `ex_revenge_grey_ex_fight2.png`, `_fight3.png`) | Fixed 21 October (section 9): palette views decoded on the GPU; `D012_NO_FB_CLUT` |
 | 2 | `prim.lines` | 25,063 | Every battle, intro and fight (1,100-6,800 a route) | Line and line-strip primitives are skipped (`expand()` returns false) | Missing streaks: additive (2x alpha, FIX white) orange segments of two vertices, colour `0x80105FE4` | Open |
 | 3 | `texmap.env_map` | 24,696 | Orphan's Cradle | Texture map mode 2 (shade mapping from the lights in `0xC1`) ignored; the vertex UVs are used | A 128x128 CLUT4 texture on quads (vertex type `0x99`, no normals) blended additively; the GE would take the coordinates from the lights and normals | Open |
 | 4 | `depth.range_minz_maxz` | 7,501 | Order's Sanctuary (6,454), Empyreal Paradox | MINZ/MAXZ (`0x2710`..`0xC350`) narrower than the viewport's depth range on these draws; not applied | Additive 64x64 CLUT8 glow sprites (vertex alpha `0x7D`) drawn where the GE would cut them: a stage overlay too much | Open |
@@ -172,7 +174,7 @@ feature above where its value matters.
 
 | Order | Fix | Effort | Why first |
 | --- | --- | --- | --- |
-| 1 | Palette views of render targets: when a CLUT4/8/16 texture lies over a target drawn with the same row length and pixel size, sample the target's copy on the GPU, rebuild the 16-bit pixel from the RGBA8 texel (5551, 5650, 4444), apply shift, mask and start, and look the index up in the palette (a small palette texture) in the shader | 2 days | A whole-screen effect lost (EX Revenge); the same mechanism serves other colour-grading effects |
+| 1 | Palette views of render targets: when a CLUT4/8/16 texture lies over a target drawn with the same row length and pixel size, sample the target's copy on the GPU, rebuild the 16-bit pixel from the RGBA8 texel (5551, 5650, 4444), apply shift, mask and start, and look the index up in the palette (a small palette texture) in the shader | 2 days | A whole-screen effect lost (EX Revenge); the same mechanism serves other colour-grading effects. **Done** (section 9) |
 | 2 | Lines (and points, same path): expand each segment into a screen-aligned quad one PSP pixel wide times the internal scale, as transformed sprites are expanded, so the replay and the pipelines need no new topology | 1 day | Every battle, from the intro |
 | 3 | MINZ/MAXZ: discard in the fragment shader outside the range, mapped like the viewport's z (a uniform; the push constants are full) | 0.5 day | Order's Sanctuary's extra glows; cheap |
 | 4 | EX Burst capture: read back at the internal scale into a texture kept for the RAM copy (or treat the copy as a render target), and key large textures written by a transfer by a full hash once after the transfer | 1 day | The burst's backdrop: 1x and possibly stale |
@@ -201,7 +203,8 @@ In this repository: `tools/port/gfx_tour.py`, this document, `port/README.md`.
 ## 6. Not verified
 
 - Hardware: what the GE does past the far plane with `0x1C` on; environment mapping without normals; how EX Revenge
-  looks on a PSP (the colour passes say greyscale; the port shows flat grey).
+  looks on a PSP (the colour passes say greyscale; the port showed flat grey; since section 9 it shows what the
+  traced passes compute, not compared with a handheld).
 - The line segments' look: they were counted, never drawn.
 - Summons, forests, dead orbs, ten of the fifteen stages, other fighters' EX Bursts, the Story Mode cutscenes and
   movies; captures were looked at as stills, not in motion.
@@ -220,3 +223,147 @@ In this repository: `tools/port/gfx_tour.py`, this document, `port/README.md`.
 .\.venv\Scripts\python.exe tools/port/gfx_tour.py --routes qb_ex_results --env D012_CLUT_FIRST_WORD_KEY=1
 # The census alone, on any run: --env D012_GE_CENSUS=build/port/census.json, and "N:scene NAME" steps in the script
 ```
+
+## 8. Lines: fixed (finding 2)
+
+> 21 October 2026. Finding 2 (`prim.lines`) is fixed on the PortableKit branch `ge-lines` (worktree
+> `tools/local/port/PortableKit-lines`, commit `6e5f8ba` on `dissidia` at `b701e14`; not merged, no patch
+> regenerated). Build `tools/local/port/build-d012-lines` (the options of `build-d012-recomp`), data
+> `build/port/data-lines` (a copy of `build/port/data`, with `video.present_mode=immediate`: with vsync every run
+> stalled before its first frame on this session's unattended desktop, the unchanged tour build too). Captures, logs
+> and censuses: `build/port/gfx-lines/` (never committed); the tour was run through a wrapper that points
+> `gfx_tour.py` at those directories, so `build/port/gfx-tour` was not touched.
+
+**What the lines are.** Hit sparks. `D012_TRACE_LINES` (new) on every battle route: all are transformed (none in
+through mode), untextured, vertex type `0x19C` (8888 colour, float position), additive (factors 6/10: twice the
+source alpha, FIX `0xFFFFFF`), depth test GEQUAL without depth writes, alpha test on, no stencil, lighting, fog or
+culling, into the shown framebuffer (`0x04000000`/`0x04044000`). Almost every draw is a line strip of two
+vertices, one segment: a bright head (alpha `0x80`) fading to a tail of half its colour and alpha, 2 to 30 PSP
+pixels long, flying out from where an attack lands. Colour by stage: orange `0x105FE4` (Old Chaos Shrine, Empyreal
+Paradox, the EX routes), yellow-orange `0x0E7FE4` (Lunar Subterrane, Order's Sanctuary), grey `0x808080` (Orphan's
+Cradle). EX Revenge also draws red ones (`0xFF8080` to `0x990000`) as line lists of 14 to 20 segments in one draw.
+They come in bursts: the intro's clash, each brave hit, HP attacks and EX Bursts, up to 45-90 segments a game
+frame and none in between; 25,880 draws over the tour's base runs, none in menus or Story Mode. Nothing else in
+the game draws lines on these routes (no speed lines, trails or debug lines). Without them every hit lost its
+sparks: `evidence/l_hit_b_*_before_after.png` (a brave combo: a fan of orange streaks around Lightning),
+`l_hp_*` (an HP attack's white streaks), `l_intro_a_*` (the intro's clash).
+
+**The fix** (`host/gpu/line_quads.hpp`, `vulkan_renderer.cpp`): each segment becomes a quad of two triangles drawn
+through the draw's own pipeline, so blending, depth, stencil, the pixel mask, colour doubling and the alpha test
+are those of any triangle, and frame interpolation records and replays it like one.
+
+- Width: one PSP pixel, measured along the minor axis (a mostly horizontal segment is one pixel tall in every
+  column), which is the coverage of the GE's one-pixel line: at 1x it lights the same pixels, a diagonal is not
+  1.41 times as bright, and at scale N it is N target pixels wide, the same share of the screen. A
+  one-target-pixel line (Vulkan's own) would be a quarter of the width at 4x and, these lines being additive, a
+  quarter of the light.
+- Ends: no caps; a quad runs from end to end, so a strip's shared vertex is not drawn twice (half-open, as raster
+  lines are). Colour, texture coordinates and depth per end, interpolated along the line (Gouraud).
+- Transformed: cut at the near plane, the corners offset on the screen at each end's own depth and handed back in
+  object space through the inverse transform, as transformed sprites are (so the vertex shader, lighting and fog
+  are unchanged, and an interpolated frame blends the transform as for any draw); centred on the projected line.
+  Through mode: centred half a pixel in, as the pixel a through coordinate names. Culling is off for lines.
+- Interpolation: lines take part like every other draw. They pair by the same key (vertex address, type, count);
+  their vertices move by new data each game frame, not by matrices, so in-between frames show them where the older
+  frame drew them, moved with the camera, as the game's other particles.
+- Switches: `<prefix>_NO_LINES` skips lines as before; `<prefix>_TRACE_LINES[=N]` logs the first N line draws and
+  each frame's count. The census counts `prim.lines_drawn` (info) instead of `prim.lines` unless `NO_LINES` is set.
+  `portablekit_render_tests` checks segment pairing, widths, ends, colours, the near-plane cut.
+
+**Verified.** Before/after at the same frame (`NO_LINES` against the build) on `qb_chaos_shrine` at 4x and 1x,
+30 fps: the timelines matched and only the line pixels differ (2,000 to 12,000 pixels at hit frames, 0 where there
+are none); at 60 fps with interpolation lines show (`l_hit_c_base_60fps_after.png`) and every replay check stayed
+at 0.00-0.03% (Kuja 0.18%, under the 1% limit). The whole tour (33 runs, 432 captures, `tour_after.txt`): no run
+with problems and no interpreter fallback; its 184 flags against the census tour's baseline are other timelines
+(the battles run on a different clock with immediate presents: other stage forms, moments and camera angles,
+`evidence/tour_flags_are_timelines.png`), not rendering changes. Cost (`D012_PERF=log`, the shrine at 4x/60 fps):
+at most about 17 line draws a game frame, of about 2,800; battle seconds averaged render 4.2 / GPU 1.9 ms without
+lines and 4.0 / 1.2 ms with them, the seconds with the most sparks 4.7 / 1.3 ms: within run-to-run noise.
+`portablekit_host_check` builds and the 21 framework tests pass.
+
+**Not verified.** The GE's exact pixel choice for a line (which pixel a step lands in, whether the last pixel is
+drawn) and flat-shaded lines (the census saw none); line antialiasing (`0x25`, never set). The sparks were
+compared with the port's own frames, not with a handheld.
+
+## 9. EX Revenge: fixed (finding 1)
+
+> 21 October 2026. Finding 1 (`fbtex.miss_clut_view`) is fixed on the PortableKit branch `ex-revenge` (worktree
+> `tools/local/port/PortableKit-exrevenge`, commit `79adede` on `dissidia` at `b701e14`; not merged, no patch
+> regenerated). Build `tools/local/port/build-d012-exrevenge` (the options of `build-d012-recomp`), data
+> `build/port/data-exrevenge` (a copy of `build/port/data` with `video.present_mode=immediate`: the monitor was
+> asleep, and with vsync every run presented at 4 fps and never reached the title). Runs through a wrapper that
+> points `gfx_tour.py` at that data and at `build/port/gfx-tour-exrevenge*/` (never committed); `build/port/gfx-tour`
+> got only the two evidence images below.
+
+**What the draws do.** Traced with `D012_TRACE_FB_CLUT=1` (new) and `D012_TRACE_GE_LIST=8722:2:400000` on
+`qb_ex_revenge` at 30 fps (list run 8722, game frame 8721, the effect's first; it lasts 299 to 303 frames). Every
+frame of the effect, once the stage is drawn into the shown framebuffer F (`0x04000000` or `0x04044000`, 5551, 512
+wide), five passes follow, each of full-screen through-mode triangles, texture 512x512 with row length 512, no
+vertex colour (so the colour is the material ambient colour, `0x55`/`0x58`), dither off:
+
+| Pass | Into | Texture | Index (`0xC5`) | CLUT (5551, 2 blocks = 32 entries) | Colour, function | Blend | Leaves in red |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | `0x040CC000` | F as CLUT16 | shift 0, mask `0x1F`: F's red | `0x089D6050`: entry v = red v/31, no green or blue | `0x000098` (0.596), modulate, TCC off | source alpha / 1 - alpha, alpha 1: replace | 0.596 R |
+| 2 | `0x040CC000` | F as CLUT16 | shift 5: F's green | the same | `0x0000FF` (1.0) | source alpha / FIX `0xFFFFFF`: add | + 1.0 G |
+| 3 | `0x040CC000` | F as CLUT16 | shift 10: F's blue | the same | `0x00003A` (0.227) | add | + 0.227 B |
+| 4 | `0x040CC000` | `0x040CC000` itself as CLUT16 | shift 0: the sum | `0x089D60D0`: entry v = grey (31 - v)/31 | replace (`0xC9000003`), TCC off | replace | grey |
+| 5 | F | `0x040CC000` as 5551 | | | `0xFFFFFF`, modulate | replace | |
+
+The GE reads a CLUT16 texel as the 16-bit word in VRAM, so over a 5551 framebuffer the index is the pixel itself
+(red in bits 0-4, green 5-9, blue 10-14, the stencil bit 15), and the entry is ((index >> shift) & mask) |
+(start << 4); passes 1-3 therefore copy one 5-bit channel each into the scratch buffer's red channel, weighted by
+the material colour: twice the Rec. 601 luma (0.299, 0.587, 0.114, doubled to 0.598, 1.174, 0.228; green capped at
+1.0 by the 8-bit colour), clamped at 31. Pass 4 maps that through an inverted ramp, pass 5 copies it over the
+frame, and the fighters, effects and HUD drawn afterwards keep their colour. Both CLUTs are in main RAM, loaded by
+`0xC4` from the game's data; none comes from a render target. So the intended look is not a plain desaturation: the
+stage becomes a high-contrast greyscale negative in 32 levels, white where it was black, black wherever its luma
+reaches one half (a bright sky), with the fighters in colour.
+
+**Cause.** `find_framebuffer_texture()` matched only direct-colour textures to render targets. A palette texture
+over F or `0x040CC000` was decoded from guest memory, which holds no render (at best the 1x write-back of an older
+shown frame): the composite came out flat grey (175 of 255) wherever the stage was.
+
+**Fix** (`host/gpu/vulkan_renderer.cpp` `palette_view()`, `host/gpu/shaders/fb_clut.frag`, game-agnostic). A
+CLUT4/8/16/32 texture is matched to a render target when its rows are the target's rows (row length times index
+bits equals the target's row in bits), its index fits a whole number of times in a pixel, and its first texel lies
+inside the rectangle the target's draws reached (their scissors), guest memory under it unchanged as for
+any texture over a target. A pass at the internal scale then reads the target's copy, turns each pixel back into the
+guest word the GE would hold (5650, 5551, 4444 or 8888, the top bits of each channel, as the write-back stores
+them), takes the texel's index from its bits (low bits first for indices smaller than a pixel), applies shift, mask
+and start, and looks the entry up: in a 512x1 texture of the palette decoded from guest memory (kept per distinct
+palette), or, when the CLUT address lies inside what a render target drew (entry size equal to its pixel size), in
+that target, read at the middle of each guest pixel. The draw samples the resulting picture like any render target,
+so filtering comes after the lookup, as on the GE. A picture made for a draw recorded for frame interpolation is
+kept until no recorded frame can name it, as the render-target snapshots of patch 0033 are; others are reused in
+command order. Off switch `D012_NO_FB_CLUT` (guest memory, as before); `D012_TRACE_FB_CLUT` logs the first 400
+views; the census counts `fbtex.clut_view` (info) and `clut.in_target`. A sync of the target down to guest memory
+was not needed: every step runs on the GPU at the internal scale.
+
+**Verified.**
+
+- Before and after, same timeline, same capture (`revenge4`), at 4x and 1x, 60 fps (interpolated) and 30 fps:
+  `build/port/gfx-tour/evidence/ex_revenge_fixed.png` (before: `D012_NO_FB_CLUT=1` on the same build, or the build
+  before the change). Before: flat grey with the fighters and some debris on it. After: the restored Old Chaos
+  Shrine's walls, pillars and doors as a light greyscale negative, the sky black with grey clouds, Lightning and the
+  HUD in colour; the 1x and 4x pictures agree, the 4x one at full detail (`ex_revenge_fixed_crop.png`: 1x before,
+  1x after, 4x after). It is believed right because every value comes from the traced state: the game's own two
+  palettes, its weights and blends; the rest of each frame is unchanged.
+- Census: `fbtex.miss_clut_view` 1,196-1,212 a run before, 0 after; `fbtex.clut_view` 1,196-1,212, in the
+  `qb_ex_revenge` battle only (four views a frame); no other route of the tour makes a palette view, and
+  `clut.in_target` never occurs, so every other draw takes the unchanged path.
+- Interpolation: the route fights unthrottled, which does not interpolate, so a variant at real time with
+  `D012_CHECK_REPLAY` and `D012_CAPTURE_BLENDED` (`build/port/gfx-tour-exrevenge-rt*`): EX Revenge drawn in the
+  blended frames; of 8 replay checks, two inside the effect differ in 1.9-2.1% of pixels, the same run with
+  `D012_NO_FB_CLUT=1` 4.5% and 2.7%, both in the same box around the player in EX Mode (a pre-existing replay
+  mismatch, not the palette views); the others 0-0.1%.
+- Whole tour on the fixed build (`build/port/gfx-tour-exrevenge/`, 33 runs, 432 captures): no run with problems,
+  no interpreter fallback, battle replay checks 0.00-0.23%. Its 185 flags against the census tour's baseline are
+  other timelines (the owner's save has moved on since the baseline was made, and immediate presents change the
+  clock), as for the lines fix in section 8.
+- The 21 framework tests pass and `portablekit_host_check` builds (`tools/local/port/build-framework-exrevenge`).
+
+**Not verified.** The look on a PSP. Palette views with indices smaller than a pixel (CLUT4/8 over a framebuffer),
+over 5650, 4444 or 8888 targets, and CLUTs read from a render target: implemented, but this game uses none of them
+on the toured routes. The hardware rounds each pass to 5 bits before the next blend reads it; the port adds in 8
+bits and rounds once, which can move a pixel by a level or two. The extra pass's cost was not measured (four passes
+a frame at the internal scale, only during EX Revenge).

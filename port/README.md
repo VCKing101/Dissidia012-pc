@@ -208,6 +208,8 @@ fresh clone of `33800c4`, apply them with `git checkout -b dissidia 33800c4` and
 | 0037 | The census describes a draw only at a feature's first hit and writes every 600 frames (`host/gpu/ge_census.*`) | Formatting every draw slowed a battle to real time |
 | 0038 | A palette texture's cache key takes the bytes its last CLUT load read and its index shift, mask and start, as does the per-list lookup (`host/gpu/texture_decode.cpp`, `host/gpu/vulkan_renderer.cpp`); `<prefix>_CLUT_FIRST_WORD_KEY` turns it off | EX Revenge reads one framebuffer through three index shifts of one CLUT, which shared one decode; battle palettes changed after their first entry kept the old one |
 | 0039 | The census counts blend factors 6/7 and TCC as handled, and as approximations only with their off switches (`host/gpu/ge_census.cpp`) | Patches 0034 and 0035 |
+| 0040 | A palette texture over a render target is decoded on the GPU at the internal scale (`host/gpu/shaders/fb_clut.frag`, `host/gpu/vulkan_renderer.cpp`), respecting interpolation snapshots; `<prefix>_NO_FB_CLUT` turns it off, `<prefix>_TRACE_FB_CLUT` traces it | EX Revenge reads the frame through CLUT16 shifts to make a greyscale negative; decoded from stale memory it came out flat grey |
+| 0041 | Line and line-strip primitives drawn as quads one PSP pixel wide at the internal scale through the draw's own pipeline (`host/gpu/line_quads.hpp`); `<prefix>_NO_LINES` skips them, `<prefix>_TRACE_LINES` traces them | Every hit's spark streaks (about 25,000 line draws per battle) were never drawn |
 
 Patches 0012 and 0013 were made on a separate worktree branch during the recompiled-build work and merged onto
 `dissidia` on 18 October 2026; patches 0014 and 0015 followed the same day (bring-up log, section "Stencil"), and
@@ -215,7 +217,7 @@ patches 0016 to 0022 that evening (section "HP bar, orbs and saves"), patches 00
 ([mod-folder.md](../docs/port/mod-folder.md)), and patches 0026 and 0027 the same day for the BGM playlist
 ([bgm-playlist-design.md](../docs/port/bgm-playlist-design.md), section 10); patch 0028 that evening, for analog
 diagonals that felt dead on a real controller. Patches 0036 to 0039 came on 20 October with the graphics census
-([graphics-census.md](../docs/port/graphics-census.md)).
+([graphics-census.md](../docs/port/graphics-census.md)), and 0040 and 0041 on 21 October from its first two findings.
 PortableKit's 21 framework tests pass on the branch and `portablekit_host_check` builds.
 
 ## Recompiled build
