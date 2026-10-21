@@ -167,6 +167,15 @@ program and an overlay library, a few tens of megabytes. The disc image and `EBO
 Files a deploy sent that the new package no longer has are removed; anything else in the folder, and the whole
 `data/` folder, is left alone.
 
+**Mods.** Add `--with-mods` to also send the PC's mods (`build/port/data/mods`) to `data/mods` on the Deck, the same
+way: only changed files, with a manifest of its own there. A mod file the PC no longer has is removed from the Deck
+only if an earlier `--with-mods` deploy sent it, so mods added on the Deck itself are kept. Saves (`data/ms0`) and
+settings are never touched. The Battle BGM Maker's `.backups` folders are not sent.
+
+```powershell
+.\.venv\Scripts\python.exe tools/port/deploy_deck.py --with-mods
+```
+
 Options: `--host deck@192.168.x.y`, `--dest /other/folder`, `--identity KEY`, `--no-build` (send the package as it is),
 `--dry-run`, `--rehash` (hash the Deck's files instead of trusting the manifest the last deploy left,
 `.deploy-manifest.json`), and `--local-target D:\Dissidia012` (the same deploy into a local folder, e.g. a USB
