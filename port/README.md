@@ -260,6 +260,23 @@ Generating takes seconds and compiling minutes, not hours (no ccache). A good ru
 `[overlay] installed suppreacc` and `[overlay] installed menu` and never `No recompiled function registered`.
 The PRX corpus only matches while the profile loads the PRX at `0x09B81000`.
 
+## Steam Deck
+
+The Windows release build, packaged as one self-contained folder and run on the Deck through Proton; updates go
+over the home network with one command. Step by step, for the owner: [docs/port/steam-deck.md](../docs/port/steam-deck.md).
+
+| Path | What it is |
+| --- | --- |
+| `tools/local/port/build-d012-release` | Release build directory (`PORTABLEKIT_RELEASE=ON`, the recompiled build's corpus in `build/port/recomp`) |
+| `host/d012_portable.cpp` | The portable layout: with `game/EBOOT.ELF` next to the executable, `D012_GAME_DIR`, `D012_DATA_DIR` and `D012_MEMORY_STICK_DIR` default to `<folder>/game`, `<folder>/data` and `<data>/ms0`, and the interpreter is off (`PSPRECOMP_NO_INTERPRETER=1`; `D012_INTERPRETER=1` keeps it). A variable already set always wins. A release build turns the interpreter off wherever it runs |
+| `tools/port/package_deck.py` | Assembles `build/port/deck-package/Dissidia012`: the program, its DLLs, `overlays/`, licences, `game/` (EBOOT.ELF copied, disc.iso hard-linked) and `data/settings.ini` with Deck defaults if absent; never saves or mods |
+| `tools/port/deploy_deck.py` | Builds, packages and sends only what changed (SHA-256 manifest, `.deploy-manifest.json` in the destination) over Windows' OpenSSH with a key; never touches the destination's `data/`. `--local-target DIR` deploys to a local folder |
+
+```powershell
+.\.venv\Scripts\python.exe tools/port/deploy_deck.py            # build, package, send to deck@steamdeck.local
+.\.venv\Scripts\python.exe tools/port/deploy_deck.py --dry-run  # what it would send
+```
+
 ## Rules for this directory
 
 - Our own MIT code only. No game bytes, no generated code, no code from PPSSPP (GPL) or from any other port's

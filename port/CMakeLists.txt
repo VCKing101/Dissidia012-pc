@@ -36,8 +36,16 @@ portablekit_add_game(D012Native
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_camera.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_loading_layout.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_crash_report.cpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_test_switches.cpp")
+            "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_test_switches.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_portable.cpp")
 target_include_directories(D012Native PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/host")
+# A release build (tools/local/port/build-d012-release, for the packaged
+# folder of tools/port/package_deck.py) runs its recompiled code only, with no
+# interpreter fallback unless D012_INTERPRETER is set (host/d012_portable.cpp).
+if(PORTABLEKIT_RELEASE)
+    set_property(SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_portable.cpp" APPEND PROPERTY
+        COMPILE_DEFINITIONS D012_RELEASE_BUILD=1)
+endif()
 
 # Decompiled game functions (C), run as native overrides (port/decomp/).
 enable_language(C)
