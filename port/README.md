@@ -212,6 +212,7 @@ fresh clone of `33800c4`, apply them with `git checkout -b dissidia 33800c4` and
 | 0041 | Line and line-strip primitives drawn as quads one PSP pixel wide at the internal scale through the draw's own pipeline (`host/gpu/line_quads.hpp`); `<prefix>_NO_LINES` skips them, `<prefix>_TRACE_LINES` traces them | Every hit's spark streaks (about 25,000 line draws per battle) were never drawn |
 | 0042 | A block transfer out of a render target is also blitted on the GPU at the internal scale into a target for its destination, used while the guest bytes still match (`host/gpu/vulkan_renderer.cpp`); `<prefix>_NO_TRANSFER_TARGETS`, `<prefix>_TRACE_TRANSFERS` | EX Burst copies the screen into RAM and draws it as its background for 56 frames: it was 1x at any scale |
 | 0043 | Environment (shade) mapping, texture map mode 2: U,V from the world-space normal and the two chosen lights (`host/gpu/shaders/ge.vert`, `host/gpu/vulkan_renderer.cpp`); `<prefix>_NO_ENV_MAP`, `<prefix>_TRACE_ENV_MAP` | Orphan's Cradle's violet wheel strips used their vertex UVs; the PSP formula is from public SDK docs, the game's edge case (no normals, unset light) unverified on hardware |
+| 0044 | A texture whose first texel lies in one target's drawn area reads that target, not a newer one that only covers it with undrawn rows (`find_framebuffer_texture()`, `host/gpu/vulkan_renderer.cpp`); `<prefix>_NO_TARGET_DRAWN_AREA` restores the old choice | Lightning's RAV Water refracts a half-size copy of the last frame kept right after another target; it read the other target's undrawn rows and looked like a negative (also Razor Gale's dome) |
 
 Patches 0012 and 0013 were made on a separate worktree branch during the recompiled-build work and merged onto
 `dissidia` on 18 October 2026; patches 0014 and 0015 followed the same day (bring-up log, section "Stencil"), and
@@ -220,7 +221,7 @@ patches 0016 to 0022 that evening (section "HP bar, orbs and saves"), patches 00
 ([bgm-playlist-design.md](../docs/port/bgm-playlist-design.md), section 10); patch 0028 that evening, for analog
 diagonals that felt dead on a real controller. Patches 0036 to 0039 came on 20 October with the graphics census
 ([graphics-census.md](../docs/port/graphics-census.md)), and 0040 to 0043 on 21 October from its findings (depth clipping, findings 3 and 6, stays on the
-unmerged branch `depth-clip`: no visible change here).
+unmerged branch `depth-clip`: no visible change here); 0044 the same day for a report from the Steam Deck.
 PortableKit's 21 framework tests pass on the branch and `portablekit_host_check` builds.
 
 ## Recompiled build

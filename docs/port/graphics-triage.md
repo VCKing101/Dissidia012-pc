@@ -15,9 +15,9 @@
 | 1 | Flicker absorbing a "power of the dead" orb | (a)+(b), as 3 | `orb` scene: the in-between frames' glow and haze around the orb differ from 30 fps without snapshots and match it with them (`item1_orb.png`). The world map's in-between frames differ from the frame they replay in 9% of pixels without snapshots, 0 with | Fixed by patch 0033 (likely; the flicker itself is motion, judged from stills) | `D012_NO_FB_SNAPSHOTS` |
 | 2 | Swirl into a battle or gate missing | (c) TCC bit of the texture function | `gate_enter` scene, GE trace of runs 4155-4178: from the gateway prompt on, each frame draws the other framebuffer back over the screen, 17 strips of 62 vertices as they are, then 17 twisted strips blended by source alpha, texture function `0x000000` (TCC clear: colour only, alpha from the vertex). The renderer took the texel's alpha, the 5551 framebuffer's stencil bit, 0: the twisted layer was invisible and only the white fade showed | Fixed, patch 0035: the swirl turns as on the handheld (`fix3_gate_swirl.png`) | `D012_NO_TEXTURE_RGB` |
 | 3 | Glow around mountain tips strobing / low-res | (a)+(b) | World map: the frame is downsampled to a 30x17 8888 glow buffer and blurred through 120-pixel strips, all in one scratch buffer `0x040CC000`. In-between frames are replays of the older frame, and every composite read that buffer's last picture (the last strip): hard white rims on the ridge line every other present (`item3_glow_compare.png`). `D012_CHECK_REPLAY`: 187,706 and 191,164 of 2,088,960 pixels differ, 0 with snapshots (`fix1_snapshots_worldmap.png`). The 30x17 glow is the game's own resolution | Fixed, patch 0033 | `D012_NO_FB_SNAPSHOTS` |
-| 4 | Leaf trail in forests flickers | (a)+(b) probably | No forest on the scripted routes; the same glow and blur composites cover the whole world map | Probably fixed with 3; not reproduced | `D012_NO_FB_SNAPSHOTS` |
+| 4 | Leaf trail in forests flickers | (a)+(b) probably | No forest on the scripted routes; the same glow and blur composites cover the whole world map | Fixed (owner confirmed on 21 October 2026, after the render-target snapshots, 0033) | `D012_NO_FB_SNAPSHOTS` |
 | 5 | Blobs in front of red gateways jitter sideways | (a)+(b) | `gate_view` scene: replayed frames differ in 8% of pixels without snapshots; the glow and blur round the portal and the dark shapes at its base come from another 120-pixel strip (`item5_gate_replay.png`). With snapshots 0 pixels differ, and at t = 0.5 the portal's bright centre sits between the two frames (995.7, 996.0, 996.1 px) | Fixed by patch 0033 (likely; judged from replays, not motion) | `D012_NO_FB_SNAPSHOTS` |
-| 6 | Ground cracks linger in Lightning's EX Burst | open | `lightning_ex` scene (EX Burst, Gestalt Drive, frames 9300-9600): nothing lingers at 30 fps or 60 fps in the captures. Checked and ruled out: a palette rewritten after its first entry (the texture key hashes only the first CLUT word): a trace of every key over the whole battle and the world map found none | Not reproduced. Next: the crack decals' blend mode (factor 7?) and their fade, with the burst's command inputs entered | |
+| 6 | Ground cracks linger in Lightning's EX Burst | (b) | `lightning_ex` scene (EX Burst, Gestalt Drive, frames 9300-9600): nothing lingers at 30 fps or 60 fps in the captures. Checked and ruled out: a palette rewritten after its first entry (the texture key hashes only the first CLUT word): a trace of every key over the whole battle and the world map found none | Fixed (owner confirmed on 21 October 2026): an intended overlay of cracks and holes in the screen, now drawn right; most likely the snapshot or palette/transfer fixes | |
 | 7 | Flickering overlay over the top-left quarter in the EX Burst | (a)+(b) | `lightning_ex`: in-between frames show a ghost quarter-size copy of the scene in the top-left quarter (small figures, `item7_exburst_topleft.png`); replay checks at 9300, 9450, 9600: 0 pixels differ with snapshots | Fixed, patch 0033 | `D012_NO_FB_SNAPSHOTS` |
 | 8 | Small overlay top-left on Lunar Subterrane | (a)+(b) | `kuja_lunar`: in-between frames show a 60x34 miniature of the scene in the top-left corner: the shadow composite reading the blur buffer (8888, 128 wide) that later reuses `0x0CC000` (`item8_lunar_topleft.png`). Replay checks: 898,687 to 1,802,392 pixels differ (43-86%), 0 with snapshots (`fix1_snapshots_lunar.png`) | Fixed, patch 0033 | `D012_NO_FB_SNAPSHOTS` |
 | 9 | Larger overlay top-left on Order's Sanctuary | (a)+(b) | `kuja_order`: the same, larger (about three quarters of the width, half the height); 863,499 to 1,030,467 pixels differ, 0 with snapshots (`fix1_snapshots_order.png`) | Fixed, patch 0033 | `D012_NO_FB_SNAPSHOTS` |
@@ -101,3 +101,94 @@ timeline sometimes drifts, so before/after pairs there use `D012_CHECK_REPLAY`'s
   in the traced battle frame only on the shadow composite, where it changes nothing), logic op `0x28`, texture map
   mode `0xC0` (UV mode in the traced frames), dither, clip planes, the region, patch state, shade model `0x50`. Nothing seen traced to
   them.
+
+## Lightning's Water: a dark negative instead of a clear sphere
+
+> 21 October 2026. Reported by the owner on the Steam Deck (the Windows build through Proton): Lightning's Water,
+> cast in her RAV (Ravager) paradigm, shows as a colour negative instead of a transparent sphere. Not Proton: it
+> reproduces on the PC at 1x and 4x, at 30 and 60 fps. Fixed on the PortableKit branch `water-fix` (worktree
+> `tools/local/port/PortableKit-water`, commit `402619f` on `dissidia` at `cb3f376`; not merged, no patch
+> regenerated). Build `tools/local/port/build-d012-water` (the options of `build-d012-recomp`), framework build
+> `tools/local/port/build-framework-water`, data `build/port/data-water-test` (a copy of `build/port/data` with
+> `video.present_mode=immediate`). Captures and logs: `build/port/gfx-water*/` (never committed).
+
+**Scene.** New tour route `qb_water` (`tools/port/gfx_tour.py`): Quick Battle on Old Chaos Shrine, R while
+holding L (the tutorial's paradigm change) switches Lightning to RAV, she runs away from the CPU (at point-blank
+range the sphere bursts at once), jumps, and circle in the air casts Water; three casts, captures every 6 frames.
+No test switch was needed: the first cast lands on every timeline seen.
+
+**What the draws do.** `D012_TRACE_GE_LIST` of the frame with the sphere (list run 8874 of an exploration run;
+`build/port/gfx-water/list8874.txt`, `state_at.py`):
+
+- Every frame, after the stage and the fighters, the shown framebuffer F (`0x04000000`, 5551) is drawn into
+  `0x04196000` (5551, row 256, scissor 256x128): a half-size copy.
+- The sphere: a fan of 18 and a strip of 34 vertices into F, textured with `0x041A6000` (5551, 256x128, row 256),
+  blend 2As / 1-2As (`0xDF` = `0x76`), material colour `0x808080` alpha `0x50`, modulate with colour doubling and
+  TCC clear (`0xC9` = `0x010000`), alpha test off, no colour test (`0x27` = 0), **no logic op** (`0x28` = 0, `0xE6` =
+  COPY). Its other layers (clouds, bubbles, a rainbow sheen: 128x128 CLUT textures) are blended on top as usual.
+- At the end of the frame F is drawn into `0x041A6000` (5551, row 256, scissor 256x128, culling on), after the
+  sphere. So the sphere refracts a half-size copy of the **previous** frame, which `0x041A6000` holds until then.
+
+`0x041A6000` is exactly 256 x 128 x 2 bytes past `0x04196000`: the two copies sit back to back in VRAM.
+
+**PSP behaviour** (public GE documentation: the PSPSDK's `sceGuDrawBuffer`, `sceGuTexImage`, `sceGuTexFunc`,
+`sceGuBlendFunc`, `sceGuLogicalOp`): VRAM has no buffers, only addresses. A texture at `0x041A6000` reads the
+bytes there, which the last draw into `0x041A6000` wrote; the draw into `0x04196000` stops at row 127 (its
+scissor), the byte before. With TCC clear the texel's alpha is ignored (the vertex's is used), so the copy shows
+through at 2 x 0x50 = 63% over the frame: a clear, distorted ball of water.
+
+**Cause** (`find_framebuffer_texture()` in PortableKit's `vulkan_renderer.cpp`, code older than this month's fixes).
+A texture is matched to the render target whose memory holds its first texel, a target taken as 272 rows of its
+row length. `0x04196000`'s 272 rows of 256 run to `0x041B8000` and take in `0x041A6000`; of two candidates the
+renderer picked the one drawn last. At the sphere `0x04196000` had been drawn this frame and `0x041A6000` the frame
+before, so the sphere read rows 128-255 of `0x04196000`'s image, which nothing draws: dark. That dark disc at 63%,
+with the clouds, bubbles and sheen on top, is the "negative".
+
+**Did a recent fix cause it?** It made it visible. A/B on the old choice (`D012_NO_TARGET_DRAWN_AREA=1`), same
+scripted frames, 30 fps (`build/port/gfx-tour/evidence/water_ab_switches.png`): with `D012_NO_TEXTURE_RGB=1` (no TCC, patch 0035
+off) the dark disc is gone, since the texel's alpha (0 in the undrawn rows) then hides the layer, and with it the
+refraction; with every other recent switch off together (`NO_FB_CLUT`, `NO_DOUBLE_ALPHA`, `NO_FB_SNAPSHOTS`,
+`NO_TRANSFER_TARGETS`, `NO_ENV_MAP`, `NO_LINES`, `CLUT_FIRST_WORD_KEY`) it stays (half as dark without the doubled
+alpha). So the wrong target choice is old, and patch 0035 (colour-only textures, a correct fix) exposed it on 20
+October. The logic op was ruled out by the trace (never enabled here, as in the census).
+
+**Fix** (PortableKit `find_framebuffer_texture()`, game-agnostic). Among the targets that take in the texture's
+first texel, one whose drawn rectangle (the scissors of its draws since it was last first drawn in a frame, as the
+palette views use) holds that texel wins over one that takes it in only with rows it never drew; among equals the
+newest draw wins, as before. The guest-memory check that follows is unchanged. Off switch
+`D012_NO_TARGET_DRAWN_AREA` (the newest target only, as before); `D012_TRACE_FB_TEXTURES` logs each texture where
+the two choices differ; the census counts `fbtex.target_by_drawn_area` (info), or
+`fbtex.undrawn_rows_of_newer_target` (high) with the switch set.
+
+**Verified.**
+
+- Before (`D012_NO_TARGET_DRAWN_AREA=1`) and after on `qb_water` at 4x and 1x, 30 and 60 fps (60 with
+  `D012_CAPTURE_BLENDED`): `build/port/gfx-tour/evidence/water_before_after.png` (capture `water1_5` and
+  `water1_7` of each) and `water_before_after_crop.png` (4x 30 fps, same timeline). Before: a dark ball with white
+  cloud streaks and a teal centre. After: a clear ball of water bending the floor and wall behind it, with its
+  bubbles and sheen. The 4x 30 fps pair is one timeline; the others fell on other timelines but show the same
+  difference. Replay checks at 60 fps: 0.00-0.06% (5 checks a run).
+- Census: `fbtex.target_by_drawn_area` 362 draws on `qb_water`, all in the Water scene (two a frame while a sphere is
+  up), example texture `0x041A6000` into F.
+- Whole tour on the fixed build, the new route included (`build/port/gfx-water-tour/`, 36 runs, 522 captures,
+  base, nointerp and 1x; `build/port/gfx-water/tour_after.txt`): no run with problems, no interpreter fallback,
+  replay checks 0.00-0.23% in colour; its flags are other timelines, as in the census document's sections 8 to 10
+  (the menus repeat exactly; `qb_water` has no baseline yet). The census counts `fbtex.target_by_drawn_area` on every
+  battle route, 4,148 draws over the base runs: the same pattern, a draw reading a buffer drawn the frame before
+  right after one drawn this frame (`0x041A6000` on most stages and in EX Mode, EX Burst and EX Revenge; `0x041AC000`
+  Lunar Subterrane, `0x041A2000` Orphan's Cradle, `0x0418C000` Empyreal Paradox, `0x04178000` Order's Sanctuary;
+  `0x04122000` 13 draws entering Story Mode).
+- The ten other routes again at 30 fps with the old choice (`build/port/gfx-water-tour-before/`, compared by
+  `build/port/gfx-water/compare_ab.py`, pairs in `build/port/gfx-water/ab_tour/`): on the routes that kept their
+  timeline the only changes are such effects. Razor Gale's dome (a COM attack, `qb_ex_burst` capture
+  `ex_burst2`) now bends the previous frame, ghost of the blade and petals included, instead of a flat haze
+  (`build/port/gfx-tour/evidence/water_fix_razor_gale.png`); a faint dome on Empyreal Paradox likewise
+  (`water_fix_empyreal_dome.png`); `story_gateway` and Order's Sanctuary are pixel-identical; Orphan's Cradle differs only in
+  the Opponent Info page's rotating BGM line (menu timing). The other battles fell
+  on other timelines (their versus screens already differ), so they were not compared pixel for pixel.
+- The 20 framework tests (`tools/port/pk_ctest.cmd`, ad hoc tests excluded) pass and `portablekit_host_check`
+  builds (`tools/local/port/build-framework-water`).
+
+**Not verified.** The sphere on a handheld: the look is the port's frames read from the traced state, not compared
+with a PSP. Most of the other effects that take the new choice (the census found them on every
+stage; only the ones above were compared pixel for pixel). The Proton build on the Deck (not touched; the cause is not platform-specific).

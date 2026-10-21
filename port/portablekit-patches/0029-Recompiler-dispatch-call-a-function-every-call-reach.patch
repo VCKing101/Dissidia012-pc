@@ -1,7 +1,7 @@
 From ed844caabb7e2e1ca2f6c4ae5a134565ab5deae6 Mon Sep 17 00:00:00 2001
 From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
 Date: Mon, 19 Oct 2026 21:36:06 +1030
-Subject: [PATCH 29/43] Recompiler: --dispatch-call, a function every call
+Subject: [PATCH 29/44] Recompiler: --dispatch-call, a function every call
  reaches by lookup
 
 A call to a function in the caller's own unit is a plain goto in the

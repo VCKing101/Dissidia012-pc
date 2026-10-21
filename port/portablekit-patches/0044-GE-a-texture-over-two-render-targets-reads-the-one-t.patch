@@ -1,0 +1,130 @@
+From 9a739332491d4bc8214072acd8675430761c2af2 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Wed, 21 Oct 2026 22:05:15 +1030
+Subject: [PATCH 44/44] GE: a texture over two render targets reads the one
+ that drew there
+
+A render target is taken as 272 rows of its row length, so a short buffer
+(256x128) takes in the buffer drawn right after it in VRAM. A texture whose
+first texel lay in both was read from the target drawn last, even where that
+target never drew: a texture over a copy of the previous frame read the
+undrawn rows of this frame's copy just below it. The GE reads whatever was
+last written at the address.
+
+Among the targets that take in the first texel, one whose drawn rectangle
+(the scissors of its draws, as palette views use) holds it now wins; among
+equals the newest, as before. <prefix>_NO_TARGET_DRAWN_AREA restores the
+old choice; <prefix>_TRACE_FB_TEXTURES logs where the two differ, and the
+census counts fbtex.target_by_drawn_area (info) or, with the switch,
+fbtex.undrawn_rows_of_newer_target.
+
+Seen in Dissidia 012: Lightning's Water refracts a half-size copy of the
+last frame at 0x041A6000, right after this frame's copy at 0x04196000; it
+came out as a dark negative and is now a clear sphere, at 1x and 4x, 30 and
+60 fps. Not verified on a handheld.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ docs/BRINGING_UP_A_GAME.md   |  1 +
+ host/gpu/ge_census.cpp       |  2 ++
+ host/gpu/vulkan_renderer.cpp | 52 ++++++++++++++++++++++++++++++------
+ 3 files changed, 47 insertions(+), 8 deletions(-)
+
+diff --git a/docs/BRINGING_UP_A_GAME.md b/docs/BRINGING_UP_A_GAME.md
+index 31b8b18..855f91b 100644
+--- a/docs/BRINGING_UP_A_GAME.md
++++ b/docs/BRINGING_UP_A_GAME.md
+@@ -84,6 +84,7 @@ Every one of these takes the profile's own prefix, so `TENKAWA_TRACE_KERNEL` for
+ | `<PREFIX>_CAPTURE_BLENDED` | A window capture (the input script's `shot`) waits for a present that frame interpolation blended, to look at an in-between frame; with `<PREFIX>_FRAME_RATE_AUTO=0` the rate does not step down while captures stall the frames |
+ | `<PREFIX>_GE_CENSUS=<file>` | A JSON census of the GE features the game's draws use that the renderer does not reproduce exactly (ignored state, approximated texture and blend modes, render-to-texture read from guest memory, transfers between targets), counted per scene with the first frame and an example draw's state words; the input script's `scene NAME` starts a new scene (`host/gpu/ge_census.hpp`) |
+ | `<PREFIX>_TRACE_FB_CLUT` | The first 400 palette views of render targets (a CLUT texture over rendered pixels, decoded on the GPU): the target, the index format, the CLUT's address, format, shift, mask and start and its first entries, the draw's blend and vertices |
++| `<PREFIX>_NO_TARGET_DRAWN_AREA` | A texture over several render targets (a target is taken as 272 rows of its row length, so a short buffer takes in the one after it in VRAM) is read from the one drawn last, as before, instead of from the one whose drawn rectangle holds the texture's first texel (`find_framebuffer_texture()` in `host/gpu/vulkan_renderer.cpp`). `<PREFIX>_TRACE_FB_TEXTURES` logs each texture where the two choices differ |
+ | `<PREFIX>_NO_FB_CLUT` | Decode a palette texture over a render target from guest memory, as before palette views (`palette_view()` in `host/gpu/vulkan_renderer.cpp`) |
+ | `<PREFIX>_TRACE_LINES[=N]` | The first N line and line-strip draws (200 by default) with their state and their ends on the screen, and how many line draws and segments each frame drew. Lines are drawn as quads one PSP pixel wide (`host/gpu/line_quads.hpp`); `<PREFIX>_NO_LINES` skips them, as before |
+ | `<PREFIX>_TRACE_TRANSFERS` | Each GE block transfer (source, destination, rectangle) and whether it was also copied on the GPU, at the internal scale, into a target standing for the destination (`copy_block_transfer()` in `host/gpu/vulkan_renderer.cpp`), and once a display list whether a texture over such a copy sampled it. `<PREFIX>_NO_TRANSFER_TARGETS` copies in guest memory only (the texture then reads the 1x read-back), as before; `<PREFIX>_TRANSFER_SAMPLED_KEY` keys textures over the latest transfers' destinations by one word in 256, as before, instead of every byte |
+diff --git a/host/gpu/ge_census.cpp b/host/gpu/ge_census.cpp
+index 3e58cd2..3613212 100644
+--- a/host/gpu/ge_census.cpp
++++ b/host/gpu/ge_census.cpp
+@@ -93,6 +93,8 @@ constexpr FeatureInfo kFeatures[] = {
+     {"fbtex.alpha_from_16bit_target", "render-to-texture", "low", "Alpha sampled from a 5551/4444 target: 8 bits in the renderer, 1 or 4 on the GE"},
+     {"fbtex.samples_beyond_480x272", "render-to-texture", "medium", "Texture coordinates past the 480x272 a render target holds: clamped to its edge (the GE reads on into VRAM)"},
+     {"fbtex.repeat_wrap", "render-to-texture", "medium", "A render target sampled with wrap REPEAT and coordinates outside the texture: clamped instead"},
++    {"fbtex.target_by_drawn_area", "render-to-texture", "info", "A texture whose first texel lies in what one target drew and in the undrawn rows of a target drawn later: read from the first (the newer only with <prefix>_NO_TARGET_DRAWN_AREA)"},
++    {"fbtex.undrawn_rows_of_newer_target", "render-to-texture", "high", "With <prefix>_NO_TARGET_DRAWN_AREA: a texture read from the undrawn rows of the newest target over it, not from the target that drew there"},
+     {"fbtex.miss_clut_view", "render-to-texture", "high", "A CLUT texture over a render target (a palette view of rendered pixels): decoded from guest memory, which does not hold the render"},
+     {"fbtex.clut_view", "render-to-texture", "info", "A CLUT texture over a render target (a palette view of rendered pixels): the target's pixels as indices, looked up on the GPU"},
+     {"clut.in_target", "render-to-texture", "info", "A palette view's CLUT lies in a render target: its entries read from the render"},
+diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
+index 19ac560..e87121f 100644
+--- a/host/gpu/vulkan_renderer.cpp
++++ b/host/gpu/vulkan_renderer.cpp
+@@ -5150,8 +5150,25 @@ VulkanRenderer::Impl::FramebufferTexture VulkanRenderer::Impl::find_framebuffer_
+         return {};
+     const std::uint32_t texture_bits = texture_bits_per_pixel(texture.format);
+     const std::uint32_t texture_address = GuestMemory::canonical(texture.address);
+-    Target *best = nullptr;
+-    std::uint32_t best_base = 0u;
++    // Several targets can take in the texture's first texel: a target is
++    // counted as 272 rows of its row length, which runs on past what its
++    // draws reach, so a 256x128 buffer takes in the one drawn right after it
++    // in VRAM. The GE reads whatever was last written at that address. A
++    // target whose drawn rectangle holds the first texel therefore wins over
++    // one that takes it in only with rows it never drew; among equals, the
++    // newest draw wins, as before. Without this, a texture over a buffer drawn
++    // last frame (a copy of the scene kept for the next frame) was read from
++    // the undrawn rows of the buffer below it, drawn more recently.
++    // <prefix>_NO_TARGET_DRAWN_AREA: the newest target only, as before.
++    static const bool newest_only = portablekit::env("NO_TARGET_DRAWN_AREA") != nullptr;
++    static const bool trace_choice = portablekit::env("TRACE_FB_TEXTURES") != nullptr;
++    struct Candidate {
++        Target *target{};
++        std::uint32_t base{};
++        bool inside{};
++    };
++    Candidate preferred;  // drawn area first, then the newest draw
++    Candidate newest;     // the newest draw only
+     for (auto &[address, target] : targets) {
+         if (!target.initialized || target.guest_words.empty()) continue;
+         const std::uint32_t bytes_per_pixel = framebuffer_bytes_per_pixel(target.format);
+@@ -5166,12 +5183,31 @@ VulkanRenderer::Impl::FramebufferTexture VulkanRenderer::Impl::find_framebuffer_
+         const std::uint32_t bytes = target.stride * kPspHeight * bytes_per_pixel;
+         if (texture_address < base || texture_address - base >= bytes) continue;
+         if (!indexed && (texture_address - base) % bytes_per_pixel != 0u) continue;
+-        if (best == nullptr || target.draw_serial > best->draw_serial) {
+-            best = &target;
+-            best_base = base;
+-        }
+-    }
+-    if (best == nullptr) return {};
++        const std::uint32_t row_bytes = target.stride * bytes_per_pixel;
++        const std::uint32_t offset = texture_address - base;
++        const Candidate candidate{&target, base,
++                                  (offset % row_bytes) / bytes_per_pixel < target.drawn_right &&
++                                      offset / row_bytes < target.drawn_bottom};
++        if (newest.target == nullptr || target.draw_serial > newest.target->draw_serial) newest = candidate;
++        if (preferred.target == nullptr || (candidate.inside && !preferred.inside) ||
++            (candidate.inside == preferred.inside && target.draw_serial > preferred.target->draw_serial))
++            preferred = candidate;
++    }
++    if (newest.target == nullptr) return {};
++    if (preferred.target != newest.target) {
++        census::note_renderer(newest_only ? "fbtex.undrawn_rows_of_newer_target" : "fbtex.target_by_drawn_area");
++        static std::map<std::pair<std::uint32_t, std::uint32_t>, bool> told;
++        if (trace_choice && told.size() < 400u && !told[{texture_address, preferred.target->address}]) {
++            told[{texture_address, preferred.target->address}] = true;
++            std::cout << "[fbtex] frame " << frames << " texture 0x" << std::hex << texture_address << " lies in what 0x"
++                      << preferred.target->address << " drew and in the undrawn rows of the newer 0x"
++                      << newest.target->address << std::dec << " (drawn to row " << newest.target->drawn_bottom
++                      << "): read from " << (newest_only ? "the newer" : "the first") << "\n";
++        }
++    }
++    const Candidate &chosen = newest_only ? newest : preferred;
++    Target *const best = chosen.target;
++    const std::uint32_t best_base = chosen.base;
+ 
+     const std::uint32_t bytes_per_pixel = framebuffer_bytes_per_pixel(best->format);
+     const std::uint64_t texture_end = static_cast<std::uint64_t>(texture_address) +
+-- 
+2.53.0.windows.1
+

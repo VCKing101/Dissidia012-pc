@@ -193,6 +193,24 @@ def ex_revenge_route():
             "about": "Quick Battle, EX-Centric rules, a full EX gauge: EX Mode under attack (EX Revenge's greyscale)"}
 
 
+def water_route():
+    """Lightning's Water (graphics-triage.md, "Water"): R while holding L changes her paradigm to RAV
+    (Ravager), then a jump and circle cast Water, a sphere that refracts a half-size copy of the previous
+    frame (0x041A6000). Its captures came out as a dark colour negative before the fix."""
+    steps, b = quick_battle(1)
+    steps = BOOT + steps + [(b - 8, "scene battle_intro"), (b, "speed normal"), (b + 260, "scene battle"),
+                            (b + 270, "shot com"), (b + 280, "pad leftshoulder 30"), (b + 288, "pad rightshoulder 6"),
+                            (b + 330, "shot rav"), (b + 350, "scene water")]
+    # Run away from the CPU first (cast at point-blank range, the sphere bursts at once), then jump and
+    # circle; three casts, since a jump made while a hit still holds her is lost on some timelines.
+    for cast, (at, way) in enumerate(((b + 420, -1), (b + 560, 1), (b + 700, -1))):
+        steps += [(at - 70, f"axis leftx {way}"), (at - 10, "axis leftx 0"), (at, "pad a"), (at + 12, "pad b")]
+        steps += [(at + 12 + 6 * k, f"shot water{cast + 1}_{k}") for k in range(2, 10)]
+    steps.append((b + 780, "quit"))
+    return {"name": "qb_water", "steps": steps, "seconds": 90,
+            "about": "Quick Battle, Lightning in RAV: Water (an aerial circle), a sphere refracting the last frame"}
+
+
 def story_route():
     """Story Mode, Continue: Lightning on the world map (chapter 12-1-2), a walk up, right and down to the
     Gateway of Fools and Hope (its portal glow), into it (the white transition and the title card) and onto
@@ -234,6 +252,7 @@ ROUTES = [
                    "Quick Battle as Kuja (unlocked by a test switch) with a full EX gauge: his attacks and EX Burst"),
     ex_revenge_route(),
     ex_results_route(),
+    water_route(),
 ]
 
 

@@ -1,7 +1,7 @@
 From 809756dd282c359cc098964a08cdee336014476f Mon Sep 17 00:00:00 2001
 From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
 Date: Sun, 18 Oct 2026 18:51:21 +1030
-Subject: [PATCH 10/43] Draw the save-data dialog and wait for the player's
+Subject: [PATCH 10/44] Draw the save-data dialog and wait for the player's
  choice
 
 The list modes (LISTLOAD, LISTSAVE, LISTDELETE) acted as if the player had

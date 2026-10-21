@@ -1,7 +1,7 @@
 From dcc3edddab8ba3abdffc4fd6042f793b2bce1508 Mon Sep 17 00:00:00 2001
 From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
 Date: Wed, 21 Oct 2026 10:59:50 +1030
-Subject: [PATCH 42/43] GE: block transfers out of a render target copied on
+Subject: [PATCH 42/44] GE: block transfers out of a render target copied on
  the GPU too
 
 A block transfer that copies a render target's pixels into memory no
