@@ -1,7 +1,7 @@
 From 9921d54ac41b9975af327578f028b70f935ad28b Mon Sep 17 00:00:00 2001
 From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
 Date: Wed, 21 Oct 2026 07:31:35 +1030
-Subject: [PATCH 40/44] GE: read a palette texture over a render target on the
+Subject: [PATCH 40/48] GE: read a palette texture over a render target on the
  GPU
 
 A game can texture from its own framebuffer through a palette: a CLUT4/8/16/32

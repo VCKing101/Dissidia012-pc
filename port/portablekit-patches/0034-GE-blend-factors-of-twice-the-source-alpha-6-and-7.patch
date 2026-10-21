@@ -1,7 +1,7 @@
 From 13f77525e4fb7f31cf1a00555326ac163d2f2ae9 Mon Sep 17 00:00:00 2001
 From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
 Date: Tue, 20 Oct 2026 21:03:05 +1030
-Subject: [PATCH 34/44] GE: blend factors of twice the source alpha (6 and 7)
+Subject: [PATCH 34/48] GE: blend factors of twice the source alpha (6 and 7)
 
 The GE's blend factors 6 and 7 are twice the source alpha and one minus
 twice it, clamped. The renderer read them as the plain alpha, so effects

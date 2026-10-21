@@ -1,7 +1,7 @@
 From e96c0ced044d88f7e0cb5661850af467d97a6f0a Mon Sep 17 00:00:00 2001
 From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
 Date: Sun, 18 Oct 2026 17:52:43 +1030
-Subject: [PATCH 01/44] Start an ET_EXEC at its module_start export when
+Subject: [PATCH 01/48] Start an ET_EXEC at its module_start export when
  e_entry is 0
 
 Some disc executables leave e_entry at 0 and name their entry only as the

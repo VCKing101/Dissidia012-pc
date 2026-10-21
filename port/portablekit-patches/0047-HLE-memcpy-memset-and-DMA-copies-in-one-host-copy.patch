@@ -1,0 +1,120 @@
+From cd886e8e7d4f6cdabbafdf8fe8bdf044d678470f Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Wed, 21 Oct 2026 23:32:32 +1030
+Subject: [PATCH 47/48] HLE: memcpy, memset and DMA copies in one host copy
+
+sceKernelMemcpy, sceKernelMemset and sceDmacMemcpy copied a byte at a
+time through the checked accessors. When both runs are contiguous host
+memory (and a forward memcpy would not smear an overlap), they are now one
+memmove or memset; otherwise, or while PSPRECOMP_WATCH_WRITE arms the store
+path (GuestMemory::write_watched), the byte loop as before.
+
+<prefix>_NO_FAST_HLE_COPIES copies byte by byte, as before.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ docs/BRINGING_UP_A_GAME.md         |  1 +
+ host/hle/hle_sysmem.cpp            |  9 ++++++++-
+ host/hle/hle_threadman.cpp         | 19 +++++++++++++++++--
+ include/psprecomp/guest_memory.hpp |  3 +++
+ 4 files changed, 29 insertions(+), 3 deletions(-)
+
+diff --git a/docs/BRINGING_UP_A_GAME.md b/docs/BRINGING_UP_A_GAME.md
+index ad524fe..fa0abf6 100644
+--- a/docs/BRINGING_UP_A_GAME.md
++++ b/docs/BRINGING_UP_A_GAME.md
+@@ -93,6 +93,7 @@ Every one of these takes the profile's own prefix, so `TENKAWA_TRACE_KERNEL` for
+ | `<PREFIX>_PERF_CSV=<file>` | One CSV row per present (time, interval, what it showed: the flip's frame, a blended in-between frame, a frame as it is, or why interpolation refused; blend fraction, grid moments skipped, lateness, rate) and one per game frame (guest, render, wait, pacing and GPU time, the emulation thread's CPU time, pipelines created and their time, pipelines the prewarm had ready, textures decoded and their time, texture-key hashing time, render-target snapshots and their size, interpolation's pairing, presents not made); the input script's `scene NAME` is a column (`host/perf/frame_stats.hpp`) |
+ | `<PREFIX>_TRACE_STALL_SAMPLES[=ms]` | Windows: while a game frame takes longer than the threshold (50 ms by default), sample the emulation thread's host stack every few milliseconds and print the commonest stacks at the next flip, with names when the program's PDB is beside it (link with `/DEBUG`). `=present` samples while a present between flips is more than 2 ms overdue instead |
+ | `<PREFIX>_NO_OVERLAY_PARKING` | Drop an overlay's registrations when another overlay replaces it and register them again when it comes back, as before (`Runtime::park_functions` keeps them; the drop and the re-registration of a 400,000-entry overlay took a quarter of a second) |
++| `<PREFIX>_NO_FAST_HLE_COPIES` | `sceKernelMemcpy`, `sceKernelMemset` and `sceDmacMemcpy` copy a byte at a time through the checked accessors, as before, instead of one host copy |
+ | `<PREFIX>_NO_BUSY_CLOCK` | Keep emulated time still for a thread that never waits, as before the busy clock (`Kernel::charge_busy_time`) |
+ | `PSPRECOMP_NO_INTERPRETER=1` | Turn the interpreter off. Nothing runs without a corpus; with one, the runtime stops at the first address the recompiler missed and names it |
+ | `PSPRECOMP_MAX_DISPATCHES` | Stop after this many dispatches, for a bounded run |
+diff --git a/host/hle/hle_sysmem.cpp b/host/hle/hle_sysmem.cpp
+index 6fe5a1e..a28543c 100644
+--- a/host/hle/hle_sysmem.cpp
++++ b/host/hle/hle_sysmem.cpp
+@@ -7,6 +7,7 @@
+ #include "gpu/ge_state.hpp"
+ 
+ #include <cstdlib>
++#include <cstring>
+ #include <iostream>
+ #include <optional>
+ 
+@@ -152,7 +153,13 @@ void register_sysmem(HleRegistrar &hle) {
+                           << " (" << size << " bytes)\n";
+             if (in_vram(source)) gpu::note_vram_copy(destination, source, size);
+         }
+-        if (destination < source || destination >= source + size) {
++        static const bool fast = portablekit::env("NO_FAST_HLE_COPIES") == nullptr;
++        std::uint8_t *to = fast && !rt.memory().write_watched() ? rt.memory().raw_pointer(destination, size) : nullptr;
++        const std::uint8_t *from = to != nullptr ? rt.memory().raw_pointer(source, size) : nullptr;
++        if (from != nullptr) {
++            // The loops below are a memmove.
++            std::memmove(to, from, size);
++        } else if (destination < source || destination >= source + size) {
+             for (std::uint32_t i = 0; i < size; ++i) rt.memory().store8(destination + i, rt.memory().load8(source + i));
+         } else {
+             for (std::uint32_t i = size; i-- > 0u;) rt.memory().store8(destination + i, rt.memory().load8(source + i));
+diff --git a/host/hle/hle_threadman.cpp b/host/hle/hle_threadman.cpp
+index 7a42a27..a65b56c 100644
+--- a/host/hle/hle_threadman.cpp
++++ b/host/hle/hle_threadman.cpp
+@@ -1,5 +1,6 @@
+ // ThreadManForUser and Kernel_Library: threads, time, semaphores, event flags,
+ // mutexes, callbacks, VTimers and interrupt masking.
++#include "../profile.hpp"
+ #include "hle_common.hpp"
+ 
+ #include "kernel/fixed_pool.hpp"
+@@ -1029,7 +1030,17 @@ void register_kernel_library(HleRegistrar &hle) {
+         const std::uint32_t destination = arg(ctx, 0);
+         const std::uint32_t source = arg(ctx, 1);
+         const std::uint32_t size = arg(ctx, 2);
+-        for (std::uint32_t i = 0; i < size; ++i) rt.memory().store8(destination + i, rt.memory().load8(source + i));
++        // In one host copy when both runs are contiguous host memory and do
++        // not overlap the way a forward byte copy would smear; a byte at a
++        // time through the checked accessors took milliseconds for the large
++        // copies a game makes every frame. <prefix>_NO_FAST_HLE_COPIES copies
++        // byte by byte, as before.
++        static const bool fast = portablekit::env("NO_FAST_HLE_COPIES") == nullptr;
++        std::uint8_t *to = fast && !rt.memory().write_watched() ? rt.memory().raw_pointer(destination, size) : nullptr;
++        const std::uint8_t *from = to != nullptr ? rt.memory().raw_pointer(source, size) : nullptr;
++        if (from != nullptr && (to <= from || to >= from + size)) std::memmove(to, from, size);
++        else
++            for (std::uint32_t i = 0; i < size; ++i) rt.memory().store8(destination + i, rt.memory().load8(source + i));
+         kernel().finish(ctx, destination);
+     });
+ 
+@@ -1055,7 +1066,11 @@ void register_kernel_library(HleRegistrar &hle) {
+         const std::uint32_t address = arg(ctx, 0);
+         const auto value = static_cast<std::uint8_t>(arg(ctx, 1));
+         const std::uint32_t size = arg(ctx, 2);
+-        for (std::uint32_t i = 0; i < size; ++i) rt.memory().store8(address + i, value);
++        static const bool fast = portablekit::env("NO_FAST_HLE_COPIES") == nullptr;
++        std::uint8_t *to = fast && !rt.memory().write_watched() ? rt.memory().raw_pointer(address, size) : nullptr;
++        if (to != nullptr) std::memset(to, value, size);
++        else
++            for (std::uint32_t i = 0; i < size; ++i) rt.memory().store8(address + i, value);
+         kernel().finish(ctx, address);
+     });
+ }
+diff --git a/include/psprecomp/guest_memory.hpp b/include/psprecomp/guest_memory.hpp
+index 2debfd3..0e05650 100644
+--- a/include/psprecomp/guest_memory.hpp
++++ b/include/psprecomp/guest_memory.hpp
+@@ -54,6 +54,9 @@ public:
+         return address & 0x1FFFFFFFu;
+     }
+     [[nodiscard]] bool contains(std::uint32_t address, std::size_t length = 1u) const noexcept;
++    // PSPRECOMP_WATCH_WRITE armed the store path: every store has to go
++    // through store8() and friends to be seen.
++    [[nodiscard]] bool write_watched() const noexcept { return write_watch_enabled_; }
+ 
+     // The view generated code keeps for a unit's memory accesses. Defined in
+     // corpus_abi.hpp, which is all a corpus sees; its slow paths come back
+-- 
+2.53.0.windows.1
+

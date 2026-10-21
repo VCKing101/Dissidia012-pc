@@ -1,7 +1,7 @@
 From 0291ca00e7284abe1d48bc512035591d6aabc58d Mon Sep 17 00:00:00 2001
 From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
 Date: Mon, 19 Oct 2026 19:09:22 +1030
-Subject: [PATCH 28/44] Stick: a full diagonal reaches the PSP nub's corner
+Subject: [PATCH 28/48] Stick: a full diagonal reaches the PSP nub's corner
 
 A modern stick's gate is a circle, so at a full diagonal each axis is only
 about 0.71 of its travel, and the left stick passed that on to the nub. The

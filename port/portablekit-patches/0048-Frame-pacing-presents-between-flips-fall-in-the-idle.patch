@@ -1,0 +1,216 @@
+From 2b83ebedf07cacce6fc110a45725f58e634ae522 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Wed, 21 Oct 2026 23:32:33 +1030
+Subject: [PATCH 48/48] Frame pacing: presents between flips fall in the idle
+ time
+
+With frame interpolation the presents are made on the emulation thread.
+The one between two frames fell a few milliseconds after a flip, while the
+game's code built its next frame, and waited for the next thread switch:
+up to 7 ms late, so presents came 11 and 22 ms apart (a 1% low of 45 fps
+on a steady 60, the "45" in the frame-time readout).
+
+PresentClock::note_idle: the first idle time after a flip (the kernel's
+idle hook) ends the frame's work, and the delay allows for it, so both
+presents of a frame fall in the idle time (8 ms more delay on the PC).
+Code that leaves less idle time than the presents' spacing keeps the
+flip's time: a longer delay would not help. And the runtime's starvation
+boundaries poll for due presents too, for long stretches of guest code.
+
+<prefix>_PRESENT_AFTER_FLIP counts the work to the flip, and
+<prefix>_NO_CODE_PRESENT_POLL leaves presents to thread switches and draws,
+as before.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ docs/BRINGING_UP_A_GAME.md    |  2 ++
+ host/gpu/frame_pacing.cpp     | 36 ++++++++++++++++++++++++++++-------
+ host/gpu/frame_pacing.hpp     | 14 ++++++++++++++
+ host/gpu/vulkan_renderer.cpp  |  7 +++++++
+ host/kernel/kernel.cpp        |  7 +++++++
+ tests/interpolation_tests.cpp | 29 ++++++++++++++++++++++++++++
+ 6 files changed, 88 insertions(+), 7 deletions(-)
+
+diff --git a/docs/BRINGING_UP_A_GAME.md b/docs/BRINGING_UP_A_GAME.md
+index fa0abf6..b77ca56 100644
+--- a/docs/BRINGING_UP_A_GAME.md
++++ b/docs/BRINGING_UP_A_GAME.md
+@@ -93,6 +93,8 @@ Every one of these takes the profile's own prefix, so `TENKAWA_TRACE_KERNEL` for
+ | `<PREFIX>_PERF_CSV=<file>` | One CSV row per present (time, interval, what it showed: the flip's frame, a blended in-between frame, a frame as it is, or why interpolation refused; blend fraction, grid moments skipped, lateness, rate) and one per game frame (guest, render, wait, pacing and GPU time, the emulation thread's CPU time, pipelines created and their time, pipelines the prewarm had ready, textures decoded and their time, texture-key hashing time, render-target snapshots and their size, interpolation's pairing, presents not made); the input script's `scene NAME` is a column (`host/perf/frame_stats.hpp`) |
+ | `<PREFIX>_TRACE_STALL_SAMPLES[=ms]` | Windows: while a game frame takes longer than the threshold (50 ms by default), sample the emulation thread's host stack every few milliseconds and print the commonest stacks at the next flip, with names when the program's PDB is beside it (link with `/DEBUG`). `=present` samples while a present between flips is more than 2 ms overdue instead |
+ | `<PREFIX>_NO_OVERLAY_PARKING` | Drop an overlay's registrations when another overlay replaces it and register them again when it comes back, as before (`Runtime::park_functions` keeps them; the drop and the re-registration of a 400,000-entry overlay took a quarter of a second) |
++| `<PREFIX>_NO_CODE_PRESENT_POLL` | Make the presents between flips only at thread switches and draws, as before, not also at the runtime's starvation boundaries in long stretches of guest code |
++| `<PREFIX>_PRESENT_AFTER_FLIP` | Frame interpolation's delay allows for the game's code up to its flip only, as before, not up to its first idle time after it (`PresentClock::note_idle`); the presents then fall in the game's code and come up to 7 ms late |
+ | `<PREFIX>_NO_FAST_HLE_COPIES` | `sceKernelMemcpy`, `sceKernelMemset` and `sceDmacMemcpy` copy a byte at a time through the checked accessors, as before, instead of one host copy |
+ | `<PREFIX>_NO_BUSY_CLOCK` | Keep emulated time still for a thread that never waits, as before the busy clock (`Kernel::charge_busy_time`) |
+ | `PSPRECOMP_NO_INTERPRETER=1` | Turn the interpreter off. Nothing runs without a corpus; with one, the runtime stops at the first address the recompiler missed and names it |
+diff --git a/host/gpu/frame_pacing.cpp b/host/gpu/frame_pacing.cpp
+index f4ba161..b71a12d 100644
+--- a/host/gpu/frame_pacing.cpp
++++ b/host/gpu/frame_pacing.cpp
+@@ -82,18 +82,15 @@ void PresentClock::flip(std::int64_t time_us, std::int64_t now_us) noexcept {
+     // the window, so that a few late frames do not keep every present late.
+     const std::int64_t work = std::clamp<std::int64_t>(now_us - time_us, 0, frame_us_) + kWorkMarginUs;
+     if (work_window_.size() < kWorkWindowFrames) {
++        work_newest_ = work_window_.size();
+         work_window_.push_back(work);
+     } else {
++        work_newest_ = work_cursor_;
+         work_window_[work_cursor_] = work;
+         work_cursor_ = (work_cursor_ + 1u) % kWorkWindowFrames;
+     }
+-    std::array<std::int64_t, kWorkWindowFrames> sorted{};
+-    std::copy(work_window_.begin(), work_window_.end(), sorted.begin());
+-    const std::size_t count = work_window_.size();
+-    const std::size_t rank = std::min(count - 1u, count * kWorkRank / kWorkWindowFrames);
+-    std::nth_element(sorted.begin(), sorted.begin() + static_cast<std::ptrdiff_t>(rank), sorted.begin() + static_cast<std::ptrdiff_t>(count),
+-                     std::greater<>{});
+-    work_us_ = sorted[rank];
++    idle_noted_ = false;
++    rank_work();
+     if (has_newer_) {
+         older_us_ = newer_us_;
+         has_older_ = true;
+@@ -109,6 +106,31 @@ void PresentClock::flip(std::int64_t time_us, std::int64_t now_us) noexcept {
+     next_index_ = 0;
+ }
+ 
++void PresentClock::note_idle(std::int64_t now_us) noexcept {
++    if (idle_noted_ || !busy_after_flip_ || !has_newer_ || work_window_.empty()) return;
++    idle_noted_ = true;
++    // The game's code after the flip. When it leaves less idle time than
++    // the presents' spacing, some present falls in the code whatever the
++    // delay, and a longer delay would only add latency: the flip's time stays.
++    const std::int64_t busy = now_us - newer_us_;
++    const auto spacing = static_cast<std::int64_t>(static_cast<double>(frame_us_) / std::max(1.0, per_frame_));
++    if (busy < 0 || busy + kWorkMarginUs > frame_us_ - spacing) return;
++    const std::int64_t work = busy + kWorkMarginUs;
++    if (work <= work_window_[work_newest_]) return;
++    work_window_[work_newest_] = work;
++    rank_work();
++}
++
++void PresentClock::rank_work() noexcept {
++    std::array<std::int64_t, kWorkWindowFrames> sorted{};
++    std::copy(work_window_.begin(), work_window_.end(), sorted.begin());
++    const std::size_t count = work_window_.size();
++    const std::size_t rank = std::min(count - 1u, count * kWorkRank / kWorkWindowFrames);
++    std::nth_element(sorted.begin(), sorted.begin() + static_cast<std::ptrdiff_t>(rank), sorted.begin() + static_cast<std::ptrdiff_t>(count),
++                     std::greater<>{});
++    work_us_ = sorted[rank];
++}
++
+ std::int64_t PresentClock::moment(std::int64_t index) const noexcept {
+     return anchor_us_ + std::llround(static_cast<double>(index) * static_cast<double>(frame_us_) / per_frame_);
+ }
+diff --git a/host/gpu/frame_pacing.hpp b/host/gpu/frame_pacing.hpp
+index 5ecd057..a9aafbb 100644
+--- a/host/gpu/frame_pacing.hpp
++++ b/host/gpu/frame_pacing.hpp
+@@ -63,6 +63,16 @@ public:
+     // A new game frame, for the moment `time_us` of real time, flipped at
+     // `now_us`.
+     void flip(std::int64_t time_us, std::int64_t now_us) noexcept;
++    // The emulation thread went idle at `now_us`, for the first time since
++    // the last flip: the game's code for the next frame has run. Presents are
++    // made on the emulation thread, and one that falls due while the game's
++    // code runs waits for a point where it can be made, up to several
++    // milliseconds late; counting the code after the flip as part of a
++    // frame's work moves the presents into the idle time, at the cost of
++    // that much more delay. Ignored when set_busy_after_flip(false).
++    void note_idle(std::int64_t now_us) noexcept;
++    // Off: a frame's work ends at its flip, as before (<prefix>_PRESENT_AFTER_FLIP).
++    void set_busy_after_flip(bool on) noexcept { busy_after_flip_ = on; }
+     // Forgets the frames and the grid, as after a pause.
+     void reset() noexcept;
+ 
+@@ -101,6 +111,10 @@ private:
+     std::int64_t work_us_{kWorkMarginUs};
+     std::vector<std::int64_t> work_window_;  // the last frames' code time, oldest first
+     std::size_t work_cursor_{};
++    std::size_t work_newest_{};              // the newest frame's entry in the window
++    bool idle_noted_{true};
++    bool busy_after_flip_{true};
++    void rank_work() noexcept;
+     std::int64_t frame_us_{game_frame_us()};
+     bool has_newer_{};
+     bool has_older_{};
+diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
+index 29104db..5119ab1 100644
+--- a/host/gpu/vulkan_renderer.cpp
++++ b/host/gpu/vulkan_renderer.cpp
+@@ -9935,6 +9935,13 @@ void VulkanRenderer::present_until(std::chrono::steady_clock::time_point wake) {
+     if (!impl_ || !impl_->ready) return;
+     Impl &impl = *impl_;
+     using Clock = std::chrono::steady_clock;
++    // The game's code for the next frame has run (frame_pacing.hpp, note_idle).
++    // <prefix>_PRESENT_AFTER_FLIP=1 counts a frame's work to its flip only, as before.
++    static const bool after_flip = portablekit::env("PRESENT_AFTER_FLIP") != nullptr;
++    if (impl.cycle_active) {
++        impl.present_clock.set_busy_after_flip(!after_flip);
++        impl.present_clock.note_idle(to_us(Clock::now()));
++    }
+     while (impl.cycle_active) {
+         const std::optional<std::int64_t> due = impl.present_clock.next_due();
+         if (!due) return;
+diff --git a/host/kernel/kernel.cpp b/host/kernel/kernel.cpp
+index a901f3a..a811bbe 100644
+--- a/host/kernel/kernel.cpp
++++ b/host/kernel/kernel.cpp
+@@ -719,6 +719,13 @@ void Kernel::charge_busy_time() {
+ }
+ 
+ void Kernel::on_starvation(AllegrexContext &ctx) {
++    // A present due while the game's code runs a long stretch without a
++    // system call (frame interpolation's in-between frames fall a few
++    // milliseconds after a flip, when the game builds its next frame) is made
++    // here rather than at the next thread switch, up to 7 ms late.
++    // <prefix>_NO_CODE_PRESENT_POLL leaves it to the thread switches, as before.
++    static const bool poll_in_code = portablekit::env("NO_CODE_PRESENT_POLL") == nullptr;
++    if (poll_in_code && poll_hook_) poll_hook_();
+     if (interrupt_active_ || current_thread() == nullptr) return;
+     advance_clock(now_us_ + kStarvationQuantumUs);
+     process_timers();
+diff --git a/tests/interpolation_tests.cpp b/tests/interpolation_tests.cpp
+index 674f854..eb33795 100644
+--- a/tests/interpolation_tests.cpp
++++ b/tests/interpolation_tests.cpp
+@@ -421,6 +421,35 @@ void present_clock() {
+         steady.flip(frame * kGameFrameUs, frame * kGameFrameUs + code);
+     }
+     check(steady.work_us() == 21000, "one frame in five that slow does");
++
++    // The game's code goes on after the flip (it builds the next frame): its
++    // end, the first idle time, is what the presents wait for, so that they
++    // fall in the idle time instead of in the code.
++    PresentClock busy;
++    busy.set_presents_per_frame(2.0);
++    for (std::int64_t frame = 0; frame < 60; ++frame) {
++        busy.flip(frame * kGameFrameUs, frame * kGameFrameUs + 2000);
++        busy.note_idle(frame * kGameFrameUs + 10000);
++        busy.note_idle(frame * kGameFrameUs + 30000);  // only the first idle time after a flip counts
++    }
++    check(busy.work_us() == 11000 && busy.delay_us() == kGameFrameUs / 2 + 11000,
++          "the delay covers the game's code up to its first idle time after the flip");
++    PresentClock flip_only;
++    flip_only.set_presents_per_frame(2.0);
++    flip_only.set_busy_after_flip(false);
++    for (std::int64_t frame = 0; frame < 60; ++frame) {
++        flip_only.flip(frame * kGameFrameUs, frame * kGameFrameUs + 2000);
++        flip_only.note_idle(frame * kGameFrameUs + 10000);
++    }
++    check(flip_only.work_us() == 3000, "with the old rule the code ends at the flip");
++    PresentClock slow;
++    slow.set_presents_per_frame(2.0);
++    for (std::int64_t frame = 0; frame < 60; ++frame) {
++        slow.flip(frame * kGameFrameUs, frame * kGameFrameUs + 2000);
++        slow.note_idle(frame * kGameFrameUs + 20000);
++    }
++    check(slow.work_us() == 3000,
++          "code that leaves less idle time than the presents' spacing does not lengthen the delay");
+ }
+ 
+ Second second_with(double speed, double idle_ms, double blend_ms, double plain_ms, double rate) {
+-- 
+2.53.0.windows.1
+

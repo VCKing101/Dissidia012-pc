@@ -1,7 +1,7 @@
 From b701e1425173fc7275e30e82d7cf99ddb3e652f1 Mon Sep 17 00:00:00 2001
 From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
 Date: Tue, 20 Oct 2026 22:47:10 +1030
-Subject: [PATCH 39/44] GE census: doubled source alpha and colour-only
+Subject: [PATCH 39/48] GE census: doubled source alpha and colour-only
  textures are drawn right now
 
 Since the blend factors 6 and 7 and the TCC bit are honoured, the census

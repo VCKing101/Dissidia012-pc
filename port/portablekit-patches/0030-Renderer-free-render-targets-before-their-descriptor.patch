@@ -1,7 +1,7 @@
 From ca541b3e47e4c40919f56ea78b695ae499ea72ce Mon Sep 17 00:00:00 2001
 From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
 Date: Mon, 19 Oct 2026 22:33:55 +1030
-Subject: [PATCH 30/44] Renderer: free render targets before their descriptor
+Subject: [PATCH 30/48] Renderer: free render targets before their descriptor
  pool at shutdown
 
 VulkanRenderer::shutdown destroyed the descriptor pool, then the render

@@ -1,7 +1,7 @@
 From 62b09491bc3fdc974f046f11510274dfd04f139d Mon Sep 17 00:00:00 2001
 From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
 Date: Tue, 20 Oct 2026 20:51:40 +1030
-Subject: [PATCH 32/44] Window captures of blended presents:
+Subject: [PATCH 32/48] Window captures of blended presents:
  <prefix>_CAPTURE_BLENDED
 
 With frame interpolation every other present is drawn again from the

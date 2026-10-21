@@ -1,0 +1,311 @@
+From 8f4addcd42abe160c6427598d55d9c1c51d1fb62 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Wed, 21 Oct 2026 23:32:17 +1030
+Subject: [PATCH 46/48] Runtime: an overlay swapped out keeps its registrations
+
+Swapping one 1.5 MB overlay for another dropped 390,000 registrations
+(a walk over the whole table, an erase and a freed name each) and
+registered as many again: a quarter of a second on the emulation thread
+at every load between the menus and a battle, with the sound running dry.
+
+Runtime::park_functions(key, start, end) takes an overlay's registrations
+out as node handles, and restore_functions(key) puts them back when the
+same overlay is loaded again: no allocation, one hash operation each.
+unregister_functions clears a range address by address while every
+registration is word aligned, and reserve_functions sizes the table before
+a corpus registers. The overlay log line gives each swap's time.
+
+<prefix>_NO_OVERLAY_PARKING drops and registers them, as before.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ docs/BRINGING_UP_A_GAME.md    |  1 +
+ host/overlays.cpp             | 30 ++++++++++++--
+ include/psprecomp/runtime.hpp | 25 +++++++++++
+ src/runtime.cpp               | 78 ++++++++++++++++++++++++++++++-----
+ tests/test_main.cpp           | 28 +++++++++++++
+ 5 files changed, 147 insertions(+), 15 deletions(-)
+
+diff --git a/docs/BRINGING_UP_A_GAME.md b/docs/BRINGING_UP_A_GAME.md
+index 00db1dc..ad524fe 100644
+--- a/docs/BRINGING_UP_A_GAME.md
++++ b/docs/BRINGING_UP_A_GAME.md
+@@ -92,6 +92,7 @@ Every one of these takes the profile's own prefix, so `TENKAWA_TRACE_KERNEL` for
+ | `<PREFIX>_TRACE_SAS` | SAS voices set, keyed on and off, and each change of the end flags a game polls |
+ | `<PREFIX>_PERF_CSV=<file>` | One CSV row per present (time, interval, what it showed: the flip's frame, a blended in-between frame, a frame as it is, or why interpolation refused; blend fraction, grid moments skipped, lateness, rate) and one per game frame (guest, render, wait, pacing and GPU time, the emulation thread's CPU time, pipelines created and their time, pipelines the prewarm had ready, textures decoded and their time, texture-key hashing time, render-target snapshots and their size, interpolation's pairing, presents not made); the input script's `scene NAME` is a column (`host/perf/frame_stats.hpp`) |
+ | `<PREFIX>_TRACE_STALL_SAMPLES[=ms]` | Windows: while a game frame takes longer than the threshold (50 ms by default), sample the emulation thread's host stack every few milliseconds and print the commonest stacks at the next flip, with names when the program's PDB is beside it (link with `/DEBUG`). `=present` samples while a present between flips is more than 2 ms overdue instead |
++| `<PREFIX>_NO_OVERLAY_PARKING` | Drop an overlay's registrations when another overlay replaces it and register them again when it comes back, as before (`Runtime::park_functions` keeps them; the drop and the re-registration of a 400,000-entry overlay took a quarter of a second) |
+ | `<PREFIX>_NO_BUSY_CLOCK` | Keep emulated time still for a thread that never waits, as before the busy clock (`Kernel::charge_busy_time`) |
+ | `PSPRECOMP_NO_INTERPRETER=1` | Turn the interpreter off. Nothing runs without a corpus; with one, the runtime stops at the first address the recompiler missed and names it |
+ | `PSPRECOMP_MAX_DISPATCHES` | Stop after this many dispatches, for a bounded run |
+diff --git a/host/overlays.cpp b/host/overlays.cpp
+index 0d68c1c..4849a65 100644
+--- a/host/overlays.cpp
++++ b/host/overlays.cpp
+@@ -13,6 +13,7 @@
+ #include "psprecomp/common.hpp"
+ 
+ #include <algorithm>
++#include <chrono>
+ #include <cstdlib>
+ #include <fstream>
+ #include <iostream>
+@@ -288,6 +289,15 @@ void dump_slot(const psprecomp::GuestMemory &memory, std::uint32_t slot_start, s
+               << path.string() << " " << psprecomp::hex32(slot_start) << "\n";
+ }
+ 
++// An overlay swapped out keeps its registrations (Runtime::park_functions),
++// and comes back with them when it is loaded again, instead of dropping and
++// registering a few hundred thousand entries at every swap.
++// <prefix>_NO_OVERLAY_PARKING drops and registers them, as before.
++bool overlay_parking() {
++    static const bool on = portablekit::env("NO_OVERLAY_PARKING") == nullptr;
++    return on;
++}
++
+ bool install_overlay_for(Runtime &runtime, std::uint32_t pc) {
+     const auto [slot_start, slot_end] = code_range_of(pc);
+     if (slot_start == 0u) return false;
+@@ -303,12 +313,19 @@ bool install_overlay_for(Runtime &runtime, std::uint32_t pc) {
+         if (identity_hash(runtime.memory(), corpus) != corpus.hash) continue;
+         auto &installed = installed_overlays();
+         if (installed[slot_start] == corpus.hash) return false;  // already installed: a real miss
++        const auto started = std::chrono::steady_clock::now();
+         runtime.unregister_functions(slot_start, slot_start + corpus.size);
+-        corpus.install(runtime);
++        const bool restored = overlay_parking() && runtime.restore_functions(corpus.hash);
++        if (!restored) {
++            runtime.reserve_functions(corpus.size / 4u);
++            corpus.install(runtime);
++        }
+         installed[slot_start] = corpus.hash;
+         installed_headers()[slot_start] = header_hash(runtime.memory(), slot_start);
+         std::cout << "[overlay] installed " << corpus.name << " (" << corpus.size / 1024u << " KiB) at "
+-                  << psprecomp::hex32(slot_start) << "\n";
++                  << psprecomp::hex32(slot_start) << (restored ? ", its parked registrations," : "") << " in "
++                  << std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count()
++                  << " ms\n";
+         return true;
+     }
+ 
+@@ -369,8 +386,13 @@ void revalidate_overlays(Runtime &runtime) {
+         }
+         // A different overlay now occupies the slot: drop the stale code so the
+         // next dispatch there goes through the miss hook.
+-        runtime.unregister_functions(corpus->base, corpus->base + corpus->size);
+-        std::cout << "[overlay] " << corpus->name << " was replaced in " << psprecomp::hex32(slot_start) << "\n";
++        const auto started = std::chrono::steady_clock::now();
++        if (overlay_parking()) runtime.park_functions(corpus->hash, corpus->base, corpus->base + corpus->size);
++        else runtime.unregister_functions(corpus->base, corpus->base + corpus->size);
++        std::cout << "[overlay] " << corpus->name << " was replaced in " << psprecomp::hex32(slot_start) << " ("
++                  << (overlay_parking() ? "parked" : "dropped") << " in "
++                  << std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count()
++                  << " ms)\n";
+         installed_headers().erase(slot_start);
+         it = installed_overlays().erase(it);
+     }
+diff --git a/include/psprecomp/runtime.hpp b/include/psprecomp/runtime.hpp
+index 7bb829b..236d3ab 100644
+--- a/include/psprecomp/runtime.hpp
++++ b/include/psprecomp/runtime.hpp
+@@ -103,6 +103,19 @@ public:
+     // Removes every registration in [start, end). A profile calls this before
+     // installing a different overlay into the same guest address window.
+     void unregister_functions(std::uint32_t start, std::uint32_t end);
++    // The same, keeping the registrations under `key` (an overlay's identity)
++    // instead of dropping them, so that restore_functions(key) can put them
++    // back when that overlay is loaded into the window again. Moving them out
++    // and back costs a hash-table operation each and no allocation; dropping
++    // and registering a large overlay's 400,000 entries again took a quarter
++    // of a second, a visible stall at every overlay swap. A key parked again
++    // replaces what it held.
++    void park_functions(std::uint64_t key, std::uint32_t start, std::uint32_t end);
++    // True when `key` was parked: its registrations are back as they were.
++    bool restore_functions(std::uint64_t key);
++    // Room for `count` more registrations, so that registering a large
++    // corpus rehashes the table once rather than every time it doubles.
++    void reserve_functions(std::size_t count);
+     void register_native_fast_path(std::uint32_t address, NativeFastPath function);
+     void invoke_native_fast_path(std::uint32_t address, AllegrexContext &ctx);
+ 
+@@ -189,6 +202,18 @@ private:
+     NidRegistry nids_;
+     AllegrexContext cpu_;
+     std::unordered_map<std::uint32_t, FunctionEntry> functions_;
++    // Registrations at addresses that are not a multiple of four; while there
++    // are none, a range is cleared address by address instead of by a walk
++    // over every registration.
++    std::size_t unaligned_functions_{};
++    // park_functions(): the registrations taken out, by key.
++    std::unordered_map<std::uint64_t, std::vector<decltype(functions_)::node_type>> parked_functions_;
++    // Takes the registrations in [start, end) out of the table and the direct
++    // tables; `keep` receives them, or they are dropped.
++    void take_functions(std::uint32_t start, std::uint32_t end,
++                        std::vector<decltype(functions_)::node_type> *keep);
++    // The direct-table part of register_function().
++    void index_function(std::uint32_t address, RecompiledFunction function, bool chainable);
+     // Direct PC table, covering only the registered code window rather than all
+     // of guest RAM.  direct_base_ is its 1 MiB-aligned first canonical address.
+     std::vector<RecompiledFunction> direct_functions_;
+diff --git a/src/runtime.cpp b/src/runtime.cpp
+index e105675..930a027 100644
+--- a/src/runtime.cpp
++++ b/src/runtime.cpp
+@@ -434,7 +434,14 @@ const NidRegistry &Runtime::nids() const noexcept { return nids_; }
+ 
+ void Runtime::register_function(std::uint32_t address, RecompiledFunction function, std::string name) {
+     if (!function) throw Error("Attempted to register a null recompiled function");
+-    functions_[address] = FunctionEntry{function, std::move(name)};
++    const bool chainable = name.starts_with("recomp_unit_");
++    const auto [entry, inserted] = functions_.insert_or_assign(address, FunctionEntry{function, std::move(name)});
++    (void)entry;
++    if (inserted && (address & 3u) != 0u) ++unaligned_functions_;
++    index_function(address, function, chainable);
++}
++
++void Runtime::index_function(std::uint32_t address, RecompiledFunction function, bool chainable) {
+     const std::uint32_t c = memory_.canonical(address);
+     if ((c & 3u) != 0u || c < GuestMemory::kPhysicalBase) return;
+ 
+@@ -471,8 +478,6 @@ void Runtime::register_function(std::uint32_t address, RecompiledFunction functi
+     // Assign unconditionally -- an import stub can also be covered by a unit,
+     // and a later import registration has to clear the earlier unit pointer or
+     // chaining would keep running the raw code instead of the wrapper.
+-    const auto &registered = functions_[address].name;
+-    const bool chainable = registered.starts_with("recomp_unit_");
+     direct_chainable_[index] = chainable ? function : nullptr;
+ 
+     if (!chainable && generated_unit_span_ != 0u && c >= generated_unit_base_) {
+@@ -1215,13 +1220,12 @@ void Runtime::arithmetic_overflow(std::uint32_t pc, std::uint32_t instruction) {
+     stop("Allegrex arithmetic overflow for " + hex32(instruction) + " at " + hex32(pc));
+ }
+ 
+-void Runtime::unregister_functions(std::uint32_t start, std::uint32_t end) {
+-    for (auto it = functions_.begin(); it != functions_.end();) {
+-        if (it->first < start || it->first >= end) {
+-            ++it;
+-            continue;
+-        }
+-        const std::uint32_t c = memory_.canonical(it->first);
++void Runtime::unregister_functions(std::uint32_t start, std::uint32_t end) { take_functions(start, end, nullptr); }
++
++void Runtime::take_functions(std::uint32_t start, std::uint32_t end,
++                             std::vector<decltype(functions_)::node_type> *keep) {
++    const auto clear_direct = [this](std::uint32_t address) {
++        const std::uint32_t c = memory_.canonical(address);
+         if (c >= direct_base_) {
+             const std::size_t index = static_cast<std::size_t>(c - direct_base_) / 4u;
+             if (index < direct_functions_.size()) {
+@@ -1229,10 +1233,62 @@ void Runtime::unregister_functions(std::uint32_t start, std::uint32_t end) {
+                 direct_chainable_[index] = nullptr;
+             }
+         }
+-        it = functions_.erase(it);
++    };
++    const auto take = [&](decltype(functions_)::const_iterator it) {
++        clear_direct(it->first);
++        if ((it->first & 3u) != 0u) --unaligned_functions_;
++        if (keep != nullptr) keep->push_back(functions_.extract(it));
++        else functions_.erase(it);
++    };
++    if (end <= start) return;
++    const std::uint64_t words = (static_cast<std::uint64_t>(end) - start + 3u) / 4u;
++    if (unaligned_functions_ == 0u && words < functions_.size()) {
++        // Every registration is at a multiple of four: look up each such
++        // address of the range rather than walk the whole table.
++        for (std::uint64_t address = (start + 3ull) & ~3ull; address < end; address += 4u) {
++            const auto found = functions_.find(static_cast<std::uint32_t>(address));
++            if (found != functions_.end()) take(found);
++        }
++        return;
++    }
++    for (auto it = functions_.begin(); it != functions_.end();) {
++        if (it->first < start || it->first >= end) {
++            ++it;
++            continue;
++        }
++        const auto next = std::next(it);
++        take(it);
++        it = next;
+     }
+ }
+ 
++void Runtime::park_functions(std::uint64_t key, std::uint32_t start, std::uint32_t end) {
++    std::vector<decltype(functions_)::node_type> kept;
++    take_functions(start, end, &kept);
++    parked_functions_[key] = std::move(kept);
++}
++
++void Runtime::reserve_functions(std::size_t count) { functions_.reserve(functions_.size() + count); }
++
++bool Runtime::restore_functions(std::uint64_t key) {
++    const auto parked = parked_functions_.find(key);
++    if (parked == parked_functions_.end()) return false;
++    std::vector<decltype(functions_)::node_type> nodes = std::move(parked->second);
++    parked_functions_.erase(parked);
++    for (auto &node : nodes) {
++        const std::uint32_t address = node.key();
++        const RecompiledFunction function = node.mapped().function;
++        const bool chainable = node.mapped().name.starts_with("recomp_unit_");
++        // Anything registered at the address since takes the parked entry's
++        // place, as a later registration always does.
++        if (functions_.contains(address)) continue;
++        functions_.insert(std::move(node));
++        if ((address & 3u) != 0u) ++unaligned_functions_;
++        index_function(address, function, chainable);
++    }
++    return true;
++}
++
+ void Runtime::register_native_fast_path(std::uint32_t address, NativeFastPath function) {
+     const std::uint32_t canonical_address = memory_.canonical(address);
+     if (!function) {
+diff --git a/tests/test_main.cpp b/tests/test_main.cpp
+index d4305f6..abfa302 100644
+--- a/tests/test_main.cpp
++++ b/tests/test_main.cpp
+@@ -136,6 +136,33 @@ static void test_chained_call_context_guard() {
+ }
+ 
+ 
++// Overlay swaps: registrations parked under a key come back as they were, and
++// a range cleared by unregister_functions no longer dispatches.
++static void test_parked_functions() {
++    psprecomp::Runtime runtime;
++    runtime.register_function(0x08804100u, &chained_same_context, "recomp_unit_main");
++    for (std::uint32_t address = 0x089DD4C0u; address < 0x089DD4C0u + 0x400u; address += 4u)
++        runtime.register_function(address, &chained_same_context, "recomp_unit_overlay_a");
++    runtime.register_function(0x089DD4C2u, &chained_switch_context, "odd_entry");
++    const std::size_t all = runtime.function_count();
++    runtime.park_functions(0xA, 0x089DD4C0u, 0x089DD4C0u + 0x400u);
++    require(runtime.function_count() == 1u && !runtime.has_function(0x089DD4C0u) &&
++                !runtime.has_function(0x089DD4C2u) && runtime.has_function(0x08804100u),
++            "Parking an overlay's range left its registrations in place or took others");
++    runtime.register_function(0x089DD4C0u, &chained_switch_context, "recomp_unit_overlay_b");
++    runtime.park_functions(0xB, 0x089DD4C0u, 0x089DD4C0u + 0x400u);
++    require(runtime.restore_functions(0xA) && runtime.function_count() == all,
++            "Restoring a parked overlay did not bring back every registration");
++    require(runtime.has_function(0x089DD4C0u + 0x3FCu) && runtime.has_function(0x089DD4C2u),
++            "Restored registrations are not found");
++    require(!runtime.restore_functions(0xA), "A key restored twice");
++    runtime.unregister_functions(0x089DD4C0u, 0x089DD4C0u + 0x400u);
++    require(runtime.function_count() == 1u && !runtime.has_function(0x089DD4C4u),
++            "unregister_functions left registrations in its range");
++    require(runtime.restore_functions(0xB) && runtime.function_count() == 2u && runtime.has_function(0x089DD4C0u),
++            "The second overlay's parked registration did not come back");
++}
++
+ // Direct-chain regression: the compile-time direct chain once guarded only the
+ // scheduler boundary that actually performed a switch. An outer native direct
+ // chain could therefore return true after a descendant had already changed the
+@@ -1324,6 +1351,7 @@ int main() {
+     try {
+         test_import_return_context_guard();
+         test_chained_call_context_guard();
++        test_parked_functions();
+         test_nested_direct_chain_context_guard();
+         test_interpreter_delay_slots_and_branch_likely();
+         test_interpreter_unaligned_word_access();
+-- 
+2.53.0.windows.1
+

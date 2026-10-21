@@ -1,0 +1,696 @@
+From 7fbdb6eba98a967d56b24ddf0de1caf46f3ea679 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Wed, 21 Oct 2026 23:32:07 +1030
+Subject: [PATCH 45/48] Perf: a per-frame CSV and a stall sampler
+
+<prefix>_PERF_CSV=<file> writes one row per present (interval, what it
+showed: the flip's frame, a blended in-between frame, a frame as it is or
+why interpolation refused; blend fraction, skipped grid moments, lateness,
+rate) and one per game frame (guest, render, wait, pacing, GPU and the
+emulation thread's CPU time; pipelines created and prewarmed, textures
+decoded, texture-key hashing, render-target snapshots, interpolation's
+pairing, presents not made), with the input script's scene as a column.
+
+<prefix>_TRACE_STALL_SAMPLES[=ms] (Windows) samples the emulation
+thread's host stack while a frame runs long, or with =present while a
+present between flips is overdue, and prints the commonest stacks at the
+next flip. The thread is stopped only to copy its registers and stack top;
+the walk and the names come after it runs again.
+
+Both off by default: each note is one test of a flag.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ docs/BRINGING_UP_A_GAME.md   |   2 +
+ host/gpu/vulkan_renderer.cpp |  32 +++
+ host/perf/frame_stats.cpp    | 410 +++++++++++++++++++++++++++++++++++
+ host/perf/frame_stats.hpp    |  40 ++++
+ host/ui/input_script.cpp     |   2 +
+ 5 files changed, 486 insertions(+)
+
+diff --git a/docs/BRINGING_UP_A_GAME.md b/docs/BRINGING_UP_A_GAME.md
+index 855f91b..00db1dc 100644
+--- a/docs/BRINGING_UP_A_GAME.md
++++ b/docs/BRINGING_UP_A_GAME.md
+@@ -90,6 +90,8 @@ Every one of these takes the profile's own prefix, so `TENKAWA_TRACE_KERNEL` for
+ | `<PREFIX>_TRACE_TRANSFERS` | Each GE block transfer (source, destination, rectangle) and whether it was also copied on the GPU, at the internal scale, into a target standing for the destination (`copy_block_transfer()` in `host/gpu/vulkan_renderer.cpp`), and once a display list whether a texture over such a copy sampled it. `<PREFIX>_NO_TRANSFER_TARGETS` copies in guest memory only (the texture then reads the 1x read-back), as before; `<PREFIX>_TRANSFER_SAMPLED_KEY` keys textures over the latest transfers' destinations by one word in 256, as before, instead of every byte |
+ | `<PREFIX>_TRACE_ENV_MAP[=N]` | The first N draws (40 by default) in texture map mode 2, environment (shade) mapping: the lights 0xC1 names and their vectors, the world matrix, the texture scale and offset, the first vertices. The vertex shader makes U and V from the world-space normal and the two lights' vectors (`environment_map_uv()` in `host/gpu/shaders/ge.vert`); `<PREFIX>_NO_ENV_MAP` uses the vertex UVs, as before; `<PREFIX>_ENV_MAP_OFFSET` adds the texture offset to the coordinates it makes |
+ | `<PREFIX>_TRACE_SAS` | SAS voices set, keyed on and off, and each change of the end flags a game polls |
++| `<PREFIX>_PERF_CSV=<file>` | One CSV row per present (time, interval, what it showed: the flip's frame, a blended in-between frame, a frame as it is, or why interpolation refused; blend fraction, grid moments skipped, lateness, rate) and one per game frame (guest, render, wait, pacing and GPU time, the emulation thread's CPU time, pipelines created and their time, pipelines the prewarm had ready, textures decoded and their time, texture-key hashing time, render-target snapshots and their size, interpolation's pairing, presents not made); the input script's `scene NAME` is a column (`host/perf/frame_stats.hpp`) |
++| `<PREFIX>_TRACE_STALL_SAMPLES[=ms]` | Windows: while a game frame takes longer than the threshold (50 ms by default), sample the emulation thread's host stack every few milliseconds and print the commonest stacks at the next flip, with names when the program's PDB is beside it (link with `/DEBUG`). `=present` samples while a present between flips is more than 2 ms overdue instead |
+ | `<PREFIX>_NO_BUSY_CLOCK` | Keep emulated time still for a thread that never waits, as before the busy clock (`Kernel::charge_busy_time`) |
+ | `PSPRECOMP_NO_INTERPRETER=1` | Turn the interpreter off. Nothing runs without a corpus; with one, the runtime stops at the first address the recompiler missed and names it |
+ | `PSPRECOMP_MAX_DISPATCHES` | Stop after this many dispatches, for a bounded run |
+diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
+index e87121f..29104db 100644
+--- a/host/gpu/vulkan_renderer.cpp
++++ b/host/gpu/vulkan_renderer.cpp
+@@ -4689,11 +4689,15 @@ VulkanRenderer::Impl::Texture &VulkanRenderer::Impl::texture_for(const GuestMemo
+     } else {
+         auto [entry, inserted] = list_texture_keys.try_emplace(input);
+         if (inserted) {
++            const bool timed = perf::csv_enabled();
++            const perf::Clock::time_point key_start = timed ? perf::Clock::now() : perf::Clock::time_point{};
+             entry->second.key = texture_key(memory, state);
+             // A large texture is keyed by one word in every 256 bytes, which
+             // can miss a block transfer writing another picture over it.
+             if (!transfer_ranges.empty())
+                 entry->second.key = key_over_transfers(memory, state, entry->second.key);
++            if (timed)
++                perf::note_texture_key(std::chrono::duration<double, std::milli>(perf::Clock::now() - key_start).count());
+         }
+         memo = &entry->second;
+         last_texture_input = input;
+@@ -4723,6 +4727,13 @@ VulkanRenderer::Impl::Texture &VulkanRenderer::Impl::texture_for(const GuestMemo
+     }
+     // Decoded in the background when it can be: copied out of guest memory
+     // now, uploaded when the frame is submitted (finish_pending_textures).
++    struct DecodeTimer {
++        bool on{perf::csv_enabled()};
++        perf::Clock::time_point start{on ? perf::Clock::now() : perf::Clock::time_point{}};
++        ~DecodeTimer() {
++            if (on) perf::note_texture_decoded(std::chrono::duration<double, std::milli>(perf::Clock::now() - start).count());
++        }
++    } decode_timer;
+     std::shared_ptr<DecodeJob> job;
+     if (recording && async_uploads() && background_decode() && !dumper) {
+         job = std::make_shared<DecodeJob>();
+@@ -5438,6 +5449,7 @@ VkDescriptorSet VulkanRenderer::Impl::framebuffer_snapshot(Target &target, bool
+     vkCmdCopyImage(command_buffer, target.color, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, slot->image,
+                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1u, &region);
+     perf::count_target_copy();
++    perf::note_snapshot(static_cast<std::uint64_t>(taken.width) * taken.height * 4u);
+     transition(command_buffer, slot->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+     transition(command_buffer, target.color, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+@@ -6262,6 +6274,7 @@ VkPipeline VulkanRenderer::Impl::pipeline_for(const PipelineKey &key) {
+             last_pipeline_key = key;
+             last_pipeline = pipeline;
+             ++pipelines_prewarm_used;
++            perf::note_pipeline_prewarmed();
+             return pipeline;
+         }
+     }
+@@ -6271,6 +6284,7 @@ VkPipeline VulkanRenderer::Impl::pipeline_for(const PipelineKey &key) {
+     perf::note_stall(perf::Stall::Pipeline, create_time);
+     ++pipelines_new;
+     pipeline_new_ms += std::chrono::duration<double, std::milli>(create_time).count();
++    perf::note_pipeline_created(std::chrono::duration<double, std::milli>(create_time).count());
+     if (pipeline_cache != VK_NULL_HANDLE) {
+         pipeline_cache_dirty = true;
+         pipeline_cache_changed = std::chrono::steady_clock::now();
+@@ -9090,6 +9104,7 @@ void VulkanRenderer::Impl::finish_interpolated_frame(VkImage source, std::uint32
+         matching.cut = older_frame.valid ? "not recorded" : "no frame before";
+     }
+     camera_motion = matching.camera_found ? interpolation::rigid_motion(matching.camera) : interpolation::RigidMotion{};
++    perf::note_pairing(matching.cut, matching.matched, matching.eligible_newer);
+     InterpolationStats &stats = interpolation_stats;
+     ++stats.frames;
+     stats.eligible += matching.eligible_newer;
+@@ -9138,6 +9153,7 @@ bool VulkanRenderer::Impl::poll_presents(std::chrono::steady_clock::time_point n
+         // Presents made while the game's code ran have taken half a frame:
+         // the rest wait for the kernel's idle time or the next flip.
+         ++interpolation_stats.over_budget;
++        perf::note_missed_present(false);
+         (void)present_clock.take(to_us(now));
+         return false;
+     }
+@@ -9146,6 +9162,7 @@ bool VulkanRenderer::Impl::poll_presents(std::chrono::steady_clock::time_point n
+     const auto start = std::chrono::steady_clock::now();
+     const bool made = present_between(*present, account);
+     if (!idle) busy_presents += std::chrono::steady_clock::now() - start;
++    perf::note_present_due(present_clock.next_due().value_or(0));
+     return made;
+ }
+ 
+@@ -9202,6 +9219,7 @@ bool VulkanRenderer::Impl::present_between(const pacing::PresentClock::Present &
+ #endif
+     if (acquired != VK_SUCCESS && acquired != VK_SUBOPTIMAL_KHR) {
+         ++stats.blocked;
++        perf::note_missed_present(true);
+         if (account) perf::add_render_time(Clock::now() - start);
+         return false;
+     }
+@@ -9285,6 +9303,17 @@ bool VulkanRenderer::Impl::present_between(const pacing::PresentClock::Present &
+         stats.plain_time += spent;
+     }
+     if (account) perf::add_render_time(spent);
++    if (perf::csv_enabled()) {
++        perf::PresentKind kind = perf::PresentKind::Other;
++        if (blended) kind = perf::PresentKind::Blended;
++        else if (image == newer_image.color) kind = perf::PresentKind::Newest;
++        else if (present.t <= 0.001f) kind = perf::PresentKind::Older;
++        else if (!(matching.cut == nullptr && older_frame.valid && older_frame.recorded && newer_frame.recorded))
++            kind = perf::PresentKind::Cut;
++        else if (destroyed_texture_clock > older_frame.texture_clock) kind = perf::PresentKind::Textures;
++        perf::note_present(kind, present.t, present.skipped,
++                           static_cast<double>(to_us(start) - present.time_us - present_clock.delay_us()) / 1000.0);
++    }
+     perf::count_present();
+     return true;
+ }
+@@ -9693,6 +9722,7 @@ void VulkanRenderer::Impl::reset_interpolation() {
+     matcher.forget_motion();
+     matching = interpolation::Matching{};
+     cycle_active = false;
++    perf::note_present_due(0);
+ }
+ 
+ void VulkanRenderer::Impl::destroy_interpolation_targets() {
+@@ -9862,6 +9892,7 @@ bool VulkanRenderer::present(std::uint32_t display_address,
+         impl.present_clock.set_presents_per_frame(pacing::presents_per_frame(impl.governor.rate()));
+         impl.present_clock.flip(moment_us, to_us(now));
+         impl.cycle_active = impl.newer_picture_valid;
++        perf::note_present_due(impl.cycle_active ? impl.present_clock.next_due().value_or(0) : 0);
+         static const bool check = portablekit::env("CHECK_REPLAY") != nullptr;
+         if (check && impl.frames % 150u == 0u) impl.check_replay();
+         impl.report_interpolation();
+@@ -9933,6 +9964,7 @@ void VulkanRenderer::pause_interpolation() {
+     // the frames' moments start over when it resumes.
+     impl_->present_clock.reset();
+     impl_->cycle_active = false;
++    perf::note_present_due(0);
+ }
+ 
+ void VulkanRenderer::set_frame_rate(settings::FrameRate rate) {
+diff --git a/host/perf/frame_stats.cpp b/host/perf/frame_stats.cpp
+index 6dc58a5..3d7b814 100644
+--- a/host/perf/frame_stats.cpp
++++ b/host/perf/frame_stats.cpp
+@@ -14,6 +14,29 @@
+ #include <cstring>
+ #include <iostream>
+ 
++#if defined(_WIN32)
++#ifndef NOMINMAX
++#define NOMINMAX
++#endif
++#ifndef WIN32_LEAN_AND_MEAN
++#define WIN32_LEAN_AND_MEAN
++#endif
++#include <windows.h>
++
++#include <dbghelp.h>
++
++#include <atomic>
++#include <map>
++#include <mutex>
++#include <string>
++#include <thread>
++#include <vector>
++
++#pragma comment(lib, "dbghelp.lib")
++#elif defined(__unix__) || defined(__APPLE__)
++#include <time.h>
++#endif
++
+ namespace portablekit::perf {
+ namespace {
+ 
+@@ -384,10 +407,171 @@ void set_display_info(const std::string &present_mode, std::uint32_t width, std:
+     s.refresh_hz = refresh_hz;
+ }
+ 
++namespace {
++
++// CPU time the calling thread has used, in milliseconds; tells a frame the
++// guest thread spent working from one where it was not running at all.
++double thread_cpu_ms() {
++#if defined(_WIN32)
++    FILETIME created{}, exited{}, kernel{}, user{};
++    if (!GetThreadTimes(GetCurrentThread(), &created, &exited, &kernel, &user)) return 0.0;
++    const auto ticks = [](const FILETIME &time) {
++        return static_cast<double>(static_cast<std::uint64_t>(time.dwHighDateTime) << 32u | time.dwLowDateTime);
++    };
++    return (ticks(kernel) + ticks(user)) / 10'000.0;
++#elif defined(__unix__) || defined(__APPLE__)
++    timespec now{};
++    if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &now) != 0) return 0.0;
++    return static_cast<double>(now.tv_sec) * 1000.0 + static_cast<double>(now.tv_nsec) / 1.0e6;
++#else
++    return 0.0;
++#endif
++}
++
++// <prefix>_PERF_CSV (frame_stats.hpp).
++struct Csv {
++    std::FILE *file{};
++    Clock::time_point start{Clock::now()};
++    std::string scene{"start"};
++    // The present about to be counted.
++    PresentKind kind{PresentKind::Flip};
++    float t{1.0f};
++    std::uint32_t skipped{};
++    double late_ms{};
++    bool noted{};
++    // The frame in progress.
++    std::uint32_t pipelines{};
++    double pipeline_ms{};
++    double pipeline_max_ms{};
++    std::uint32_t prewarmed{};
++    std::uint32_t textures{};
++    double texture_ms{};
++    double key_ms{};
++    std::uint32_t snapshots{};
++    std::uint64_t snapshot_bytes{};
++    std::uint32_t presents{};
++    std::uint32_t blocked{};
++    std::uint32_t over_budget{};
++    const char *cut{};
++    bool paired{};
++    std::uint32_t matched{};
++    std::uint32_t eligible{};
++    double cpu_start_ms{};
++};
++
++Csv &csv() {
++    static Csv value = [] {
++        Csv result{};
++        const char *path = portablekit::env("PERF_CSV");
++        if (path == nullptr || *path == '\0') return result;
++        result.file = std::fopen(path, "w");
++        if (result.file == nullptr) {
++            std::cout << "[perf] cannot write " << path << "\n";
++            return result;
++        }
++        std::fputs("type,ms,interval_ms,kind,t,skipped,late_ms,rate,guest_ms,render_ms,wait_ms,pacing_ms,gpu_ms,"
++                   "pipelines,pipeline_ms,pipeline_max_ms,prewarmed,textures,texture_ms,key_ms,snapshots,"
++                   "snapshot_kib,presents,blocked,over_budget,cut,matched,eligible,cpu_ms,scene\n",
++                   result.file);
++        std::cout << "[perf] per-frame CSV: " << path << "\n";
++        return result;
++    }();
++    return value;
++}
++
++const char *kind_name(PresentKind kind) {
++    switch (kind) {
++    case PresentKind::Flip: return "flip";
++    case PresentKind::Blended: return "blended";
++    case PresentKind::Newest: return "newest";
++    case PresentKind::Older: return "older";
++    case PresentKind::Cut: return "cut";
++    case PresentKind::Textures: return "textures";
++    case PresentKind::Other: break;
++    }
++    return "other";
++}
++
++} // namespace
++
++bool csv_enabled() noexcept { return csv().file != nullptr; }
++
++void note_present(PresentKind kind, float t, std::uint32_t skipped, double late_ms) noexcept {
++    Csv &c = csv();
++    if (c.file == nullptr) return;
++    c.kind = kind;
++    c.t = t;
++    c.skipped = skipped;
++    c.late_ms = late_ms;
++    c.noted = true;
++}
++
++void note_missed_present(bool blocked) noexcept {
++    Csv &c = csv();
++    if (c.file == nullptr) return;
++    ++(blocked ? c.blocked : c.over_budget);
++}
++
++void note_pipeline_created(double milliseconds) noexcept {
++    Csv &c = csv();
++    if (c.file == nullptr) return;
++    ++c.pipelines;
++    c.pipeline_ms += milliseconds;
++    c.pipeline_max_ms = std::max(c.pipeline_max_ms, milliseconds);
++}
++
++void note_pipeline_prewarmed() noexcept {
++    Csv &c = csv();
++    if (c.file != nullptr) ++c.prewarmed;
++}
++
++void note_texture_decoded(double milliseconds) noexcept {
++    Csv &c = csv();
++    if (c.file == nullptr) return;
++    ++c.textures;
++    c.texture_ms += milliseconds;
++}
++
++void note_texture_key(double milliseconds) noexcept {
++    Csv &c = csv();
++    if (c.file != nullptr) c.key_ms += milliseconds;
++}
++
++void note_snapshot(std::uint64_t bytes) noexcept {
++    Csv &c = csv();
++    if (c.file == nullptr) return;
++    ++c.snapshots;
++    c.snapshot_bytes += bytes;
++}
++
++void note_pairing(const char *cut, std::uint32_t matched, std::uint32_t eligible) noexcept {
++    Csv &c = csv();
++    if (c.file == nullptr) return;
++    c.cut = cut;
++    c.paired = true;
++    c.matched = matched;
++    c.eligible = eligible;
++}
++
++void set_scene(const std::string &name) {
++    Csv &c = csv();
++    if (c.file == nullptr) return;
++    c.scene.clear();
++    for (const char ch : name) c.scene += ch == ',' || ch == '\n' ? '_' : ch;
++}
++
+ void count_present() {
+     State &s = state();
+     const Clock::time_point now = Clock::now();
+     const double present_ms = to_ms(now - s.last_present);
++    if (Csv &c = csv(); c.file != nullptr) {
++        std::fprintf(c.file, "present,%.3f,%.3f,%s,%.3f,%u,%.2f,%.0f,,,,,,,,,,,,,,,,,,,,,,%s\n",
++                     to_ms(now - c.start), present_ms, kind_name(c.noted ? c.kind : PresentKind::Flip),
++                     c.noted ? static_cast<double>(c.t) : 1.0, c.noted ? c.skipped : 0u, c.noted ? c.late_ms : 0.0,
++                     s.frame_rate, c.scene.c_str());
++        c.noted = false;
++        ++c.presents;
++    }
+     s.last_present = now;
+     s.history[s.cursor] = static_cast<float>(present_ms);
+     s.cursor = (s.cursor + 1u) % kHistoryFrames;
+@@ -402,7 +586,206 @@ void set_frame_rate_info(double rate, double requested) {
+     s.requested_rate = requested;
+ }
+ 
++namespace {
++
++#if defined(_WIN32)
++// <prefix>_TRACE_STALL_SAMPLES[=ms]: while a game frame (flip to flip) has
++// taken longer than the threshold (default 50 ms), a thread of its own
++// samples the emulation thread's host stack every few milliseconds; the next
++// flip prints the commonest stacks as [stall-sample] lines, module+offset or
++// with names when the program's PDB is next to it. For finding out what a
++// long frame was busy with when the frame statistics cannot say. Windows only.
++//
++// The emulation thread is stopped only to copy its registers and the top of
++// its stack; the walk and the names are worked out after it runs again, so
++// the sampler never waits on a lock the stopped thread holds.
++std::atomic<std::int64_t> &present_due_us() {
++    static std::atomic<std::int64_t> value{0};
++    return value;
++}
++
++class StallSampler {
++public:
++    static StallSampler *get() {
++        static StallSampler *sampler = [] () -> StallSampler * {
++            const char *text = portablekit::env("TRACE_STALL_SAMPLES");
++            if (text == nullptr) return nullptr;
++            auto *made = new StallSampler();
++            made->presents_ = std::strcmp(text, "present") == 0;
++            const double ms = std::strtod(text, nullptr);
++            made->threshold_ms_ = ms >= 5.0 ? ms : 50.0;
++            return made;
++        }();
++        return sampler;
++    }
++
++    // At every flip, on the emulation thread.
++    void flip(double frame_ms) {
++        if (guest_ == nullptr) {
++            DuplicateHandle(GetCurrentProcess(), GetCurrentThread(), GetCurrentProcess(), &guest_, 0, FALSE,
++                            DUPLICATE_SAME_ACCESS);
++            thread_ = std::thread([this] { run(); });
++            thread_.detach();
++        }
++        std::map<std::string, int> stacks;
++        int samples = 0;
++        {
++            std::lock_guard<std::mutex> guard(lock_);
++            stacks.swap(stacks_);
++            samples = samples_;
++            samples_ = 0;
++            frame_start_.store(std::chrono::steady_clock::now().time_since_epoch().count());
++        }
++        if (samples == 0) return;
++        std::vector<std::pair<int, std::string>> sorted;
++        for (auto &[stack, count] : stacks) sorted.emplace_back(count, stack);
++        std::sort(sorted.begin(), sorted.end(), [](const auto &a, const auto &b) { return a.first > b.first; });
++        std::printf("[stall-sample] a %.1f ms frame, %d samples past %.0f ms:\n", frame_ms, samples, threshold_ms_);
++        for (std::size_t i = 0; i < sorted.size() && i < 6u; ++i)
++            std::printf("[stall-sample]   x%d %s\n", sorted[i].first, sorted[i].second.c_str());
++        std::fflush(stdout);
++    }
++
++private:
++    static constexpr std::size_t kStackCopy = 256u * 1024u;
++
++    struct Copy {
++        std::uint64_t base{};
++        std::size_t size{};
++        std::vector<std::uint8_t> bytes = std::vector<std::uint8_t>(kStackCopy);
++    };
++    static Copy &copy() {
++        static Copy value;
++        return value;
++    }
++    static BOOL CALLBACK read_memory(HANDLE process, DWORD64 address, PVOID buffer, DWORD size, LPDWORD read) {
++        const Copy &c = copy();
++        if (address >= c.base && address + size <= c.base + c.size) {
++            std::memcpy(buffer, c.bytes.data() + (address - c.base), size);
++            if (read != nullptr) *read = size;
++            return TRUE;
++        }
++        SIZE_T done = 0;
++        const BOOL ok = ReadProcessMemory(process, reinterpret_cast<LPCVOID>(address), buffer, size, &done);
++        if (read != nullptr) *read = static_cast<DWORD>(done);
++        return ok;
++    }
++
++    std::string name(HANDLE process, DWORD64 pc) {
++        const DWORD64 base = SymGetModuleBase64(process, pc);
++        char module[MAX_PATH] = "?";
++        if (base != 0) {
++            char path[MAX_PATH]{};
++            GetModuleFileNameA(reinterpret_cast<HMODULE>(base), path, MAX_PATH);
++            const char *slash = std::strrchr(path, '\\');
++            std::snprintf(module, sizeof module, "%s", slash != nullptr ? slash + 1 : path);
++        }
++        alignas(SYMBOL_INFO) char buffer[sizeof(SYMBOL_INFO) + 256]{};
++        auto *symbol = reinterpret_cast<SYMBOL_INFO *>(buffer);
++        symbol->SizeOfStruct = sizeof(SYMBOL_INFO);
++        symbol->MaxNameLen = 255;
++        DWORD64 displacement = 0;
++        char text[400];
++        if (SymFromAddr(process, pc, &displacement, symbol))
++            std::snprintf(text, sizeof text, "%s!%s", module, symbol->Name);
++        else
++            std::snprintf(text, sizeof text, "%s+0x%llx", module, static_cast<unsigned long long>(pc - base));
++        return text;
++    }
++
++    void run() {
++        HANDLE process = GetCurrentProcess();
++        SymSetOptions(SYMOPT_UNDNAME | SYMOPT_DEFERRED_LOADS);
++        SymInitialize(process, nullptr, TRUE);
++        for (;;) {
++            Sleep(presents_ ? 1 : 4);
++            if (presents_) {
++                // A present more than 2 ms overdue.
++                const std::int64_t due = present_due_us().load();
++                const std::int64_t now = std::chrono::duration_cast<std::chrono::microseconds>(
++                                             std::chrono::steady_clock::now().time_since_epoch())
++                                             .count();
++                if (due == 0 || now < due + 2000) continue;
++            } else {
++                const auto start = std::chrono::steady_clock::time_point(
++                    std::chrono::steady_clock::duration(frame_start_.load()));
++                if (std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count() <
++                    threshold_ms_)
++                    continue;
++            }
++            CONTEXT context{};
++            context.ContextFlags = CONTEXT_FULL;
++            Copy &c = copy();
++            if (SuspendThread(guest_) == static_cast<DWORD>(-1)) continue;
++            const bool got = GetThreadContext(guest_, &context) != 0;
++            if (got) {
++                c.base = context.Rsp;
++                SIZE_T done = 0;
++                ReadProcessMemory(process, reinterpret_cast<LPCVOID>(c.base), c.bytes.data(), kStackCopy, &done);
++                if (done == 0) {
++                    // The copy crossed the stack's end: take what is there, page by page.
++                    std::size_t taken = 0;
++                    while (taken < kStackCopy &&
++                           ReadProcessMemory(process, reinterpret_cast<LPCVOID>(c.base + taken),
++                                             c.bytes.data() + taken, 4096u - ((c.base + taken) & 4095u), &done) &&
++                           done != 0)
++                        taken += done;
++                    done = taken;
++                }
++                c.size = done;
++            }
++            ResumeThread(guest_);
++            if (!got) continue;
++            // An idle emulation thread (the kernel holding the game to real
++            // time) is not part of the stall.
++            STACKFRAME64 frame{};
++            frame.AddrPC.Offset = context.Rip;
++            frame.AddrPC.Mode = AddrModeFlat;
++            frame.AddrFrame.Offset = context.Rbp;
++            frame.AddrFrame.Mode = AddrModeFlat;
++            frame.AddrStack.Offset = context.Rsp;
++            frame.AddrStack.Mode = AddrModeFlat;
++            std::string stack;
++            for (int depth = 0; depth < 24; ++depth) {
++                if (!StackWalk64(IMAGE_FILE_MACHINE_AMD64, process, guest_, &frame, &context, &read_memory,
++                                 SymFunctionTableAccess64, SymGetModuleBase64, nullptr))
++                    break;
++                if (frame.AddrPC.Offset == 0) break;
++                if (!stack.empty()) stack += " < ";
++                stack += name(process, frame.AddrPC.Offset);
++            }
++            std::lock_guard<std::mutex> guard(lock_);
++            ++stacks_[stack];
++            ++samples_;
++        }
++    }
++
++    double threshold_ms_{50.0};
++    bool presents_{};
++    HANDLE guest_{};
++    std::thread thread_;
++    std::mutex lock_;
++    std::map<std::string, int> stacks_;
++    int samples_{};
++    std::atomic<std::chrono::steady_clock::rep> frame_start_{std::chrono::steady_clock::now().time_since_epoch().count()};
++};
++#endif
++
++} // namespace
++
++void note_present_due(std::int64_t steady_us) noexcept {
++#if defined(_WIN32)
++    present_due_us().store(steady_us, std::memory_order_relaxed);
++#else
++    (void)steady_us;
++#endif
++}
++
+ void end_frame(std::uint64_t virtual_us, bool presented) {
++#if defined(_WIN32)
++    if (StallSampler *sampler = StallSampler::get())
++        sampler->flip(std::chrono::duration<double, std::milli>(Clock::now() - state().frame_start).count());
++#endif
+     State &s = state();
+     if (presented) count_present();
+     const Clock::time_point now = Clock::now();
+@@ -457,6 +840,33 @@ void end_frame(std::uint64_t virtual_us, bool presented) {
+         line += " |" + format_stalls(s.stalls, 1.0, false);
+         std::cout << line << std::endl;
+     }
++    if (Csv &c = csv(); c.file != nullptr) {
++        const double cpu_now = thread_cpu_ms();
++        const double render_ms = std::max(0.0, to_ms(s.render) - to_ms(s.wait));
++        const double guest_ms = std::max(0.0, frame_ms - render_ms - to_ms(s.wait) - to_ms(s.pacing));
++        char gpu[24] = "";
++        if (s.gpu_samples != 0u) std::snprintf(gpu, sizeof(gpu), "%.3f", s.gpu_ms);
++        std::fprintf(c.file,
++                     "flip,%.3f,%.3f,,,,,%.0f,%.3f,%.3f,%.3f,%.3f,%s,%u,%.3f,%.3f,%u,%u,%.3f,%.3f,%u,%.1f,%u,%u,%u,%s,%s,%s,"
++                     "%.3f,%s\n",
++                     to_ms(now - c.start), frame_ms, s.frame_rate, guest_ms, render_ms, to_ms(s.wait),
++                     to_ms(s.pacing), gpu, c.pipelines, c.pipeline_ms, c.pipeline_max_ms, c.prewarmed, c.textures,
++                     c.texture_ms, c.key_ms, c.snapshots, static_cast<double>(c.snapshot_bytes) / 1024.0, c.presents,
++                     c.blocked, c.over_budget, c.paired ? (c.cut != nullptr ? c.cut : "none") : "",
++                     c.paired ? std::to_string(c.matched).c_str() : "",
++                     c.paired ? std::to_string(c.eligible).c_str() : "", cpu_now - c.cpu_start_ms,
++                     c.scene.c_str());
++        // Written as it goes: a run is stopped at its time limit.
++        if (s.frame_number % 30u == 0u) std::fflush(c.file);
++        const std::string scene = std::move(c.scene);
++        const Clock::time_point start = c.start;
++        std::FILE *file = c.file;
++        c = Csv{};
++        c.cpu_start_ms = cpu_now;
++        c.file = file;
++        c.start = start;
++        c.scene = scene;
++    }
+     s.render = s.wait = s.pacing = s.overlay = Clock::duration{};
+     s.lists = 0u;
+     s.draws = s.recorded_draws = 0u;
+diff --git a/host/perf/frame_stats.hpp b/host/perf/frame_stats.hpp
+index 44b1114..051f77b 100644
+--- a/host/perf/frame_stats.hpp
++++ b/host/perf/frame_stats.hpp
+@@ -194,6 +194,46 @@ private:
+     std::uint64_t start_{};
+ };
+ 
++// <prefix>_PERF_CSV=<file>: one CSV row per present and one per game frame
++// (flip), for frame-time statistics over a scripted run (1% lows, dips,
++// hitches and what caused them). Off, every note below is one test of a flag.
++// Present rows: when, the time since the present before, what it showed
++// (PresentKind), the blend fraction, the grid moments skipped before it, how
++// late it was and the rate. Frame rows: the frame's guest, render, wait,
++// pacing and GPU time, and what happened in it: pipelines created and their
++// time, pipelines the prewarm had ready, textures decoded and their time,
++// texture-key hashing time, render-target snapshots and their size,
++// interpolation's pairing (cut reason, matched of eligible draws) and the
++// presents it could not make. The input script's `scene NAME` is a column.
++[[nodiscard]] bool csv_enabled() noexcept;
++enum class PresentKind : std::uint8_t {
++    Flip,      // the game's frame at its flip, no interpolation
++    Blended,   // an in-between frame drawn by interpolation
++    Newest,    // the newer frame as it is (a present on a frame's own moment)
++    Older,     // the older frame as it is (t = 0)
++    Cut,       // interpolation refused: a camera cut, unmatched draws, no frame before
++    Textures,  // a texture the older frame drew was dropped
++    Other,
++};
++// The present about to be counted (count_present) showed `kind`.
++void note_present(PresentKind kind, float t, std::uint32_t skipped, double late_ms) noexcept;
++// A present due that was not made: the display had no image free
++// (`blocked`), or the presents made while the game's code ran had taken half
++// a frame (`over budget`).
++void note_missed_present(bool blocked) noexcept;
++void note_pipeline_created(double milliseconds) noexcept;
++void note_pipeline_prewarmed() noexcept;
++void note_texture_decoded(double milliseconds) noexcept;
++void note_texture_key(double milliseconds) noexcept;
++void note_snapshot(std::uint64_t bytes) noexcept;
++void note_pairing(const char *cut, std::uint32_t matched, std::uint32_t eligible) noexcept;
++// When the next present between flips is due (steady clock, microseconds;
++// 0: none), for <prefix>_TRACE_STALL_SAMPLES=present, which samples the
++// emulation thread while a present is overdue.
++void note_present_due(std::int64_t steady_us) noexcept;
++// The scene the input script names (also the census's).
++void set_scene(const std::string &name);
++
+ // Frame times in milliseconds, a ring written at `history_cursor()`.
+ inline constexpr std::size_t kHistoryFrames = 192u;
+ [[nodiscard]] const std::array<float, kHistoryFrames> &frame_history();
+diff --git a/host/ui/input_script.cpp b/host/ui/input_script.cpp
+index 891f4f8..daad5ea 100644
+--- a/host/ui/input_script.cpp
++++ b/host/ui/input_script.cpp
+@@ -4,6 +4,7 @@
+ #include "ui/layer.hpp"
+ 
+ #include "gpu/ge_census.hpp"
++#include "perf/frame_stats.hpp"
+ #include "gpu/vulkan_renderer.hpp"
+ #include "settings/settings.hpp"
+ 
+@@ -212,6 +213,7 @@ void run(const Step &step) {
+                                                ".bmp");
+     } else if (step.action == "scene") {
+         gpu::census::set_scene(step.argument);
++        perf::set_scene(step.argument);
+     } else if (step.action == "speed") {
+         // Not saved: the run's settings.ini keeps the player's choice.
+         settings::current().unthrottled = step.argument == "unlimited";
+-- 
+2.53.0.windows.1
+

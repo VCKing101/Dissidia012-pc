@@ -213,6 +213,10 @@ fresh clone of `33800c4`, apply them with `git checkout -b dissidia 33800c4` and
 | 0042 | A block transfer out of a render target is also blitted on the GPU at the internal scale into a target for its destination, used while the guest bytes still match (`host/gpu/vulkan_renderer.cpp`); `<prefix>_NO_TRANSFER_TARGETS`, `<prefix>_TRACE_TRANSFERS` | EX Burst copies the screen into RAM and draws it as its background for 56 frames: it was 1x at any scale |
 | 0043 | Environment (shade) mapping, texture map mode 2: U,V from the world-space normal and the two chosen lights (`host/gpu/shaders/ge.vert`, `host/gpu/vulkan_renderer.cpp`); `<prefix>_NO_ENV_MAP`, `<prefix>_TRACE_ENV_MAP` | Orphan's Cradle's violet wheel strips used their vertex UVs; the PSP formula is from public SDK docs, the game's edge case (no normals, unset light) unverified on hardware |
 | 0044 | A texture whose first texel lies in one target's drawn area reads that target, not a newer one that only covers it with undrawn rows (`find_framebuffer_texture()`, `host/gpu/vulkan_renderer.cpp`); `<prefix>_NO_TARGET_DRAWN_AREA` restores the old choice | Lightning's RAV Water refracts a half-size copy of the last frame kept right after another target; it read the other target's undrawn rows and looked like a negative (also Razor Gale's dome) |
+| 0045 | Performance instruments: a per-frame CSV (`<prefix>_PERF_CSV`) and a stall sampler (`<prefix>_TRACE_STALL_SAMPLES`) | Measuring the 45/30 fps dips ([performance.md](../docs/port/performance.md)) |
+| 0046 | An overlay swapped out keeps its registrations, so swapping back is a lookup, not a re-install (about 70 ms instead of 180); `<prefix>_NO_OVERLAY_PARKING` | Menu-to-battle and world-map swaps stalled for 210-305 ms and gapped the music |
+| 0047 | memcpy, memset and DMA copies done as one host copy, not byte by byte; `<prefix>_NO_FAST_HLE_COPIES` | About 0.7 ms a frame of guest time |
+| 0048 | Interpolated presents between flips fall in the game's idle time, and are polled at the runtime's starvation boundaries in long stretches of guest code; `<prefix>_PRESENT_AFTER_FLIP` and `<prefix>_NO_CODE_PRESENT_POLL` restore the old pacing | One present in ten came up to 7 ms late (11/22 ms intervals, the "45" the meter showed); costs about 9 ms of display delay |
 
 Patches 0012 and 0013 were made on a separate worktree branch during the recompiled-build work and merged onto
 `dissidia` on 18 October 2026; patches 0014 and 0015 followed the same day (bring-up log, section "Stencil"), and
@@ -221,7 +225,7 @@ patches 0016 to 0022 that evening (section "HP bar, orbs and saves"), patches 00
 ([bgm-playlist-design.md](../docs/port/bgm-playlist-design.md), section 10); patch 0028 that evening, for analog
 diagonals that felt dead on a real controller. Patches 0036 to 0039 came on 20 October with the graphics census
 ([graphics-census.md](../docs/port/graphics-census.md)), and 0040 to 0043 on 21 October from its findings (depth clipping, findings 3 and 6, stays on the
-unmerged branch `depth-clip`: no visible change here); 0044 the same day for a report from the Steam Deck.
+unmerged branch `depth-clip`: no visible change here); 0044 the same day for a report from the Steam Deck, and 0045 to 0048 for the frame-rate dips.
 PortableKit's 21 framework tests pass on the branch and `portablekit_host_check` builds.
 
 ## Recompiled build

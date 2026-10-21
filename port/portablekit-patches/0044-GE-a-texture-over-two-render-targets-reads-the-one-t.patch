@@ -1,7 +1,7 @@
 From 9a739332491d4bc8214072acd8675430761c2af2 Mon Sep 17 00:00:00 2001
 From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
 Date: Wed, 21 Oct 2026 22:05:15 +1030
-Subject: [PATCH 44/44] GE: a texture over two render targets reads the one
+Subject: [PATCH 44/48] GE: a texture over two render targets reads the one
  that drew there
 
 A render target is taken as 272 rows of its row length, so a short buffer

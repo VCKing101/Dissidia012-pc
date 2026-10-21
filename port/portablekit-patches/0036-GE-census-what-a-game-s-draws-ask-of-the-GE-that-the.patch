@@ -1,7 +1,7 @@
 From d521802c7e94c6e9cb1b8adb7972c2da3663e396 Mon Sep 17 00:00:00 2001
 From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
 Date: Tue, 20 Oct 2026 21:12:21 +1030
-Subject: [PATCH 36/44] GE census: what a game's draws ask of the GE that the
+Subject: [PATCH 36/48] GE census: what a game's draws ask of the GE that the
  renderer approximates
 
 <prefix>_GE_CENSUS=<file> checks every draw against a list of features the

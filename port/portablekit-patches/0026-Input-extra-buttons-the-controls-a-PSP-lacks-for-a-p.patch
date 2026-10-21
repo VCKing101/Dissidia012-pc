@@ -1,7 +1,7 @@
 From 525956489145d4e252ef81d7a1be3cbfcac4ec5b Mon Sep 17 00:00:00 2001
 From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
 Date: Mon, 19 Oct 2026 09:29:28 +1030
-Subject: [PATCH 26/44] Input: extra buttons, the controls a PSP lacks, for a
+Subject: [PATCH 26/48] Input: extra buttons, the controls a PSP lacks, for a
  port to use
 
 A modern pad has L2, R2, L3 and R3; a PSP has none of them, so a game
