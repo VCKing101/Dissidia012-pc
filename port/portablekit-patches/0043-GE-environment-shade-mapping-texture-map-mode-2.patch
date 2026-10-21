@@ -1,0 +1,334 @@
+From cb3f376bc2338f09c9a81e552d3a8789e849bd80 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Wed, 21 Oct 2026 10:59:49 +1030
+Subject: [PATCH 43/43] GE: environment (shade) mapping, texture map mode 2
+
+Texture map mode 2 (0xC0 bits 0-1) was ignored and drawn with the vertex
+UVs. The vertex shader now makes U and V as (1 + N.L) / 2 from the
+world-space normal and the vectors of the two lights 0xC1 names (bits 0-1
+and 8-9), whatever their types and enables, scaled by the texture scale
+and not offset. A light vector never set is taken as (0, 0, 1), and so is
+a vertex without a normal, in world space, as the lighting takes it. The
+light indices and reverse normals ride in the object block (texgen), which
+env-mapped draws now write and record for frame interpolation as lit draws
+do.
+
+<prefix>_NO_ENV_MAP uses the vertex UVs, as before; <prefix>_ENV_MAP_OFFSET
+adds the texture offset; <prefix>_TRACE_ENV_MAP[=N] logs the first draws.
+The census counts texmap.env_map_drawn (info) unless NO_ENV_MAP.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ docs/BRINGING_UP_A_GAME.md   |  2 +
+ host/gpu/ge_census.cpp       | 11 ++++--
+ host/gpu/ge_state.cpp        |  8 ++++
+ host/gpu/ge_state.hpp        |  6 +++
+ host/gpu/shaders/ge.vert     | 25 +++++++++++-
+ host/gpu/vulkan_renderer.cpp | 77 ++++++++++++++++++++++++++++++++----
+ 6 files changed, 118 insertions(+), 11 deletions(-)
+
+diff --git a/docs/BRINGING_UP_A_GAME.md b/docs/BRINGING_UP_A_GAME.md
+index 780e8ea..31b8b18 100644
+--- a/docs/BRINGING_UP_A_GAME.md
++++ b/docs/BRINGING_UP_A_GAME.md
+@@ -86,6 +86,8 @@ Every one of these takes the profile's own prefix, so `TENKAWA_TRACE_KERNEL` for
+ | `<PREFIX>_TRACE_FB_CLUT` | The first 400 palette views of render targets (a CLUT texture over rendered pixels, decoded on the GPU): the target, the index format, the CLUT's address, format, shift, mask and start and its first entries, the draw's blend and vertices |
+ | `<PREFIX>_NO_FB_CLUT` | Decode a palette texture over a render target from guest memory, as before palette views (`palette_view()` in `host/gpu/vulkan_renderer.cpp`) |
+ | `<PREFIX>_TRACE_LINES[=N]` | The first N line and line-strip draws (200 by default) with their state and their ends on the screen, and how many line draws and segments each frame drew. Lines are drawn as quads one PSP pixel wide (`host/gpu/line_quads.hpp`); `<PREFIX>_NO_LINES` skips them, as before |
++| `<PREFIX>_TRACE_TRANSFERS` | Each GE block transfer (source, destination, rectangle) and whether it was also copied on the GPU, at the internal scale, into a target standing for the destination (`copy_block_transfer()` in `host/gpu/vulkan_renderer.cpp`), and once a display list whether a texture over such a copy sampled it. `<PREFIX>_NO_TRANSFER_TARGETS` copies in guest memory only (the texture then reads the 1x read-back), as before; `<PREFIX>_TRANSFER_SAMPLED_KEY` keys textures over the latest transfers' destinations by one word in 256, as before, instead of every byte |
++| `<PREFIX>_TRACE_ENV_MAP[=N]` | The first N draws (40 by default) in texture map mode 2, environment (shade) mapping: the lights 0xC1 names and their vectors, the world matrix, the texture scale and offset, the first vertices. The vertex shader makes U and V from the world-space normal and the two lights' vectors (`environment_map_uv()` in `host/gpu/shaders/ge.vert`); `<PREFIX>_NO_ENV_MAP` uses the vertex UVs, as before; `<PREFIX>_ENV_MAP_OFFSET` adds the texture offset to the coordinates it makes |
+ | `<PREFIX>_TRACE_SAS` | SAS voices set, keyed on and off, and each change of the end flags a game polls |
+ | `<PREFIX>_NO_BUSY_CLOCK` | Keep emulated time still for a thread that never waits, as before the busy clock (`Kernel::charge_busy_time`) |
+ | `PSPRECOMP_NO_INTERPRETER=1` | Turn the interpreter off. Nothing runs without a corpus; with one, the runtime stops at the first address the recompiler missed and names it |
+diff --git a/host/gpu/ge_census.cpp b/host/gpu/ge_census.cpp
+index 154740d..3e58cd2 100644
+--- a/host/gpu/ge_census.cpp
++++ b/host/gpu/ge_census.cpp
+@@ -70,7 +70,8 @@ constexpr FeatureInfo kFeatures[] = {
+     {"tfx.tcc_rgb_handled", "texture", "info", "Texture colour component RGB (0xC9 bit 8 clear) on a texture with alpha: drawn right (the vertex alpha is kept)"},
+     {"texmap.projection", "texture", "high", "Texture map mode 1 (0xC0): texture coordinates from the texture matrix and position/UV/normal; the renderer ignores the matrix"},
+     {"texmap.projection_identity_uv", "texture", "info", "Texture map mode 1 with UV as the source and an identity texture matrix: the same as mode 0"},
+-    {"texmap.env_map", "texture", "high", "Texture map mode 2 (0xC0): environment (shade) mapping from the lights 0xC1; the renderer uses the vertex UVs"},
++    {"texmap.env_map", "texture", "high", "Texture map mode 2 (0xC0) with <prefix>_NO_ENV_MAP: environment (shade) mapping from the lights 0xC1; the renderer uses the vertex UVs"},
++    {"texmap.env_map_drawn", "texture", "info", "Texture map mode 2 (0xC0): environment (shade) mapping, U and V from the world-space normal and the lights 0xC1 names, in the vertex shader"},
+     {"tex.mipmaps", "texture", "low", "Mipmapped texture (0xC2 levels > 0): level 0 only"},
+     {"tex.lod_const_level", "texture", "medium", "Texture level mode CONST (0xC8) with a bias that selects a level above 0: level 0 drawn"},
+     {"tex.lod_slope", "texture", "low", "Texture level mode SLOPE (0xC8) with mipmaps: level 0 only"},
+@@ -702,8 +703,12 @@ void note_draw(const GuestMemory &memory, const DrawCall &call, const std::array
+         else
+             hit_draw(s, "texmap.projection", kSources[source], detail);
+     } else if (map_mode == 2u) {
+-        hit_draw(s, "texmap.env_map", "lights " + std::to_string(reg(0xC1) & 3u) + "," +
+-                                          std::to_string((reg(0xC1) >> 8u) & 3u), detail);
++        static const bool no_env_map = portablekit::env("NO_ENV_MAP") != nullptr;
++        const bool normals = ((call.vertex_type >> 5u) & 3u) != 0u;
++        hit_draw(s, no_env_map ? "texmap.env_map" : "texmap.env_map_drawn",
++                 "lights " + std::to_string(reg(0xC1) & 3u) + "," + std::to_string((reg(0xC1) >> 8u) & 3u) +
++                     (normals ? ", normals" : ", no normals"),
++                 detail);
+     }
+ 
+     // Levels and filtering.
+diff --git a/host/gpu/ge_state.cpp b/host/gpu/ge_state.cpp
+index 48b8c1f..a7654a2 100644
+--- a/host/gpu/ge_state.cpp
++++ b/host/gpu/ge_state.cpp
+@@ -887,6 +887,12 @@ void GeState::handle_command(const GuestMemory &memory, std::uint32_t command, s
+     case kTextureFlush:
+         break;
+ 
++    // Texture coordinate generation: read from the registers with the rest of
++    // a draw's state (DrawCall::texture_map, texture_env_lights).
++    case 0xC0:
++    case 0xC1:
++        break;
++
+     default:
+         // The per-light runs: three floats per light for positions, directions
+         // and attenuations, one float for the spot exponent and cutoff, and
+@@ -1016,6 +1022,8 @@ void GeState::fill_draw_state(DrawCall &call) const {
+     call.view = view_;
+     call.projection = projection_;
+     call.texture_matrix = texture_matrix_;
++    call.texture_map = registers_[0xC0] & 0xFFFFFFu;
++    call.texture_env_lights = registers_[0xC1] & 0xFFFFFFu;
+ }
+ 
+ void GeState::draw_primitive(const GuestMemory &memory, std::uint32_t data) {
+diff --git a/host/gpu/ge_state.hpp b/host/gpu/ge_state.hpp
+index 17ecf5f..3cbb6a7 100644
+--- a/host/gpu/ge_state.hpp
++++ b/host/gpu/ge_state.hpp
+@@ -215,6 +215,12 @@ struct DrawCall {
+     std::array<float, 16> view{};
+     std::array<float, 16> projection{};
+     std::array<float, 16> texture_matrix{};
++    // Texture coordinate generation: 0xC0 (bits 0-1 the map mode: 0 the
++    // vertex UVs, 1 the texture matrix, 2 environment (shade) mapping; bits
++    // 8-9 the projection source) and 0xC1 (bits 0-1 and 8-9: the lights whose
++    // vectors give U and V in environment mapping), as the game wrote them.
++    std::uint32_t texture_map{};
++    std::uint32_t texture_env_lights{};
+     // GPU vertex decode (GeState::set_raw_vertices): a transformed triangle
+     // draw whose vertices were not decoded here. `vertices` is then empty, and
+     // these give the guest's own bytes of the vertices the draw uses (from its
+diff --git a/host/gpu/shaders/ge.vert b/host/gpu/shaders/ge.vert
+index 476ebf6..244b63b 100644
+--- a/host/gpu/shaders/ge.vert
++++ b/host/gpu/shaders/ge.vert
+@@ -167,7 +167,7 @@ layout(location = 4) flat out vec4 frag_uv_rect;
+ 
+ layout(push_constant) uniform Push {
+     mat4 transform;      // WVP, or identity for through vertices
+-    vec4 viewport;       // xy: target size in PSP pixels, z: through, w: 1 fog + 2 lighting
++    vec4 viewport;       // xy: target size in PSP pixels, z: through, w: 1 fog + 2 lighting + 8 environment map
+     vec4 texture_params; // x: texture enabled (+2 clamp u, +4 clamp v), y: texture function, z: alpha ref, w: alpha func
+     vec4 uv_transform;   // xy: scale, zw: offset
+     vec4 view_z;         // row of view * world that gives view-space z
+@@ -197,6 +197,7 @@ layout(set = 1, binding = 1) uniform Object {
+     vec4 material_ambient;  // rgba
+     vec4 material_diffuse;  // rgb; w: 1 keeps specular apart
+     vec4 material_specular; // rgb; w: reverse normals
++    vec4 texgen;            // environment mapping: x, y the lights for U and V; z: reverse normals
+ } object;
+ 
+ // The GE's per-vertex lighting, evaluated in world space: emissive, plus the
+@@ -265,6 +266,26 @@ void light_vertex(out vec4 color, out vec3 separate_specular) {
+ }
+ 
+ 
++// Environment (shade) mapping, texture map mode 2: the GE takes U and V from
++// the vertex normal in world space and the vectors of the two lights 0xC1
++// names, (1 + N.L) / 2 each, whatever the lights' types and enables; the
++// vertex UVs are not read. The light vectors are the position registers, as
++// for a directional light; one never set (zero) is taken as (0, 0, 1). A
++// vertex without a normal has none in its data: it is taken as (0, 0, 1) in
++// world space, as the lighting above takes it. The texture scale applies to
++// the result, the offset does not (the host leaves it out of uv_transform).
++vec2 environment_map_uv() {
++    vec3 normal = mat3(object.world) * in_normal;
++    float length_squared = dot(normal, normal);
++    normal = length_squared > 0.0 ? normal * inversesqrt(length_squared) : vec3(0.0, 0.0, 1.0);
++    if (object.texgen.z > 0.5) normal = -normal;
++    vec3 u_light = lighting.light_position[int(object.texgen.x + 0.5) & 3].xyz;
++    vec3 v_light = lighting.light_position[int(object.texgen.y + 0.5) & 3].xyz;
++    u_light = dot(u_light, u_light) > 0.0 ? normalize(u_light) : vec3(0.0, 0.0, 1.0);
++    v_light = dot(v_light, v_light) > 0.0 ? normalize(v_light) : vec3(0.0, 0.0, 1.0);
++    return 0.5 * (vec2(1.0) + vec2(dot(normal, u_light), dot(normal, v_light)));
++}
++
+ void main() {
+ #ifdef GE_RAW_VERTICES
+     decode_raw_vertex();
+@@ -283,6 +304,8 @@ void main() {
+         gl_Position = vec4(ndc, clamp(in_position.z / 65535.0, 0.0, 1.0), 1.0);
+     } else {
+         int enables = int(push.viewport.w + 0.5);
++        if ((enables & 8) != 0)
++            frag_texcoord = environment_map_uv() * push.uv_transform.xy + push.uv_transform.zw;
+         if ((enables & 2) != 0) light_vertex(frag_color, frag_specular);
+         // Fog runs linearly from 1 (clear) to 0 (fogged) with view-space z,
+         // which is negative in front of the camera: (z + end) * scale.
+diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
+index 3c381c1..19ac560 100644
+--- a/host/gpu/vulkan_renderer.cpp
++++ b/host/gpu/vulkan_renderer.cpp
+@@ -147,6 +147,10 @@ constexpr float kPushLighting = 2.0f;
+ // The blend reads twice the source alpha (doubled_alpha()): the fragment
+ // shader doubles the alpha it hands to the blender.
+ constexpr float kPushDoubleAlpha = 4.0f;
++// Environment (shade) mapping (texture map mode 2): the vertex shader makes
++// the texture coordinates from the normal and two lights' vectors, named in
++// the object block's texgen.
++constexpr float kPushEnvMap = 8.0f;
+ 
+ struct GpuVertex {
+     float x{}, y{}, z{}, w{1.0f};
+@@ -244,9 +248,10 @@ struct ObjectBlock {
+     std::array<float, 4> material_ambient{};
+     std::array<float, 4> material_diffuse{};  // w: separate specular
+     std::array<float, 4> material_specular{}; // w: reverse normals
++    std::array<float, 4> texgen{};            // environment mapping: x, y the lights for U and V; z reverse normals
+ };
+ 
+-static_assert(sizeof(ObjectBlock) == 144u, "ObjectBlock must match the std140 layout in ge.vert");
++static_assert(sizeof(ObjectBlock) == 160u, "ObjectBlock must match the std140 layout in ge.vert");
+ 
+ // GPU vertex decode (<prefix>_GPU_DECODE): what the raw vertex shader needs to
+ // decode and skin a draw's own bytes; the layout matches the Raw block in
+@@ -7265,6 +7270,56 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+     static const bool no_lighting = portablekit::env("NO_LIGHTING") != nullptr;
+     static const bool no_fog = no_lighting || portablekit::env("NO_FOG") != nullptr;
+     const bool lit = call.lighting_enabled && !no_lighting && !call.through && !call.clear_mode;
++    // Texture map mode 2, environment (shade) mapping: the vertex shader makes
++    // the texture coordinates from the normal and the lights 0xC1 names
++    // (environment_map_uv() in ge.vert), so the draw needs the lights and its
++    // world matrix as a lit draw does. <prefix>_NO_ENV_MAP draws with the
++    // vertex UVs, as before.
++    static const bool no_env_map = portablekit::env("NO_ENV_MAP") != nullptr;
++    const bool env_map = !no_env_map && (call.texture_map & 3u) == 2u && call.texture.enabled && !call.through &&
++                         !call.clear_mode;
++    const bool needs_object = lit || env_map;
++    // <prefix>_TRACE_ENV_MAP[=N]: the first N (default 40) draws in texture
++    // map mode 2, with the lights' vectors, the world matrix, the texture
++    // scale and offset, and the coordinates the first vertex gets.
++    static const std::uint64_t trace_env_map = [] {
++        const char *text = portablekit::env("TRACE_ENV_MAP");
++        if (text == nullptr) return std::uint64_t{0};
++        const std::uint64_t count = std::strtoull(text, nullptr, 10);
++        return count > 1u ? count : std::uint64_t{40};
++    }();
++    static std::uint64_t env_map_traced = 0u;
++    if (trace_env_map != 0u && (call.texture_map & 3u) == 2u && env_map_traced < trace_env_map) {
++        ++env_map_traced;
++        const LightingState &state = call.lighting;
++        const std::uint32_t u_light = call.texture_env_lights & 3u;
++        const std::uint32_t v_light = (call.texture_env_lights >> 8u) & 3u;
++        std::cout << "[env-map] frame " << impl.frames << " target 0x" << std::hex << call.target.color_address
++                  << " texture 0x" << call.texture.address << " vertex type 0x" << call.vertex_type << " 0xC0=0x"
++                  << call.texture_map << " 0xC1=0x" << call.texture_env_lights << std::dec << " prim "
++                  << static_cast<int>(call.primitive) << " count " << call.primitive_count << " lit "
++                  << (call.lighting_enabled ? 1 : 0) << " through " << (call.through ? 1 : 0) << " reverse "
++                  << (state.reverse_normals ? 1 : 0) << " uv scale " << call.texture.scale_u << ","
++                  << call.texture.scale_v << " offset " << call.texture.offset_u << "," << call.texture.offset_v
++                  << "\n";
++        for (std::uint32_t i = 0; i < 4u; ++i) {
++            const LightState &light = state.lights[i];
++            std::cout << "[env-map]   light " << i << (i == u_light ? " U" : "") << (i == v_light ? " V" : "")
++                      << " enabled " << (light.enabled ? 1 : 0) << " type " << light.type << " vector "
++                      << light.position[0] << "," << light.position[1] << "," << light.position[2] << "\n";
++        }
++        const auto &w = call.world;
++        std::cout << "[env-map]   world " << w[0] << "," << w[1] << "," << w[2] << " / " << w[4] << "," << w[5] << ","
++                  << w[6] << " / " << w[8] << "," << w[9] << "," << w[10] << " / " << w[12] << "," << w[13] << ","
++                  << w[14] << "\n";
++        for (std::size_t i = 0; i < std::min<std::size_t>(call.vertices.size(), 4u); ++i) {
++            const Vertex &vertex = call.vertices[i];
++            std::cout << "[env-map]   vertex " << i << " position " << vertex.position[0] << "," << vertex.position[1]
++                      << "," << vertex.position[2] << " uv " << vertex.texcoord[0] << "," << vertex.texcoord[1]
++                      << " normal " << vertex.normal[0] << "," << vertex.normal[1] << "," << vertex.normal[2]
++                      << " colour 0x" << std::hex << vertex.color << std::dec << "\n";
++        }
++    }
+     const bool use_material_color = !no_material_color && !call.has_vertex_color && !call.lighting_enabled;
+     const auto to_gpu = [&](const Vertex &vertex) {
+         GpuVertex out{};
+@@ -7742,7 +7797,7 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+     // changed, and the vertices follow whatever was written.
+     const bool fogged = call.fog.enabled && !no_fog && !call.through && !call.clear_mode;
+     const auto view_world = multiply(call.view, call.world);
+-    if ((lit || fogged) && impl.environment_version != call.environment_version) {
++    if ((lit || fogged || env_map) && impl.environment_version != call.environment_version) {
+         const LightingState &state = call.lighting;
+         EnvironmentBlock environment{};
+         environment.ambient = unpack_color(state.ambient_color, static_cast<float>(state.ambient_alpha) / 255.0f);
+@@ -7764,7 +7819,7 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+         if (!impl.write_uniform(&environment, sizeof(environment), impl.environment_offset)) return;
+         impl.environment_version = call.environment_version;
+     }
+-    if (lit) {
++    if (needs_object) {
+         const LightingState &state = call.lighting;
+         if (impl.material_version != call.material_version) {
+             impl.material[0] = unpack_color(state.material_emissive, state.specular_power);
+@@ -7781,6 +7836,10 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+         object.material_ambient = impl.material[1];
+         object.material_diffuse = impl.material[2];
+         object.material_specular = impl.material[3];
++        if (env_map)
++            object.texgen = {static_cast<float>(call.texture_env_lights & 3u),
++                             static_cast<float>((call.texture_env_lights >> 8u) & 3u),
++                             state.reverse_normals ? 1.0f : 0.0f, 0.0f};
+         if (!impl.object_valid || std::memcmp(&object, &impl.last_object, sizeof(object)) != 0) {
+             if (!impl.write_uniform(&object, sizeof(object), impl.object_offset)) return;
+             impl.last_object = object;
+@@ -8066,7 +8125,7 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+     PushConstants push{};
+     push.transform = multiply(call.projection, view_world);
+     push.viewport = {static_cast<float>(kPspWidth), static_cast<float>(kPspHeight), call.through ? 1.0f : 0.0f,
+-                     (fogged ? kPushFog : 0.0f) + (lit ? kPushLighting : 0.0f) +
++                     (fogged ? kPushFog : 0.0f) + (lit ? kPushLighting : 0.0f) + (env_map ? kPushEnvMap : 0.0f) +
+                          (key.blend && doubled_alpha(key.source_factor, key.destination_factor) ? kPushDoubleAlpha
+                                                                                                 : 0.0f)};
+     push.view_z = {view_world[2], view_world[6], view_world[10], view_world[14]};
+@@ -8099,6 +8158,10 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+                                                    1.0f / static_cast<float>(call.texture.height), 0.0f, 0.0f}
+                             : std::array<float, 4>{call.texture.scale_u, call.texture.scale_v, call.texture.offset_u,
+                                                    call.texture.offset_v};
++    // Environment mapping scales the coordinates it makes but does not
++    // offset them. <prefix>_ENV_MAP_OFFSET adds the offset too.
++    static const bool env_map_offset = portablekit::env("ENV_MAP_OFFSET") != nullptr;
++    if (env_map && !env_map_offset) push.uv_transform[2] = push.uv_transform[3] = 0.0f;
+ 
+     if (call.clear_mode) push.texture_params = {0.0f, 0.0f, 0.0f, 0.0f};
+ 
+@@ -8367,7 +8430,7 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+                 vkCmdDraw(impl.command_buffer, draw_count, 1u, 0u, 0u);
+             }
+             perf::count_recorded_draws(1u);
+-            impl.record_draw_for_replay(call, lit, skinned_first, state, vertex_start, VK_NULL_HANDLE, 0u,
++            impl.record_draw_for_replay(call, needs_object, skinned_first, state, vertex_start, VK_NULL_HANDLE, 0u,
+                                         draw_count, drawn_vertices, false);
+         } else {
+             Impl::DrawGroup &group = impl.group;
+@@ -8394,7 +8457,7 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+                 rebase = 0u;
+                 impl.group_skinned = skinned;
+             }
+-            impl.record_draw_for_replay(call, lit, skinned_first, state, vertex_start, impl.index_buffer,
++            impl.record_draw_for_replay(call, needs_object, skinned_first, state, vertex_start, impl.index_buffer,
+                                         group.index_base, draw_count, vertex_count, join, raw);
+             auto *indices = reinterpret_cast<std::uint8_t *>(impl.index_mapped) + impl.index_offset;
+             if (rebase == 0u) {
+@@ -8445,7 +8508,7 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+     if (impl.interpolating) {
+         const Impl::DrawState state{pipeline, texture_descriptor, lighting_offsets, vk_viewport, vk_scissor,
+                                     blend_constants, push};
+-        impl.record_draw_for_replay(call, lit, skinned_first, state, vertex_start,
++        impl.record_draw_for_replay(call, needs_object, skinned_first, state, vertex_start,
+                                     direct ? impl.vertex_buffer : VK_NULL_HANDLE, index_start, draw_count,
+                                     drawn_vertices, false, raw);
+     }
+-- 
+2.53.0.windows.1
+

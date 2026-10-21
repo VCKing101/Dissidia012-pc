@@ -1,0 +1,436 @@
+From dcc3edddab8ba3abdffc4fd6042f793b2bce1508 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Wed, 21 Oct 2026 10:59:50 +1030
+Subject: [PATCH 42/43] GE: block transfers out of a render target copied on
+ the GPU too
+
+A block transfer that copies a render target's pixels into memory no
+draw renders to (a capture of the screen in main memory, as an EX Burst
+makes) was only copied in guest memory, after the 1x read-back, so a
+texture drawn from the copy was 1x at any internal scale. The same
+rectangle is now also blitted on the GPU, at the internal scale, into a
+render target standing for the destination; find_framebuffer_texture()
+samples it while every byte of guest memory under the copied rectangle
+is what the transfer left (a hash checked once a display list), and only
+inside that rectangle. Guest memory still gets the 1x copy. A draw
+recorded for frame interpolation samples a snapshot of it as of any
+target. Transfers into a target the game draws to are left as before; at
+most four transfer targets.
+
+Textures over the latest 16 transfer destinations are keyed by every
+byte instead of one word in 256, so a changed copy is never drawn from
+an older decode.
+
+<prefix>_NO_TRANSFER_TARGETS copies in guest memory only, as before;
+<prefix>_TRANSFER_SAMPLED_KEY keys by the sampled words, as before;
+<prefix>_TRACE_TRANSFERS logs each transfer and each lookup over a copy.
+The census counts transfer.gpu_copy (info).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/gpu/ge_census.cpp       |   1 +
+ host/gpu/vulkan_renderer.cpp | 288 ++++++++++++++++++++++++++++++++++-
+ host/gpu/vulkan_renderer.hpp |   5 +
+ host/hle/hle_media.cpp       |   8 +-
+ 4 files changed, 299 insertions(+), 3 deletions(-)
+
+diff --git a/host/gpu/ge_census.cpp b/host/gpu/ge_census.cpp
+index a37b2b0..154740d 100644
+--- a/host/gpu/ge_census.cpp
++++ b/host/gpu/ge_census.cpp
+@@ -107,6 +107,7 @@ constexpr FeatureInfo kFeatures[] = {
+     {"target.depth_stride_mismatch", "depth", "low", "Depth buffer row length other than the colour target's: depth is not shared between targets"},
+     {"target.odd_stride", "target", "low", "Target row length that is not 64, 128, 256 or 512"},
+     {"transfer.from_target", "transfer", "medium", "Block transfer out of a render target: read back to guest memory at 480x272 (1x), waiting for the GPU"},
++    {"transfer.gpu_copy", "transfer", "info", "Block transfer out of a render target: also copied on the GPU at the internal scale, into a target standing for the destination that textures over the copy sample"},
+     {"transfer.into_target", "transfer", "high", "Block transfer into a render target: guest memory changes, the target's image does not"},
+     {"transfer.overlapping", "transfer", "low", "Block transfer whose source and destination overlap"},
+     {"transfer.bpp_vs_target", "transfer", "medium", "Block transfer with another pixel size than the target it touches"},
+diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
+index 1b880f9..3c381c1 100644
+--- a/host/gpu/vulkan_renderer.cpp
++++ b/host/gpu/vulkan_renderer.cpp
+@@ -1418,8 +1418,35 @@ struct VulkanRenderer::Impl {
+         // holds (DepthPicture); 0: none in particular.
+         std::uint32_t depth_address{};
+         std::uint64_t depth_version{};
++        // A target made by GE block transfers out of other targets
++        // (copy_block_transfer()), at a guest address no draw renders to,
++        // such as a capture of the screen in main memory. Only the guest
++        // pixels the copies wrote (`transfer_rect`: x0, y0, x1, y1) are its
++        // picture, and only while guest memory under them keeps every byte
++        // the copies left (`transfer_hash`, checked once a display list).
++        bool from_transfer{};
++        std::array<std::uint32_t, 4> transfer_rect{};
++        std::uint64_t transfer_hash{};
++        std::uint64_t transfer_checked_list{};
++        bool transfer_unchanged{};
+     };
+     std::map<std::uint32_t, Target> targets;
++    // Block transfers (copy_block_transfer()): the display lists walked so
++    // far, which is when a transfer target's memory is checked again; and the
++    // guest memory the latest transfers wrote, whose textures are keyed by
++    // every byte (texture_for()) instead of one word in 256.
++    std::uint64_t display_lists{};
++    struct TransferRange {
++        std::uint32_t start{};
++        std::uint32_t end{};
++    };
++    std::vector<TransferRange> transfer_ranges;
++    [[nodiscard]] bool transfer_target_unchanged(const GuestMemory &memory, Target &target);
++    // `key` with a hash of every byte of the texture mixed in when the texture
++    // lies over memory one of the latest block transfers wrote; `key` itself
++    // otherwise.
++    [[nodiscard]] std::uint64_t key_over_transfers(const GuestMemory &memory, const TextureState &texture,
++                                                   std::uint64_t key) const;
+     // Depth buffers by guest address. Each target has its own depth image,
+     // but the GE tests against the depth buffer the draw names, which
+     // several colour buffers may share: a game draws its scene into one
+@@ -4656,7 +4683,13 @@ VulkanRenderer::Impl::Texture &VulkanRenderer::Impl::texture_for(const GuestMemo
+         memo = last_texture;
+     } else {
+         auto [entry, inserted] = list_texture_keys.try_emplace(input);
+-        if (inserted) entry->second.key = texture_key(memory, state);
++        if (inserted) {
++            entry->second.key = texture_key(memory, state);
++            // A large texture is keyed by one word in every 256 bytes, which
++            // can miss a block transfer writing another picture over it.
++            if (!transfer_ranges.empty())
++                entry->second.key = key_over_transfers(memory, state, entry->second.key);
++        }
+         memo = &entry->second;
+         last_texture_input = input;
+         last_texture = memo;
+@@ -4841,6 +4874,36 @@ std::uint32_t framebuffer_bytes_per_pixel(std::uint32_t format) { return format
+ 
+ } // namespace
+ 
++std::uint64_t VulkanRenderer::Impl::key_over_transfers(const GuestMemory &memory, const TextureState &texture,
++                                                       std::uint64_t key) const {
++    const std::uint32_t bits = texture_bits_per_pixel(texture.format);
++    const std::uint32_t row = std::max<std::uint32_t>(texture.buffer_width, texture.width);
++    if (texture.height == 0u || row == 0u) return key;
++    const std::uint32_t start = GuestMemory::canonical(texture.address);
++    const std::uint32_t bytes = static_cast<std::uint32_t>(
++        (static_cast<std::uint64_t>(row) * (texture.height - 1u) + texture.width) * bits / 8u);
++    bool over = false;
++    for (const TransferRange &range : transfer_ranges)
++        over = over || (start < range.end && range.start < start + bytes);
++    if (!over) return key;
++    const std::uint8_t *data = memory.raw_pointer(texture.address, bytes);
++    if (data == nullptr) return key;
++    std::uint64_t lanes[4] = {key, key ^ 0x9E3779B97F4A7C15ull, key ^ 0xC2B2AE3D27D4EB4Full,
++                              key ^ 0x165667B19E3779F9ull};
++    std::uint32_t offset = 0u;
++    for (; offset + 32u <= bytes; offset += 32u) {
++        for (int lane = 0; lane < 4; ++lane) {
++            std::uint64_t word{};
++            std::memcpy(&word, data + offset + static_cast<std::uint32_t>(lane) * 8u, sizeof(word));
++            lanes[lane] = (lanes[lane] ^ word) * 0x100000001B3ull;
++        }
++    }
++    for (; offset < bytes; ++offset) lanes[0] = (lanes[0] ^ data[offset]) * 0x100000001B3ull;
++    std::uint64_t mixed = lanes[0];
++    for (int lane = 1; lane < 4; ++lane) mixed = (mixed ^ lanes[lane]) * 0x100000001B3ull;
++    return mixed;
++}
++
+ // <prefix>_TRACE_FB_TEXTURES: every distinct texture whose memory overlaps a
+ // guest framebuffer the renderer has drawn to, once, with where it is drawn.
+ void VulkanRenderer::Impl::trace_framebuffer_texture(const DrawCall &call) {
+@@ -5125,6 +5188,26 @@ VulkanRenderer::Impl::FramebufferTexture VulkanRenderer::Impl::find_framebuffer_
+         found.texel_x = (offset % row_bytes) * 8u / texture_bits;
+     }
+     if (found.x >= kPspWidth || found.y >= kPspHeight) return {};
++    // A copy made by block transfers holds only what they wrote, and only
++    // while every byte of it is still in guest memory.
++    if (best->from_transfer) {
++        const std::array<std::uint32_t, 4> &rect = best->transfer_rect;
++        const bool inside = found.x >= rect[0] && found.y >= rect[1] && found.x < rect[2] && found.y < rect[3];
++        const bool unchanged = inside && transfer_target_unchanged(memory, *best);
++        static const bool trace = portablekit::env("TRACE_TRANSFERS") != nullptr;
++        static std::uint64_t traced_list = 0u;
++        static std::uint32_t traced = 0u;
++        if (trace && traced_list != display_lists && traced < 2000u) {
++            traced_list = display_lists;
++            ++traced;
++            std::cout << "[transfer] frame " << frames << " texture 0x" << std::hex << texture.address << std::dec
++                      << " " << texture.width << "x" << texture.height << " bufw " << texture.buffer_width
++                      << " over the copy at 0x" << std::hex << best->address << std::dec << ": "
++                      << (!inside ? "outside what was copied" : unchanged ? "sampled" : "memory changed: decoded")
++                      << "\n";
++        }
++        if (!unchanged) return {};
++    }
+     return found;
+ }
+ 
+@@ -6661,6 +6744,13 @@ void VulkanRenderer::Impl::resize_targets(VkExtent2D extent) {
+         target->last_drawn_frame = old_target.last_drawn_frame;
+         target->draw_serial = old_target.draw_serial;
+         target->guest_words = old_target.guest_words;
++        if (old_target.from_transfer) {
++            target->drawn_right = old_target.drawn_right;
++            target->drawn_bottom = old_target.drawn_bottom;
++            target->from_transfer = true;
++            target->transfer_rect = old_target.transfer_rect;
++            target->transfer_hash = old_target.transfer_hash;
++        }
+         if (old_target.initialized) copies.emplace_back(target, &old_target);
+     }
+     run_commands([&](VkCommandBuffer commands) {
+@@ -7139,6 +7229,7 @@ bool VulkanRenderer::check_gpu_decode() const { return impl_ && impl_->check_gpu
+ 
+ void VulkanRenderer::begin_display_list() {
+     if (!impl_) return;
++    ++impl_->display_lists;
+     impl_->list_texture_keys.clear();
+     impl_->last_texture = nullptr;
+ }
+@@ -8458,6 +8549,33 @@ void VulkanRenderer::read_back_framebuffer(std::uint32_t source, GuestMemory &me
+ 
+ namespace {
+ 
++// Every byte of guest pixels x0..x1, y0..y1 of a buffer at `base` with rows
++// of `stride` pixels of `bytes_per_pixel`; 0 when they are not all in guest
++// memory.
++std::uint64_t hash_guest_rect(const GuestMemory &memory, std::uint32_t base, std::uint32_t stride,
++                              std::uint32_t bytes_per_pixel, const std::array<std::uint32_t, 4> &rect) {
++    std::uint64_t lanes[4] = {0xCBF29CE484222325ull, 0x9E3779B97F4A7C15ull, 0xC2B2AE3D27D4EB4Full,
++                              0x165667B19E3779F9ull};
++    const std::size_t row_bytes = static_cast<std::size_t>(rect[2] - rect[0]) * bytes_per_pixel;
++    for (std::uint32_t y = rect[1]; y < rect[3]; ++y) {
++        const std::uint32_t at = base + (y * stride + rect[0]) * bytes_per_pixel;
++        const std::uint8_t *row = memory.raw_pointer(at, row_bytes);
++        if (row == nullptr) return 0u;
++        std::size_t offset = 0;
++        for (; offset + 32u <= row_bytes; offset += 32u) {
++            for (int lane = 0; lane < 4; ++lane) {
++                std::uint64_t word{};
++                std::memcpy(&word, row + offset + static_cast<std::size_t>(lane) * 8u, sizeof(word));
++                lanes[lane] = (lanes[lane] ^ word) * 0x100000001B3ull;
++            }
++        }
++        for (; offset < row_bytes; ++offset) lanes[0] = (lanes[0] ^ row[offset]) * 0x100000001B3ull;
++    }
++    std::uint64_t hash = lanes[0];
++    for (int lane = 1; lane < 4; ++lane) hash = (hash ^ lanes[lane]) * 0x100000001B3ull;
++    return hash == 0u ? 1u : hash;
++}
++
+ // 480x272 RGBA pixels (red in the low byte) into guest framebuffer rows of
+ // `stride` pixels in `format`: 8888 copied, the 16-bit formats packed a row at
+ // a time into a buffer the compiler vectorises. The same bits as the
+@@ -8501,6 +8619,174 @@ void store_rows(std::uint8_t *out, std::uint32_t stride, std::uint32_t format, c
+ 
+ } // namespace
+ 
++bool VulkanRenderer::Impl::transfer_target_unchanged(const GuestMemory &memory, Target &target) {
++    // Guest memory cannot change while a display list is walked.
++    if (target.transfer_checked_list != display_lists || display_lists == 0u) {
++        target.transfer_checked_list = display_lists;
++        target.transfer_unchanged =
++            hash_guest_rect(memory, target.address, target.stride, framebuffer_bytes_per_pixel(target.format),
++                            target.transfer_rect) == target.transfer_hash;
++    }
++    return target.transfer_unchanged;
++}
++
++// After a GE block transfer has copied guest memory (block_transfer() in
++// hle_media.cpp): when it copied pixels of a render target, the same pixels
++// are copied on the GPU, at the internal scale, into a target that stands
++// for the destination, so a texture the game draws from the copy (a capture
++// of the screen behind a cut-in, say) samples the render instead of the 1x
++// picture read_back_framebuffer() left in guest memory. The source target's
++// pixels as they are now, in command order: a later draw into it changes
++// nothing here, and a draw recorded for frame interpolation samples a
++// snapshot of the copy as for any target. Guest memory keeps the 1x copy, for
++// the game's own reads, and the copy is used only while every byte of it is
++// unchanged (find_framebuffer_texture()). Into another target the game draws
++// to, nothing is copied (guest memory changes, the target does not, as
++// before). Textures over the latest transfers' destinations are keyed by
++// every byte (texture_for()), so a changed copy is never drawn from an older
++// decode. <prefix>_NO_TRANSFER_TARGETS copies in guest memory only;
++// <prefix>_TRANSFER_SAMPLED_KEY keys those textures by a word in 256, as
++// before; <prefix>_TRACE_TRANSFERS logs each transfer.
++void VulkanRenderer::copy_block_transfer(const BlockTransfer &transfer, const GuestMemory &memory) {
++    Impl &impl = *impl_;
++    if (!impl.ready) return;
++    static const bool trace = portablekit::env("TRACE_TRANSFERS") != nullptr;
++    static const bool sampled_key = portablekit::env("TRANSFER_SAMPLED_KEY") != nullptr;
++    static const bool disabled =
++        portablekit::env("NO_TRANSFER_TARGETS") != nullptr || portablekit::env("NO_FB_TEXTURES") != nullptr;
++    const std::uint32_t bytes_per_pixel = transfer.bytes_per_pixel;
++    const std::uint32_t destination = GuestMemory::canonical(transfer.destination);
++    const std::uint32_t source = GuestMemory::canonical(transfer.source);
++    if (!sampled_key && bytes_per_pixel != 0u && transfer.width != 0u && transfer.height != 0u) {
++        const std::uint32_t start =
++            destination + (transfer.destination_y * transfer.destination_stride + transfer.destination_x) *
++                              bytes_per_pixel;
++        const std::uint32_t end =
++            start + ((transfer.height - 1u) * transfer.destination_stride + transfer.width) * bytes_per_pixel;
++        auto &ranges = impl.transfer_ranges;
++        ranges.erase(std::remove_if(ranges.begin(), ranges.end(),
++                                    [&](const Impl::TransferRange &range) { return range.start == start; }),
++                     ranges.end());
++        if (ranges.size() >= 16u) ranges.erase(ranges.begin());
++        ranges.push_back({start, end});
++    }
++    const auto log = [&](const char *outcome) {
++        if (!trace) return;
++        std::cout << "[transfer] frame " << impl.frames << " 0x" << std::hex << source << std::dec << " ("
++                  << transfer.source_x << "," << transfer.source_y << " row " << transfer.source_stride << ") -> 0x"
++                  << std::hex << destination << std::dec << " (" << transfer.destination_x << ","
++                  << transfer.destination_y << " row " << transfer.destination_stride << ") " << transfer.width << "x"
++                  << transfer.height << " x" << bytes_per_pixel << ": " << outcome << "\n";
++    };
++    if (disabled) return log("guest memory only (switched off)");
++
++    // The source: a target the transfer reads with its own row length and
++    // pixel size.
++    const auto holding = [&](std::uint32_t address) -> Impl::Target * {
++        for (auto &[base_address, target] : impl.targets) {
++            if (!target.initialized) continue;
++            const std::uint32_t base = GuestMemory::canonical(base_address);
++            const std::uint32_t bytes = target.stride * kPspHeight * framebuffer_bytes_per_pixel(target.format);
++            if (address >= base && address - base < bytes) return &target;
++        }
++        return nullptr;
++    };
++    Impl::Target *from = holding(source);
++    if (from == nullptr || from->guest_words.empty()) return log("not from a render target");
++    if (from->from_transfer && !impl.transfer_target_unchanged(memory, *from))
++        return log("from a copy whose memory has changed");
++    const std::uint32_t from_base = GuestMemory::canonical(from->address);
++    if (transfer.source_stride != from->stride || bytes_per_pixel != framebuffer_bytes_per_pixel(from->format) ||
++        (source - from_base) % bytes_per_pixel != 0u)
++        return log("another row length or pixel size than its target");
++    const std::uint32_t from_row = from->stride * bytes_per_pixel;
++    const std::uint32_t from_x = (source - from_base) % from_row / bytes_per_pixel + transfer.source_x;
++    const std::uint32_t from_y = (source - from_base) / from_row + transfer.source_y;
++    // Both rectangles within the 480x272 a target holds.
++    const std::uint32_t to_x = transfer.destination_x;
++    const std::uint32_t to_y = transfer.destination_y;
++    if (from_x >= kPspWidth || from_y >= kPspHeight || to_x >= kPspWidth || to_y >= kPspHeight)
++        return log("outside the 480x272 a target holds");
++    const std::uint32_t width = std::min({transfer.width, kPspWidth - from_x, kPspWidth - to_x});
++    const std::uint32_t height = std::min({transfer.height, kPspHeight - from_y, kPspHeight - to_y});
++    if (width == 0u || height == 0u || transfer.destination_stride < to_x + width)
++        return log("an empty or ragged rectangle");
++
++    // The destination: its own transfer target, or none when it lies in a
++    // target the game draws to.
++    Impl::Target *to = nullptr;
++    if (const auto found = impl.targets.find(destination);
++        found != impl.targets.end() && found->second.from_transfer)
++        to = &found->second;
++    if (to == nullptr) {
++        if (Impl::Target *other = holding(destination); other != nullptr && !other->from_transfer)
++            return log("into a render target: guest memory only");
++        std::size_t count = 0u;
++        for (const auto &[address, target] : impl.targets) count += target.from_transfer ? 1u : 0u;
++        if (count >= 4u) return log("four transfer targets already: guest memory only");
++    }
++    if (to == from) return log("within one target: guest memory only");
++    if (!impl.recording) begin_frame();
++    std::string error;
++    if (to == nullptr) {
++        to = impl.target_for(destination, error);
++        if (to == nullptr) return log("no target could be made");
++        to->from_transfer = true;
++    }
++    // Copied as the source's colour (with its alpha brought up from the
++    // stencil) now holds it.
++    if (from->stencil_sync == Impl::Target::StencilSync::StencilNewer) impl.bring_alpha_up_to_date(*from);
++    impl.end_pass();
++    impl.initialize_layouts(impl.command_buffer, *to);
++    const VkExtent2D extent = impl.target_extent;
++    const auto scaled_x = [&](std::uint32_t x) {
++        return static_cast<std::int32_t>(static_cast<std::uint64_t>(x) * extent.width / kPspWidth);
++    };
++    const auto scaled_y = [&](std::uint32_t y) {
++        return static_cast<std::int32_t>(static_cast<std::uint64_t>(y) * extent.height / kPspHeight);
++    };
++    impl.transition(impl.command_buffer, from->color, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
++                    VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
++    impl.transition(impl.command_buffer, to->color, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
++                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
++    VkImageBlit blit{};
++    blit.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0u, 0u, 1u};
++    blit.dstSubresource = blit.srcSubresource;
++    blit.srcOffsets[0] = {scaled_x(from_x), scaled_y(from_y), 0};
++    blit.srcOffsets[1] = {scaled_x(from_x + width), scaled_y(from_y + height), 1};
++    blit.dstOffsets[0] = {scaled_x(to_x), scaled_y(to_y), 0};
++    blit.dstOffsets[1] = {scaled_x(to_x + width), scaled_y(to_y + height), 1};
++    vkCmdBlitImage(impl.command_buffer, from->color, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, to->color,
++                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1u, &blit, VK_FILTER_NEAREST);
++    perf::count_target_copy();
++    impl.transition(impl.command_buffer, from->color, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
++                    VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
++    impl.transition(impl.command_buffer, to->color, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
++                    VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
++
++    // The picture is the rectangle copied, or the earlier one it lies in;
++    // anything else (another layout, pieces that make no rectangle) starts
++    // it again.
++    std::array<std::uint32_t, 4> &rect = to->transfer_rect;
++    const std::array<std::uint32_t, 4> copied{to_x, to_y, to_x + width, to_y + height};
++    const bool same_layout = to->stride == transfer.destination_stride && to->format == from->format;
++    const bool inside = copied[0] >= rect[0] && copied[1] >= rect[1] && copied[2] <= rect[2] && copied[3] <= rect[3];
++    if (!same_layout || !inside) rect = copied;
++    to->stride = transfer.destination_stride;
++    to->format = from->format;
++    to->stencil_sync = Impl::Target::StencilSync::AlphaNewer;
++    to->last_drawn_frame = impl.frames;
++    to->draw_serial = ++impl.target_draw_counter;
++    to->drawn_right = rect[2];
++    to->drawn_bottom = rect[3];
++    impl.snapshot_guest_words(memory, destination, *to);
++    to->transfer_hash = hash_guest_rect(memory, destination, to->stride, bytes_per_pixel, rect);
++    to->transfer_checked_list = impl.display_lists;
++    to->transfer_unchanged = to->transfer_hash != 0u;
++    census::note_renderer("transfer.gpu_copy");
++    log("copied on the GPU at the internal scale");
++}
++
+ void VulkanRenderer::Impl::store_frame(GuestMemory &memory, const WritebackFrame &frame,
+                                        const std::uint32_t *pixels) {
+     Impl &impl = *this;
+diff --git a/host/gpu/vulkan_renderer.hpp b/host/gpu/vulkan_renderer.hpp
+index 181a720..ba683fa 100644
+--- a/host/gpu/vulkan_renderer.hpp
++++ b/host/gpu/vulkan_renderer.hpp
+@@ -142,6 +142,11 @@ public:
+     // writes that framebuffer back to guest memory, so the copy gets the
+     // picture. Waits for the GPU. <prefix>_NO_FB_TEXTURES turns it off.
+     void read_back_framebuffer(std::uint32_t source, GuestMemory &memory);
++    // After a GE block transfer has copied guest memory: when it copied a
++    // render target's pixels, copies them on the GPU at the internal scale
++    // too, into a target standing for the destination, which textures over
++    // the copy then sample. <prefix>_NO_TRANSFER_TARGETS turns it off.
++    void copy_block_transfer(const BlockTransfer &transfer, const GuestMemory &memory);
+     // Ends the frame and shows the target the guest just flipped to. Draws go to
+     // a separate offscreen target per guest framebuffer address, so only the
+     // displayed one reaches the window. `moment` is the real time the flip's
+diff --git a/host/hle/hle_media.cpp b/host/hle/hle_media.cpp
+index 8c0542a..1da41da 100644
+--- a/host/hle/hle_media.cpp
++++ b/host/hle/hle_media.cpp
+@@ -162,8 +162,12 @@ void block_transfer(Runtime &rt, const gpu::BlockTransfer &transfer) {
+         std::memmove(destination, source, row_bytes);
+     }
+ #if defined(PORTABLEKIT_HAS_RENDERER)
+-    // Textures already looked up in this list may have changed.
+-    if (media().renderer && media().renderer->available()) media().renderer->begin_display_list();
++    if (media().renderer && media().renderer->available()) {
++        // The same copy on the GPU, at the internal scale, when it read a render target.
++        media().renderer->copy_block_transfer(transfer, memory);
++        // Textures already looked up in this list may have changed.
++        media().renderer->begin_display_list();
++    }
+ #endif
+ }
+ 
+-- 
+2.53.0.windows.1
+

@@ -1,7 +1,7 @@
 From e4c9be77880276f031300cc3b22ea7e864ce0a35 Mon Sep 17 00:00:00 2001
 From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
 Date: Sun, 18 Oct 2026 18:51:20 +1030
-Subject: [PATCH 08/41] sceKernelCancelSema
+Subject: [PATCH 08/43] sceKernelCancelSema
 
 Was a logging stub. Wakes every waiting thread with WAIT_CANCEL
 (0x800201A9), sets the count (a negative count restores the initial one,

@@ -1,7 +1,7 @@
 From 9b671490a6d282260ea4d4d9700276d7df8a9d24 Mon Sep 17 00:00:00 2001
 From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
 Date: Sun, 18 Oct 2026 18:32:27 +1030
-Subject: [PATCH 04/41] Draw the message dialog and wait for the player's
+Subject: [PATCH 04/43] Draw the message dialog and wait for the player's
  answer
 
 sceUtilityMsgDialog answered every message at once without drawing it:

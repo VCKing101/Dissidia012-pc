@@ -33,12 +33,19 @@
   2. **Lines are not drawn** (`prim.lines`, 25,063 draws, every battle from the intro on): additive (factor 6/FIX)
      orange line segments, two vertices each.
   3. **Environment mapping** (`texmap.env_map`, 24,696 draws, Orphan's Cradle only): drawn with the vertex UVs.
+     **Implemented 21 October** (section 11): U and V from the normal and the lights `0xC1` names; on this stage it
+     dims the violet strips on Orphan's wheels a little (`evidence/orphans_cradle_env_map.png`).
   4. **Depth range clip** (`depth.range_minz_maxz`, 7,501 draws, Order's Sanctuary and Empyreal Paradox): additive
-     64x64 sprites the GE would cut at MINZ/MAXZ are drawn whole.
+     64x64 sprites the GE would cut at MINZ/MAXZ are drawn whole. **Implemented 21 October** (section 12), with the
+     GE's near/far clipping and culling: no visible change on the tour, since the game's MINZ/MAXZ equal its
+     viewport's depth range.
   5. **EX Burst's captured frame** (`transfer.from_target`, `tex.large_change_missed_by_key`): the frame is copied to
-     RAM at 480x272 and drawn as a 512x512 texture whose cache key samples one word per 256 bytes; one capture was
-     drawn from a stale decode.
+     RAM at 480x272 and drawn as a 512x512 texture whose cache key samples one word per 256 bytes. **Fixed 21
+     October** (section 10): the copy is also made on the GPU at the internal scale and drawn from there
+     (`evidence/ex_burst_capture_before_after.png`); the stale picture was a false alarm of the census on this route.
   6. **Effects past the far plane** (`clip.depth_clamp_far`, 875 draws): clipped by Vulkan, clamped by the GE.
+     **Implemented 21 October** (section 12): the GE clamps, then MINZ cuts them at exactly the far plane in this
+     game, so the cut was right; the renderer now does it the GE's way.
 - **Scaling and interpolation.** No capture pair at 4x and 1x differed beyond what scale explains (the largest
   matched-timeline mean difference: 7.4 of 255, a walk). After patch 0033 every replay check is pixel-exact in colour;
   Empyreal Paradox's checks still count 50-69% of pixels, but only in the alpha bits (the stencil), which do not
@@ -140,10 +147,10 @@ triage's patches 0033 to 0035 were merged.
 | --- | --- | --- | --- | --- | --- | --- |
 | 1 | `fbtex.miss_clut_view` | 1,340 | EX Revenge, 335 frames (`qb_ex_revenge`; counted under `qb_ex_results` in the third tour, which then had the gauge switch) | The 5551 framebuffer (`0x04000000`/`0x04044000`) read as a 512x512 CLUT16 texture into `0x040CC000`, three passes with index shift 0, 5 and 10 and mask `0x1F` (one channel each), then composited. A palette texture is never matched to a render target, so it is decoded from guest memory, which holds at best the 1x write-back of an earlier shown frame | The greyscale of EX Revenge comes out flat grey: the stage disappears behind fighters, particles and HUD (`evidence/ex_revenge_grey.png`, `ex_revenge_grey_ex_fight2.png`, `_fight3.png`) | Fixed 21 October (section 9): palette views decoded on the GPU; `D012_NO_FB_CLUT` |
 | 2 | `prim.lines` | 25,063 | Every battle, intro and fight (1,100-6,800 a route) | Line and line-strip primitives are skipped (`expand()` returns false) | Missing streaks: additive (2x alpha, FIX white) orange segments of two vertices, colour `0x80105FE4` | Open |
-| 3 | `texmap.env_map` | 24,696 | Orphan's Cradle | Texture map mode 2 (shade mapping from the lights in `0xC1`) ignored; the vertex UVs are used | A 128x128 CLUT4 texture on quads (vertex type `0x99`, no normals) blended additively; the GE would take the coordinates from the lights and normals | Open |
-| 4 | `depth.range_minz_maxz` | 7,501 | Order's Sanctuary (6,454), Empyreal Paradox | MINZ/MAXZ (`0x2710`..`0xC350`) narrower than the viewport's depth range on these draws; not applied | Additive 64x64 CLUT8 glow sprites (vertex alpha `0x7D`) drawn where the GE would cut them: a stage overlay too much | Open |
-| 5 | `transfer.from_target`, `tex.large_change_missed_by_key` | 1 and 1 a burst | EX Burst | The shown frame is block-copied to RAM (`0x095CD140`, 480 wide) and drawn as a 512x512 5551 texture: read back at 480x272 (1x), and the cache key samples one word per 256 bytes; once the copy changed where no sampled word did | The burst's captured background is 1x at any scale, and can be an earlier capture | Open |
-| 6 | `clip.depth_clamp_far` | 875 | World map, EX Burst, Kuja, Empyreal Paradox | `0x1C` on, vertices past the far plane: Vulkan clips them | Parts of large additive effects (the 128x64 CLUT8 2x-alpha draws) cut at the far plane | Open; GE behaviour not verified |
+| 3 | `texmap.env_map` | 24,696 | Orphan's Cradle | Texture map mode 2 (shade mapping from the lights in `0xC1`) ignored; the vertex UVs are used | A 128x128 CLUT4 texture on quads (vertex type `0x99`, no normals) blended additively; the GE would take the coordinates from the lights and normals | Implemented 21 October (section 11); `D012_NO_ENV_MAP` |
+| 4 | `depth.range_minz_maxz` | 7,501 | Order's Sanctuary (6,454), Empyreal Paradox | MINZ/MAXZ (`0x2710`..`0xC350`) narrower than the viewport's depth range on these draws; not applied | Additive 64x64 CLUT8 glow sprites (vertex alpha `0x7D`) drawn where the GE would cut them: a stage overlay too much | Not a visible problem: the range is the viewport's own but for 6 units, and the strips sit at the near plane Vulkan already clips (section 12; branch `depth-clip`, not merged) |
+| 5 | `transfer.from_target`, `tex.large_change_missed_by_key` | 1 and 1 a burst | EX Burst | The shown frame is block-copied to RAM (`0x095CD140`, 480 wide) and drawn as a 512x512 5551 texture: read back at 480x272 (1x), and the cache key samples one word per 256 bytes; once the copy changed where no sampled word did | The burst's captured background is 1x at any scale, and can be an earlier capture | Fixed 21 October (section 10): copied on the GPU at the internal scale; no stale picture on this route; `D012_NO_TRANSFER_TARGETS`, `D012_TRANSFER_SAMPLED_KEY` |
+| 6 | `clip.depth_clamp_far` | 875 | World map, EX Burst, Kuja, Empyreal Paradox | `0x1C` on, vertices past the far plane: Vulkan clips them | Parts of large additive effects (the 128x64 CLUT8 2x-alpha draws) cut at the far plane | Not a visible problem: the GE cuts them at the same place here (MINZ is the far plane) (section 12; branch `depth-clip`, not merged) |
 | 7 | `blend.doubled_source_alpha` | 395,449 (487,304 before) | Every 3D scene | Factors 6/7 were read as plain alpha | Haze, glows, EX Force crystals, hit flashes at half strength (`evidence/double_alpha_before_after.png`: the shrine's mist and a crystal) | Fixed, patch 0034 (triage); `D012_NO_DOUBLE_ALPHA` |
 | 8 | `tfx.tcc_rgb_handled` | 44,989 (59,355 before) | Every scene with a scene copy | TCC was ignored: the texel's alpha (the stencil bit) was used | The gate swirl (triage item 2); the half-size scene copies | Fixed, patch 0035 (triage); `D012_NO_TEXTURE_RGB` |
 | 9 | Replay check | 48-79% of pixels before | Every battle | In-between frames composited a later pass of a reused scratch target | Miniatures top-left, strobing glow (triage items 3, 5, 7-9) | Fixed, patch 0033 (triage): 0.00-0.06% in colour after |
@@ -176,10 +183,10 @@ feature above where its value matters.
 | --- | --- | --- | --- |
 | 1 | Palette views of render targets: when a CLUT4/8/16 texture lies over a target drawn with the same row length and pixel size, sample the target's copy on the GPU, rebuild the 16-bit pixel from the RGBA8 texel (5551, 5650, 4444), apply shift, mask and start, and look the index up in the palette (a small palette texture) in the shader | 2 days | A whole-screen effect lost (EX Revenge); the same mechanism serves other colour-grading effects. **Done** (section 9) |
 | 2 | Lines (and points, same path): expand each segment into a screen-aligned quad one PSP pixel wide times the internal scale, as transformed sprites are expanded, so the replay and the pipelines need no new topology | 1 day | Every battle, from the intro |
-| 3 | MINZ/MAXZ: discard in the fragment shader outside the range, mapped like the viewport's z (a uniform; the push constants are full) | 0.5 day | Order's Sanctuary's extra glows; cheap |
-| 4 | EX Burst capture: read back at the internal scale into a texture kept for the RAM copy (or treat the copy as a render target), and key large textures written by a transfer by a full hash once after the transfer | 1 day | The burst's backdrop: 1x and possibly stale |
-| 5 | Environment mapping (mode 2): texture coordinates from the light vectors named in `0xC1` and the normal, in the vertex shader; check first what the GE does without normals (vertex type `0x99`) | 1-2 days | One stage, but every frame of it |
-| 6 | Depth clamp: Vulkan `depthClamp` while `0x1C` is on, after a check on hardware or a reference of what the GE does past the far plane | 0.5 day + the check | Few draws |
+| 3 | MINZ/MAXZ: discard in the fragment shader outside the range, mapped like the viewport's z (a uniform; the push constants are full) | 0.5 day | Order's Sanctuary's extra glows; cheap. **Not needed here** (section 12): no visible change; branch `depth-clip`, not merged |
+| 4 | EX Burst capture: read back at the internal scale into a texture kept for the RAM copy (or treat the copy as a render target), and key large textures written by a transfer by a full hash once after the transfer | 1 day | The burst's backdrop: 1x and possibly stale. **Done** (section 10) |
+| 5 | Environment mapping (mode 2): texture coordinates from the light vectors named in `0xC1` and the normal, in the vertex shader; check first what the GE does without normals (vertex type `0x99`) | 1-2 days | One stage, but every frame of it. **Done** (section 11) |
+| 6 | Depth clamp: Vulkan `depthClamp` while `0x1C` is on, after a check on hardware or a reference of what the GE does past the far plane | 0.5 day + the check | Few draws. **Not needed here** (section 12): no visible change; branch `depth-clip`, not merged |
 | 7 | Off-screen perspective passes under interpolation (Kuja's trance): blend or re-render them per present | 2+ days, a design | Timeline-dependent; motion only |
 | 8 | Latent, not used here: the alpha test NEVER/ALWAYS swap in `ge.frag`, blend factors 8/9, BLEND's environment colour, ADD | 0.5 day together | Other games |
 
@@ -367,3 +374,195 @@ over 5650, 4444 or 8888 targets, and CLUTs read from a render target: implemente
 on the toured routes. The hardware rounds each pass to 5 bits before the next blend reads it; the port adds in 8
 bits and rounds once, which can move a pixel by a level or two. The extra pass's cost was not measured (four passes
 a frame at the internal scale, only during EX Revenge).
+
+## 10. EX Burst's captured background: fixed (fix order 4)
+
+> 21 October 2026. On the PortableKit branch `exburst-envmap` (worktree `tools/local/port/PortableKit-exbg`, commit
+> `a6bd1ad` on `dissidia` at `1a27208`; not merged, no patch regenerated), with section 11's commit before it.
+> Build `tools/local/port/build-d012-exbg` (the options of `build-d012-recomp`), framework build
+> `tools/local/port/build-framework-exbg`, data `build/port/data-exbg` (a copy of `build/port/data` with
+> `video.present_mode=immediate`). Runs through a wrapper that points `gfx_tour.py` at that data and at
+> `build/port/gfx-tour-exbg*/` (never committed); `build/port/gfx-tour` got only the evidence images.
+
+**What the game does.** Traced with `D012_TRACE_TRANSFERS` (new) on `qb_ex_burst`. One GE block transfer
+(`0xB2`-`0xB5`, `0xEB`/`0xEC`/`0xEE`, start `0xEA`), not `sceGuCopyImage` from the CPU and not a render to texture:
+the shown framebuffer `0x04044000` (5551, 512 wide), rectangle 0,0 480x272, 2 bytes a pixel, into main memory at
+`0x095CD140` with rows of 480 pixels, at Gestalt Drive's command prompt (frame 8802 on most timelines, 8722 on
+others). For the next 56 frames each frame draws it as a 512x512 5551 texture, row length 480, two transformed
+triangles into the shown framebuffer, source-alpha blended: the frozen scene behind the prompt. Every other
+transfer on the route goes from main memory to main memory (a 64-wide 16-bit atlas patched into a 128-wide one, a
+few times a second) or from main memory into VRAM (32-wide 8888 textures and 256x1 palettes); none reads a target.
+
+**Cause.** `read_back_framebuffer()` waited for the GPU and stored the target at 480x272 in guest memory; the copy
+then ran in guest memory, and the texture was decoded from it: 1x at any internal scale. The stale picture: the
+census's check hashes the texture's whole 512 rows (491 KB), while the copy is 272 rows (261 KB). The memory past
+row 272 changes at frame 8835 (game data, never sampled); the 480x272 the draws read did not change in any of the
+56 frames (the new per-list hash of it, below). So nothing stale was drawn on this route; but a later capture that
+differed from an earlier one only between sampled words would have been, so the key is fixed too.
+
+**Fix** (`host/gpu/vulkan_renderer.cpp` `copy_block_transfer()`, called from `block_transfer()` in
+`host/hle/hle_media.cpp` after the guest copy; game-agnostic). When a transfer's source lies in a render target
+with the same row length and pixel size, the same rectangle is blitted on the GPU, at the internal scale, in command
+order, into a render target standing for the destination (made the first time; at most four). Guest memory still
+gets the 1x copy for the game's own reads. A texture over the destination is matched to that target as to any
+render target, but only inside the rectangle copied and only while every byte of guest memory under it is what the
+transfer left (a hash, checked once a display list); otherwise it is decoded from memory as before. Draws recorded
+for frame interpolation sample a snapshot of it, as of any target (patch 0033). A transfer into a target the game
+draws to is left as before. Textures over the latest 16 transfer destinations are keyed by every byte instead of
+one word in 256. Switches: `D012_NO_TRANSFER_TARGETS` (guest memory only, as before), `D012_TRANSFER_SAMPLED_KEY`
+(sampled key, as before), `D012_TRACE_TRANSFERS` (each transfer and what became of it, each lookup over a copy).
+The census counts `transfer.gpu_copy` (info).
+
+**Verified.**
+
+- Before (`D012_NO_TRANSFER_TARGETS=1 D012_TRANSFER_SAMPLED_KEY=1`) and after, same timeline, capture `ex_burst3`
+  (frame 8820), 4x 30 fps: only the frame changes (1,635,368 pixels, nearly all by a few levels), from the 1x copy
+  scaled up to the scene at full detail; `evidence/ex_burst_capture_before_after.png` (4x 30 fps before and after,
+  4x 60 fps after) and `ex_burst_capture_full.png`. Every lookup in the 56 frames sampled the copy, at 30 and 60 fps
+  and at 1x.
+- 1x: the GPU copy is the same size as the read-back; captures before and after match where the timelines did
+  (`ex_burst_capture_1x.png` shows each with the capture, at different frames).
+- Interpolation (4x and 1x, 60 fps, `D012_CHECK_REPLAY`): replay checks 0.00-0.04% on `qb_ex_burst`; the check at
+  frame 8850 falls inside the 56 frames and was 0 pixels.
+- Other routes: no other transfer reads a target, so nothing else takes the new path; the full-byte key applies to
+  the atlas patches and VRAM uploads above (small textures, keyed whole before already).
+- Whole tour on the build with both fixes (`build/port/gfx-tour-exbg-full/`, 33 runs, 432 captures, base, nointerp
+  and 1x): no run with problems, no interpreter fallback, no stall; replay checks 0.00-0.03% in colour; the menus
+  differ from the census tour's baseline exactly as the section 9 tour's did (main menu and Battle Mode, mean 1 of
+  255); the 187 flags are other timelines, as in sections 8 and 9. One earlier unattended run (`qb_ex_burst`, 60
+  fps) stalled at the player select (no frame for 66 s, every guest thread waiting); not seen again in 40 runs.
+- The 20 framework tests (`tools/port/pk_ctest.cmd`, ad hoc tests excluded) pass and `portablekit_host_check`
+  builds (`tools/local/port/build-framework-exbg`).
+
+**Not verified.** A transfer whose rectangle is not at 0,0 or not 480x272, chains of copies, and a copy whose memory
+the game then edits with the CPU (implemented: the hash then rejects the GPU copy); the look on a PSP.
+
+## 11. Environment mapping: implemented (fix order 5)
+
+> 21 October 2026. Same branch, worktree, builds and data as section 10; commit `be8560c`.
+
+**What the draws do.** Traced with `D012_TRACE_GE_LIST=9000:2:400000` and `D012_TRACE_ENV_MAP` (new) on
+`qb_orphans_cradle`: 84 draws a frame from the battle on, all of texture `0x04118580` (128x128 CLUT4, swizzled, one
+level: `0xC2` = 1, so `0xC8` = 0, level mode auto with no bias, changes nothing), triangle strips of four vertices
+of type `0x99` (8-bit UV, 4444 colour, 8-bit position, **no normal**), lighting on with every light off, additive
+(source alpha / FIX white), depth writes off, the stencil test on: the violet glowing strips around the wheels of
+Orphan's shell. `0xC0` = `0x102`: map mode 2 (environment), projection source UV (unused in mode 2); `0xC1` = 0:
+light 0 for both U and V. Light 0's vector was never written (0,0,0; lights 2 and 3 hold (1,0,0) and (0,-1,0)). The
+texture scale is (0.502, 0.498) and the offset scrolls in U (6.67, -4.93, ...), set for the vertex UVs, which run
+0-2 in U and 0.5-1.0 in V. So the game draws these strips in mode 2 with the state of a UV-mapped draw: the mode
+looks left over, and what the GE makes of it decides their look.
+
+**PSP behaviour.** From public GE documentation: the PSPSDK's `sceGuTexMapMode(GU_ENVIRONMENT_MAP, a1, a2)` and its
+`envmap` sample, which sets lights 0 and 1 to the two vectors the normal is projected on; the GE's shade mapping takes s = (1 + N.L1) / 2 and t = (1 + N.L2) / 2 with N the normal in world space (after
+the world matrix, normalised, reversed by `0x51`) and L the lights' position registers normalised, whatever the
+lights' types and enables; the vertex UVs are not read. Less certain, and not testable here: the texture scale
+applies to the result and the offset does not; a zero light vector counts as (0, 0, 1); a vertex without a normal
+counts as (0, 0, 1) in world space (the renderer's lighting already does so). Under those, every vertex of these
+strips gets the same coordinate (0.502, 0.498): one texel near the texture's centre, instead of the scrolling band.
+
+**Cause.** `0xC0`/`0xC1` were ignored commands; every transformed draw used its vertex UVs.
+
+**Fix** (`environment_map_uv()` in `host/gpu/shaders/ge.vert`; `submit()` in `vulkan_renderer.cpp`;
+`DrawCall::texture_map`, `texture_env_lights` from `GeState`). In mode 2 the vertex shader makes U and V as above
+from the object block's world matrix, the environment block's light vectors and two new fields (the lights for U
+and V, reverse normals); env-mapped draws write both blocks and are recorded with their object block for frame
+interpolation, as lit draws are. Switches: `D012_NO_ENV_MAP` (vertex UVs, as before), `D012_ENV_MAP_OFFSET` (add
+the texture offset too), `D012_TRACE_ENV_MAP[=N]`. The census counts `texmap.env_map_drawn` (info, with whether the
+vertices have normals) instead of `texmap.env_map`. Projection mapping (mode 1) is still not done (never seen).
+
+**Verified.** Before (`D012_NO_ENV_MAP=1`) and after, same timeline, `fight4`-`fight6`, at 4x and 1x, 30 and 60 fps
+(`evidence/orphans_cradle_env_map.png`: `fight5` cropped, before, after and the difference): only the strips change,
+840 to 2,600 pixels at 4x and about 1,500 at 1x (10,000 at 1x 60 fps, most by a level or two), a little dimmer and without the band's pattern; everything else is
+identical. Replay checks at 60 fps: 0.00% on the stage. The census: 24,696 draws a run, `lights 0,0, no normals`.
+
+**Not verified.** Mode 2 on hardware, and in particular these three details, on which the strips' look depends:
+the missing normal, the zero light vector and the offset. If the PSP draws these strips with their vertex UVs
+(that is, if the mode is ignored without normals), `D012_NO_ENV_MAP` is the right picture; a capture from a handheld
+of Orphan's Cradle would decide it. Env mapping with normals (none on the tour).
+
+## 12. Depth range and the far plane: investigated, not merged (fix order 3 and 6)
+
+**Decision (21 October 2026):** not merged into `dissidia`. On every traced draw the before and after captures are
+identical, so neither finding is a visible problem in this game, and the change is about 600 lines that had already
+caused one crash (fixed on the branch). Its rules were also taken from PPSSPP's software renderer as a reference,
+which needs a careful clean-room rewrite before it could go into an MIT framework. It stays on the branch `depth-clip`
+for a game that needs it. The notes below describe that branch.
+
+> 21 October 2026. Findings 4 and 6 of section 3 (`depth.range_minz_maxz`, `clip.depth_clamp_far`), fix order 3 and 6,
+> on the PortableKit branch `depth-clip` (worktree `tools/local/port/PortableKit-depthclip`, commits `d29810a` and
+> `61256fb` on `dissidia` at `1a27208`; not merged, no patch regenerated). Build `tools/local/port/build-d012-depthclip`
+> (the options of `build-d012-recomp`), data `build/port/data-depthclip` (a copy of `build/port/data` with
+> `video.present_mode=immediate`), runs through a wrapper that points `gfx_tour.py` at them and at
+> `build/port/gfx-depthclip-*/` (never committed); `build/port/gfx-tour` got only the evidence images below.
+
+**What the GE does** (public reference: the hardware-tested clipper and pixel pipeline of PPSSPP's software
+renderer, `GPU/Software/Clipper.cpp`, `TransformUnit.cpp`, `DrawPixel.cpp`; not checked on a handheld here). For
+transformed draws only; through mode takes z as given and skips all of it.
+
+- Screen depth is S = z / w * z scale + z centre. The viewport's z range clips nothing: there is no far plane.
+- MINZ/MAXZ: a pixel with S outside [MINZ, MAXZ] is discarded before every other test (no colour, depth or stencil
+  write), in clear mode too.
+- `0x1C` on (`GU_CLIP_PLANES`): triangles and lines are cut at the near plane (z = -w); sprites are never cut. S is
+  clamped to 0..65535, so past the far plane the GE draws at the end of the range unless MINZ/MAXZ discards it.
+- `0x1C` off: nothing is cut at the near plane either, but a primitive with a vertex whose S leaves 0..65535, or
+  with w <= 0, is dropped whole.
+- Always: a primitive with a vertex outside the guard band (screen x or y before the offset outside 0..4096) is
+  dropped whole, except that with `0x1C` on a vertex the near plane cuts away does not count; one whose vertices all
+  lie past the far plane, or all past the near plane, is dropped; a sprite with a corner at w <= 0 is dropped.
+
+Ambiguous or unverified: whether the clamp applies per vertex (the reference) or per pixel (PPSSPP's hardware
+renderers); the exact rounding of S against MINZ/MAXZ (integer depths); hardware tests are cited by the reference,
+not repeated here.
+
+**What this game sets** (`D012_TRACE_DEPTH_RANGE`, new; every battle stage, the world map, the EX Burst): every 3D
+draw has viewport z scale -20000 and centre 30000 (device z -1..1 to S 50000..10000: near 50000, far 10000, the depth
+test GEQUAL) and MINZ/MAXZ `0x2710`..`0xC350`, 10000..50000: exactly the viewport's range. The census's 7,925
+"narrower" draws are glow strips with centre 30006 (near plane at 50006, MAXZ 6 units in front of it): Order's
+Sanctuary's 64x64 CLUT8 glow (`0x090CE7D0`), Empyreal Paradox's (`0x0909FA10`), vertex type `0x19F`, `0x1C` off,
+additive. The far-plane draws (`0x1C` on, 1,477 on the tour) are the large 2x-alpha effects; past the far plane their
+S drops below 10000, the GE clamps it (still below 10000) and MINZ discards it: the GE cuts them at the far plane,
+where Vulkan cut them.
+
+**The fix** (`host/gpu/depth_clip.hpp`, `vulkan_renderer.cpp`, `shaders/ge.vert`, game-agnostic). The vertex shader
+maps a transformed draw's depth so that Vulkan's clip volume (0 <= z <= w) ends where the GE stops drawing: the
+window of S a pixel may have (MINZ/MAXZ, and the near plane with `0x1C` on), with the Vulkan viewport's depth range
+set to the same window so the depth written is S / 65535 as before. For flat primitives clipping there covers
+exactly the pixels the GE's test passes, so there is no discard and no loss of early depth testing. With `0x1C` on
+and no MINZ/MAXZ on the far side, a vertex past the far plane has its depth clamped to the end of the range. The two
+mapping constants ride in the push constants' viewport x and y, unused by transformed draws. Primitives the GE drops
+whole are left out on the CPU (per-vertex classification, then per triangle, sprite or line segment, in the
+expansion and the index lists alike); GPU-decoded (raw) draws are not culled. Frame interpolation replays the
+recorded push constants and viewport, so in-between frames clip alike; lines (section 8) go through the same
+culling; a skinned draw recorded for interpolation keeps its vertex numbering (no compaction, no culling when
+expanded), and the vertex count recorded for replay is now the count written (an earlier version crashed at 60 fps
+on Empyreal Paradox when culling made a skinned draw compact). Switches: `D012_NO_DEPTH_RANGE_CLIP` (MINZ/MAXZ
+ignored), `D012_NO_GE_DEPTH_CLIP` (Vulkan's near and far planes, nothing dropped), both: the old mapping exactly;
+`D012_NO_GUARD_BAND`; `D012_TRACE_DEPTH_RANGE[=N]`; `D012_DEPTH_CLIP_ALTERNATE` (odd frames the old way, and the
+frame pairs around a dropped glow primitive captured to `D012_SCREENSHOT_DIR`). Census: `*_applied` and
+`clip.out_of_range_dropped` (7,403 draws on the tour) are info unless a switch is set.
+
+**Verified.**
+
+- What is dropped: about 4,000-7,000 primitives a frame in battle, nearly all stage quads wholly behind the eye or
+  with a vertex off the guard band, which Vulkan clipped to nothing on screen; of the glow strips, a few primitives a
+  frame while the camera passes through them (`0x1C` off, a vertex past the near plane and out of 0..65535).
+- Before/after on the same build (both switches against none), 30 fps 4x, matched timelines: Order's Sanctuary's
+  intro and first seconds (39 captures) and a fight with the glow route's inputs (17): every capture pixel-identical
+  (`evidence/depthclip_orders_before_after.png`, `depthclip_orders_intro_before_after.png`). At 1x and at 60 fps the
+  runs fell on other timelines (intro lines, CPU moves); the alternate mode compares on one timeline instead: 40
+  pairs on Order's Sanctuary and 9-11 on Empyreal Paradox, at 4x and 1x, around frames that dropped glow primitives show only the motion between two frames,
+  no glow (`evidence/depthclip_alternate_orders_8576.png`, `depthclip_alternate_paradox_9014.png`: the old frame,
+  the GE frame, their difference).
+- 60 fps (`D012_FRAME_RATE_AUTO=0`): both stages run, replay checks 0.00% in colour; render and GPU time within the
+  noise of the before runs (both captured every 10 frames).
+- Whole tour (33 runs, 432 captures, `build/port/gfx-depthclip-tour.txt`): no run with problems, no interpreter
+  fallback, every run exited 0, replay checks 0.00-0.03% in colour; its flags are `nointerp` against `1x` on other
+  timelines (the directory has no baseline). Menus against the census baseline: identical but for the save's play
+  time.
+- `portablekit_render_tests` (depth window and culling cases) and the other framework tests pass (20, the ad hoc
+  ones skipped), `portablekit_host_check` builds (`tools/local/port/build-framework-depthclip`).
+
+**Not verified.** Any of it on a handheld. A visible case: none of the toured scenes changes, so the code paths that
+matter for other games (a narrower MINZ/MAXZ, depth past the far plane inside 0..65535, `0x1C` off with vertices out
+of range on screen) are checked by the unit tests only. Per-vertex against per-pixel clamping; the near plane with
+`0x1C` on when it lies beyond 0..65535 (the window stops at the end of the range instead of clamping).
