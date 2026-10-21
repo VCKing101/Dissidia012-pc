@@ -22,6 +22,10 @@ and:
   - never changes, removes or reads anything in the destination's data/ folder, where
     the Deck's saves, settings and mods live. The one exception: when data/settings.ini
     does not exist yet (the first deploy), the package's Deck defaults are put there.
+  - with --with-mods, also sends the PC's mods folder (build/port/data/mods) to data/mods
+    the same way, with its own manifest there: only changed files go, a mod file the PC no
+    longer has is removed only if an earlier --with-mods deploy sent it, and mods that
+    exist only on the Deck are kept. Saves (data/ms0) and settings are still never touched.
 
 With no manifest in the destination (a first deploy, or one that was interrupted), the
 destination's files are hashed instead, so files already there are not sent again;
@@ -56,6 +60,8 @@ MANIFEST = ".deploy-manifest.json"
 STAGING = ".deploy-staging"
 SEED = "data/settings.ini"
 CONFIG = ROOT / "tools/local/deck.json"
+MODS_DIR = ROOT / "build/port/data/mods"
+MODS_HASH_CACHE = package_deck.OUT_DIR / ".mods-hash-cache.json"
 DEFAULT_HOST = "deck@steamdeck.local"  # SteamOS's own default user and network name
 DEFAULT_DEST = "/home/deck/Games/Dissidia012"
 
@@ -96,10 +102,10 @@ def human(size):
 
 # ---------------------------------------------------------------- the package's manifest
 
-def package_manifest(package):
+def package_manifest(package, hash_cache=HASH_CACHE):
     """{relative path: {"sha256", "size"}} for every file but data/ and dot files."""
     try:
-        cache = json.loads(HASH_CACHE.read_text(encoding="utf-8"))
+        cache = json.loads(hash_cache.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         cache = {}
     files, new_cache = {}, {}
@@ -120,8 +126,8 @@ def package_manifest(package):
             digest = package_deck.sha256_file(path)
         new_cache[relative] = key + [digest]
         files[relative] = {"sha256": digest, "size": stat.st_size}
-    HASH_CACHE.parent.mkdir(parents=True, exist_ok=True)
-    HASH_CACHE.write_text(json.dumps(new_cache, indent=1), encoding="utf-8")
+    hash_cache.parent.mkdir(parents=True, exist_ok=True)
+    hash_cache.write_text(json.dumps(new_cache, indent=1), encoding="utf-8")
     return files
 
 
@@ -331,6 +337,10 @@ def main():
     parser.add_argument("--no-build", action="store_true", help="use the package as it is")
     parser.add_argument("--rehash", action="store_true", help="hash the destination's files, not its manifest")
     parser.add_argument("--package", type=Path, default=PACKAGE, help=argparse.SUPPRESS)
+    parser.add_argument("--with-mods", action="store_true",
+                        help="also send the mods folder to data/mods on the Deck (only changed files; mods "
+                             "only on the Deck are kept; saves and settings are never touched)")
+    parser.add_argument("--mods-dir", type=Path, default=MODS_DIR, help="the mods folder to send (default build/port/data/mods)")
     options = parser.parse_args()
 
     if options.identity and not options.local_target and not Path(options.identity).is_file():
@@ -347,7 +357,20 @@ def main():
     if not (package / package_deck.EXE_NAME).exists():
         raise SystemExit(f"deploy: no package at {package} (run tools/port/package_deck.py)")
 
-    local = package_manifest(package)
+    status = deploy_tree(target, package, package_manifest(package), options, allow_seed=True)
+    if status or not options.with_mods:
+        return status
+    mods = options.mods_dir.resolve()
+    if not mods.is_dir():
+        raise SystemExit(f"deploy: no mods folder at {mods}")
+    log("the mods (data/mods on the Deck)")
+    mods_target = (LocalTarget(options.local_target / "data" / "mods") if options.local_target
+                   else SshTarget(options.host, options.dest.rstrip("/") + "/data/mods", options.identity))
+    return deploy_tree(mods_target, mods, package_manifest(mods, MODS_HASH_CACHE), options, allow_seed=False,
+                       restart_note="restart the game on the Deck to load the mods")
+
+
+def deploy_tree(target, package, local, options, allow_seed, restart_note=None):
     previous = target.read_manifest()
     previous_files = (previous or {}).get("files", {})
     if previous is None or options.rehash:
@@ -358,7 +381,7 @@ def main():
     uploads = plan(local, present)
     # Only files a deploy sent are ever removed; data/ never.
     removals = sorted(r for r in previous_files if r not in local and not is_data(r) and r != MANIFEST)
-    seed = (package / SEED).exists() and not target.has_seed()
+    seed = allow_seed and (package / SEED).exists() and not target.has_seed()
     for relative in uploads + removals:
         assert not is_data(relative), relative
 
@@ -381,7 +404,7 @@ def main():
         log("dry run; nothing changed")
         return 0
     target.apply(package, uploads, removals, seed, manifest_text)
-    log("done; restart the game on the Deck to use the new build")
+    log("done; " + (restart_note or "restart the game on the Deck to use the new build"))
     return 0
 
 
