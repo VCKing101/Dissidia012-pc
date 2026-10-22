@@ -178,7 +178,11 @@ def main():
     parser.add_argument("--route", choices=("battle", "worldmap"), default="battle")
     parser.add_argument("--menu-keys", default=MENU_KEYS, help="script steps for --quit menu; @ is the quit frame")
     parser.add_argument("--env", action="append", default=[], metavar="NAME=VALUE")
+    parser.add_argument("--build-dir", default=None, help="the build to run (default tools/local/port/build-d012-recomp)")
     options = parser.parse_args()
+    if options.build_dir:
+        global BUILD
+        BUILD = options.build_dir
     options.seconds = min(options.seconds, 90.0)
     work = os.path.join(ROOT, options.work)
     os.makedirs(os.path.join(work, "logs"), exist_ok=True)

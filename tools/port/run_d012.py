@@ -16,6 +16,9 @@ another data directory (default build/port/data).
 
 --headless sets D012_NO_RENDER=1 and D012_NO_AUDIO=1. --env adds or overrides
 any variable, e.g. --env D012_TRACE_IO=1 --env D012_SCREENSHOT_DIR=build/port/shots.
+
+--affinity MASK (Windows) limits the process it started to the logical CPUs in
+MASK (e.g. 0x5: CPUs 0 and 2), to try a machine with fewer cores.
 """
 
 import argparse
@@ -37,6 +40,7 @@ def main():
     parser.add_argument("--env", action="append", default=[], metavar="NAME=VALUE")
     parser.add_argument("--build-dir", default=BUILD_DIR)
     parser.add_argument("--data-dir", default=os.path.join(ROOT, "build", "port", "data"))
+    parser.add_argument("--affinity", default=None, help="CPU mask for the process it starts (Windows)")
     parser.add_argument("args", nargs="*")
     options = parser.parse_args()
     seconds = min(options.seconds, MAX_SECONDS)
@@ -62,6 +66,12 @@ def main():
     with open(options.log, "wb") as log:
         process = subprocess.Popen([exe] + options.args, cwd=os.path.dirname(exe), env=env,
                                    stdout=log, stderr=subprocess.STDOUT)
+        if options.affinity and os.name == "nt":
+            import ctypes
+            mask = int(options.affinity, 0)
+            # Its own process only, by the handle Popen holds.
+            if not ctypes.windll.kernel32.SetProcessAffinityMask(int(process._handle), ctypes.c_size_t(mask)):
+                print(f"cannot set the affinity {options.affinity}")
         try:
             code = process.wait(timeout=seconds)
             outcome = f"exited with {code}"

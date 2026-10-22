@@ -1,7 +1,7 @@
 From cd886e8e7d4f6cdabbafdf8fe8bdf044d678470f Mon Sep 17 00:00:00 2001
 From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
 Date: Wed, 21 Oct 2026 23:32:32 +1030
-Subject: [PATCH 47/48] HLE: memcpy, memset and DMA copies in one host copy
+Subject: [PATCH 47/53] HLE: memcpy, memset and DMA copies in one host copy
 
 sceKernelMemcpy, sceKernelMemset and sceDmacMemcpy copied a byte at a
 time through the checked accessors. When both runs are contiguous host

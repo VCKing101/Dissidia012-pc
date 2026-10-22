@@ -15,15 +15,19 @@ written). Before each run the copy's ms0/ is restored from build/port/perf/prist
 settings.ini from build/port/perf/pristine-settings.ini with the present mode set; --cold also deletes the
 copy's pipeline_cache.bin and pipeline_keys.bin first (the driver's own shader cache is not touched).
 The routes reach their scene unthrottled (scene "fast", left out of the statistics) and then run at real
-time (D012_PERF=log, D012_TRACE_INTERPOLATION=1).
+time (D012_PERF=log, D012_TRACE_INTERPOLATION=1). --data-dir runs against another copy (made the same way, once),
+--affinity limits the game to some logical CPUs (run_d012.py --affinity), and --tag names a variant of the same
+label's routes (runs/<label>/<route>-<tag>).
 
 Output under build/port/perf/ (never committed): runs/<label>/<route>/ with run.log and frames.csv, and
 runs/<label>/stats.json.
 
 Statistics per scene, from the present rows: presents per second (mean), the 1% low (1000 over the 99th
-percentile of the time between presents), seconds whose present count, as the fps meter counts them, is below
+percentile of the time between presents), the mean and 99th percentile of that time and the presents more than
+20 ms after the one before, seconds whose present count, as the fps meter counts them, is below
 55, presents more than 25 ms after the one before (hitches), the share of presents interpolation blended, and
-why the others were not; from the frame rows: pipelines created and their time, textures decoded, key hashing,
+why the others were not; the emulation thread's CPU time per second (the flip rows' cpu_ms) and, from the log,
+the present thread's ([present-thread] lines) and frame interpolation's delay ([interp] ... delay); from the frame rows: pipelines created and their time, textures decoded, key hashing,
 snapshots, GPU time.
 """
 
@@ -113,6 +117,8 @@ def prepare_data(cold, present):
     if not os.path.isdir(DATA):
         print(f"copying {OWNER_DATA} to {DATA} (once)")
         shutil.copytree(OWNER_DATA, DATA)
+    if os.path.abspath(DATA) == os.path.abspath(OWNER_DATA):
+        sys.exit("refusing to run against build/port/data itself")
     os.makedirs(OUT, exist_ok=True)
     if not os.path.isdir(PRISTINE):
         shutil.copytree(os.path.join(OWNER_DATA, "ms0"), PRISTINE)
@@ -153,14 +159,15 @@ def run_route(route, options):
     waited = wait_for_quiet()
     if waited > 1:
         print(f"  waited {waited:.0f} s for another game process to end", flush=True)
-    out = os.path.join(OUT, "runs", options.label, route["name"])
+    folder = route["name"] + (f"-{options.tag}" if options.tag else "")
+    out = os.path.join(OUT, "runs", options.label, folder)
     if os.path.isdir(out):
         shutil.rmtree(out)
     os.makedirs(out)
     prepare_data(options.cold, options.present)
     # The log and the CSV are written on a local SSD (--log-root) and copied afterwards: written to the
     # repository's disk, a busy hard drive held the game's own log writes for up to two seconds.
-    scratch = os.path.join(options.log_root, options.label, route["name"])
+    scratch = os.path.join(options.log_root, options.label, folder)
     os.makedirs(scratch, exist_ok=True)
     frames = os.path.join(scratch, "frames.csv")
     env = ["PSPRECOMP_NO_INTERPRETER=1", "D012_UNTHROTTLED=1", "D012_PERF=log", "D012_TRACE_INTERPOLATION=1",
@@ -170,6 +177,8 @@ def run_route(route, options):
     log = os.path.join(scratch, "run.log")
     command = [PYTHON, os.path.join(ROOT, "tools", "port", "run_d012.py"), "--seconds", "90", "--build-dir",
                options.build_dir, "--data-dir", DATA, "--log", log]
+    if options.affinity:
+        command += ["--affinity", options.affinity]
     for item in env:
         command += ["--env", item]
     started = time.monotonic()
@@ -197,7 +206,7 @@ def run_route(route, options):
     for name in ("run.log", "frames.csv"):
         if os.path.exists(os.path.join(scratch, name)):
             shutil.copyfile(os.path.join(scratch, name), os.path.join(out, name))
-    print(f"  {options.label}/{route['name']}: {result.stdout.strip()} ({time.monotonic() - started:.0f} s)",
+    print(f"  {options.label}/{folder}: {result.stdout.strip()} ({time.monotonic() - started:.0f} s)",
           flush=True)
 
 
@@ -237,6 +246,10 @@ def scene_stats(presents, flips):
             "fps_mean": round(len(presents) / seconds, 1),
             "low1_fps": round(1000.0 / max(0.1, percentile(intervals, 0.99)), 1),
             "interval_p50_ms": round(percentile(intervals, 0.5), 2),
+            "interval_mean_ms": round(sum(intervals) / len(intervals), 2),
+            "interval_p99_ms": round(percentile(intervals, 0.99), 2),
+            "over_20ms": sum(1 for value in intervals if value > 20.0),
+            "late_p99_ms": round(percentile([p["late_ms"] for p in presents], 0.99), 2),
             "interval_max_ms": round(max(intervals), 1),
             "seconds_below_55": sum(1 for count in whole if count < 55),
             "seconds_counted": len(whole),
@@ -275,6 +288,7 @@ def scene_stats(presents, flips):
             "snapshots_per_frame": round(sum(column("snapshots")) / len(flips), 2),
             "snapshot_kib_per_frame": round(sum(column("snapshot_kib")) / len(flips), 0),
             "blocked": int(sum(column("blocked"))),
+            "emu_cpu_ms_per_s": round(sum(column("cpu_ms")) / max(1e-3, sum(column("interval_ms")) / 1000.0), 1),
             "over_budget": int(sum(column("over_budget"))),
             "cuts": cuts,
         })
@@ -344,6 +358,30 @@ def analyse(label):
             if name in per_scene and isinstance(per_scene[name], dict):
                 per_scene[name]["audio"] = item
         per_scene["slow_frames"] = len(re.findall(r"\[slow-frame\]", text))
+        # The present thread's lines and interpolation's delay, over the real-time part (after "speed normal").
+        real_text = text.split("[script] game speed normal", 1)[-1]
+        threads = re.findall(r"\[present-thread\] ([\d.]+) s: (\d+) presents, cpu ([\d.]+) ms \([\d.]+% of a core\); "
+                             r"waited for the renderer ([\d.]+) ms \(longest ([\d.]+)\), for an image ([\d.]+) ms "
+                             r"\(longest ([\d.]+)\), (\d+) not made; latest ([\d.-]+) ms late; the emulation thread "
+                             r"waited ([\d.]+) ms", real_text)
+        if threads:
+            seconds = sum(float(t[0]) for t in threads)
+            per_scene["present_thread"] = {
+                "seconds": round(seconds, 1),
+                "cpu_ms_per_s": round(sum(float(t[2]) for t in threads) / seconds, 1),
+                "lock_wait_ms_per_s": round(sum(float(t[3]) for t in threads) / seconds, 2),
+                "lock_wait_max_ms": round(max(float(t[4]) for t in threads), 2),
+                "acquire_ms_per_s": round(sum(float(t[5]) for t in threads) / seconds, 2),
+                "acquire_max_ms": round(max(float(t[6]) for t in threads), 2),
+                "not_made": sum(int(t[7]) for t in threads),
+                "late_max_ms": round(max(float(t[8]) for t in threads), 2),
+                "emu_wait_ms_per_s": round(sum(float(t[9]) for t in threads) / seconds, 2),
+            }
+        delays = [float(d) for d in re.findall(r"; delay ([\d.]+) ms \(code", real_text)]
+        if delays:
+            per_scene["delay_ms"] = {"median": round(percentile(delays, 0.5), 1), "min": min(delays),
+                                     "max": max(delays)}
+        per_scene["display_stalls"] = re.findall(r"\[present\] the display has taken no image[^\n]*", text)
         per_scene["display"] = (re.findall(r"\| (FIFO|MAILBOX|IMMEDIATE)[^|]*\|", text) or [""])[0]
         result[route] = per_scene
     with open(os.path.join(base, "stats.json"), "w", encoding="utf-8") as handle:
@@ -410,7 +448,13 @@ def main():
     parser.add_argument("--log-root", default=os.path.join(os.environ.get("LOCALAPPDATA", OUT), "Temp", "d012-perf"),
                         help="where the run writes its log and CSV (a local SSD), copied to build/port/perf after")
     parser.add_argument("--env", action="append", default=[], metavar="NAME=VALUE")
+    parser.add_argument("--data-dir", default=None, help="the data copy to run against (default build/port/data-perf)")
+    parser.add_argument("--affinity", default=None, help="CPU mask for the game (run_d012.py --affinity)")
+    parser.add_argument("--tag", default="", help="a suffix for the routes' run folders")
     options = parser.parse_args()
+    if options.data_dir:
+        global DATA
+        DATA = os.path.join(ROOT, options.data_dir)
     if options.list:
         for route in ROUTES:
             print(f"{route['name']}: {route['about']}")
@@ -429,7 +473,8 @@ def main():
         # A run another game process overlapped is made again, twice at most.
         for _ in range(3):
             run_route(route, options)
-            if not os.path.exists(os.path.join(OUT, "runs", options.label, route["name"], "contended")):
+            folder = route["name"] + (f"-{options.tag}" if options.tag else "")
+            if not os.path.exists(os.path.join(OUT, "runs", options.label, folder, "contended")):
                 break
     print_table([options.label])
     return 0

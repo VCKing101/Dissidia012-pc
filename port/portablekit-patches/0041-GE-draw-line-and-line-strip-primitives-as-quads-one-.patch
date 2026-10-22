@@ -1,7 +1,7 @@
 From 1a272088d97cb328b65762ceea63906cd8ca2a5e Mon Sep 17 00:00:00 2001
 From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
 Date: Wed, 21 Oct 2026 07:34:42 +1030
-Subject: [PATCH 41/48] GE: draw line and line-strip primitives as quads one
+Subject: [PATCH 41/53] GE: draw line and line-strip primitives as quads one
  PSP pixel wide
 
 Lines were skipped. Each segment now becomes two triangles through the

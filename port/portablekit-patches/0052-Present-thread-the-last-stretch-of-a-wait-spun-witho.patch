@@ -1,0 +1,45 @@
+From a1d1c22884cc0c227dd339d53d59179d6b42b997 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Thu, 22 Oct 2026 19:17:40 +1030
+Subject: [PATCH 52/53] Present thread: the last stretch of a wait spun without
+ yielding
+
+With two CPUs to share (a handheld's game thread busy), a yield in the wait's
+last 0.25 ms could hand the rest of a time slice to the game's thread: presents
+came 3-5 ms late. A plain spin of 0.15 ms: 0.5 ms late at the 99th percentile.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/gpu/present_queue.cpp | 9 ++++++---
+ 1 file changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/host/gpu/present_queue.cpp b/host/gpu/present_queue.cpp
+index b2c1a05..b3e47d4 100644
+--- a/host/gpu/present_queue.cpp
++++ b/host/gpu/present_queue.cpp
+@@ -161,8 +161,10 @@ WaitPlan plan_wait(Clock::time_point now, Clock::time_point due, Clock::duration
+ 
+ void precise_sleep_until(Clock::time_point when) {
+     // The last stretch is spun: a sleep's wake-up comes up to a few hundred
+-    // microseconds late even with the finest timer.
+-    constexpr auto kSpin = std::chrono::microseconds(250);
++    // microseconds late even with the finest timer. Without yielding: on a
++    // busy CPU a yield can hand the rest of a time slice to the game's
++    // thread, which made presents 3-5 ms late with two CPUs to share.
++    constexpr auto kSpin = std::chrono::microseconds(150);
+ #if defined(_WIN32)
+     static thread_local HANDLE timer = make_timer();
+     const Clock::time_point sleep_to = when - kSpin;
+@@ -172,7 +174,8 @@ void precise_sleep_until(Clock::time_point when) {
+     const Clock::time_point sleep_to = when - kSpin;
+     if (sleep_to > Clock::now()) std::this_thread::sleep_until(sleep_to);
+ #endif
+-    while (Clock::now() < when) std::this_thread::yield();
++    while (Clock::now() < when) {
++    }
+ }
+ 
+ double thread_cpu_ms() {
+-- 
+2.53.0.windows.1
+

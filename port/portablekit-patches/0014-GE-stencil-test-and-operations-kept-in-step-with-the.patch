@@ -1,7 +1,7 @@
 From a9ecb010ec24367a57fe70f11827e3e548ed860e Mon Sep 17 00:00:00 2001
 From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
 Date: Sun, 18 Oct 2026 19:59:44 +1030
-Subject: [PATCH 14/48] GE: stencil test and operations, kept in step with the
+Subject: [PATCH 14/53] GE: stencil test and operations, kept in step with the
  alpha bits
 
 The stencil registers (0x24 enable, 0xDC function/reference/mask, 0xDD

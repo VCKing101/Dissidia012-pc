@@ -57,6 +57,8 @@ TOUR = os.path.join(ROOT, "build", "port", "gfx-tour")
 DATA = os.path.join(ROOT, "build", "port", "data-gfx-tour")
 OWNER_DATA = os.path.join(ROOT, "build", "port", "data")
 PRISTINE = os.path.join(TOUR, "pristine-ms0")
+# Where runs, the report, the census summary and the replay checks go (--out); the baseline stays in TOUR.
+RUNS = TOUR
 DEFAULT_BUILD = os.path.join("tools", "local", "port", "build-d012-tour")
 
 VARIANTS = {
@@ -286,7 +288,7 @@ def prepare_data():
 
 
 def run_route(route, variant, options):
-    out = os.path.join(TOUR, "runs", route["name"], variant)
+    out = os.path.join(RUNS, "runs", route["name"], variant)
     if os.path.isdir(out):
         shutil.rmtree(out)
     os.makedirs(out)
@@ -387,7 +389,7 @@ def compare(results, options):
     report = []
     for result in results:
         route, variant = result["route"], result["variant"]
-        run_dir = os.path.join(TOUR, "runs", route, variant, "png")
+        run_dir = os.path.join(RUNS, "runs", route, variant, "png")
         base_dir = os.path.join(TOUR, "baseline", route, variant)
         for shot in result["shots"]:
             path = os.path.join(run_dir, shot + ".png")
@@ -397,7 +399,7 @@ def compare(results, options):
                 entry["baseline"] = nearest(path, stored)
             if variant == "nointerp":
                 ones = alternatives(os.path.join(TOUR, "baseline", route, "1x"), shot)
-                current = os.path.join(TOUR, "runs", route, "1x", "png", shot + ".png")
+                current = os.path.join(RUNS, "runs", route, "1x", "png", shot + ".png")
                 if any(r["route"] == route and r["variant"] == "1x" for r in results) and os.path.exists(current):
                     ones.append(current)
                 if ones:
@@ -444,7 +446,7 @@ def merge_census(results):
 
 def contact_sheet(results):
     for result in results:
-        directory = os.path.join(TOUR, "runs", result["route"], result["variant"], "png")
+        directory = os.path.join(RUNS, "runs", result["route"], result["variant"], "png")
         names = result["shots"]
         if not names:
             continue
@@ -457,7 +459,7 @@ def contact_sheet(results):
             x, y = (i % columns) * width, (i // columns) * (height + 14)
             sheet.paste(image, (x, y + 14))
             draw.text((x + 2, y + 1), name, fill=(255, 255, 0))
-        sheet.save(os.path.join(TOUR, "runs", result["route"], result["variant"], "sheet.png"))
+        sheet.save(os.path.join(RUNS, "runs", result["route"], result["variant"], "sheet.png"))
 
 
 def main():
@@ -471,7 +473,14 @@ def main():
     parser.add_argument("--name", default="probe", help="the ad hoc route's name")
     parser.add_argument("--list", action="store_true")
     parser.add_argument("--env", action="append", default=[], metavar="NAME=VALUE")
+    parser.add_argument("--data-dir", default=None, help="the data copy to run against (default build/port/data-gfx-tour)")
+    parser.add_argument("--out", default=None, help="where runs and reports go (default build/port/gfx-tour)")
     options = parser.parse_args()
+    global DATA, RUNS
+    if options.data_dir:
+        DATA = os.path.join(ROOT, options.data_dir)
+    if options.out:
+        RUNS = os.path.join(ROOT, options.out)
     if os.path.abspath(DATA) == os.path.abspath(OWNER_DATA):
         sys.exit("refusing to run against build/port/data")
     if options.list:
@@ -499,7 +508,7 @@ def main():
             results.append(run_route(route, variant, options))
     contact_sheet(results)
     report = compare(results, options)
-    with open(os.path.join(TOUR, "report.json"), "w", encoding="utf-8") as file:
+    with open(os.path.join(RUNS, "report.json"), "w", encoding="utf-8") as file:
         json.dump(report, file, indent=1)
     flags = [entry for entry in report if any(isinstance(v, dict) and v.get("flag") for v in entry.values())]
     for entry in flags:
@@ -508,7 +517,7 @@ def main():
         print(f"  FLAG {entry['route']}/{entry['variant']}/{entry['shot']}: {', '.join(parts)}")
     summary = merge_census(results)
     if summary["features"]:
-        with open(os.path.join(TOUR, "census_summary.json"), "w", encoding="utf-8") as file:
+        with open(os.path.join(RUNS, "census_summary.json"), "w", encoding="utf-8") as file:
             json.dump(summary, file, indent=1)
         for feature in summary["features"]:
             print(f"  {feature['impact']:6} {feature['count']:>9} {feature['feature']:34} "
@@ -520,7 +529,7 @@ def main():
             rgba = [check["rgba_pct"] for check in checks]
             print(f"  replay check {result['route']}/{result['variant']}: {len(checks)} checks, colour differs in "
                   f"up to {max(rgb):.2f}% of pixels (with alpha {max(rgba):.2f}%)")
-    with open(os.path.join(TOUR, "replay_checks.json"), "w", encoding="utf-8") as file:
+    with open(os.path.join(RUNS, "replay_checks.json"), "w", encoding="utf-8") as file:
         json.dump({f"{r['route']}/{r['variant']}": r["replay_checks"] for r in results if r["replay_checks"]}, file)
     problems = [r for r in results if r["problems"]]
     print(f"{len(results)} runs, {len(report)} captures, {len(flags)} flagged, {len(problems)} with problems")

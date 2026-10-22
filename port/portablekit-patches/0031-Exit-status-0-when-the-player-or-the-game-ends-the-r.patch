@@ -1,7 +1,7 @@
 From 0e99f0168c704c6c0b8ce5d6b4611c88075c43cd Mon Sep 17 00:00:00 2001
 From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
 Date: Mon, 19 Oct 2026 22:33:57 +1030
-Subject: [PATCH 31/48] Exit status 0 when the player or the game ends the run
+Subject: [PATCH 31/53] Exit status 0 when the player or the game ends the run
 
 main returned 4 whenever the runtime had a stop reason, and every stop has
 one: closing the window, Quit in the menu, the input script's quit and the

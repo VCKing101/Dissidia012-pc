@@ -217,6 +217,11 @@ fresh clone of `33800c4`, apply them with `git checkout -b dissidia 33800c4` and
 | 0046 | An overlay swapped out keeps its registrations, so swapping back is a lookup, not a re-install (about 70 ms instead of 180); `<prefix>_NO_OVERLAY_PARKING` | Menu-to-battle and world-map swaps stalled for 210-305 ms and gapped the music |
 | 0047 | memcpy, memset and DMA copies done as one host copy, not byte by byte; `<prefix>_NO_FAST_HLE_COPIES` | About 0.7 ms a frame of guest time |
 | 0048 | Interpolated presents between flips fall in the game's idle time, and are polled at the runtime's starvation boundaries in long stretches of guest code; `<prefix>_PRESENT_AFTER_FLIP` and `<prefix>_NO_CODE_PRESENT_POLL` restore the old pacing | One present in ten came up to 7 ms late (11/22 ms intervals, the "45" the meter showed); costs about 9 ms of display delay |
+| 0049 | Performance statistics safe to note from a second thread | Patch 0050 |
+| 0050 | Presents on a thread of their own: the emulation thread records and submits each game frame and hands it over; the present thread acquires, replays the interpolated frame, submits and presents at its due time (renderer state behind one lock, the swapchain the present thread's alone); `<prefix>_NO_PRESENT_THREAD` restores patch 0048's pacing exactly | Steady 60 fps without 0048's extra delay: 99th-percentile interval 17.3 ms, display delay 19.2 ms ([performance.md](../docs/port/performance.md), section 9) |
+| 0051 | Tests of the present thread's hand-off and timing (`tests/present_queue_tests.cpp`) | |
+| 0052 | The last stretch of a present's wait spins without yielding | Present timing to well under a millisecond (99th percentile 0.6 ms late) |
+| 0053 | No present before its time when a flip moves the timing grid | Keeps presents from coming early |
 
 Patches 0012 and 0013 were made on a separate worktree branch during the recompiled-build work and merged onto
 `dissidia` on 18 October 2026; patches 0014 and 0015 followed the same day (bring-up log, section "Stencil"), and
@@ -225,7 +230,7 @@ patches 0016 to 0022 that evening (section "HP bar, orbs and saves"), patches 00
 ([bgm-playlist-design.md](../docs/port/bgm-playlist-design.md), section 10); patch 0028 that evening, for analog
 diagonals that felt dead on a real controller. Patches 0036 to 0039 came on 20 October with the graphics census
 ([graphics-census.md](../docs/port/graphics-census.md)), and 0040 to 0043 on 21 October from its findings (depth clipping, findings 3 and 6, stays on the
-unmerged branch `depth-clip`: no visible change here); 0044 the same day for a report from the Steam Deck, and 0045 to 0048 for the frame-rate dips.
+unmerged branch `depth-clip`: no visible change here); 0044 the same day for a report from the Steam Deck, and 0045 to 0048 for the frame-rate dips; 0049 to 0053 on 22 October for the present thread.
 PortableKit's 21 framework tests pass on the branch and `portablekit_host_check` builds.
 
 ## Recompiled build

@@ -1,7 +1,7 @@
 From fe31234e4c67008c86e6f01bb4bf9844cb6d47d5 Mon Sep 17 00:00:00 2001
 From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
 Date: Tue, 20 Oct 2026 22:12:09 +1030
-Subject: [PATCH 38/48] Texture cache: key a palette texture by its whole
+Subject: [PATCH 38/53] Texture cache: key a palette texture by its whole
  palette and index mode
 
 A CLUT texture's cache key took the first word of its palette, and neither

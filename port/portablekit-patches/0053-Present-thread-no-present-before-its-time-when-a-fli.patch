@@ -1,0 +1,59 @@
+From 81bfc74faed68a27bc846fb78cc70cefbac729d5 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Thu, 22 Oct 2026 19:48:08 +1030
+Subject: [PATCH 53/53] Present thread: no present before its time when a flip
+ moves the grid
+
+A blended present falls about a millisecond after the next flip, which may
+lengthen the delay (it follows the frames' work) while the thread waits or
+acquires its image. It then found nothing due and showed the newest frame at
+once, off the grid: about one present in a hundred came early (60.4 presents
+a second instead of 59.9). Now it checks before acquiring and, with an image
+already acquired, waits the few hundred microseconds to the moved time.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/gpu/vulkan_renderer.cpp | 20 ++++++++++++++++++++
+ 1 file changed, 20 insertions(+)
+
+diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
+index 154b01e..de488d2 100644
+--- a/host/gpu/vulkan_renderer.cpp
++++ b/host/gpu/vulkan_renderer.cpp
+@@ -10168,6 +10168,15 @@ void VulkanRenderer::Impl::make_present(PresentJob job, std::uint64_t ticket) {
+ 
+     // The swapchain, rebuilt here when the window or a setting changed it.
+     present_lock();
++    if (job == PresentJob::Between) {
++        // A flip during the wait may have moved the grid (the delay follows
++        // the frames' work): nothing is due yet, and the loop waits again.
++        const std::optional<std::int64_t> due = cycle_active ? present_clock.next_due() : std::nullopt;
++        if (due && *due > to_us(Clock::now()) + 200) {
++            present_unlock();
++            return;
++        }
++    }
+     check_swapchain();
+     if (swapchain_dirty || swapchain == VK_NULL_HANDLE) recreate_swapchain();
+     const VkSwapchainKHR chain = swapchain;
+@@ -10226,6 +10235,17 @@ void VulkanRenderer::Impl::make_present(PresentJob job, std::uint64_t ticket) {
+ 
+     // Recorded and submitted holding the renderer.
+     present_lock();
++    if (job == PresentJob::Between && cycle_active) {
++        // A flip while the image was acquired moved the present a little
++        // later: it waits for it rather than show the newest frame early.
++        const std::optional<std::int64_t> due = present_clock.next_due();
++        const std::int64_t now_us = to_us(Clock::now());
++        if (due && *due > now_us && *due - now_us < 5000) {
++            present_unlock();
++            present::precise_sleep_until(Clock::time_point{std::chrono::microseconds(*due)});
++            present_lock();
++        }
++    }
+     const Clock::time_point start = Clock::now();
+     if (acquired == VK_SUBOPTIMAL_KHR) swapchain_check = true;
+     vkResetFences(device, 1u, &fence);
+-- 
+2.53.0.windows.1
+

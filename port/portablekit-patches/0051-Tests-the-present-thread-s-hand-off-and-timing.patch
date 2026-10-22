@@ -1,0 +1,276 @@
+From cc125c7380873672a5a65b22b887e4fdf68c156f Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Thu, 22 Oct 2026 19:01:08 +1030
+Subject: [PATCH 51/53] Tests: the present thread's hand-off and timing
+
+The mailbox between the emulation thread and the present thread (wakes,
+coalesced posts, interface presents waited for, stopping), the planned and
+precise waits, and the present clock as the present thread drives it: presents
+every 16.7 ms however long the game's code runs after a flip, and a delay of
+half a game frame plus the work to the flip.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ CMakeLists.txt                |  16 +++
+ tests/present_queue_tests.cpp | 222 ++++++++++++++++++++++++++++++++++
+ 2 files changed, 238 insertions(+)
+ create mode 100644 tests/present_queue_tests.cpp
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 899e851..82e34b2 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -398,6 +398,22 @@ if(PSPRECOMP_BUILD_TESTS)
+     add_test(NAME portablekit_interpolation_tests COMMAND portablekit_interpolation_tests)
+ endif()
+ 
++# The present thread's hand-off and timing: the mailbox between the emulation
++# thread and the present thread, the waits, and the present clock as that
++# thread drives it.
++if(PSPRECOMP_BUILD_TESTS)
++    add_executable(portablekit_present_queue_tests
++        "${PORTABLEKIT_ROOT}/tests/present_queue_tests.cpp"
++        "${PORTABLEKIT_ROOT}/host/gpu/present_queue.cpp"
++        "${PORTABLEKIT_ROOT}/host/gpu/frame_pacing.cpp")
++    target_compile_features(portablekit_present_queue_tests PRIVATE cxx_std_20)
++    target_include_directories(portablekit_present_queue_tests PRIVATE "${PORTABLEKIT_ROOT}/host")
++    find_package(Threads REQUIRED)
++    target_link_libraries(portablekit_present_queue_tests PRIVATE Threads::Threads)
++    set_target_properties(portablekit_present_queue_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
++    add_test(NAME portablekit_present_queue_tests COMMAND portablekit_present_queue_tests)
++endif()
++
+ # Keyboard and mouse bindings: names, settings.ini spelling, the menu's
+ # assignment rules and what held keys press; and the stick's mapping to the
+ # PSP nub. No SDL or game data.
+diff --git a/tests/present_queue_tests.cpp b/tests/present_queue_tests.cpp
+new file mode 100644
+index 0000000..519071c
+--- /dev/null
++++ b/tests/present_queue_tests.cpp
+@@ -0,0 +1,222 @@
++// Checks for the present thread's hand-off and timing (gpu/present_queue.hpp,
++// and the present clock as the present thread drives it): the mailbox wakes
++// the thread for a frame and lets the emulation thread wait for an interface
++// present; the waits are planned so a new frame interrupts them; the presents
++// between flips keep their spacing however long the game's code runs after a
++// flip, and the delay from a frame's moment to its present stays the work to
++// the flip plus half a game frame. Needs no game data and no GPU.
++//
++//   portablekit_present_queue_tests
++#include "gpu/frame_pacing.hpp"
++#include "gpu/present_queue.hpp"
++
++#include <algorithm>
++#include <atomic>
++#include <chrono>
++#include <cmath>
++#include <cstdio>
++#include <cstdlib>
++#include <thread>
++#include <vector>
++
++using namespace portablekit::gpu;
++using namespace std::chrono_literals;
++
++namespace {
++
++int failures = 0;
++
++void check(bool condition, const char *what) {
++    std::printf("%s %s\n", condition ? "ok  " : "FAIL", what);
++    if (!condition) ++failures;
++}
++
++using present::Clock;
++using present::Mailbox;
++
++void mailbox_wakes() {
++    Mailbox mailbox;
++    const Clock::time_point start = Clock::now();
++    check(mailbox.wait_until(start + 5ms) == Mailbox::Wake::Deadline, "with nothing posted the wait ends at its time");
++    mailbox.post();
++    mailbox.post();
++    mailbox.post();
++    check(mailbox.wait_until(Clock::now() + 10s) == Mailbox::Wake::Posted, "a post made before the wait ends it at once");
++    check(mailbox.wait_until(Clock::now() + 5ms) == Mailbox::Wake::Deadline, "several posts before a wake are one");
++
++    // A frame flipped while the present thread waits for a present far off.
++    std::thread poster([&] {
++        std::this_thread::sleep_for(20ms);
++        mailbox.post();
++    });
++    const Clock::time_point waited_from = Clock::now();
++    const Mailbox::Wake woke = mailbox.wait_until(Clock::now() + 10s);
++    const auto waited = Clock::now() - waited_from;
++    poster.join();
++    check(woke == Mailbox::Wake::Posted && waited < 5s, "a post from the other thread interrupts a long wait");
++}
++
++void interface_presents() {
++    Mailbox mailbox;
++    check(mailbox.ui_wanted() == 0u, "no interface present is wanted at first");
++    const std::uint64_t first = mailbox.post_ui();
++    const std::uint64_t second = mailbox.post_ui();
++    check(second > first && mailbox.ui_wanted() == second, "the newest interface present is the one wanted");
++    check(!mailbox.wait_ui(first, 5ms), "an interface present not made yet times out");
++    mailbox.ui_done(second);
++    check(mailbox.wait_ui(first, 0ms) && mailbox.wait_ui(second, 0ms), "a later present covers the earlier ones");
++    check(mailbox.ui_wanted() == 0u, "nothing is wanted once it is made");
++
++    // The paused game's menu: each frame waits for its present, which the
++    // present thread makes; every wait ends, none waits for the time limit.
++    Mailbox shared;
++    std::atomic<bool> running{true};
++    std::thread presenter([&] {
++        while (running.load()) {
++            if (shared.wait_until(Clock::now() + 50ms) == Mailbox::Wake::Stop) return;
++            if (const std::uint64_t ticket = shared.ui_wanted(); ticket != 0u) shared.ui_done(ticket);
++        }
++    });
++    int made = 0;
++    for (int frame = 0; frame < 200; ++frame) {
++        if (shared.wait_ui(shared.post_ui(), 2s)) ++made;
++        if (frame % 3 == 0) shared.post();  // flips in between
++    }
++    running = false;
++    shared.stop();
++    presenter.join();
++    check(made == 200, "200 interface presents, each waited for and made");
++
++    Mailbox stopping;
++    const std::uint64_t ticket = stopping.post_ui();
++    std::thread stopper([&] {
++        std::this_thread::sleep_for(10ms);
++        stopping.stop();
++    });
++    const Clock::time_point waited_from = Clock::now();
++    const bool done = stopping.wait_ui(ticket, 10s);
++    stopper.join();
++    check(!done && Clock::now() - waited_from < 5s, "stopping ends an interface wait without the present");
++    check(stopping.stopping() && stopping.wait_until(Clock::now() + 10s) == Mailbox::Wake::Stop,
++          "and every later wait at once");
++}
++
++void waits() {
++    const Clock::time_point now = Clock::now();
++    const present::WaitPlan past = present::plan_wait(now, now - 1ms);
++    check(!past.precise && past.coarse_until == now, "a present already due is made without waiting");
++    const present::WaitPlan far = present::plan_wait(now, now + 10ms);
++    check(far.precise && far.coarse_until == now + 10ms - present::kPreciseSlack,
++          "a present 10 ms off: an interruptible wait to 2 ms before, then a precise sleep");
++    const present::WaitPlan near = present::plan_wait(now, now + 1ms);
++    check(near.precise && near.coarse_until == now, "closer than the slack: the precise sleep only");
++
++    // The precise sleep never wakes early; how late it wakes depends on the
++    // machine, so only a gross error fails.
++    bool early = false;
++    Clock::duration latest{};
++    for (int i = 0; i < 20; ++i) {
++        const Clock::time_point when = Clock::now() + 3ms;
++        present::precise_sleep_until(when);
++        const Clock::time_point woke = Clock::now();
++        early = early || woke < when;
++        latest = std::max(latest, woke - when);
++    }
++    std::printf("     precise sleep: latest wake-up %.3f ms after its time\n",
++                std::chrono::duration<double, std::milli>(latest).count());
++    check(!early && latest < 20ms, "the precise sleep wakes at its time, never before");
++
++    // The mailbox's own timed wait (interruptible by a post) is as fine.
++    Mailbox mailbox;
++    Clock::duration mailbox_latest{};
++    bool mailbox_early = false;
++    for (int i = 0; i < 20; ++i) {
++        const Clock::time_point when = Clock::now() + 3ms;
++        const bool deadline = mailbox.wait_until(when) == Mailbox::Wake::Deadline;
++        const Clock::time_point woke = Clock::now();
++        mailbox_early = mailbox_early || woke < when || !deadline;
++        mailbox_latest = std::max(mailbox_latest, woke - when);
++    }
++    std::printf("     mailbox wait: latest wake-up %.3f ms after its time\n",
++                std::chrono::duration<double, std::milli>(mailbox_latest).count());
++    check(!mailbox_early && mailbox_latest < 20ms, "a mailbox wait ends at its time, never before");
++
++    const double cpu_before = present::thread_cpu_ms();
++    const Clock::time_point busy_until = Clock::now() + 30ms;
++    volatile std::uint64_t spin = 0;
++    while (Clock::now() < busy_until) spin = spin + 1;
++    const double cpu_after = present::thread_cpu_ms();
++    check(cpu_after > cpu_before, "the thread's CPU time grows while it works");
++}
++
++// The present thread's timing: the clock as it drives it (no idle notes),
++// with presents taken at their due times.
++void thread_timing() {
++    using pacing::kGameFrameUs;
++    using pacing::PresentClock;
++    // The work to the flip on the PC (patch 0048's measurement): 1.9 ms.
++    constexpr std::int64_t kWorkUs = 1900;
++    PresentClock clock;
++    clock.set_busy_after_flip(false);
++    clock.set_presents_per_frame(pacing::presents_per_frame(60.0));
++    std::vector<std::int64_t> intervals;
++    std::vector<float> factors;
++    std::int64_t last_present = -1;
++    std::int64_t next_frame = 0;
++    std::int64_t delay_seen = 0;
++    for (std::int64_t now = 0; now < 60 * kGameFrameUs; now += 10) {
++        const std::int64_t moment = next_frame * kGameFrameUs;
++        if (now >= moment + kWorkUs) {
++            clock.flip(moment, now);
++            // The game's code after the flip, however long, is the emulation
++            // thread's: it moves nothing here (on the emulation thread, 0048
++            // counted it as the frame's work when it ended in idle time).
++            clock.note_idle(now + 25'000);
++            ++next_frame;
++        }
++        const std::optional<std::int64_t> due = clock.next_due();
++        if (!due || *due > now) continue;
++        if (const auto present = clock.take(now)) {
++            if (last_present >= 0) intervals.push_back(now - last_present);
++            last_present = now;
++            factors.push_back(present->t);
++            delay_seen = clock.delay_us();
++        }
++    }
++    std::int64_t shortest = intervals.empty() ? 0 : intervals.front();
++    std::int64_t longest = shortest;
++    for (std::size_t i = 4u; i < intervals.size(); ++i) {
++        shortest = std::min(shortest, intervals[i]);
++        longest = std::max(longest, intervals[i]);
++    }
++    check(intervals.size() > 100u && longest - shortest <= 20, "presents every 16.7 ms, however long the code runs");
++    bool alternating = factors.size() > 10u;
++    for (std::size_t i = 4u; i + 1u < factors.size(); i += 2u) {
++        const bool pair = (std::fabs(factors[i] - 1.0f) < 0.01f && std::fabs(factors[i + 1u] - 0.5f) < 0.01f) ||
++                          (std::fabs(factors[i] - 0.5f) < 0.01f && std::fabs(factors[i + 1u] - 1.0f) < 0.01f);
++        alternating = alternating && pair;
++    }
++    check(alternating, "each frame as it is, then halfway to the next");
++    const std::int64_t expected = kGameFrameUs / 2 + kWorkUs + PresentClock::kWorkMarginUs;
++    std::printf("     delay from a frame's moment to its present: %.1f ms\n", static_cast<double>(delay_seen) / 1000.0);
++    check(std::llabs(delay_seen - expected) <= 20, "the delay is half a game frame plus the work to the flip and 1 ms");
++    check(delay_seen < kGameFrameUs, "and less than one game frame");
++
++    // A slow machine: the flip itself comes 12 ms after the frame's moment.
++    PresentClock slow;
++    slow.set_busy_after_flip(false);
++    slow.set_presents_per_frame(2.0);
++    for (std::int64_t frame = 0; frame < 30; ++frame) slow.flip(frame * kGameFrameUs, frame * kGameFrameUs + 12'000);
++    check(slow.delay_us() == kGameFrameUs / 2 + 13'000, "a later flip lengthens the delay by as much, no more");
++}
++
++} // namespace
++
++int main() {
++    mailbox_wakes();
++    interface_presents();
++    waits();
++    thread_timing();
++    std::printf("%s\n", failures == 0 ? "all passed" : "FAILED");
++    return failures == 0 ? 0 : 1;
++}
+-- 
+2.53.0.windows.1
+

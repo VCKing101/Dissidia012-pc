@@ -1,0 +1,351 @@
+From 3b47ed8213e73f3b0492828d98fbe406fff6ecd8 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Thu, 22 Oct 2026 19:00:51 +1030
+Subject: [PATCH 49/53] Perf: statistics safe to note from a second thread
+
+The frame statistics, the CSV and the overlay's readings are kept behind one
+lock, so a thread other than the emulation thread (the renderer's present
+thread) can count its presents and the overlay can read them while it draws.
+A thread that marks itself as the present thread (set_present_thread) keeps
+its waits, render time and split out of the game's frame time; its presents,
+passes, copies and GPU time still count. count_noted_present notes and counts
+a present in one step.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/perf/frame_stats.cpp  | 135 ++++++++++++++++++++++++++++++++-----
+ host/perf/frame_stats.hpp  |  15 +++++
+ host/perf/perf_overlay.cpp |   3 +
+ 3 files changed, 138 insertions(+), 15 deletions(-)
+
+diff --git a/host/perf/frame_stats.cpp b/host/perf/frame_stats.cpp
+index 3d7b814..fa53a59 100644
+--- a/host/perf/frame_stats.cpp
++++ b/host/perf/frame_stats.cpp
+@@ -13,6 +13,7 @@
+ #include <cstdlib>
+ #include <cstring>
+ #include <iostream>
++#include <mutex>
+ 
+ #if defined(_WIN32)
+ #ifndef NOMINMAX
+@@ -166,6 +167,22 @@ State &state() {
+     return value;
+ }
+ 
++// The statistics are written by the emulation thread and, when presents have
++// a thread of their own (the renderer's present thread), by that thread too;
++// the overlay reads them while it presents. One lock for all of it, never
++// held while calling out of this file. Never destroyed: the process may still
++// count a present while it exits.
++std::mutex &stats_mutex() {
++    static std::mutex *value = new std::mutex;
++    return *value;
++}
++using Guard = std::lock_guard<std::mutex>;
++
++// The present thread's waits and CPU time are its own, not the game's frame
++// time: they are left out of render, wait and the split (the renderer reports
++// them on its [present-thread] line). Its presents still count.
++thread_local bool tl_present_thread = false;
++
+ void print(const Summary &s) {
+     char line[512];
+     int length = std::snprintf(line, sizeof(line),
+@@ -266,6 +283,7 @@ Options options() {
+ }
+ 
+ void restart_measurement() {
++    const Guard guard(stats_mutex());
+     State &s = state();
+     const Clock::time_point now = Clock::now();
+     s.frame_start = now;
+@@ -293,7 +311,11 @@ void restart_measurement() {
+     s.gpu_frames = 0u;
+ }
+ 
+-void add_render_time(Clock::duration duration) { state().render += duration; }
++void add_render_time(Clock::duration duration) {
++    if (tl_present_thread) return;
++    const Guard guard(stats_mutex());
++    state().render += duration;
++}
+ 
+ namespace {
+ 
+@@ -364,42 +386,83 @@ std::uint64_t split_ticks() noexcept {
+ #endif
+ }
+ 
+-void add_split(Split kind, std::uint64_t ticks) noexcept { render_split().ticks[static_cast<std::size_t>(kind)] += ticks; }
++void add_split(Split kind, std::uint64_t ticks) noexcept {
++    if (tl_present_thread) return;
++    const Guard guard(stats_mutex());
++    render_split().ticks[static_cast<std::size_t>(kind)] += ticks;
++}
+ void add_wait_time(Clock::duration duration, Stall kind) {
++    if (tl_present_thread) return;
++    const Guard guard(stats_mutex());
+     State &s = state();
+     s.wait += duration;
+     s.stalls[static_cast<std::size_t>(kind)].add(duration);
+ }
+ void note_stall(Stall kind, Clock::duration duration) {
++    if (tl_present_thread) return;
++    const Guard guard(stats_mutex());
+     state().stalls[static_cast<std::size_t>(kind)].add(duration);
+ }
+ void add_gpu_time(double milliseconds) {
++    const Guard guard(stats_mutex());
+     State &s = state();
+     s.gpu_ms += milliseconds;
+     ++s.gpu_samples;
+ }
+-void set_gpu_time_unavailable() { state().gpu_unavailable = true; }
++void set_gpu_time_unavailable() {
++    const Guard guard(stats_mutex());
++    state().gpu_unavailable = true;
++}
+ void add_pacing_time(Clock::duration duration) {
++    if (tl_present_thread) return;
++    const Guard guard(stats_mutex());
+     State &s = state();
+     s.pacing += duration;
+     s.stalls[static_cast<std::size_t>(Stall::Pacing)].add(duration);
+ }
+-void add_overlay_time(Clock::duration duration) { state().overlay += duration; }
+-void count_display_list() { ++state().lists; }
+-void count_draw() { ++state().draws; }
+-void count_recorded_draws(std::uint32_t count) { state().recorded_draws += count; }
+-void count_render_pass() { ++state().pass_sum; }
+-void count_target_copy() { ++state().copy_sum; }
+-void count_stencil_copy() { ++state().stencil_sum; }
+-void count_cleared_pass() { ++state().cleared_pass_sum; }
++void add_overlay_time(Clock::duration duration) {
++    if (tl_present_thread) return;
++    const Guard guard(stats_mutex());
++    state().overlay += duration;
++}
++void count_display_list() {
++    const Guard guard(stats_mutex());
++    ++state().lists;
++}
++void count_draw() {
++    const Guard guard(stats_mutex());
++    ++state().draws;
++}
++void count_recorded_draws(std::uint32_t count) {
++    const Guard guard(stats_mutex());
++    state().recorded_draws += count;
++}
++void count_render_pass() {
++    const Guard guard(stats_mutex());
++    ++state().pass_sum;
++}
++void count_target_copy() {
++    const Guard guard(stats_mutex());
++    ++state().copy_sum;
++}
++void count_stencil_copy() {
++    const Guard guard(stats_mutex());
++    ++state().stencil_sum;
++}
++void count_cleared_pass() {
++    const Guard guard(stats_mutex());
++    ++state().cleared_pass_sum;
++}
+ 
+ void note_frame_space(std::uint64_t vertex_bytes, std::uint64_t index_bytes) {
++    const Guard guard(stats_mutex());
+     State &s = state();
+     s.vertex_peak = std::max(s.vertex_peak, vertex_bytes);
+     s.index_peak = std::max(s.index_peak, index_bytes);
+ }
+ 
+ void set_display_info(const std::string &present_mode, std::uint32_t width, std::uint32_t height, float refresh_hz) {
++    const Guard guard(stats_mutex());
+     State &s = state();
+     s.present_mode = present_mode;
+     s.width = width;
+@@ -497,6 +560,7 @@ const char *kind_name(PresentKind kind) {
+ bool csv_enabled() noexcept { return csv().file != nullptr; }
+ 
+ void note_present(PresentKind kind, float t, std::uint32_t skipped, double late_ms) noexcept {
++    const Guard guard(stats_mutex());
+     Csv &c = csv();
+     if (c.file == nullptr) return;
+     c.kind = kind;
+@@ -507,12 +571,14 @@ void note_present(PresentKind kind, float t, std::uint32_t skipped, double late_
+ }
+ 
+ void note_missed_present(bool blocked) noexcept {
++    const Guard guard(stats_mutex());
+     Csv &c = csv();
+     if (c.file == nullptr) return;
+     ++(blocked ? c.blocked : c.over_budget);
+ }
+ 
+ void note_pipeline_created(double milliseconds) noexcept {
++    const Guard guard(stats_mutex());
+     Csv &c = csv();
+     if (c.file == nullptr) return;
+     ++c.pipelines;
+@@ -521,11 +587,13 @@ void note_pipeline_created(double milliseconds) noexcept {
+ }
+ 
+ void note_pipeline_prewarmed() noexcept {
++    const Guard guard(stats_mutex());
+     Csv &c = csv();
+     if (c.file != nullptr) ++c.prewarmed;
+ }
+ 
+ void note_texture_decoded(double milliseconds) noexcept {
++    const Guard guard(stats_mutex());
+     Csv &c = csv();
+     if (c.file == nullptr) return;
+     ++c.textures;
+@@ -533,11 +601,13 @@ void note_texture_decoded(double milliseconds) noexcept {
+ }
+ 
+ void note_texture_key(double milliseconds) noexcept {
++    const Guard guard(stats_mutex());
+     Csv &c = csv();
+     if (c.file != nullptr) c.key_ms += milliseconds;
+ }
+ 
+ void note_snapshot(std::uint64_t bytes) noexcept {
++    const Guard guard(stats_mutex());
+     Csv &c = csv();
+     if (c.file == nullptr) return;
+     ++c.snapshots;
+@@ -545,6 +615,7 @@ void note_snapshot(std::uint64_t bytes) noexcept {
+ }
+ 
+ void note_pairing(const char *cut, std::uint32_t matched, std::uint32_t eligible) noexcept {
++    const Guard guard(stats_mutex());
+     Csv &c = csv();
+     if (c.file == nullptr) return;
+     c.cut = cut;
+@@ -554,13 +625,16 @@ void note_pairing(const char *cut, std::uint32_t matched, std::uint32_t eligible
+ }
+ 
+ void set_scene(const std::string &name) {
++    const Guard guard(stats_mutex());
+     Csv &c = csv();
+     if (c.file == nullptr) return;
+     c.scene.clear();
+     for (const char ch : name) c.scene += ch == ',' || ch == '\n' ? '_' : ch;
+ }
+ 
+-void count_present() {
++namespace {
++
++void count_present_locked() {
+     State &s = state();
+     const Clock::time_point now = Clock::now();
+     const double present_ms = to_ms(now - s.last_present);
+@@ -580,7 +654,31 @@ void count_present() {
+     s.present_max_ms = std::max(s.present_max_ms, present_ms);
+ }
+ 
++} // namespace
++
++void count_present() {
++    const Guard guard(stats_mutex());
++    count_present_locked();
++}
++
++void count_noted_present(PresentKind kind, float t, std::uint32_t skipped, double late_ms) {
++    const Guard guard(stats_mutex());
++    if (Csv &c = csv(); c.file != nullptr) {
++        c.kind = kind;
++        c.t = t;
++        c.skipped = skipped;
++        c.late_ms = late_ms;
++        c.noted = true;
++    }
++    count_present_locked();
++}
++
++void set_present_thread() noexcept { tl_present_thread = true; }
++bool on_present_thread() noexcept { return tl_present_thread; }
++std::unique_lock<std::mutex> lock_stats() { return std::unique_lock<std::mutex>(stats_mutex()); }
++
+ void set_frame_rate_info(double rate, double requested) {
++    const Guard guard(stats_mutex());
+     State &s = state();
+     s.frame_rate = rate;
+     s.requested_rate = requested;
+@@ -783,11 +881,18 @@ void note_present_due(std::int64_t steady_us) noexcept {
+ 
+ void end_frame(std::uint64_t virtual_us, bool presented) {
+ #if defined(_WIN32)
+-    if (StallSampler *sampler = StallSampler::get())
+-        sampler->flip(std::chrono::duration<double, std::milli>(Clock::now() - state().frame_start).count());
++    if (StallSampler *sampler = StallSampler::get()) {
++        Clock::time_point frame_start{};
++        {
++            const Guard guard(stats_mutex());
++            frame_start = state().frame_start;
++        }
++        sampler->flip(std::chrono::duration<double, std::milli>(Clock::now() - frame_start).count());
++    }
+ #endif
++    const Guard guard(stats_mutex());
+     State &s = state();
+-    if (presented) count_present();
++    if (presented) count_present_locked();
+     const Clock::time_point now = Clock::now();
+     const double frame_ms = to_ms(now - s.frame_start);
+     s.frame_start_previous = s.frame_start;
+diff --git a/host/perf/frame_stats.hpp b/host/perf/frame_stats.hpp
+index 051f77b..8b22aef 100644
+--- a/host/perf/frame_stats.hpp
++++ b/host/perf/frame_stats.hpp
+@@ -3,6 +3,7 @@
+ #include <array>
+ #include <chrono>
+ #include <cstdint>
++#include <mutex>
+ #include <string>
+ 
+ namespace portablekit::perf {
+@@ -96,6 +97,20 @@ void end_frame(std::uint64_t virtual_us, bool presented = true);
+ 
+ // A present between the game's flips (frame interpolation).
+ void count_present();
++// note_present() and count_present() as one step, for a present made on the
++// present thread while the emulation thread may note its own.
++enum class PresentKind : std::uint8_t;
++void count_noted_present(PresentKind kind, float t, std::uint32_t skipped, double late_ms);
++
++// The calling thread is the renderer's present thread (presents on a thread
++// of their own). Its waits, render time and split are not the game's frame
++// time and are left out of them; its presents, passes, copies and GPU time
++// still count. Every function here may be called from either thread.
++void set_present_thread() noexcept;
++[[nodiscard]] bool on_present_thread() noexcept;
++// Held while reading last_second() or frame_history() on another thread than
++// the one that ends frames (the overlay, drawn by the present thread).
++[[nodiscard]] std::unique_lock<std::mutex> lock_stats();
+ // The rate frame interpolation presents at now and the one the setting asks
+ // for, shown on the perf line; 0 when it is off.
+ void set_frame_rate_info(double rate, double requested);
+diff --git a/host/perf/perf_overlay.cpp b/host/perf/perf_overlay.cpp
+index 8653c72..283419b 100644
+--- a/host/perf/perf_overlay.cpp
++++ b/host/perf/perf_overlay.cpp
+@@ -108,6 +108,9 @@ std::uint32_t graph_row(float ms) {
+ std::uint32_t overlay_scale(std::uint32_t height) { return std::max(1u, height / 360u); }
+ 
+ void draw_overlay(std::uint32_t *pixels) {
++    // Drawn by the present thread when presents have one, while the emulation
++    // thread ends frames.
++    const auto lock = lock_stats();
+     std::fill(pixels, pixels + kOverlayWidth * kOverlayHeight, kBackground);
+ 
+     const Summary &s = last_second();
+-- 
+2.53.0.windows.1
+
