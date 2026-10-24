@@ -44,3 +44,6 @@
 __pycache__/
 *.pyc
 *.splat_cache
+
+# Planning notes kept local
+/docs/port/installer-design.md
