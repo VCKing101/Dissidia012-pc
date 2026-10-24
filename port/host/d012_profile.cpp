@@ -67,12 +67,14 @@ const GameProfile &game() {
         // decryption (build/ULUS10566/EBOOT.ELF, tools/decrypt_main.sh).
         .encrypted_executable_sha256 = "8fbf3541ab121aff85aae72795760736dfe37706996b2b0f9b81d36fc98f3394",
         .executable_sha256 = "0bc8e779aad2814a3d1bd77346f69ca5e16665845ed053cd0ad44a9cbfaefe6d",
-        // The word at 0xD0 of EBOOT.BIN. The key it selects is not filled in:
-        // this port is run from a game directory holding the decrypted
-        // EBOOT.ELF (tools/port/prepare_game_dir.py), so the installer's
-        // --install path is not used and refuses the disc.
+        // The word at 0xD0 of EBOOT.BIN and the key that tag selects, the
+        // same public value pspdecrypt and the PSP emulators carry; with it
+        // --install image.iso decrypts the disc's EBOOT.BIN itself, so a
+        // player needs only their own disc image (owner's decision,
+        // 24 October 2026).
         .decryption_tag = 0xD91613F0u,
-        .decryption_key = {},
+        .decryption_key = {0xEB, 0xFF, 0x40, 0xD8, 0xB4, 0x1A, 0xE1, 0x66,
+                           0x91, 0x3B, 0x8F, 0x64, 0xB6, 0xFC, 0xB7, 0x12},
 
         .load_base = 0x08804000u,
         .guest_ram_bytes = 32u * 1024u * 1024u,
