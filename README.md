@@ -17,7 +17,9 @@ game's executable and overlays.
 - **Windows:** plays from New Game through the menus and battles in the recompiled build, with no interpreter
   fallbacks. Message, save-data and keyboard dialogs are drawn by the port. Expect rough edges; see the
   [bring-up log](docs/port/bring-up-log.md).
-- **Linux and Steam Deck:** untested. PortableKit supports them, but this port has not been built or run there.
+- **Steam Deck:** plays through Proton as a non-Steam game, built on a Windows PC (`setup.ps1 -Deck`; see
+  [docs/port/steam-deck.md](docs/port/steam-deck.md)).
+- **Linux (native):** untested. PortableKit supports it, but this port has not been built natively there yet.
 - **Matching decompilation:** a few hundred functions are matching C; most of the game is still machine code. See the
   [decompilation notes](docs/decomp/README.md) and the [progress report](docs/decomp/progress.md).
 
