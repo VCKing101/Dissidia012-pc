@@ -9,7 +9,7 @@ set "ROOT=%~dp0..\.."
 set "BUILD=%~1"
 if "%BUILD%"=="" set "BUILD=%ROOT%\tools\local\port\build-framework"
 set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
-for /f "usebackq delims=" %%i in (`"%VSWHERE%" -latest -property installationPath`) do set "VS=%%i"
+for /f "usebackq delims=" %%i in (`"%VSWHERE%" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VS=%%i"
 set "CTEST=%VS%\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\ctest.exe"
 set "PATH=%ROOT%\tools\local\port-deps\sdl3\SDL3-3.4.18\lib\x64;%PATH%"
 if "%PK_CTEST_ADHOC%"=="1" (

@@ -41,6 +41,7 @@ Outside this directory:
 | `build/port/game` | The game directory: `EBOOT.ELF`, `disc.iso`, `ms0/` |
 | `build/port/data` | Settings, pipeline cache and anything else the port writes (`D012_DATA_DIR`), and the memory stick `ms0/` the runner uses (`D012_MEMORY_STICK_DIR`) |
 | `build/port/generated`, `build/port/overlays` | Where the AOT corpus and overlay corpora will go (`D012_WORK_DIR`); empty for now |
+| `setup.ps1`, `tools/port/setup/` | The one-command setup for players ([docs/port/setup.md](../docs/port/setup.md)) |
 | `tools/port/pk_cmake.cmd` | Runs cmake in the Visual Studio 2022 environment with the local dependencies |
 | `tools/port/prepare_game_dir.py` | Makes `build/port/game` from the read-only inputs |
 | `tools/port/run_d012.py` | Runs the port for a bounded time and keeps the log |
@@ -52,6 +53,10 @@ Outside this directory:
 | `tools/port/check_quit_crash.py` | Runs the recompiled build to a battle or the world map and quits, N times, camera on and off, and counts the runs that crash on the way out ([docs/port/quit-crash.md](../docs/port/quit-crash.md)) |
 
 ## Build
+
+`setup.ps1` at the repository root does every step below for the recompiled build (dependencies, the PortableKit
+clone and its patches, the game directory, the corpora, the build and a shortcut), checking each input's hash and
+skipping what is already done: [docs/port/setup.md](../docs/port/setup.md). The steps by hand follow.
 
 From the repository root, in PowerShell. The configure must report `D012Native: Vulkan renderer enabled`.
 
@@ -71,8 +76,9 @@ Cache variables: `D012_PORTABLEKIT_DIR` (default `tools/local/port/PortableKit`)
 ```
 
 It copies `build/ULUS10566/EBOOT.ELF` (checking its SHA-256), hard-links the retail ISO at the repository root as
-`disc.iso` (PortableKit opens it read-only; `--copy-iso` copies instead), and makes an empty `ms0/`. No saves are
-copied in. The originals are never written.
+`disc.iso` (PortableKit opens it read-only; `--copy-iso` copies instead, and so does a hard link that fails because the
+ISO is on another drive), and makes an empty `ms0/`. `--eboot FILE` and `--iso FILE` name other inputs. Files already
+right are kept. No saves are copied in. The originals are never written.
 
 PortableKit's own installer (`D012Native --install image.iso`) is not used: the profile does not carry the
 decryption key for the executable's tag (`0xD91613F0`), so it would refuse the disc.

@@ -7,7 +7,7 @@ setlocal EnableDelayedExpansion
 set "ROOT=%~dp0..\.."
 set "DEPS=%ROOT%\tools\local\port-deps"
 set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
-for /f "usebackq delims=" %%i in (`"!VSWHERE!" -latest -property installationPath`) do set "VS=%%i"
+for /f "usebackq delims=" %%i in (`"!VSWHERE!" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VS=%%i"
 if not defined VS (
     echo pk_cmake: Visual Studio not found
     exit /b 1

@@ -58,30 +58,49 @@ and L2 or R2 again hands the D-pad back. Mods add series of their own after the 
 The FINAL FANTASY XV and CRISIS CORE series in these captures come from a test mod with track titles only; it plays
 generated tones.
 
-## Requirements
+## Quick start (Windows)
 
-- Windows 10 or 11 (x64) with a Vulkan-capable GPU.
-- Visual Studio 2022 (C++ workload), CMake and Ninja.
-- SDL3, glslang and the Vulkan headers and loader library; PortableKit's FFmpeg build is fetched on the first
-  configure.
-- Python 3.10 or newer, for the preparation, run and Battle BGM Maker scripts.
-- A clone of PortableKit at `33800c4` with this repository's patches applied (`port/portablekit-patches/`).
-- Your own dump of the game (USA ULUS10566 v1.00). The decrypted `EBOOT.ELF` and the overlays are produced locally
-  from it.
+The port is built on your PC from this repository and your own copy of the game. One script does it all. A
+download that needs no build tools is planned.
+
+**1. Install these** (free; the defaults are fine unless noted):
+
+- [Visual Studio 2022 Community](https://visualstudio.microsoft.com/downloads/) with the workload
+  **Desktop development with C++** (or Build Tools 2022 with the same workload).
+- [Python](https://www.python.org/downloads/windows/) 3.10 or newer. Tick "Add python.exe to PATH".
+- [Git for Windows](https://git-scm.com/download/win).
+- An up-to-date graphics driver (Vulkan support: any GPU from about 2016 on).
+- About 5 GB of free disk space.
+
+**2. Have your game ready:** the USA disc **ULUS10566** as an `.iso` file, and its **decrypted EBOOT**. The decrypted
+EBOOT is the game's executable, which is encrypted on the disc. This project does not include the key that decrypts it, so you make it yourself
+once. Either use PPSSPP's setting "Dump decrypted EBOOT.BIN on game boot" (Settings > Tools > Developer tools), then
+start the game once, or use [pspdecrypt](https://github.com/hrydgard/pspdecrypt). The setup explains both, and
+[docs/port/setup.md](docs/port/setup.md#the-decrypted-eboot) has the details. The PPSSPP route has not been tried by
+the project yet.
+
+**3. Run the setup** in PowerShell:
+
+```powershell
+git clone https://github.com/VCKing101/Dissidia012-pc.git
+cd Dissidia012-pc
+powershell -ExecutionPolicy Bypass -File .\setup.ps1
+```
+
+(Or double-click `setup.cmd`.) It checks what is installed, downloads and verifies the dependencies, asks for your
+ISO and EBOOT, checks them, and builds the port. The first time takes about 10 to 30 minutes, most of it compiling.
+
+**4. Play** with the new "Dissidia 012 (PC port)" shortcut on the desktop or in the Start menu. Esc, or L3 + R3 on a
+controller, opens the port's menu. Your saves are in `build/port/data/ms0`, and mods go in `build/port/data/mods`.
+
+**To update:** `git pull`, then run `setup.ps1` again. It rebuilds only what changed.
+
+Options, what each step does, and troubleshooting: [docs/port/setup.md](docs/port/setup.md). The manual build steps
+for developers are in [`port/README.md`](port/README.md). For the Steam Deck, see
+[docs/port/steam-deck.md](docs/port/steam-deck.md) (`setup.ps1 -Deck` builds its package).
 
 The matching decompilation has its own toolchain (the historical PSP SNC compiler, a WSL build environment, splat,
 spimdisasm and Ghidra with the Allegrex extension); see [getting started](docs/decomp/getting-started.md).
-
-## Building
-
-The full steps, from applying the PortableKit patches to the recompiled build and a first bounded run, are in
-[`port/README.md`](port/README.md). In short:
-
-1. Clone PortableKit into `tools/local/port/PortableKit`, check out `33800c4` on a branch `dissidia` and
-   `git am port/portablekit-patches/*.patch`.
-2. Place your ISO at the repository root and prepare the game directory with `tools/port/prepare_game_dir.py`.
-3. Configure and build with `tools/port/pk_cmake.cmd` (Visual Studio environment), generate the recompiled corpora
-   and build again.
 
 ## Repository layout
 

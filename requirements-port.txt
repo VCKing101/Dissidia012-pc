@@ -1,0 +1,8 @@
+# Python packages for the PC port's scripts (setup.ps1 installs them into .venv).
+#   pycdlib: reads the overlays, the disc PRX and the icon from your ISO (tools/port/setup/game.py)
+#   Pillow:  makes the launcher icon, and converts run captures (tools/port/shots_to_png.py, gfx_tour.py)
+# The other port scripts (prepare_game_dir, overlay_meta, run_d012, play, package_deck, deploy_deck,
+# the Battle BGM Maker) need only the standard library. The survey scripts (common.py and the
+# scripts importing it) and the matching decompilation use requirements.txt instead.
+pycdlib==1.22.0
+Pillow==12.0.0

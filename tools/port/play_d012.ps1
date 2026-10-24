@@ -10,7 +10,15 @@ $ErrorActionPreference = "Stop"
 $root = Resolve-Path (Join-Path $PSScriptRoot "..\..")
 $build = if ($Interpreter) { "tools/local/port/build-d012" } else { "tools/local/port/build-d012-recomp" }
 $exe = Join-Path $root "$build/bin/D012Native.exe"
-if (-not (Test-Path $exe)) { throw "Not built: $exe" }
+if (-not (Test-Path $exe)) {
+    # The desktop shortcut runs this hidden, so say it in a window too.
+    $message = "The port is not built yet ($exe).`nRun setup.ps1 (or setup.cmd) in the repository folder first."
+    try {
+        Add-Type -AssemblyName System.Windows.Forms
+        [System.Windows.Forms.MessageBox]::Show($message, "Dissidia 012 (PC port)") | Out-Null
+    } catch { }
+    throw "Not built: $exe"
+}
 $data = Join-Path $root $DataDir
 New-Item -ItemType Directory -Force $data | Out-Null
 $env:D012_GAME_DIR = Join-Path $root "build/port/game"
