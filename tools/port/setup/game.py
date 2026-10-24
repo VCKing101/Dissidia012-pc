@@ -1,15 +1,19 @@
-"""The game: the user's ISO and decrypted EBOOT checked, the overlays, the disc PRX and the icon
-taken from the ISO, and build/port/game prepared (tools/port/prepare_game_dir.py).
+"""The game: the user's ISO checked, the overlays, the disc PRX and the icon taken from the ISO,
+the decrypted EBOOT made from the ISO, and build/port/game prepared (tools/port/prepare_game_dir.py).
 
-Nothing here decrypts anything, and no key is used or fetched: the decrypted EBOOT must come from the
-user (PPSSPP's "Dump decrypted EBOOT.BIN on game boot", or pspdecrypt), and is accepted only if its
-SHA-256 is that of the known ULUS10566 v1.00 executable.
+Nothing here decrypts anything itself. The port does: `D012Native --install <iso> --in-place`, with
+the profile's key for the executable's tag (port/host/d012_profile.cpp), writes EBOOT.ELF into its
+data directory, here a temporary folder (decrypt()). A decrypted EBOOT the user already has can be
+given instead (-Eboot). Either way it is accepted only if its SHA-256 is that of the known ULUS10566
+v1.00 executable.
 """
 
 import hashlib
 import io
 import os
+import shutil
 import struct
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -26,7 +30,7 @@ ISO_SIZE = 1754529792
 ISO_SHA1 = "ec23f5beac89312a2a25654e202ae1c997999c9e"
 EBOOT_SHA256 = prepare_game_dir.EBOOT_SHA256
 EBOOT_SIZE = 4640948
-EBOOT_BIN_SHA256 = "8fbf3541ab121aff85aae72795760736dfe37706996b2b0f9b81d36fc98f3394"  # encrypted, on the disc
+DECRYPT_TIMEOUT = 60  # seconds; decrypting takes a second or two
 DISC_FILES = {  # path on the disc: (folder under build/port, SHA-256)
     "/PSP_GAME/USRDIR/DATA/OVL_MENU_APP.ELF":
         ("ovl", "f021f96fa05da5907563a28c232966aa8a344526d6b8bdee728053ec75224d0a"),
@@ -41,24 +45,8 @@ PORT = ROOT / "build" / "port"
 LAUNCHER = PORT / "launcher"
 ICON = LAUNCHER / "dissidia012.ico"
 SETUP_DIR = PORT / "setup"
-
-EBOOT_HELP = """\
-The port needs the game's decrypted executable (EBOOT). It is not on the disc in a usable form, and this
-project never includes or downloads the key that decrypts it, so you make it yourself from your own disc, once:
-
-  A. With PPSSPP (a PSP emulator, https://www.ppsspp.org):
-     1. Settings > Tools > Developer tools: turn on "Dump decrypted EBOOT.BIN on game boot".
-     2. Start the game in PPSSPP from your ISO, wait for the title screen, then close PPSSPP.
-     3. The file is in PPSSPP's memory stick folder, under PSP\\SYSTEM\\DUMP, named after the disc ID
-        (for example ULUS10566.BIN). Settings > System > PSP Memory Stick > "Show Memory Stick folder"
-        opens that folder. (This route has not been tried by the project yet: if the file is refused
-        below, use B.)
-  B. With pspdecrypt (https://github.com/hrydgard/pspdecrypt), built from source:
-         pspdecrypt -o EBOOT.ELF EBOOT.BIN
-     where EBOOT.BIN is PSP_GAME\\SYSDIR\\EBOOT.BIN from your ISO{extracted}.
-
-See docs/port/setup.md, "The decrypted EBOOT", for details."""
-
+DECRYPT_DIR = SETUP_DIR / "decrypt"  # D012Native --install's data directory, removed afterwards
+LOG_DIR = PORT / "logs"
 
 def sha256_file(path, progress=None):
     digest = hashlib.sha256()
@@ -189,7 +177,8 @@ def check_eboot(path):
     size = path.stat().st_size
     if magic == b"~PSP":
         raise SetupError(f"{path.name} is the encrypted EBOOT.BIN (it starts with ~PSP). The port needs the "
-                         "decrypted executable, which starts with an ELF header; see the two ways above.")
+                         "decrypted executable, which starts with an ELF header. Leave -Eboot out and setup makes it "
+                         "from your ISO.")
     if magic != b"\x7fELF":
         raise SetupError(f"{path.name} is not a PSP executable (no ELF header)")
     digest = sha256_file(path)
@@ -198,9 +187,8 @@ def check_eboot(path):
             f"{path.name} is an ELF file ({size:,} bytes), but not the decrypted executable the port knows.\n"
             f"    SHA-256 {digest}\n    expected {EBOOT_SHA256} ({EBOOT_SIZE:,} bytes)\n"
             "    Possible reasons: it comes from another release or version of the game (only USA v1.00, "
-            "ULUS10566, is supported), it was patched, or it was written in another form. PPSSPP's dump has "
-            "not been checked against this hash yet; if your PPSSPP dump is refused, pspdecrypt (see above) "
-            "gives the expected file.")
+            "ULUS10566, is supported), it was patched, or it was written in another form. Leave -Eboot out "
+            "and setup makes the right file from your ISO.")
     info(f"EBOOT: the decrypted ULUS10566 v1.00 executable ({size:,} bytes, SHA-256 matches)")
 
 
@@ -218,16 +206,6 @@ def extract_disc_files(disc):
         os.replace(temporary, target)
         info(f"extracted {iso_path} -> {target.relative_to(ROOT)}")
     info("overlays and LIBSUPPREACC.PRX: in build/port/ovl and build/port/prx")
-
-
-def extract_eboot_bin(disc):
-    """The disc's encrypted EBOOT.BIN, for pspdecrypt; returns its path."""
-    target = SETUP_DIR / "EBOOT.BIN"
-    if not (target.is_file() and sha256_file(target) == EBOOT_BIN_SHA256):
-        data = disc.read("/PSP_GAME/SYSDIR/EBOOT.BIN")
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(data)
-    return target
 
 
 def make_icon(disc):
@@ -263,7 +241,8 @@ def ask_path(question, default, checker):
 
 
 def ensure(state, iso=None, eboot=None, interactive=True, skip_iso_hash=False):
-    game_dir = PORT / "game"
+    """Checks the ISO and takes the overlays, the PRX and the icon from it. Returns (ISO path, decrypted
+    EBOOT path or None); None means setup must make it from the ISO (decrypt(), then prepare())."""
     # The ISO
     disc = None
     if not iso and state.get("iso"):
@@ -291,35 +270,73 @@ def ensure(state, iso=None, eboot=None, interactive=True, skip_iso_hash=False):
     try:
         extract_disc_files(disc)
         info(f"icon: {make_icon(disc)}")
-        # The decrypted EBOOT
-        target = game_dir / "EBOOT.ELF"
-        remembered = state.get("eboot")
-        if not eboot and (not remembered or not Path(remembered).is_file()) and target.is_file() \
-                and sha256_file(target) == EBOOT_SHA256:
-            remembered = str(target)  # the game directory already has it (the original was moved, or none)
-        eboot = eboot or remembered
-        if eboot:
-            try:
-                check_eboot(eboot)
-            except SetupError:
-                print()
-                print(EBOOT_HELP.format(extracted=f" (setup copied it to {extract_eboot_bin(disc)})"))
-                print()
-                raise
-            eboot_path = Path(eboot).resolve()
-        elif interactive:
-            print()
-            print(EBOOT_HELP.format(extracted=f" (setup copied it to {extract_eboot_bin(disc)})"))
-            print()
-            info("Type or paste the path of the decrypted file, or drag it into this window.")
-            eboot_path, _ = ask_path("Decrypted EBOOT", "", check_eboot)
-        else:
-            print(EBOOT_HELP.format(extracted=f" (setup copied it to {extract_eboot_bin(disc)})"))
-            raise SetupError("no decrypted EBOOT given: pass -Eboot <path>")
     finally:
         disc.close()
-    if eboot_path != target.resolve():
-        state["eboot"] = str(eboot_path)
-    for line in prepare_game_dir.prepare(eboot_path, iso_path, game_dir, PORT / "data"):
+
+    # The decrypted EBOOT: -Eboot, else the game directory's if it is right, else one given before.
+    target = PORT / "game" / "EBOOT.ELF"
+    if eboot:
+        check_eboot(eboot)
+        state["eboot"] = str(Path(eboot).resolve())
+        return iso_path, Path(eboot).resolve()
+    if target.is_file() and sha256_file(target) == EBOOT_SHA256:
+        info("EBOOT: build/port/game/EBOOT.ELF is the decrypted ULUS10566 v1.00 executable (kept)")
+        return iso_path, target.resolve()
+    remembered = state.get("eboot")
+    if remembered and Path(remembered).is_file():
+        try:
+            check_eboot(remembered)
+            return iso_path, Path(remembered).resolve()
+        except SetupError as error:
+            warn(f"the EBOOT given before cannot be used now ({error}); setup makes it from the ISO instead")
+    state.pop("eboot", None)
+    return iso_path, None
+
+
+def decrypt(program, iso_path):
+    """Runs `program --install <iso> --in-place` with its data directory in a temporary folder, and
+    returns the EBOOT.ELF it wrote there, checked. The caller removes the folder (cleanup())."""
+    cleanup()
+    DECRYPT_DIR.mkdir(parents=True)
+    env = dict(os.environ)
+    env["D012_DATA_DIR"] = str(DECRYPT_DIR)
+    env["D012_GAME_DIR"] = str(DECRYPT_DIR)
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    log = LOG_DIR / "setup-decrypt.log"
+    started = time.monotonic()
+    try:
+        result = subprocess.run([str(program), "--install", str(iso_path), "--in-place"], cwd=str(DECRYPT_DIR),
+                                env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, timeout=DECRYPT_TIMEOUT)
+        output = result.stdout.decode("utf-8", errors="replace")
+        code = result.returncode
+    except subprocess.TimeoutExpired as error:  # subprocess.run stops the program it started
+        output = (error.stdout or b"").decode("utf-8", errors="replace")
+        log.write_text(output, encoding="utf-8")
+        raise SetupError(f"decrypting the EBOOT did not finish in {DECRYPT_TIMEOUT} s (output: {log})")
+    log.write_text(output, encoding="utf-8")
+    eboot = DECRYPT_DIR / "EBOOT.ELF"
+    if code != 0 or not eboot.is_file():
+        print()
+        for line in output.strip().splitlines()[-20:]:
+            print(f"      | {line}")
+        raise SetupError(f"{Path(program).name} --install could not decrypt the EBOOT from the ISO (exit code "
+                         f"{code}; output: {log}). If you have the decrypted EBOOT, pass -Eboot <path>.")
+    digest = sha256_file(eboot)
+    if digest != EBOOT_SHA256:
+        raise SetupError(f"the decrypted EBOOT has SHA-256 {digest}, expected {EBOOT_SHA256}")
+    info(f"EBOOT: decrypted from the ISO in {time.monotonic() - started:.1f} s "
+         f"({eboot.stat().st_size:,} bytes, SHA-256 matches)")
+    return eboot
+
+
+def cleanup():
+    """Removes the temporary folder of decrypt()."""
+    if DECRYPT_DIR.exists():
+        shutil.rmtree(DECRYPT_DIR)
+
+
+def prepare(iso_path, eboot_path):
+    """build/port/game: EBOOT.ELF, disc.iso and ms0/."""
+    for line in prepare_game_dir.prepare(eboot_path, iso_path, PORT / "game", PORT / "data"):
         info(line)
-    return state

@@ -43,7 +43,8 @@ configure time, where PortableKit looks for it.
 
 Profile values (all read from the game's files): disc id `ULUS10566`; `EBOOT.BIN` SHA-256 `8fbf3541…f3394`;
 `EBOOT.ELF` SHA-256 `0bc8e779…fe6d`; tag `0xD91613F0` (word at `0xD0` of `EBOOT.BIN`), key left empty because
-the decrypted ELF is supplied directly; load base `0x08804000`; 32 MiB; overlay window `0x089DD4C0..0x08B62F70`;
+the decrypted ELF is supplied directly (since 24 October 2026 the profile carries the public key, and `--install`
+decrypts the disc's EBOOT); load base `0x08804000`; 32 MiB; overlay window `0x089DD4C0..0x08B62F70`;
 save folders `ULUS10566GameData00`/`01`; English, confirm on cross; `frame_vblanks` 2.
 
 ---
@@ -172,7 +173,8 @@ Values with the default window (output in `build/scratch/port/overlay_meta/`):
 6. **Fonts.** One host TrueType font with glyph metrics tuned to another game; `sceFontGetFontList` leaves the
    game's entry as it was. Visible once menus draw text.
 7. **Installer.** The profile carries the tag but not the key, so `--install` is unsupported; the game directory
-   route is the only one.
+   route is the only one. (Since 24 October 2026 the profile carries the key too, and `setup.ps1` uses `--install`
+   to decrypt the EBOOT.)
 
 ---
 

@@ -227,7 +227,7 @@ All the hashes below are already in this repository. They are fingerprints, not 
 | The disc image, `.iso` only (CSO/ZSO are refused by the framework's installer, V: `installer.cpp`) | `PARAM.SFO` disc id `ULUS10566`; `PSP_GAME/SYSDIR/EBOOT.BIN` = `8fbf3541...3394` (`d012_profile.cpp`). **Not a hash of the whole ISO**: dumps of the same UMD can differ in padding | the player's own disc |
 | `PSP_GAME/USRDIR/DATA/OVL_MENU_APP.ELF`, `OVL_BATTLE_APP.ELF`, `OVL_EXTRA_APP.ELF` | `f021f96f...4d0a`, `1f96cfb3...49dc`, `f6b7be5e...ca01` (V: hashed here; identical to `build/ULUS10566/`) | read from the ISO: they are plain, unencrypted ELFs |
 | `PSP_GAME/USRDIR/DATA/MODULE/LIBSUPPREACC.PRX` | `aed4d30f...8778` (V) | read from the ISO: a plain PRX |
-| **Either** the decrypted EBOOT | `0bc8e779...fe6d` (`executable_sha256`) | **PPSSPP**: Settings, Tools, Developer tools, "Dump decrypted EBOOT.BIN on game boot", then start the game once; the file lands in PPSSPP's memory stick under `PSP/SYSTEM/DUMP/`. **pspdecrypt** on `EBOOT.BIN` (what `tools/decrypt_main.sh` does). I: PPSSPP's dump should be the same bytes. Check this on the owner's copy; if it differs, add that second hash after checking that it loads |
+| **Either** the decrypted EBOOT | `0bc8e779...fe6d` (`executable_sha256`) | Since 24 October 2026 the profile has the tag key, so the port's own `--install` makes it from the ISO (V: same SHA-256), and `setup.ps1` does that. A file the player already has (**pspdecrypt** on `EBOOT.BIN`, what `tools/decrypt_main.sh` does) is still accepted. PPSSPP's "Dump decrypted EBOOT.BIN on game boot" was tried and wrote no file, so it is not recommended |
 | **Or** a keys file, the app's `keys.txt` format | `kirk.aes.5D`, `kirk.cmd1` and `tag.D91613F0` decrypt `EBOOT.BIN`. The result must hash to `0bc8e779...`, which checks the tag key. The fixed keys are checked by the app's compiled-in fingerprints | made by the player. The release never names a source of keys |
 
 Notes:
@@ -323,7 +323,7 @@ new dispatch-call row would change the key. That is the right outcome: those cha
 | Game files (ISO, EBOOT, overlays, PRX, PARAM.SFO, saves) | `package_deck.py`'s folder contains the ISO and EBOOT.ELF, by design, for the owner's Deck only | none. The zip is made from a staging folder by a script that refuses them (below) |
 | Generated C++, objects, compiled corpus or overlay libraries | `D012Native.exe` (80 MB) has the main corpus linked in, and `overlays\*.dll` are the game's code | **none**. The release program is built `NO_CORPUS` and the zip has no `cache\` |
 | **Console keys** | **`D012Native` links `crypto_keys_builtin.cpp`** (V: `portablekit_add_game` adds it unless `EXTERNAL_KEYS`; our `port/CMakeLists.txt` does not pass that). The current Deck package carries the framework's KIRK and save keys | built with `EXTERNAL_KEYS`; keys come only from the player's `keys.txt` |
-| The tag key for `0xD91613F0` | not in this repository (`decryption_key = {}`); it is in the local `tools/local/pspdecrypt` only | not shipped |
+| The tag key for `0xD91613F0` | in the profile since 24 October 2026 (owner's decision): the public value pspdecrypt and the emulators carry, so `--install` decrypts the player's own disc. `setup.ps1` uses it | in the public source, so a release program carries it too |
 | Paths of the build machine, the owner's user name, work identity | the `PORTABLEKIT_RELEASE=ON` build drops the checkout fallback | checked by the script (below), as the app's is |
 | Decompiled C (`port/decomp/`) | already published in the public repository as source | compiled into the program. That is the same exposure as the public source, a stance the owner has already taken; noted here so it is a conscious choice |
 
@@ -371,7 +371,7 @@ compiling. Nothing is ever downloaded at run time.
 
 | Phase | Work | Effort | Verify |
 | --- | --- | --- | --- |
-| **0. Measure** (needs the owner's approval to download llvm-mingw 20260922, about 83 MB zip, from `github.com/mstorsjo/llvm-mingw`) | Build the framework branch and `D012Native` with llvm-mingw; compile our corpus at -O0, -O1 and -O2, at 16 and 8 KiB units, timing each; run the perf tour's battle scenes on each. Check that a PPSSPP dump hashes to `0bc8e779...` | 2 days | MinGW builds warning-clean; PortableKit's 21 tests pass (`tools/port/pk_ctest.cmd`, never ad hoc tests); compile minutes and battle guest ms per level. **Go/no-go on -O1 and the unit span** |
+| **0. Measure** (needs the owner's approval to download llvm-mingw 20260922, about 83 MB zip, from `github.com/mstorsjo/llvm-mingw`) | Build the framework branch and `D012Native` with llvm-mingw; compile our corpus at -O0, -O1 and -O2, at 16 and 8 KiB units, timing each; run the perf tour's battle scenes on each. | 2 days | MinGW builds warning-clean; PortableKit's 21 tests pass (`tools/port/pk_ctest.cmd`, never ad hoc tests); compile minutes and battle guest ms per level. **Go/no-go on -O1 and the unit span** |
 | **1. Framework seams** (patches 0054 and up, upstream-friendly) | `crypto_keys_file.cpp` (from the app); the port installer accepting a decrypted executable or keys; a `NO_CORPUS` port loading a main corpus library from a configured path; a compile stage in the setup screens | 2 to 3 days | the installer refuses a wrong EBOOT and wrong keys with a sentence; no keys in a release build (byte scan) |
 | **2. Our compile step** | `overlays.txt`; extraction and hash checks; PRX relocation; five `psp_recomp` runs; entry files; compile and link into `cache/<key>`; object cache; two stages (-O0, then -O2) if phase 0 says so; `d012_portable` pointing at `cache` | 2 to 3 days | the libraries made by setup equal what the developer build makes (same registered counts; `[overlay] installed menu`, `battle`, `suppreacc`; no `No recompiled function registered`); overrides active (`[decomp] overrides ... registered`) |
 | **3. Packaging** | `tools/port/package_release.ps1` modelled on `package_desktop_windows.ps1`; notices; checks of section 5.2; GitHub release on VCKing101/Dissidia012-pc | 1 to 2 days | the script fails on a planted test file of each forbidden kind; the zip has no game bytes or key bytes |
@@ -386,7 +386,8 @@ compiling. Nothing is ever downloaded at run time.
    the present thread's timing, `d012_crash_report.cpp`, and `<windows.h>` macros.
 3. **Proton compile on the Deck.** Unverified. The fallback is to compile on the player's PC and copy the folder to
    the Deck.
-4. **A PPSSPP dump that differs from pspdecrypt's output.** Settled by hash; the risk is only a second hash to add.
+4. **A PPSSPP dump that differs from pspdecrypt's output.** Moot: in a test PPSSPP's dump setting wrote no file,
+   and the port now decrypts the EBOOT itself.
 5. **Overlay hash windows.** The extra overlay's window is still inferred, not measured
    ([recompiled-build.md](recompiled-build.md), section 8). The PRX corpus depends on the load address
    `0x09B81000`. The setup's own hash check catches a mismatch on the files, not at run time.

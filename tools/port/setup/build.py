@@ -1,5 +1,7 @@
 """The recompiled build, as in port/README.md ("Recompiled build"):
 
+    0. only when the decrypted EBOOT is not there yet: configure and build D012Native with no game
+       code (bootstrap()), which setup runs as `D012Native --install` to decrypt it from the ISO;
     1. configure tools/local/port/build-d012-recomp (D012_WORK_DIR=build/port/recomp,
        PSPRECOMP_GENERATED_JOBS = one per 4 GiB of memory, PortableKit's own rule);
     2. build psp_recomp;
@@ -199,6 +201,21 @@ def check_outputs(build_dir):
     if len(overlays) < len(LIBRARIES):
         raise SetupError(f"the build has {len(overlays)} overlay libraries in {build_dir / 'bin/overlays'}, "
                          f"expected {len(LIBRARIES)}")
+    return exe
+
+
+def bootstrap():
+    """The program with no game code yet (PortableKit's bootstrap stage), to decrypt the EBOOT with
+    --install. It compiles only the host code, which the full build then reuses, and links PortableKit's
+    empty corpus stub while build/port/recomp/generated has no units. Returns the program's path."""
+    generated_jobs, ninja_jobs = jobs()
+    configure(BUILD, generated_jobs)
+    info("compiling the program without the game code first (it decrypts the EBOOT from your ISO); "
+         "the full build reuses this")
+    build(BUILD, ninja_jobs, "bootstrap", "setup-build-bootstrap.log", target="D012Native")
+    exe = BUILD / "bin" / "D012Native.exe"
+    if not exe.is_file():
+        raise SetupError(f"the bootstrap build finished but {exe} is missing")
     return exe
 
 

@@ -72,12 +72,7 @@ download that needs no build tools is planned.
 - An up-to-date graphics driver (Vulkan support: any GPU from about 2016 on).
 - About 5 GB of free disk space.
 
-**2. Have your game ready:** the USA disc **ULUS10566** as an `.iso` file, and its **decrypted EBOOT**. The decrypted
-EBOOT is the game's executable, which is encrypted on the disc. This project does not include the key that decrypts it, so you make it yourself
-once. Either use PPSSPP's setting "Dump decrypted EBOOT.BIN on game boot" (Settings > Tools > Developer tools), then
-start the game once, or use [pspdecrypt](https://github.com/hrydgard/pspdecrypt). The setup explains both, and
-[docs/port/setup.md](docs/port/setup.md#the-decrypted-eboot) has the details. The PPSSPP route has not been tried by
-the project yet.
+**2. Have your game ready:** your own USA ISO (**ULUS10566**), as an `.iso` file.
 
 **3. Run the setup** in PowerShell:
 
@@ -88,7 +83,7 @@ powershell -ExecutionPolicy Bypass -File .\setup.ps1
 ```
 
 (Or double-click `setup.cmd`.) It checks what is installed, downloads and verifies the dependencies, asks for your
-ISO and EBOOT, checks them, and builds the port. The first time takes about 10 to 30 minutes, most of it compiling.
+ISO, checks it, and builds the port. The first time takes about 10 to 30 minutes, most of it compiling.
 
 **4. Play** with the new "Dissidia 012 (PC port)" shortcut on the desktop or in the Start menu. Esc, or L3 + R3 on a
 controller, opens the port's menu. Your saves are in `build/port/data/ms0`, and mods go in `build/port/data/mods`.

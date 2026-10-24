@@ -7,23 +7,23 @@
 .DESCRIPTION
     Run it from the repository folder:
         powershell -ExecutionPolicy Bypass -File .\setup.ps1
-    (or double-click setup.cmd). It asks for your ISO (USA, ULUS10566) and your decrypted EBOOT the
-    first time, and remembers them. Running it again redoes only what changed, so after `git pull` just
-    run it again. Full guide and troubleshooting: docs/port/setup.md.
+    (or double-click setup.cmd). It asks for your ISO (USA, ULUS10566) the first time, and remembers
+    it; the port decrypts the game's executable from it. Running it again redoes only what changed,
+    so after `git pull` just run it again. Full guide and troubleshooting: docs/port/setup.md.
 
-    It never installs system software, never needs administrator rights, never includes or downloads
-    the key that decrypts the game, and never touches your saves (build\port\data\ms0).
+    It never installs system software, never needs administrator rights, and never touches your saves
+    (build\port\data\ms0).
 
 .PARAMETER Update
     Re-apply the PortableKit patches and rebuild, asking nothing (uses the files given before).
 .PARAMETER Deck
     Also build the Steam Deck package (build\port\deck-package\Dissidia012); see docs/port/steam-deck.md.
 .PARAMETER NonInteractive
-    Never ask: fail with a message instead. Give -Iso and -Eboot on the first run.
+    Never ask: fail with a message instead. Give -Iso on the first run.
 .PARAMETER Iso
     Path of your Dissidia 012 Duodecim Final Fantasy (USA, ULUS10566) ISO.
 .PARAMETER Eboot
-    Path of the decrypted EBOOT (pspdecrypt's EBOOT.ELF, or PPSSPP's dump).
+    Optional: a decrypted EBOOT.ELF you already have, used instead of decrypting the ISO's.
 .PARAMETER NoShortcuts
     Make no desktop shortcut or Start Menu entry.
 .PARAMETER ShortcutDir
@@ -39,7 +39,7 @@
 .EXAMPLE
     .\setup.ps1
 .EXAMPLE
-    .\setup.ps1 -NonInteractive -Iso "D:\Games\Dissidia 012 (USA).iso" -Eboot "D:\Games\EBOOT.ELF"
+    .\setup.ps1 -NonInteractive -Iso "D:\Games\Dissidia 012 (USA).iso"
 .EXAMPLE
     git pull; .\setup.ps1 -Update
 #>

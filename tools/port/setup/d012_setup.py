@@ -6,7 +6,7 @@ prerequisites and makes .venv first). Run setup.ps1, not this file; docs/port/se
         [--portablekit-source PATH] [--deps-cache DIR] [--skip-iso-hash]
 
 Every step checks what is already done and skips it, so running it again only redoes what changed.
-State (the ISO and EBOOT paths given, what was last applied and generated) is kept in
+State (the ISO path, an EBOOT path if one was given, what was last applied and generated) is kept in
 build/port/setup/state.json.
 """
 
@@ -30,7 +30,7 @@ def parse():
     parser.add_argument("--deck", action="store_true", help="also build the Steam Deck package")
     parser.add_argument("--non-interactive", action="store_true", help="never ask; fail instead")
     parser.add_argument("--iso", help="the USA ULUS10566 ISO")
-    parser.add_argument("--eboot", help="the decrypted EBOOT (EBOOT.ELF, or PPSSPP's dump)")
+    parser.add_argument("--eboot", help="a decrypted EBOOT.ELF to use instead of decrypting the ISO's")
     parser.add_argument("--no-shortcuts", action="store_true", help="make no desktop or Start Menu shortcut")
     parser.add_argument("--shortcut-dir", help="make the two shortcuts under this folder instead (for tests)")
     parser.add_argument("--portablekit-source", help="clone PortableKit from this path or URL (it must have 33800c4)")
@@ -100,7 +100,17 @@ def main():
     ui.save_state(state)
 
     step(4, total, "Your game files")
-    game.ensure(state, options.iso, options.eboot, ui.INTERACTIVE, options.skip_iso_hash)
+    iso_path, eboot_path = game.ensure(state, options.iso, options.eboot, ui.INTERACTIVE, options.skip_iso_hash)
+    ui.save_state(state)
+    if eboot_path is None:
+        info("EBOOT: the port decrypts the game's executable from your ISO")
+        program = build.bootstrap()
+        try:
+            game.prepare(iso_path, game.decrypt(program, iso_path))
+        finally:
+            game.cleanup()
+    else:
+        game.prepare(iso_path, eboot_path)
     ui.save_state(state)
 
     step(5, total, "Building the port")

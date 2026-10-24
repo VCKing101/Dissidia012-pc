@@ -15,6 +15,10 @@ configuration (`config/`) and the documentation (`docs/`, `README.md`).
   game's machine code for interoperability and research. It describes how the original program works; the program it
   describes remains Square Enix's. The MIT licence applies only to whatever original contribution these files
   contain, not to the game.
+- **The executable's decryption key.** The port's profile (`port/host/d012_profile.cpp`) includes the public
+  decryption key for the tag of the game's executable, the same value that pspdecrypt and PSP emulators carry, so
+  that the port can read the player's own disc. The key is not a copyrighted work of ours. The game itself is not
+  included.
 - **Facts about the game.** Addresses, sizes, hashes, format descriptions and short identifiers in the
   documentation and configuration are recorded as facts for interoperability.
 - **PortableKit.** The patches in `port/portablekit-patches/` modify [PortableKit](https://github.com/TeamGDB/PortableKit)

@@ -80,8 +80,11 @@ It copies `build/ULUS10566/EBOOT.ELF` (checking its SHA-256), hard-links the ret
 ISO is on another drive), and makes an empty `ms0/`. `--eboot FILE` and `--iso FILE` name other inputs. Files already
 right are kept. No saves are copied in. The originals are never written.
 
-PortableKit's own installer (`D012Native --install image.iso`) is not used: the profile does not carry the
-decryption key for the executable's tag (`0xD91613F0`), so it would refuse the disc.
+`EBOOT.ELF` can also come from the disc itself: the profile carries the public decryption key for the executable's
+tag (`0xD91613F0`), so PortableKit's installer, `D012Native --install image.iso --in-place` run with `D012_DATA_DIR`
+set, writes the decrypted `EBOOT.ELF` (and a `settings.ini` naming the image) into that directory. `setup.ps1` does
+this in a temporary folder with a bootstrap build (no corpus yet) and passes the result to `prepare_game_dir.py
+--eboot`.
 
 ## Run
 
