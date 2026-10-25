@@ -488,8 +488,9 @@ What the port does (`d012_split_view.cpp`):
 | Piece | How |
 | --- | --- |
 | Player 1's cursor | Its placement (main `0x088D9C60`, now an override, called from `battle:0x08B418C8`) is moved into the left half: x − 120, or off screen outside player 1's crop (guest x 120 to 360) |
-| Player 2's cursor | A task in the system list right after `MENU_MANAGER::Draw` (priority 70035; owner `*(*0x089D69A8 + 0x2000)`) draws the menu manager again with every other layout and sprite hidden. The cursor is moved to player 2's lock target (the lock-on mode's vtable `+0x70`, its lock point main `0x0883820C`) projected through view 2's view×projection, which the split task keeps. Everything is put back after |
-| Damage numbers | When the spawner projects, the projection records the world point for the ring slot the spawner fills next. Before the second pass, each live popup moves to its place in view 2, keeping its own jitter and rise; afterwards it goes back. Player 1's half needs nothing: its popups are drawn into player 1's frame and cropped with it |
+| Player 2's cursor | A cursor part of its own, 0x40 bytes below the EBOOT (`0x08800400`), set up as the camera manager sets up its own: `battle:0x08B41A54`, then a sprite of the cursor's layout (`battle:0x08B41638` with `*0x08B422A8`, layout 0x222), and the manager's part's two flags. Each split frame, the split task runs the game's cursor update (`battle:0x08B41BDC`) for player 2's fighter while the camera manager holds view 2, so player 2's cursor has its own target, bone, scale, animation, visibility and lock-on sounds. That update shows the cursor only for the local player (vtable `+0x144`, `battle:0x08B2EF74`: fighter `+0x5B0` bit 4, set by `battle:0x08B2EF44` on player 1's), so player 2's fighter has that bit for the call only. Its placement goes into the right half. Overrides of `battle:0x08B41B40` (cursor shown or hidden: intros, EX Bursts) and `battle:0x08B41B24` (released at the camera manager's teardown) do the same to player 2's part. Hidden on full-screen frames. Both sprites are in the same layout, so the HUD's own draw draws both |
+| Damage numbers | When the spawner projects, the projection records the world point for the ring slot the spawner fills next, which is exactly the slot it then fills. Before the second pass, each live popup moves to its place in view 2, keeping its own jitter and rise; afterwards it goes back. The records are cleared when the ring is empty. Player 1's half needs nothing: its popups are drawn into player 1's frame and cropped with it |
+| Lens flare | Nothing needed: `battle:0x08B53C20` draws the sun's flare itself from the graphics manager's camera during the battle's draw tasks, so the second pass draws it from player 2's |
 
 Checked (`build/port/versus/cursor2/`, `popups1/`, local):
 
@@ -498,15 +499,20 @@ Checked (`build/port/versus/cursor2/`, `popups1/`, local):
 - **A fight with hits:** the Brave numbers float over the fighter that was hit, in each half where that fighter is
   in view.
 
+Also checked (`build/port/versus/cursor3/`, `sweep1/`, `popups2/`):
+
+- **Player 2's own cursor** rings player 1 at the game's own aim point.
+- **Independent cursors:** player 1 switched to the free camera and their cursor went away, while player 2's stayed
+  on player 1.
+- **The marker sweep:** a fight with the free camera, assist calls by both players, attacks and EX Mode
+  (`D012_TEST_EX_FULL`). It found no world-pinned HUD piece other than the cursors, the popups and the lens flare.
+  The only other placements came from the loading screen's pages.
+
 Not done:
 
-- **Player 2's cursor looks like player 1's.** It is the same sprite, so it shares player 1's animation and its
-  distance scale, and it shows only while player 1's cursor is shown.
-- **Player 2's cursor sits a little high.** It aims at the target's lock point, not the bone the game uses for
-  player 1's (`0x088353C8` and `0x08812664`).
-- **Popups matched by position:** a popup takes a recorded point only while it lies within 64 by 160 px of where
-  that point was projected; otherwise it keeps player 1's place in the second pass.
-- **Not looked at:** other world-pinned HUD pieces (called-assist markers, EX core arrows, if any).
+- **Not swept:** EX Bursts, summons, Kuja's or other fighters' special HUD pieces, other stages.
+- **The lock-on sound** now plays for player 2's lock-on events too, through the game's own cursor update. Not
+  listened to.
 
 ## 8. For later: two copies over the game's ad hoc versus
 

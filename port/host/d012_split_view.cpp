@@ -62,21 +62,24 @@ constexpr std::uint32_t kGuClear = 0x089A0AC4u;          // sceGuClear(flags)
 constexpr std::uint32_t kGuLight = 0x089A0D48u;          // sceGuLight(light, type, components, vec3 *)
 constexpr std::uint32_t kWorldToScreen = 0x08866E04u;    // (out, in) -> in front of the camera
 constexpr std::uint32_t kSetPosition = 0x088D9C60u;      // (layout instance, x, y)
-constexpr std::uint32_t kSystemTasks = 0x089D69A8u;      // -> the system task list (its owner at +0x2000)
-constexpr std::uint32_t kMenuManager = 0x089D7830u;      // -> the menu manager (the HUD's layouts)
-constexpr std::uint32_t kMenuDraw = 0x088CED50u;         // (menu manager): MENU_MANAGER::Draw's body
-constexpr std::uint32_t kHudPriority = 70035u;           // MENU_MANAGER::Draw's, in the system list
-constexpr std::uint32_t kLockPoint = 0x0883820Cu;        // (fighter, out vec4): where a lock-on aims
-// battle: the lock-on cursor, the camera manager's part at +0x878 (battle
-// 0x08B41BDC, run by the camera update for the on-screen camera's fighter);
-// its layout instance at +0x880, placed by the call at battle 0x08B418C8.
+constexpr std::uint32_t kSpriteRelease = 0x088DA060u;    // (layout instance)
+// battle: the lock-on cursor, a 0x40-byte part of the camera manager at
+// +0x878, set up by battle 0x08B41A54 and given a sprite of the cursor's
+// layout (layout 0x222, *0x08B422A8) by battle 0x08B41638 (part +8). The
+// camera update runs its update, battle 0x08B41BDC(part, fighter), for the
+// on-screen camera's fighter through the camera manager's view and
+// projection, which places the sprite through the call at battle 0x08B418C8.
 constexpr std::uint32_t kCursorPart = 0x878u;
 constexpr std::uint32_t kCursorCaller = 0x08B418C8u;
-// Below the EBOOT, as the split task: player 2's cursor task, its name, and
-// view 2's view x projection for it.
-constexpr std::uint32_t kCursorTask = 0x08800280u;
-constexpr std::uint32_t kCursorTaskName = 0x088002C0u;
-constexpr std::uint32_t kView2Matrix = 0x08800300u;
+constexpr std::uint32_t kCursorLayout = 0x08B422A8u;
+constexpr std::uint32_t kCursorInit = 0x08B41A54u;       // (part)
+constexpr std::uint32_t kCursorAttach = 0x08B41638u;     // (part + 8, layout)
+constexpr std::uint32_t kCursorShow = 0x08B41830u;       // (part + 8, shown)
+constexpr std::uint32_t kCursorUpdate = 0x08B41BDCu;     // (part, fighter)
+constexpr std::uint32_t kCursorRelease = 0x08B41B24u;    // (part): its sprite released
+constexpr std::uint32_t kCursorEnable = 0x08B41B40u;     // (part, shown)
+// Player 2's cursor part, below the EBOOT as the split task.
+constexpr std::uint32_t kPlayer2Cursor = 0x08800400u;
 constexpr std::uint32_t kVec4Copy = 0x089A3868u;         // (out, in)
 constexpr std::uint32_t kMatrixApplyProjected = 0x089A4AF8u;  // (out, matrix, vec4)
 constexpr std::uint32_t kViewProjection = 0x830u;        // gfx: view x projection
@@ -130,7 +133,7 @@ struct State {
     // the end of the split task), and still so when the next frame's update
     // places the HUD, until a frame that is not split.
     bool split_active = false;
-    std::uint32_t cursor_task = 0;  // in the system task list, after the HUD's draw
+    bool cursor2 = false;  // player 2's cursor part is set up, with a sprite
 };
 
 State &state() {
@@ -335,8 +338,52 @@ void frame_start_state(Guest *g, std::uint32_t graphics) {
     g_call1(g, 0x089A25C0u, 0u);
 }
 
-void add_cursor_task(Guest *g);
 void popups_to_view2(Guest *g, std::vector<std::pair<gaddr, std::array<std::uint32_t, 2>>> &saved);
+bool trace_markers();
+
+// Player 2's lock-on cursor part: set up as the camera manager sets up its
+// own (battle 0x08B41A54, then a sprite of the cursor's layout and the
+// manager's part's two flags), once a battle, when the layout exists.
+void set_up_cursor2(Guest *g, gaddr manager) {
+    State &s = state();
+    if (s.cursor2) return;
+    const gaddr layout = g_ld32(g, kCursorLayout);
+    if (layout == 0u) return;
+    g_call1(g, kCursorInit, kPlayer2Cursor);
+    g_call2(g, kCursorAttach, kPlayer2Cursor + 8u, layout);
+    g_st8(g, kPlayer2Cursor, g_ld8(g, manager + kCursorPart));
+    g_st8(g, kPlayer2Cursor + 1u, g_ld8(g, manager + kCursorPart + 1u));
+    s.cursor2 = true;
+    std::cout << "[versus] player 2's lock-on cursor set up (sprite " << std::hex << g_ld32(g, kPlayer2Cursor + 8u)
+              << std::dec << ")" << std::endl;
+}
+
+// battle 0x08B41B24, the cursor part's release (the camera manager's
+// teardown): player 2's part's sprite goes with player 1's.
+void run_cursor_release(Guest *g, const decomp::CallState &in, GuestRegs &) {
+    State &s = state();
+    const gaddr parts[2] = {in.gpr[4], s.cursor2 ? kPlayer2Cursor : 0u};
+    for (gaddr part : parts) {
+        if (part == 0u) continue;
+        const gaddr sprite = g_ld32(g, part + 8u);
+        if (sprite != 0u) g_call1(g, kSpriteRelease, sprite);
+        g_st32(g, part + 8u, 0u);
+    }
+    s.cursor2 = false;
+}
+
+// battle 0x08B41B40, the cursor shown or hidden (battle intros, EX Bursts):
+// player 2's follows player 1's.
+void run_cursor_enable(Guest *g, const decomp::CallState &in, GuestRegs &) {
+    const gaddr part = in.gpr[4];
+    const std::uint32_t shown = in.gpr[5] & 0xFFu;
+    const gaddr parts[2] = {part, state().cursor2 ? kPlayer2Cursor : 0u};
+    for (gaddr p : parts) {
+        if (p == 0u || g_ld8(g, p) != 1u) continue;
+        g_st8(g, p + 1u, static_cast<std::uint8_t>(shown));
+        g_call2(g, kCursorShow, p + 8u, shown);
+    }
+}
 
 void run_split_task(Guest *g, const decomp::CallState &in, GuestRegs &) {
     State &s = state();
@@ -346,11 +393,16 @@ void run_split_task(Guest *g, const decomp::CallState &in, GuestRegs &) {
     s.split_active = false;
     if (manager == 0u || graphics == 0u || g_ld8(g, manager + 0x8BCu) != 1u) return;
     // A scripted camera (manager +0x804 == 2) or an event camera (+0x9E0):
-    // the frame stays one full view.
-    if (g_ld32(g, manager + 0x804u) == 2u || g_ld8(g, manager + 0x9E0u) == 1u) return;
+    // the frame stays one full view, and player 2's cursor is hidden.
+    if (g_ld32(g, manager + 0x804u) == 2u || g_ld8(g, manager + 0x9E0u) == 1u) {
+        if (s.cursor2) g_call2(g, kCursorShow, kPlayer2Cursor + 8u, 0u);
+        return;
+    }
     const int slot = opponent_slot(g, manager);
     if (slot < 0) return;
-    add_cursor_task(g);
+    // From here the frame is split (the HUD's placements read it).
+    s.split_active = true;
+    set_up_cursor2(g, manager);
 
     emit(g, kMarkerSplitLeft);
 
@@ -379,8 +431,35 @@ void run_split_task(Guest *g, const decomp::CallState &in, GuestRegs &) {
     // camera), before anything is drawn.
     g_call1(g, kCameraDraw, manager);
     frame_start_state(g, graphics);
-    // View 2's view x projection, for player 2's lock-on cursor after the HUD.
-    std::memcpy(g_ptr(g, kView2Matrix, 64u), g_ptr(g, graphics + kViewProjection, 64u), 64u);
+    // Player 2's lock-on cursor, by the game's own cursor update, for player
+    // 2's fighter while the camera manager holds view 2.
+    if (s.cursor2) {
+        const gaddr fighter = g_ld32(g, g_ld32(g, kBattleManager) + 0x3Cu);
+        // The update shows the cursor only for the local player's fighter
+        // (vtable +0x144, battle 0x08B2EF74: fighter +0x5B0 bit 4, which
+        // battle 0x08B2EF44 sets on player 1's): player 2's counts as local
+        // for this call only.
+        if (fighter != 0u) {
+            const std::uint8_t local = g_ld8(g, fighter + 0x5B0u);
+            g_st8(g, fighter + 0x5B0u, static_cast<std::uint8_t>(local | 4u));
+            g_call2(g, kCursorUpdate, kPlayer2Cursor, fighter);
+            g_st8(g, fighter + 0x5B0u, static_cast<std::uint8_t>((g_ld8(g, fighter + 0x5B0u) & ~4u) | (local & 4u)));
+        }
+        static std::uint32_t lines = 0;
+        if (trace_markers() && lines < 200u) {
+            ++lines;
+            const gaddr camera = fighter != 0u ? g_ld32(g, fighter + 0x5ACu) : 0u;
+            const gaddr sprite = g_ld32(g, kPlayer2Cursor + 8u);
+            std::printf("[markers] split %llu player 2's cursor part %u %u state %u camera mode %d/%d sprite flags %04X "
+                        "player 1's part %u %u\n",
+                        static_cast<unsigned long long>(s.frames), g_ld8(g, kPlayer2Cursor),
+                        g_ld8(g, kPlayer2Cursor + 1u), g_ld32(g, kPlayer2Cursor + 0xCu),
+                        camera != 0u ? g_ld32s(g, camera + 0x108u) : -9, camera != 0u ? g_ld32s(g, camera + 0x10Cu) : -9,
+                        sprite != 0u ? static_cast<std::uint16_t>(g_ld16s(g, sprite + 0x20u)) : 0u,
+                        g_ld8(g, manager + kCursorPart), g_ld8(g, manager + kCursorPart + 1u));
+            std::fflush(stdout);
+        }
+    }
     std::vector<std::pair<gaddr, std::array<std::uint32_t, 2>>> popups;
     popups_to_view2(g, popups);
 
@@ -424,7 +503,6 @@ void run_split_task(Guest *g, const decomp::CallState &in, GuestRegs &) {
     // Both views side by side in the frame buffer, before the HUD
     // (MENU_MANAGER::Draw, after the battle's task list) draws over them.
     emit(g, kMarkerSplitCompose);
-    s.split_active = true;
     if (s.frames++ == 0u) std::cout << "[versus] second view drawn (opponent camera slot " << slot << ")" << std::endl;
 }
 
@@ -487,16 +565,23 @@ void popups_to_view2(Guest *g, std::vector<std::pair<gaddr, std::array<std::uint
     if (ring == 0u || graphics == 0u) return;
     const std::int32_t start = g_ld32s(g, ring + 0x330u);
     const std::int32_t count = g_ld32s(g, ring + 0x334u);
-    if (start < 0 || start >= 10 || count <= 0 || count > 10) return;
+    if (count == 0) {
+        // The ring is empty (or was reset for a battle): no record belongs to
+        // a live popup any more.
+        for (PopupRecord &r : popup_records()) r.valid = false;
+        return;
+    }
+    if (start < 0 || start >= 10 || count < 0 || count > 10) return;
     for (std::int32_t i = 0; i < count; ++i) {
         const std::uint32_t slot = static_cast<std::uint32_t>((start + i) % 10);
+        // The spawner fills exactly the slot note_popup worked out, right
+        // after the projection that recorded it, so a live slot's record is
+        // its own popup's.
         const PopupRecord &r = popup_records()[slot];
         const gaddr position = ring + slot * 0x50u + 0x20u;
         float now[2];
         std::memcpy(now, g_ptr(g, position, 8u), 8u);
-        // A record from this popup's own projection: its own motion stays
-        // within the jitter and the rise.
-        if (!r.valid || std::fabs(now[0] - r.base[0]) > 64.0f || std::fabs(now[1] - r.base[1]) > 160.0f) continue;
+        if (!r.valid) continue;
         saved.push_back({position, {g_ld32(g, position), g_ld32(g, position + 4u)}});
         const gaddr frame = g_push(g, 0x20u);
         for (int k = 0; k < 3; ++k) g_stf(g, frame + 4u * static_cast<std::uint32_t>(k), r.world[k]);
@@ -584,7 +669,8 @@ void run_set_position(Guest *g, const decomp::CallState &in, GuestRegs &) {
     float x = static_cast<float>(static_cast<std::int32_t>(in.gpr[5]));
     const float y = static_cast<float>(static_cast<std::int32_t>(in.gpr[6]));
     const bool cursor = in.gpr[31] == kCursorCaller && state().split_active;
-    if (cursor) x = window_x(x, 0);
+    const bool cursor2 = cursor && state().cursor2 && instance == g_ld32(g, kPlayer2Cursor + 8u);
+    if (cursor) x = window_x(x, cursor2 ? 1 : 0);
     g_st16(g, instance + 0x20u, static_cast<std::uint16_t>(g_ld16s(g, instance + 0x20u) & 0xF7FF));
     g_stf(g, instance + 0x10u, x);
     g_stf(g, instance + 0x14u, y);
@@ -594,112 +680,7 @@ void run_set_position(Guest *g, const decomp::CallState &in, GuestRegs &) {
         std::printf("[markers] split %llu place %08X caller %08X at (%d, %d)%s\n",
                     static_cast<unsigned long long>(state().frames), instance, in.gpr[31],
                     static_cast<std::int32_t>(in.gpr[5]), static_cast<std::int32_t>(in.gpr[6]),
-                    cursor ? " (player 1's cursor, left half)" : "");
-        std::fflush(stdout);
-    }
-}
-
-// Player 2's lock-on cursor. After the HUD's draw (system list, priority
-// 70035, after MENU_MANAGER::Draw), the menu manager's layouts are drawn
-// again with everything but the cursor hidden, the cursor moved to where
-// player 2's lock-on target lies in view 2 (view 2's view x projection, kept
-// by the split task), in the right half. The cursor's look (its animation,
-// its scale) stays player 1's: it is one sprite.
-void add_cursor_task(Guest *g) {
-    State &s = state();
-    if (s.cursor_task != 0u) return;
-    // The system task list's owner, as MENU_MANAGER registers its tasks with
-    // it (main 0x08882274 of *0x089D69A8: the word at +0x2000).
-    const std::uint32_t list = g_ld32(g, kSystemTasks);
-    if (list == 0u) return;
-    const std::uint32_t owner = g_ld32(g, list + 0x2000u);
-    if (owner == 0u) return;
-    const char name[] = "D012::Player2CursorTask";
-    std::memcpy(g_ptr(g, kCursorTaskName, sizeof name), name, sizeof name);
-    s.cursor_task = g_call5(g, kTaskFactory, owner, kDrawFilter, kHudPriority, kCursorTask, kCursorTaskName);
-    std::cout << "[versus] player 2's lock-on cursor task added to the system task list" << std::endl;
-}
-
-// Player 2's lock-on target, as battle 0x08B41BDC finds player 1's: the
-// camera's lock-on mode (camera +0x108 == 1), its mode object's vtable slot
-// +0x70 with the camera.
-gaddr lock_target(Guest *g, gaddr fighter) {
-    const gaddr camera = g_ld32(g, fighter + 0x5ACu);
-    if (camera == 0u || g_ld32s(g, camera + 0x108u) != 1) return 0u;
-    const gaddr mode = g_ld32(g, camera + 300u + 4u);
-    if (mode == 0u) return 0u;
-    const gaddr vtable = g_ld32(g, mode);
-    const std::int16_t adjust = g_ld16s(g, vtable + 0x70u);
-    const gaddr fn = g_ld32(g, vtable + 0x74u);
-    return g_call2(g, fn, mode + static_cast<std::uint32_t>(static_cast<std::int32_t>(adjust)), camera);
-}
-
-void run_cursor_task(Guest *g, const decomp::CallState &, GuestRegs &) {
-    State &s = state();
-    if (!s.split_active) return;
-    const gaddr menu = g_ld32(g, kMenuManager);
-    const gaddr manager = g_ld32(g, kCameraManager);
-    const gaddr field = g_ld32(g, kBattleManager);
-    if (menu == 0u || manager == 0u || field == 0u) return;
-    const gaddr cursor = g_ld32(g, manager + kCursorPart + 8u);
-    const gaddr fighter = g_ld32(g, field + 0x3Cu);
-    if (cursor == 0u || fighter == 0u) return;
-    if ((static_cast<std::uint16_t>(g_ld16s(g, cursor + 0x20u)) & 0x8000u) == 0u) return;  // not drawn now
-    const gaddr target = lock_target(g, fighter);
-    if (target == 0u) return;
-    const gaddr frame = g_push(g, 0x20u);
-    g_call2(g, kLockPoint, target, frame);
-    g_stf(g, frame + 0xCu, 1.0f);
-    g_call3(g, kMatrixApplyProjected, frame + 0x10u, kView2Matrix, frame);
-    float clip[4];
-    std::memcpy(clip, g_ptr(g, frame + 0x10u, 16u), 16u);
-    g_pop(g, 0x20u);
-    if (clip[3] < 0.0f) return;
-    const float x = window_x((clip[0] * 0.5f + 0.5f) * 480.0f, 1);
-    const float y = 272.0f - (clip[1] * 0.5f + 0.5f) * 272.0f;
-    if (x == kOffscreen) return;
-
-    // The cursor's layout; every other layout and sprite hidden for this draw.
-    struct Saved {
-        gaddr address;
-        std::uint32_t value;
-        int size;
-    };
-    std::vector<Saved> saved;
-    gaddr cursor_layout = 0u;
-    std::uint32_t guard = 0u;
-    for (gaddr layout = g_ld32(g, menu + 0x24u); layout != 0u && guard < 4096u; layout = g_ld32(g, layout + 0x24u)) {
-        for (gaddr sprite = g_ld32(g, layout); sprite != 0u && ++guard < 4096u; sprite = g_ld32(g, sprite + 0x3Cu))
-            if (sprite == cursor) cursor_layout = layout;
-    }
-    if (cursor_layout == 0u) return;
-    guard = 0u;
-    for (gaddr layout = g_ld32(g, menu + 0x24u); layout != 0u && ++guard < 4096u; layout = g_ld32(g, layout + 0x24u)) {
-        saved.push_back({layout + 0x14u, g_ld8(g, layout + 0x14u), 1});
-        if (layout != cursor_layout) g_st8(g, layout + 0x14u, static_cast<std::uint8_t>(g_ld8(g, layout + 0x14u) | 0x20u));
-    }
-    for (gaddr sprite = g_ld32(g, cursor_layout); sprite != 0u && ++guard < 8192u; sprite = g_ld32(g, sprite + 0x3Cu)) {
-        if (sprite == cursor) continue;
-        saved.push_back({sprite + 0x20u, static_cast<std::uint16_t>(g_ld16s(g, sprite + 0x20u)), 2});
-        saved.push_back({sprite + 0x30u, g_ld32(g, sprite + 0x30u), 4});
-        g_st16(g, sprite + 0x20u, static_cast<std::uint16_t>(g_ld16s(g, sprite + 0x20u) & 0x7FFF));
-        g_st32(g, sprite + 0x30u, 0u);
-    }
-    saved.push_back({cursor + 0x10u, g_ld32(g, cursor + 0x10u), 4});
-    saved.push_back({cursor + 0x14u, g_ld32(g, cursor + 0x14u), 4});
-    g_stf(g, cursor + 0x10u, x);
-    g_stf(g, cursor + 0x14u, y);
-    g_call1(g, kMenuDraw, menu);
-    for (auto it = saved.rbegin(); it != saved.rend(); ++it) {
-        if (it->size == 1) g_st8(g, it->address, static_cast<std::uint8_t>(it->value));
-        else if (it->size == 2) g_st16(g, it->address, static_cast<std::uint16_t>(it->value));
-        else g_st32(g, it->address, it->value);
-    }
-    static std::uint32_t lines = 0;
-    if (trace_markers() && lines < 3000u) {
-        ++lines;
-        std::printf("[markers] split %llu player 2's cursor at (%.0f, %.0f)\n",
-                    static_cast<unsigned long long>(s.frames), x, y);
+                    cursor2 ? " (player 2's cursor, right half)" : cursor ? " (player 1's cursor, left half)" : "");
         std::fflush(stdout);
     }
 }
@@ -709,8 +690,10 @@ struct Install {
         if (!on()) return;
         static const decomp::Override overrides[] = {
             {kSetPosition, "versus_set_position", decomp::Module::Main, decomp::Returns::Nothing, &run_set_position},
-            {kCursorTask, "versus_player2_cursor_task", decomp::Module::Main, decomp::Returns::Nothing,
-             &run_cursor_task},
+            {kCursorRelease, "versus_cursor_release", decomp::Module::BattleOverlay, decomp::Returns::Nothing,
+             &run_cursor_release},
+            {kCursorEnable, "versus_cursor_enable", decomp::Module::BattleOverlay, decomp::Returns::Nothing,
+             &run_cursor_enable},
             {kWorldToScreen, "versus_world_to_screen", decomp::Module::Main, decomp::Returns::Integer,
              &run_world_to_screen},
             {kCameraDrawThunk, "versus_camera_draw_thunk", decomp::Module::BattleOverlay, decomp::Returns::Nothing,
