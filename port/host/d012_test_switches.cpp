@@ -11,7 +11,10 @@
 //       so R + square enters EX Mode at once and the next HP attack that lands
 //       is an EX Burst. =2: the opponent's too, for player 2 in local versus.
 //   D012_TEST_LOW_HP=1           once a battle, the player's maximum HP set to
-//       50 (status block +0x0C), so the opponent wins at the next HP attack.
+//       50 (status block +0x0C), so the opponent wins at the next HP attack;
+//       =2 the opponent's.
+//   D012_TEST_FOUR_ROWS=1        the save's flag for Battle Mode's fourth row
+//       set (kept by an autosave).
 //
 // Facts (docs/research/roster-and-save.md, private research notes on the
 // status block): the save's flag field is at *(main 0x089D726C), tested as
@@ -81,14 +84,26 @@ void unlock_fighters(Runtime &rt) {
 
 void fill_ex_gauge(Runtime &rt, std::uint32_t slot_offset);
 
+// D012_TEST_FOUR_ROWS=1: the save's flag 0x400000 (its first flag word) set,
+// with which the start menu's Battle Mode has its fourth row (menu
+// 0x089E3DB8). An autosave keeps it: use a copy of the data directory.
+void four_rows(Runtime &rt) {
+    const std::uint32_t field = rt.memory().load32(kFlagFieldPointer);
+    if (!user_ram(field)) return;
+    const std::uint32_t word = rt.memory().load32(field);
+    if ((word & 0x400000u) != 0u) return;
+    rt.memory().store32(field, word | 0x400000u);
+    std::cout << "[d012] test: Battle Mode's fourth row unlocked (D012_TEST_FOUR_ROWS)\n";
+}
+
 // D012_TEST_LOW_HP=1: once a battle, the player's maximum HP (status +0x0C)
-// set to 50, which brings the HP down to it, so that the opponent wins at the
-// next HP attack (versus endings). The HP itself is elsewhere (not found).
-void lower_hp(Runtime &rt) {
+// set to 50, so that the opponent wins at the next HP attack (versus
+// endings); the HP is that less the damage taken (+0x08). =2: the opponent's.
+void lower_hp(Runtime &rt, std::uint32_t slot_offset) {
     static std::uint32_t lowered = 0;  // the status block lowered last
     const std::uint32_t manager = rt.memory().load32(kBattleManager);
     if (!user_ram(manager)) return;
-    const std::uint32_t fighter = rt.memory().load32(manager + kPlayerFighter);
+    const std::uint32_t fighter = rt.memory().load32(manager + slot_offset);
     if (!user_ram(fighter)) return;
     const std::uint32_t status = rt.memory().load32(fighter + kStatusBlock);
     if (!user_ram(status) || status == lowered) return;
@@ -136,16 +151,22 @@ void install(portablekit::HleRegistrar &hle) {
     const char *ex_text = portablekit::env("TEST_EX_FULL");
     const bool ex_both = ex_full && std::strcmp(ex_text, "2") == 0;
     const bool low_hp = flag("TEST_LOW_HP");
-    if (!unlock && !ex_full && !low_hp) return;
+    // D012_TEST_LOW_HP=2: the opponent's instead.
+    const std::uint32_t low_slot =
+        low_hp && std::strcmp(portablekit::env("TEST_LOW_HP"), "2") == 0 ? kOpponentFighter : kPlayerFighter;
+    const bool rows = flag("TEST_FOUR_ROWS");
+    if (!unlock && !ex_full && !low_hp && !rows) return;
     // sceDisplayWaitVblankStartCB and sceDisplayWaitVblankStart: once a
     // vblank wait, between two of the game's frames.
     for (const std::uint32_t nid : {0x46F186C3u, 0x984C27E7u}) {
         const portablekit::HleFunction previous = hle.bound_function("sceDisplay", nid);
         if (!previous) continue;
-        hle.bind("sceDisplay", nid, [previous, unlock, ex_full, ex_both, low_hp](Runtime &rt, AllegrexContext &ctx) {
+        hle.bind("sceDisplay", nid, [previous, unlock, ex_full, ex_both, low_hp, low_slot, rows](Runtime &rt,
+                                                                                               AllegrexContext &ctx) {
             if (unlock) unlock_fighters(rt);
+            if (rows) four_rows(rt);
             if (ex_full) fill_ex_gauges(rt, ex_both);
-            if (low_hp) lower_hp(rt);
+            if (low_hp) lower_hp(rt, low_slot);
             previous(rt, ctx);
         });
     }

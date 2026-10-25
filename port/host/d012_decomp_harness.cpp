@@ -166,6 +166,8 @@ struct Registered {
     Override o;
     std::uint64_t calls = 0;
     std::uint64_t verified = 0;
+    // The recompiled function the override stands in for, for call_original().
+    Runtime::RecompiledFunction original = nullptr;
 };
 
 struct Harness {
@@ -532,8 +534,12 @@ void live_entry(CorpusRuntime &corpus, AllegrexContext &ctx) {
 
 void register_set(Runtime &rt, Module module) {
     Harness &h = harness();
-    for (const Registered &reg : h.overrides) {
+    for (Registered &reg : h.overrides) {
         if (reg.o.module != module || !reg.o.live || h.verify_only) continue;
+        // The recompiled function now in place (the overlay's, after each
+        // install), kept for call_original().
+        const Runtime::RecompiledFunction original = rt.registered_function(reg.o.address);
+        if (original != nullptr && original != &live_entry) reg.original = original;
         rt.register_function(reg.o.address, &live_entry, std::string("d012_decomp_") + reg.o.name);
     }
 }
@@ -583,6 +589,36 @@ bool flag(const char *name) {
 }
 
 } // namespace
+
+void call_original(Guest *g, std::uint32_t address, GuestRegs &regs) {
+    Harness &h = harness();
+    const auto found = h.by_address.find(address);
+    if (found == h.by_address.end() || h.overrides[found->second].original == nullptr)
+        throw std::runtime_error("no recompiled function kept at " + hex(address));
+    Machine *m = static_cast<Machine *>(g->impl);
+    AllegrexContext c = m->caller;
+    load_arguments(c, regs);
+    c.gpr[29] = g->sp;
+    c.gpr[31] = kReturnMagic;
+    c.pc = address;
+    portablekit::Kernel &k = portablekit::kernel();
+    const bool dispatch = k.dispatch_enabled();
+    if (m->live) k.set_dispatch_enabled(false);
+    std::string error;
+    bool ok = true;
+    {
+        ChainOff chain_off(m->rt);
+        h.overrides[found->second].original(m->rt, c);
+    }
+    // What it calls or jumps to afterwards runs through dispatch, as in
+    // machine_call(), until it returns.
+    if (c.pc != kReturnMagic) ok = run_nested(m->rt, c, m->live, m->live ? ~0ull : 3'000'000ull, &error);
+    if (m->live) k.set_dispatch_enabled(dispatch);
+    if (!ok) throw std::runtime_error("original " + hex(address) + ": " + error);
+    regs.v0 = c.gpr[2];
+    regs.v1 = c.gpr[3];
+    regs.f0 = c.fpr[0];
+}
 
 void add_overrides(const Override *overrides, std::size_t count, bool enable) {
     Harness &h = harness();

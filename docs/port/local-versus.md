@@ -232,7 +232,8 @@ Decided (0.1): **the HUD is drawn once across the whole window**, laid out as th
 - Each view is a full 480x272 target, since every pass assumes one view at the origin (V).
 - Decided (0.1): **each half shows the middle of its view** (guest x 120 to 360 of 480, full height), the same
   picture a tall 8:9 camera with today's vertical field of view would give, with no projection change. On a
-  1920x1080 window at 4x that is 960x1088 per half. A thin dark line marks the split.
+  1920x1080 window at 4x that is 960x1088 per half. A thin dark line marks the split, over one guest pixel of each
+  view's inner edge (7.9).
 - Guest time per frame in 3D scenes is 6.5 to 7.3 ms ([performance.md](performance.md)); the draw half of it runs
   twice. Fine on the PC within the 33 ms of a 30 Hz frame; the Steam Deck is not measured.
 
@@ -243,7 +244,8 @@ Decided (0.1): **the HUD is drawn once across the whole window**, laid out as th
   a scripted camera is in charge.
 - **Frame interpolation.** It blends only perspective draws into the displayed framebuffer
   (`interpolation::mark_eligible`), so view 2 would stay at 30 fps. Matching already keys draws by target
-  (`DrawSummary::target`); it needs two eligible targets with a camera estimate each.
+  (`DrawSummary::target`); it needs two eligible targets with a camera estimate each. **Built differently: both
+  views draw into one target, and each draw carries its view (7.9).**
 - **Two gamepads**, as in 1.2.
 - **Render-target snapshots** for interpolated frames and the one-shot screen captures have to handle a second shown
   target.
@@ -267,7 +269,7 @@ Decided (0.1): **the HUD is drawn once across the whole window**, laid out as th
 - **Rewards: none** (0.1). A Quick Battle gives player 1's save experience, KP, PP and items (V: rewards go to the
   local slot, `battle:0x08B0B71C`). Versus skips all of it, and the battle records.
 - **Results: versus wording** (0.1). The stock results screen is worded from player 1's side; versus shows which
-  player won. Text and layout ids not mapped yet.
+  player won. Text and layout ids not mapped yet. **Built as a banner over the game's own ending (7.8).**
 - **EX Burst.** A human fighter gets the button sequence, through the bursting fighter's own pad as far as can be
   seen (I). Untested for slot 1. The EX Burst itself is a scripted camera, so it plays full screen.
 - **Disconnects.** A controller lost mid-battle pauses the battle with a message until a gamepad reconnects (0.1).
@@ -284,12 +286,12 @@ every Quick Battle a versus one, for the scripted tests (7.6).
    sessions. **Done (7.2, 7.7).**
 2. **The second view.** The per-view state of 2.3, the cropped halves and divider, the full-width HUD layer, full
    screen during scripted cameras, world-pinned pieces per view, then the screen-capture effects one by one (glass
-   crack, EX Revenge). 5 to 7 sessions. **Done but for EX Revenge, untested (7.5).**
-3. **60 fps on both halves.** Frame interpolation on two targets. 1 to 2 sessions. **Not started.**
+   crack, EX Revenge). 5 to 7 sessions. **Done (7.5, EX Revenge in 7.8).**
+3. **60 fps on both halves.** Frame interpolation on two targets. 1 to 2 sessions. **Done (7.9); not tried on the
+   Steam Deck.**
 4. **The menu row and polish.** Quick Battle (Player vs Player) under Battle Mode, "Connect a second controller",
-   CPU rows hidden, no replays or rewards, versus results wording, 1P / 2P labels. 3 sessions. **The row, the
-   connect notice and the labels done (7.6); CPU rows, replays, rewards, results wording and the loser's outro
-   open.**
+   CPU rows hidden, no replays or rewards, versus results wording, 1P / 2P labels. 3 sessions. **Done (7.6, 7.8):
+   the results wording is a winner banner over the game's own ending.**
 
 ## 7. Decisions
 
@@ -319,7 +321,8 @@ How it is built (branches `local-versus` here and in the PortableKit worktree `t
     middle half of view 1 and of the target as drawn now (view 2) side by side back into the target, with a dark
     line between them. The HUD, drawn next by the game, lies over both.
 - **Spike limits:** 30 fps with `D012_NO_PRESENT_THREAD=1`. Interpolated presents redraw the frame's recorded
-  draws, which don't include the two copies, so they don't show the split yet. Nothing in 2.3 is handled.
+  draws, which don't include the two copies, so they don't show the split yet (now they do, 7.9). Nothing in 2.3
+  is handled.
 
 Runs: recompiled build `tools/local/port/build-d012-versus`, data `build/port/data-versus-test` (a copy of
 `build/port/data-camera-test`), the right-stick camera's Quick Battle route (Lightning against Lightning), window
@@ -644,18 +647,16 @@ Mode rows):
 - Chosen with player 2's gamepad unplugged: the "not allowed" sound and the notice; the menu stays.
 - Quick Battle (1-on-1) chosen as usual with the mode built in: a stock battle against the CPU, full screen, no tags.
 
-Not done or not checked:
+Left open at the time, all done since (7.8):
 
 - **Four Battle Mode rows** (the save's flag `0x400000`, the "CROOM_T" room unlocked): the row goes to slot 0 of the
-  frame, as the Communication submenu's fifth row does; not seen.
-- **The row's lit label** is drawn dark on the bar: the game's rows put a second copy on the bar at locator 1, and
-  the row has one copy at locator 0 (no third free text id).
-- **Results wording, no rewards, no replays, CPU rows hidden:** not started. A versus battle still ends as a Quick
-  Battle does: player 1 losing gets "Return to Battle Setup / Rematch", player 1 winning the results screen with
-  rewards. The fallen fighter's HP was not found (status block `+0x0C` is the maximum HP), so there is no "Player N
-  wins" banner yet.
-- **The loser's outro is split:** player 1's fighter stays played (not handed to the CPU) after a loss, and no
-  battle-event bit is set, so the frame stays split with player 2's half on an empty floor.
+  frame, as the Communication submenu's fifth row does; not seen then.
+- **The row's lit label** was drawn dark on the bar: the game's rows put a second copy on the bar at locator 1, and
+  the row had one copy at locator 0.
+- **Results wording, no rewards, no replays, CPU rows hidden:** a versus battle ended as a Quick Battle does, with
+  rewards, and the fallen fighter's HP was not found yet.
+- **The loser's outro was split:** player 1's fighter stays played after a loss, and no battle-event bit is set, so
+  the frame stayed split with player 2's half on an empty floor.
 - `D012_TEST_LOW_HP=1` sets player 1's maximum HP to 50 once a battle, for reaching endings fast.
 
 ## 7.7 Phase 1's leftovers (25 October 2026)
@@ -674,6 +675,123 @@ Not done or not checked:
   player 1, its stages full screen (7.5), player 1's defence prompt, and the damage.
 - **A battle player 2 wins** (`p2results4/`): the finishing blow full screen, then the game's own ending for player 1
   losing. See 7.6 for what is still missing there.
+
+## 7.8 Endings, rewards, the setup screen and EX Revenge (phase 4, 25 October 2026)
+
+V unless marked. Runs local, in `build/port/versus/`.
+
+**A fighter's HP.** The status block (`fighter+0x52C`) holds the maximum HP at `+0x0C` and the damage taken at `+0x08`;
+the HP is the difference, as battle `0x089E0110` and main `0x08847964` read it. A fighter has fallen when it is 0 or
+less (with a maximum that is not 0).
+
+**The ending.**
+
+- Once a fighter has fallen, the split task keeps the frame one full view, as for an EX Burst, so the finishing blow
+  and the loser's outro are the game's own, full screen. 7.6's empty right half is gone.
+- The port draws a banner over the game's ending: "Player 1 wins", "Player 2 wins" or "Draw". The 1P / 2P tags go
+  at that point. The game's own ending follows as before, worded from player 1's side (the results screen, or
+  "Return to Battle Setup / Rematch"). The banner is the versus wording.
+- Checked: player 1 winning (`p1end3/`) and player 2 winning (`p2results5/`), both with
+  `D012_TEST_LOW_HP=1` or `=2` (now: `=2` lowers the opponent's maximum HP instead of player 1's).
+
+**No rewards.** The ending (`battle:0x08B07324`) gives each fighter's side its rewards (`0x08B0AD88`, once per
+fighter: experience, AP, gil, PP, items) and then lists the local player's (`0x08B0B71C`). In versus the first is
+skipped. The second still starts and shows its list, empty, as it would (list `*0x08B1D820`, `0x08B1CF0C`,
+`0x08B1D314`, then `0x08B1D544`), because the ending waits for it. Skipping that as well stalled the ending. The log
+says "[versus] no rewards for a versus battle". Checked: a versus win lists nothing, and a stock Quick Battle still
+gives its rewards (`stockend/`). **Replays:** neither Quick Battle ending offers to save one, so there was nothing to
+hide. **Not checked:** whether the battle records (win counts) still change after a versus battle.
+
+**`decomp::call_original`** (harness). An override that only sometimes replaces a function now runs the
+recompiled original otherwise. It is the function as registered before the override, taken at `register_set` with
+PortableKit's new `Runtime::registered_function` and run through `run_nested`. The two reward overrides and the
+setup hooks below use it.
+
+**The setup screen without the CPU rows.** Quick Battle's setup (the character room's setup object; start
+`menu:0x08AA6F0C`, redraw `0x08AA637C`) picks its tables by mode (`state+0x58C`):
+
+| | Quick Battle (mode 0) | Mode 2 |
+| --- | --- | --- |
+| Row layout | `0x08AA83E0`: Stage, Strength, Level, Type (CPU), Rules | `0x08AA8588`: Stage, Rules, Judgment, its own header with "L View Ruleset", a ruleset icon (part 6) |
+| Texts on the parts | `0x08AA7EF8` | `0x08AA8048` |
+| Display row to setting | `0x08AA8790`: 0, 3, 1, 2, 5 (count 6 with Enter Battle) | `0x08AA87A8`: 0, 5, 4 (count 4) |
+| Name plates | `0x08AA86F0`: part `0x3D` look 2, a red "CPU" | `0x08AA8710`: part `0x3D` look 1, a "GUEST" badge |
+
+A layout entry is four u16: part, look, parent part, parent locator. The rows table at `state+0x71C` is indexed by
+cursor − 1, and its count is the byte at `+0x720`. The settings are the same in both modes: Rules is setting 5,
+Judgment setting 4.
+
+What the port does (`d012_versus_menu.cpp`): the main functions the tables are handed to (`0x088D3CF0` attach,
+`0x088D3F00` attach again, `0x088D44EC` place texts) are overridden. In versus they run the original with these
+tables in place of Quick Battle's, all built below the EBOOT:
+
+- A row layout: Quick Battle's header and its first six entries, with mode 2's three rows on Quick Battle's first
+  three row places (locators 5, 4, 3), then mode 2's entries for the rows' own pieces (`0x08800C00`).
+- A texts table: Quick Battle's first entry (player 1's plate), then mode 2's rows (`0x08800B00`).
+- The name plates with the "GUEST" badge (`0x08800D00`).
+
+After the start's plate attachment, the rows table becomes mode 2's with count 4. The screen then reads Enter
+Battle, Stage, Rules, Judgment, with Quick Battle's header and plates, and "GUEST" over player 2's plate
+(`setup3/`). The battle is still a Quick Battle: the cursor, the settings, Enter Battle and the split battle after it
+work as before. **Not checked:** setting Judgment to anything but None, and what it does in a Quick Battle.
+
+**The row's lit label** (7.6's "drawn dark"): the label's two copies are now menu texts 0x50 (on the label part) and
+0x51 (on the bar at locator 1, as the game's rows have it). The help, which needs no slot of its own on a part, moved
+to the private text at `0x08800A80` (`kPrivateHelp`). Texts on a row's parts are drawn only from the menu's own
+array, so the private one could not carry the label. Checked lit and unlit (`rows_lit2/`).
+
+**Four Battle Mode rows** (`D012_TEST_FOUR_ROWS=1` sets the save's flag `0x400000`): the fourth row is "Labyrinth".
+The versus row goes to slot 0, under it, and lights, chooses and helps as with three rows (`rows_four/`).
+
+**EX Revenge** (`D012_TEST_REVENGE=1`: R + □ on player 1's pad the moment their Brave, the u16 at status `+0x14`,
+drops, which is when EX Mode becomes EX Revenge): the greyscale and slow motion show in both halves, each from its own
+camera (`revenge4/`). The 2.3 row is settled.
+
+## 7.9 60 fps on both halves (phase 3, 25 October 2026)
+
+PortableKit's frame interpolation draws the older of two recorded frames again with its transforms blended towards
+the newer one's. Before this, a split frame broke it in three ways:
+
+- the replay had no copies at the two markers, so it drew view 2 over view 1;
+- the draws of both views paired by mesh in drawing order across the views;
+- one camera motion, the median over all the frame's draws, was taken for both views.
+
+What changed (PortableKit, game-agnostic):
+
+- **Each draw knows its view** (`DrawSummary::split_view`, `ReplayGroup::split_view`): 0 before the left marker, 1
+  between the markers, 2 after the compose (the HUD). `take_split_left()` and `compose_split()` move the recording
+  frame's view on, and a frame whose compose happened is marked `split`.
+- **The matcher pairs draws within a view** (the view is part of a draw's key) and finds **a camera motion per view**
+  (`Matching::views`). The own-motion guard and the blend of each draw use its view's camera. The cut limits apply to
+  every view, each continuing its own previous motion. The top-level camera fields are the largest turn and move
+  over the views; with one view they are as before.
+- **The composite is a move, not a scale.** Each half is its view's middle moved a quarter of the width (left view
+  left, right view right). The dark line now covers one guest pixel of each view's inner edge instead of squeezing
+  the halves by one pixel.
+- **The replay draws each view into its half.** View 1's draws go with their viewport moved left a quarter of the
+  width, and view 2's moved right. Their scissors are cut at their half's edge. The dark line is cleared before the
+  first draw that lies over both. No copies are needed: the in-between frame comes out as the compose would make it.
+- **A frame that starts or ends the split** against its neighbour is a cut ("split changed"), shown as is.
+
+Checked (local, `build/port/data-versus-60`, a copy of `data-versus-test` with `video.frame_rate=60`):
+
+- **The replay check** (`D012_CHECK_REPLAY=1`): a split frame drawn again from its recording with nothing blended
+  against the frame itself. 424 and 555 of 2,088,960 pixels differ, none by more than 8 of 255 (`sixty1/`). The
+  halfway frames in a fight sit between the two frames in both halves.
+- **Rate** (`sixty2/`, about 25 seconds of battle with both players moving and turning their cameras): 60 of 60 fps
+  throughout, 99 to 100% of about 5,000 draws a frame matched, 0.35 to 0.5 ms a blended present. Two cuts, at quick
+  camera turns. Captures show both halves and the HUD whole.
+- **A stock Quick Battle** at 60 (`stock60/`): every replay check 0 pixels different, 60 of 60 fps, so one view
+  interpolates as before. The framework's tests pass, with a new one for two views (`split_views`).
+
+Not checked:
+
+- **The Steam Deck.** A split frame has about twice the draws to record and replay.
+- **The governor under load.** With the replay check on (a GPU wait every 150 frames), the governor stepped down to
+  45 and then 30 for the rest of that run. That is the check's cost, not the game's, but the split frame's extra
+  work leaves less room on a slower machine.
+- **The intro's white flash** blends one frame towards the white frame without a cut (`sixty1/replay_8250_*`). It
+  is not specific to the split.
 
 ## 8. For later: two copies over the game's ad hoc versus
 

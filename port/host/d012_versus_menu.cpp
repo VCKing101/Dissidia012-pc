@@ -34,7 +34,10 @@
 //     swap (menu 0x089E2A24): the row's help, and its highlight;
 //   - main 0x088D4BF4 (a menu sound), from Battle Mode's handler: the row
 //     chosen; Quick Battle (1-on-1) with versus on, or "Connect a second
-//     controller".
+//     controller";
+//   - main 0x088D3CF0, 0x088D3F00, 0x088D44EC and 0x088D428C, handed the
+//     battle setup's tables: in versus, the setup without the CPU rows (see
+//     "the battle setup" below).
 //
 // MIT licence; see port/README.md.
 
@@ -93,16 +96,18 @@ constexpr std::uint32_t kFont = 0x089D6998u;  // -> the text font
 constexpr std::uint32_t kSaveFlags = 0x089D726Cu;  // -> the save's flag words
 constexpr std::uint32_t kSoundRefused = 4u, kSoundChosen = 1u;
 // The row's parts, in ids the start menu leaves free (its parts end at 70).
-// Its label and the label's copy on the bar part are menu texts 0x50 and
-// 0x51, shown and hidden with the submenu through its texts table as the
-// other rows' are (the menu's own run to 0x4F, and 0x52 up are made as the
-// menu goes; it releases 0 to 0x58 at its end). The game's rows have a second
-// copy on the bar part (locator 1); the row has room for one. The help is
-// kept apart, in a word of its own below the EBOOT, and put on the help line
-// through it.
+// Its label on the label part and the label's copy on the bar part (locator
+// 1: the label as it reads on the lit bar) are menu texts 0x50 and 0x51,
+// shown and hidden with the submenu through its texts table as the other
+// rows' are (the menu's own run to 0x4F, 0x52 up are made as the menu goes,
+// and it releases 0 to 0x58 at its end). Texts on these parts draw only from
+// that array; the game's rows have a third copy (bar, locator 0) for which
+// there is no free id. The help is kept apart, in a word of its own below the
+// EBOOT, and put on the help line through it.
 constexpr std::uint32_t kPartLabel = 71u, kPartBar = 72u;
-constexpr std::uint32_t kTextLabel = 0x50u, kTextBar = 0x51u;
-constexpr std::uint32_t kRowHelp = 0x08800A80u;
+constexpr std::uint32_t kTextLabel = 0x50u, kTextBarLit = 0x51u;
+constexpr std::uint32_t kRowPrivate = 0x08800A80u;
+constexpr std::uint32_t kPrivateHelp = 0u, kPrivateCount = 1u;
 constexpr std::uint32_t kPartFree = 0x088DA060u;  // (part)
 constexpr std::uint32_t kLayoutFree = 0x088DAB44u;  // (layout), with its parts
 constexpr std::uint32_t kTextFree = 0x0887BA5Cu;  // (text)
@@ -206,21 +211,21 @@ void make_row(Guest *g, gaddr menu) {
     const gaddr texts = menu + kStateTexts;
     const std::uint32_t label = text_from_string(g, kLabelString);
     g_st32(g, texts + 4u * kTextLabel, label);
-    std::uint32_t copy = label != 0u ? g_call1(g, kTextCopy, label) : 0u;
+    const std::uint32_t copy = label != 0u ? g_call1(g, kTextCopy, label) : 0u;
     if (copy != 0u) {
         g_call1(g, kTextSetUp, copy);
         g_st32(g, copy + 0x10u, g_ld32(g, copy + 0x10u) & ~0x400u);
     }
-    g_st32(g, texts + 4u * kTextBar, copy);
-    const std::uint32_t on_parts[2][4] = {{kTextLabel, 9u, kPartLabel, 0u}, {kTextBar, 9u, kPartBar, 0u}};
+    g_st32(g, texts + 4u * kTextBarLit, copy);
+    const std::uint32_t on_parts[2][4] = {{kTextLabel, 9u, kPartLabel, 0u}, {kTextBarLit, 9u, kPartBar, 1u}};
     for (const auto &e : on_parts)
         if (g_ld32(g, texts + 4u * e[0]) != 0u) g_call8(g, kTextAttach, parts, texts, e[0], e[1], e[2], e[3], 0u, 0u);
     const std::uint32_t help = text_from_string(g, kHelpString);
-    g_st32(g, kRowHelp, help);
+    g_st32(g, kRowPrivate + 4u * kPrivateHelp, help);
     // Putting a text on a part shows it; the help line shows the row's help
     // only while the row is chosen.
     if (help != 0u) {
-        g_call8(g, kTextAttach, parts, kRowHelp, 0u, kHelpFlags, kHelpPart, 0u, 0u, 0u);
+        g_call8(g, kTextAttach, parts, kRowPrivate, kPrivateHelp, kHelpFlags, kHelpPart, 0u, 0u, 0u);
         g_st32(g, help + 0x10u, g_ld32(g, help + 0x10u) & ~0x400u);
     }
 
@@ -230,7 +235,7 @@ void make_row(Guest *g, gaddr menu) {
                                             static_cast<std::uint16_t>(slot)}};
     copy_table(g, kRowParts, g_ld32(g, kSubmenuParts), [&](gaddr p) { return ld16(g, p) == 0xFFFFu; }, row_parts, 2u);
     const std::uint16_t row_texts[2][4] = {{static_cast<std::uint16_t>(kTextLabel), 9u, static_cast<std::uint16_t>(kPartLabel), 0u},
-                                           {static_cast<std::uint16_t>(kTextBar), 9u, static_cast<std::uint16_t>(kPartBar), 0u}};
+                                           {static_cast<std::uint16_t>(kTextBarLit), 9u, static_cast<std::uint16_t>(kPartBar), 1u}};
     copy_table(g, kRowTexts, kGameTexts, [&](gaddr p) { return ld16(g, p + 4u) == 0xFFFFu; }, row_texts, 2u);
     const std::uint16_t row[1][4] = {{kPartLabel, kPartBar, static_cast<std::uint16_t>(slot),
                                       static_cast<std::uint16_t>(kRowType)}};
@@ -257,11 +262,13 @@ void free_row_parts(Guest *g, gaddr parts) {
     }
 }
 
-// The row's help released, after every part (the help line's part listed it).
-void free_row_help(Guest *g) {
-    const gaddr help = g_ld32(g, kRowHelp);
-    if (help != 0u) g_call1(g, kTextFree, help);
-    g_st32(g, kRowHelp, 0u);
+// The row's own texts released, after every part (their parts listed them).
+void free_row_texts(Guest *g) {
+    for (std::uint32_t i = 0; i < kPrivateCount; ++i) {
+        const gaddr text = g_ld32(g, kRowPrivate + 4u * i);
+        if (text != 0u) g_call1(g, kTextFree, text);
+        g_st32(g, kRowPrivate + 4u * i, 0u);
+    }
     state().menu = 0u;
 }
 
@@ -299,8 +306,10 @@ void run_make_parts(Guest *g, const decomp::CallState &in, GuestRegs &) {
 
 // main 0x088D428C (parts, texts, table, reset): the texts of `table` put on
 // their parts, the parts' text lists emptied first when `reset`.
+std::uint32_t setup_table(Guest *g, std::uint32_t table);
+
 void run_attach_texts(Guest *g, const decomp::CallState &in, GuestRegs &) {
-    const gaddr parts = in.gpr[4], texts = in.gpr[5], table = in.gpr[6];
+    const gaddr parts = in.gpr[4], texts = in.gpr[5], table = setup_table(g, in.gpr[6]);
     if ((in.gpr[7] & 0xFFu) != 0u) {
         for (gaddr p = table; ld16(g, p + 4u) != 0xFFFFu; p += 8u) {
             const gaddr part = g_ld32(g, parts + ld16(g, p + 4u) * 4u);
@@ -345,7 +354,7 @@ void run_free_layouts(Guest *g, const decomp::CallState &in, GuestRegs &) {
         g_call1(g, kLayoutFree, layout);
         g_st32(g, layouts + 4u * i, 0u);
     }
-    if (state().menu != 0u && layouts == state().menu + kStateLayouts && menu_resident(g)) free_row_help(g);
+    if (state().menu != 0u && layouts == state().menu + kStateLayouts && menu_resident(g)) free_row_texts(g);
 }
 
 // main 0x088D46E4 (cursor, row, a2, last row, t0, t1).
@@ -389,10 +398,10 @@ gaddr help_for_row(Guest *g, const decomp::CallState &in, gaddr text) {
     if (trace && menu_resident(g) && state().menu != 0u && from(in, kHelpSwap, kHelpSwapEnd))
         std::printf("[versus-menu] help swap text 0x%08X from 0x%08X, submenu %u, text 0 0x%08X, row's help 0x%08X\n",
                     text, in.gpr[31], g_ld32(g, state().menu + kStateSubmenu), g_ld32(g, state().menu + kStateTexts),
-                    g_ld32(g, kRowHelp));
+                    g_ld32(g, kRowPrivate + 4u * kPrivateHelp));
     if (!from(in, kHelpSwap, kHelpSwapEnd) || !in_battle_mode(g)) return 0u;
     if (text != g_ld32(g, state().menu + kStateTexts)) return 0u;
-    return g_ld32(g, kRowHelp);
+    return g_ld32(g, kRowPrivate + 4u * kPrivateHelp);
 }
 
 // main 0x0887B924 (text): shown.
@@ -434,6 +443,122 @@ void run_sound(Guest *g, const decomp::CallState &in, GuestRegs &out) {
     out.v0 = sound < 0x29u ? g_call4(g, kPlaySound, 0u, g_ld32(g, kSounds + sound * 4u), 1u, 0u) : 0u;
 }
 
+// ---- the battle setup ----------------------------------------------------------
+//
+// Quick Battle's setup screen (the character room's setup object, menu
+// 0x08AA5B6C and around) picks its rows by mode when it starts (menu
+// 0x08AA6F0C): a table of display rows to settings at state +0x71C and a
+// count at +0x720, a layout of the rows' parts, and a table of the settings'
+// texts on them. Quick Battle has Stage, Strength (CPU), Level (CPU), Type
+// (CPU) and Rules (layout 0x08AA83E0, texts 0x08AA7EF8, rows 0x08AA8790);
+// mode 2 (state +0x58C) has Stage, Rules and Judgment (layout 0x08AA8588,
+// texts 0x08AA8048, rows 0x08AA87A8: four rows with Enter Battle). In versus
+// the Quick Battle setup gets mode 2's rows: the main functions the tables
+// are handed to (attach parts, put texts on parts, place texts) take a row
+// layout of both (below), a texts table of Quick Battle's first entry (player
+// 1's name plate, as Quick Battle draws it) and mode 2's rows, and the name
+// plates with a "GUEST" badge on the right one instead of "CPU"; the rows
+// follow right after the start's last attachment (the name plates, layout
+// 0x08AA86F0).
+//
+// A layout entry is four u16: part, animation, parent part, parent locator.
+// Mode 2's layout has its own header (part 4, animation 6, with "L View
+// Ruleset") and a ruleset icon (part 6) under player 1's level; the versus
+// layout keeps Quick Battle's header and its first six entries, with mode 2's
+// three rows on Quick Battle's first three row places (locators 5, 4, 3), and
+// then mode 2's entries from part 0xE on (the rows' own pieces). The name
+// plates' entry for part 0x3D takes mode 2's animation 1, a "GUEST" badge,
+// instead of Quick Battle's 2, the red "CPU".
+constexpr std::uint32_t kSetupStartAttach = 0x08AA86F0u;
+constexpr std::uint32_t kSetupTexts = 0x08800B00u;   // the versus texts table, below the EBOOT
+constexpr std::uint32_t kSetupLayout = 0x08800C00u;  // the versus row layout
+constexpr std::uint32_t kSetupPlates = 0x08800D00u;  // the versus name plates
+
+void put_entry(Guest *g, gaddr at, std::uint16_t part, std::uint16_t animation, std::uint16_t parent,
+               std::uint16_t locator) {
+    g_st32(g, at, part | static_cast<std::uint32_t>(animation) << 16u);
+    g_st32(g, at + 4u, parent | static_cast<std::uint32_t>(locator) << 16u);
+}
+
+std::uint32_t setup_table(Guest *g, std::uint32_t table) {
+    if (!versus::active()) return table;
+    switch (table) {
+    case 0x08AA83E0u: {
+        static const std::uint16_t head[][4] = {{4, 5, 0, 9}, {5, 0, 4, 6}, {7, 6, 4, 6},
+                                                {8, 8, 4, 5}, {9, 8, 4, 4}, {0xA, 8, 4, 3}};
+        gaddr at = kSetupLayout;
+        for (const auto &e : head) {
+            put_entry(g, at, e[0], e[1], e[2], e[3]);
+            at += 8u;
+        }
+        // Mode 2's from part 0xE on, with the terminator.
+        for (gaddr p = 0x08AA85C0u; at < kSetupPlates; p += 8u, at += 8u) {
+            g_st32(g, at, g_ld32(g, p));
+            g_st32(g, at + 4u, g_ld32(g, p + 4u));
+            if (ld16(g, p) == 0xFFFFu) break;
+        }
+        return kSetupLayout;
+    }
+    case kSetupStartAttach:
+        put_entry(g, kSetupPlates, 0x3A, 0xA, 0, 7);
+        put_entry(g, kSetupPlates + 8u, 0x3B, 0xC, 0, 6);
+        put_entry(g, kSetupPlates + 16u, 0x3D, 1, 0x3B, 0);
+        put_entry(g, kSetupPlates + 24u, 0xFFFF, 0xFFFF, 0xFFFF, 0);
+        return kSetupPlates;
+    case 0x08AA7EF8u: {
+        // Quick Battle's first entry, then mode 2's from its third (its
+        // first two are the name plates in its own style).
+        g_st32(g, kSetupTexts, g_ld32(g, 0x08AA7EF8u));
+        g_st32(g, kSetupTexts + 4u, g_ld32(g, 0x08AA7EFCu));
+        std::uint32_t n = 1;
+        for (gaddr p = 0x08AA8048u + 16u; n < 32u; p += 8u, ++n) {
+            g_st32(g, kSetupTexts + 8u * n, g_ld32(g, p));
+            g_st32(g, kSetupTexts + 8u * n + 4u, g_ld32(g, p + 4u));
+            if (ld16(g, p + 4u) == 0xFFFFu) break;
+        }
+        return kSetupTexts;
+    }
+    default: return table;
+    }
+}
+
+GuestRegs arguments(const decomp::CallState &in) {
+    GuestRegs regs{};
+    for (int i = 0; i < 8; ++i) regs.a[i] = in.gpr[4 + i];
+    for (int i = 0; i < 4; ++i) regs.f[i] = in.fpr[12 + i];
+    return regs;
+}
+
+// main 0x088D3CF0 (layouts, parts, table): parts animated and attached.
+void run_setup_attach(Guest *g, const decomp::CallState &in, GuestRegs &) {
+    GuestRegs regs = arguments(in);
+    regs.a[2] = setup_table(g, in.gpr[6]);
+    decomp::call_original(g, 0x088D3CF0u, regs);
+    if (in.gpr[6] == kSetupStartAttach && versus::active()) {
+        // The setup's state is the parts' owner: parts at +0x10.
+        const gaddr setup = in.gpr[5] - 0x10u;
+        if (g_ld32(g, setup + 0x71Cu) == 0x08AA8790u) {
+            g_st32(g, setup + 0x71Cu, 0x08AA87A8u);
+            g_st8(g, setup + 0x720u, 4u);
+            std::cout << "[versus] battle setup without the CPU rows" << std::endl;
+        }
+    }
+}
+
+// main 0x088D3F00 (layouts, parts, table): parts attached again.
+void run_setup_reattach(Guest *g, const decomp::CallState &in, GuestRegs &) {
+    GuestRegs regs = arguments(in);
+    regs.a[2] = setup_table(g, in.gpr[6]);
+    decomp::call_original(g, 0x088D3F00u, regs);
+}
+
+// main 0x088D44EC (parts, texts, table): texts placed on their parts.
+void run_setup_place_texts(Guest *g, const decomp::CallState &in, GuestRegs &) {
+    GuestRegs regs = arguments(in);
+    regs.a[2] = setup_table(g, in.gpr[6]);
+    decomp::call_original(g, 0x088D44ECu, regs);
+}
+
 struct Install {
     Install() {
         if (!versus::enabled()) return;
@@ -444,6 +569,9 @@ struct Install {
             {0x088D428Cu, "versus_menu_attach_texts", Module::Main, Returns::Nothing, &run_attach_texts},
             {0x088D3C24u, "versus_menu_free_parts", Module::Main, Returns::Nothing, &run_free_parts},
             {0x088D3A04u, "versus_menu_free_layouts", Module::Main, Returns::Nothing, &run_free_layouts},
+            {0x088D3CF0u, "versus_setup_attach", Module::Main, Returns::Nothing, &run_setup_attach},
+            {0x088D3F00u, "versus_setup_reattach", Module::Main, Returns::Nothing, &run_setup_reattach},
+            {0x088D44ECu, "versus_setup_place_texts", Module::Main, Returns::Nothing, &run_setup_place_texts},
             {0x088D46E4u, "versus_menu_cursor", Module::Main, Returns::Nothing, &run_cursor},
             {0x0887B924u, "versus_menu_text_show", Module::Main, Returns::Nothing, &run_text_show},
             {0x0887B944u, "versus_menu_text_hide", Module::Main, Returns::Nothing, &run_text_hide},

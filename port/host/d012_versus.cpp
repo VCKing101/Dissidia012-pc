@@ -115,6 +115,7 @@ struct State {
     // In a versus battle, player 1's fighter played (not the CPU's, as in the
     // intro), at the last pad read: the 1P / 2P labels show.
     bool fighting = false;
+    std::uint32_t fallen = 0;  // bit 0 player 1's fighter, bit 1 player 2's
     bool chosen = false;      // the Battle Mode row was chosen
     bool start_menu = false;  // the start menu is up (player 2's pad looked for)
     // Pad reads left for the notice "Connect a second controller".
@@ -213,13 +214,26 @@ void trace_fighters(psprecomp::GuestMemory &memory, const State &s) {
 
 // Whether player 1's fighter is played: the intro hands it to the CPU (its
 // AI, fighter +0x5C4, in mode 0 at +0x54).
+//
+// And who has fallen: a fighter's HP is its status block's (fighter +0x52C)
+// maximum at +0x0C less the damage taken at +0x08 (as battle 0x089E0110 and
+// main 0x08847964 read it), 0 or less once fallen.
 void read_fighting(psprecomp::GuestMemory &memory, State &s, bool battle) {
     s.fighting = false;
+    s.fallen = 0u;
     const std::uint32_t field = battle ? memory.load32(kBattleManager) : 0u;
     if (!user_ram(field)) return;
     const std::uint32_t player = memory.load32(field + 0x38u);
     const std::uint32_t ai = user_ram(player) ? memory.load32(player + kFighterAi) : 0u;
     s.fighting = user_ram(ai) && memory.load32(ai + 0x54u) != 0u;
+    for (std::uint32_t i = 0; i < 2u; ++i) {
+        const std::uint32_t fighter = memory.load32(field + 0x38u + 4u * i);
+        const std::uint32_t status = user_ram(fighter) ? memory.load32(fighter + 0x52Cu) : 0u;
+        if (!user_ram(status)) continue;
+        const std::int32_t hp = static_cast<std::int32_t>(memory.load32(status + 0x0Cu)) -
+                                static_cast<std::int32_t>(memory.load32(status + 0x08u));
+        if (hp <= 0 && memory.load32(status + 0x0Cu) != 0u) s.fallen |= 1u << i;
+    }
 }
 
 // battle 0x08B2F2E4, with the Quick Battle set-up's CPU call for slot 1
@@ -266,6 +280,48 @@ void check_set_ai_mode(Guest *g, const decomp::CallState &in, GuestRegs &out) {
     out.v0 = g_call2(g, kAiSetMode, ai, mode) == 0u ? 0u : 0xFFFFFFFDu;
 }
 
+// No rewards in a versus battle (docs/port/local-versus.md 0.1). The battle's
+// ending (battle 0x08B07324) works out and gives each fighter's side its
+// rewards, experience, AP, gil, PP and items (battle 0x08B0AD88, for each
+// fighter), then lists them for the local player (battle 0x08B0B71C). In
+// versus both are left out; otherwise the game's own run.
+constexpr std::uint32_t kGiveRewards = 0x08B0AD88u;
+constexpr std::uint32_t kListRewards = 0x08B0B71Cu;
+
+GuestRegs arguments(const decomp::CallState &in) {
+    GuestRegs regs{};
+    for (int i = 0; i < 8; ++i) regs.a[i] = in.gpr[4 + i];
+    for (int i = 0; i < 4; ++i) regs.f[i] = in.fpr[12 + i];
+    return regs;
+}
+
+void run_give_rewards(Guest *g, const decomp::CallState &in, GuestRegs &) {
+    if (active()) return;
+    GuestRegs regs = arguments(in);
+    decomp::call_original(g, kGiveRewards, regs);
+}
+
+// The list is still started and shown, empty, as the list function starts
+// it (battle 0x08B1CF0C and 0x08B1D314 on the list *0x08B1D820) and shows it
+// (battle 0x08B1D544): the ending waits for it before the save and the menu.
+void run_list_rewards(Guest *g, const decomp::CallState &in, GuestRegs &) {
+    if (active()) {
+        static bool told = false;
+        if (!told) {
+            told = true;
+            std::cout << "[versus] no rewards for a versus battle" << std::endl;
+        }
+        const gaddr list = g_ld32(g, 0x08B1D820u);
+        const std::uint32_t kind = g_call1(g, 0x088908F0u, in.gpr[4]);
+        g_call2(g, 0x08B1CF0Cu, list, kind);
+        g_call1(g, 0x08B1D314u, list);
+        g_call2(g, 0x08B1D544u, list, 0u);
+        return;
+    }
+    GuestRegs regs = arguments(in);
+    decomp::call_original(g, kListRewards, regs);
+}
+
 #if defined(PORTABLEKIT_HAS_RENDERER)
 // The notice over a paused battle whose controller went away: a band in the
 // middle of the game's picture, in the PSP's pixels scaled to where the
@@ -303,9 +359,9 @@ void notice_draw() {
 
 // In a versus battle while player 1's fighter is played (not in the intro):
 // "1P" and "2P" over the portraits (the stock HUD names neither player; the
-// word under Lightning's portrait is her paradigm). They stay on the loser's
-// outro, which keeps the fighters played.
-bool hud_visible() { return active() && state().fighting; }
+// word under Lightning's portrait is her paradigm). Once a fighter has fallen,
+// the winner instead.
+bool hud_visible() { return active() && (state().fighting || state().fallen != 0u); }
 
 void hud_draw() {
     const portablekit::ui::GamePicture picture = portablekit::ui::game_picture();
@@ -324,8 +380,18 @@ void hud_draw() {
         ImU32 colour;
     } tags[2] = {{38.0f, "1P", IM_COL32(70, 130, 255, 235)}, {442.0f, "2P", IM_COL32(235, 70, 70, 235)}};
     for (const auto &tag : tags) {
+        if (state().fallen != 0u) break;
         draw->AddRectFilled(at(tag.x - 11.0f, 190.0f), at(tag.x + 11.0f, 201.0f), tag.colour, 3.0f * sy);
         centred(8.5f, tag.x, 195.5f, IM_COL32(255, 255, 255, 255), tag.label);
+    }
+    // Once a fighter has fallen: who won, over the game's own ending (player
+    // 1's results, or player 1's "Return to Battle Setup / Rematch").
+    const std::uint32_t fallen = state().fallen;
+    if (fallen != 0u) {
+        const char *line = fallen == 3u ? "Draw" : fallen == 2u ? "Player 1 wins" : "Player 2 wins";
+        draw->AddRectFilled(at(150.0f, 18.0f), at(330.0f, 46.0f), IM_COL32(10, 14, 40, 215), 4.0f * sy);
+        draw->AddRect(at(150.0f, 18.0f), at(330.0f, 46.0f), IM_COL32(255, 196, 64, 255), 4.0f * sy, 0, 1.2f * sy);
+        centred(15.0f, 240.0f, 32.0f, IM_COL32(255, 222, 130, 255), line);
     }
 }
 #endif
@@ -336,6 +402,10 @@ struct Install {
         static const decomp::Override overrides[] = {
             {kSetAiMode, "versus_set_ai_mode", decomp::Module::BattleOverlay, decomp::Returns::Integer,
              &run_set_ai_mode, true, nullptr, &check_set_ai_mode},
+            {kGiveRewards, "versus_give_rewards", decomp::Module::BattleOverlay, decomp::Returns::Nothing,
+             &run_give_rewards},
+            {kListRewards, "versus_list_rewards", decomp::Module::BattleOverlay, decomp::Returns::Nothing,
+             &run_list_rewards},
         };
         decomp::add_overrides(overrides, sizeof overrides / sizeof overrides[0], true);
     }
@@ -421,6 +491,7 @@ void install(portablekit::HleRegistrar &hle) {
             s.connected = s.pad.connected;
             s.picking = false;
             s.fighting = false;
+            s.fallen = 0u;
             return;
         }
         read_fighting(memory, s, battle);
@@ -451,6 +522,21 @@ void install(portablekit::HleRegistrar &hle) {
             --s.pause1_reads;
             for (std::uint32_t i = 0; i < count; ++i)
                 memory.store32(buffer + i * 16u + 4u, memory.load32(buffer + i * 16u + 4u) | kStart);
+        }
+        // D012_TEST_REVENGE=1, a test switch: R + square on player 1's pad
+        // for the read in which player 1's Bravery (status block +0x14)
+        // drops, the moment a hit lands, which is when EX Mode is EX Revenge.
+        static const bool revenge = std::getenv("D012_TEST_REVENGE") != nullptr;
+        if (revenge && battle && buffer != 0u) {
+            static std::uint32_t last = 0;
+            const std::uint32_t field = memory.load32(kBattleManager);
+            const std::uint32_t player = user_ram(field) ? memory.load32(field + 0x38u) : 0u;
+            const std::uint32_t status = user_ram(player) ? memory.load32(player + 0x52Cu) : 0u;
+            const std::uint32_t brave = user_ram(status) ? memory.load16(status + 0x14u) : 0u;
+            if (brave < last)
+                for (std::uint32_t i = 0; i < count; ++i)
+                    memory.store32(buffer + i * 16u + 4u, memory.load32(buffer + i * 16u + 4u) | 0x0200u | 0x8000u);
+            last = brave;
         }
         feed_raw_pad1(memory, s);
         trace_fighters(memory, s);

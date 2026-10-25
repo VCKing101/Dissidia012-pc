@@ -705,10 +705,17 @@ void run_split_task(Guest *g, const decomp::CallState &in, GuestRegs &) {
     // fighter's +0x5B1 bit 0x80, set at its start, battle 0x08A3EE44, and
     // cleared at its end, 0x08A3F448): the frame stays one full view, and
     // player 2's cursor is hidden.
+    // The same once a fighter has fallen (the ending is the game's own, one
+    // view): its HP, the status block's (fighter +0x52C) maximum at +0x0C less
+    // the damage taken at +0x08 (battle 0x089E0110), is 0 or less.
     const gaddr field = g_ld32(g, kBattleManager);
     const auto in_event = [&](std::uint32_t slot_offset) {
         const gaddr fighter = field != 0u ? g_ld32(g, field + slot_offset) : 0u;
-        return fighter != 0u && (g_ld8(g, fighter + 0x5B1u) & 0x80u) != 0u;
+        if (fighter == 0u) return false;
+        if ((g_ld8(g, fighter + 0x5B1u) & 0x80u) != 0u) return true;
+        const gaddr status = g_ld32(g, fighter + 0x52Cu);
+        return status != 0u && g_ld32(g, status + 0x0Cu) != 0u &&
+               g_ld32s(g, status + 0x0Cu) - g_ld32s(g, status + 0x08u) <= 0;
     };
     if (g_ld32(g, manager + 0x804u) == 2u || g_ld8(g, manager + 0x9E0u) == 1u || in_event(0x38u) ||
         in_event(0x3Cu)) {

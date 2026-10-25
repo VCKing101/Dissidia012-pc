@@ -72,6 +72,12 @@ struct Override {
 // first overlay loads. D012_DECOMP_VERIFY=1 tests them.
 void add_overrides(const Override *overrides, std::size_t count, bool enable);
 
+// From inside an override: runs the recompiled function it stands in for,
+// with the arguments in `regs` (a0-a3, t0-t3, f12-f15); its results come
+// back in `regs` (v0/v1/f0). For an override that changes a function only
+// sometimes (local versus: no rewards in a versus battle).
+void call_original(Guest *g, std::uint32_t address, GuestRegs &regs);
+
 // Checks the decompiled `run` against the original at `address`, called with
 // the argument registers in `arguments` (a0-a3, t0-t3, f12-f15) and the rest
 // of the state of the current call. Only while the test is on.
