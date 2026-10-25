@@ -515,3 +515,38 @@ uploads take the queue lock; no pack was loaded), and ad hoc play.
 The repository's tools changed with it (not committed): `run_d012.py --affinity`, `perf_tour.py --data-dir
 --affinity --tag` and its new statistics, `gfx_tour.py --data-dir --out`, `check_quit_crash.py --build-dir`. The
 patch files for `port/portablekit-patches/` and the README's framework table are left for the merge.
+
+## 10. Hitches the first time after a boot: the disc image (26 October 2026)
+
+The owner remembered the game hanging for a moment while things loaded, the last time they played (a while before),
+and wondered whether it was shaders caching for both cameras. Measured on the PC (RX 9070 XT, disc image on G:, a 5400 rpm SMR hard
+drive), with the versus route of `docs/port/local-versus.md` 7.9 at 60 fps, `D012_PERF_CSV` and `D012_TRACE_IO`, which
+now gives each read's time and whether it was asynchronous.
+
+- **The battle reads almost nothing from the disc.** The game loads a battle on its loading screen (`PACKAGE.BIN`,
+  mostly asynchronous reads). In the fight only the music streams, about 48 KiB at a time.
+- **The one stall with a cold file cache** is the battle's first music block: 96 KiB read synchronously as the battle
+  starts, 85 ms from the cold drive, which made a 116 ms frame. A cold cache without a reboot: the image copied with
+  unbuffered I/O (`robocopy /J`) and the copy's folder given as `D012_GAME_DIR`.
+- **Shaders: not a cause here.** Without the port's pipeline cache a versus battle made 68 pipelines in 4 ms (section
+  4.5). The driver's own shader cache was warm. AMD's driver has no switch to turn it off for one process, so a first
+  run on a new machine or driver is not measured.
+- **Longer stalls (0.3 to 2.5 s)** came only while the drive was still writing a fresh 881 MB copy of a data folder
+  (section 4.4): writes from the port itself (its logs) are held back then. Not something a player would meet.
+
+**The fix** (PortableKit `IsoImage::read_through_in_background`): from launch, a thread reads the whole image once and
+throws the bytes away, so the system's file cache holds it by the time the game needs it. On Windows the thread runs
+in background mode, which lowers its I/O priority below the game's own reads. It is not started for an image larger
+than half the machine's memory. `D012_NO_DISC_READ_THROUGH` turns it off.
+
+| Cold file cache | Without | With |
+| --- | --- | --- |
+| The battle's first music block | 85 ms | 11.5 ms |
+| The first battle frame | 116 ms | 47 ms |
+| Reads over 10 ms, the whole run | 19, 1.4 s in all | 17, 0.6 s in all |
+| The read-through | | 1,673 MiB in 33.6 s |
+
+The scripted route rushes through the menus, so the read-through ended just after the battle began. At normal speed,
+the title screen and the menus take longer than that. Not checked: the Steam Deck (no lower I/O priority there; a
+microSD card reads 1.7 GB in about 20 s), and how much it slows the first loading screens on a hard drive (the whole
+run took 1.2 s longer).
