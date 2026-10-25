@@ -462,6 +462,52 @@ port asked for a second pad, PortableKit's scan stopped at the first spare pad. 
 a second player is wanted, so the input script's second pad takes player 2's place from a real one, as its first
 pad does player 1's.
 
+## 7.4 The lock-on cursor and the damage numbers per view (25 October 2026)
+
+V unless marked. Found with `D012_TRACE_MARKERS=1`, which logs the projections and the HUD's sprite placements.
+
+- **The world-to-screen function** (main `0x08866E04`, `(out, in)`) is the HUD's only use of the graphics manager's
+  view×projection (`gfx+0x830`). Now an exact native copy (an override), for the trace and for the popups below.
+  In a fight it is called only at hits.
+- **The lock-on cursor** is the camera manager's part at `mgr+0x878` (`battle:0x08B41BDC`). The camera update runs
+  it for the on-screen camera's fighter: it projects the lock target through the manager's own view and
+  projection, and places one HUD sprite (`*(mgr+0x880)`) through main `0x088D9C60` from `battle:0x08B418C8`.
+- **Damage and Brave numbers** come from main `0x08858CB8` on `*0x089D4DC8 + 0x190`.
+  - At a hit it projects a point once and keeps the screen position in a ring of 10 (start `+0x330`, count
+    `+0x334`, 0x50 bytes each, position `+0x20`), with offsets `+0x33C/+0x340` and a jitter of up to 15 px on one
+    path.
+  - The popups animate in screen space and are drawn by battle draw task 83000 (main `0x0888819C`), so in both
+    passes.
+- **The HUD** is drawn in 2D only (through mode) by the menu manager (`*0x089D7830`, draw main `0x088CED50`):
+  - a list of layouts at `+0x24`, linked through `+0x24`;
+  - a layout draws while flag byte `+0x14` has bit 1 and not `0x0C` or `0x20`;
+  - its sprites are linked through `+0x3C`, and one draws while `u16 +0x20` has `0x8000`.
+
+What the port does (`d012_split_view.cpp`):
+
+| Piece | How |
+| --- | --- |
+| Player 1's cursor | Its placement (main `0x088D9C60`, now an override, called from `battle:0x08B418C8`) is moved into the left half: x − 120, or off screen outside player 1's crop (guest x 120 to 360) |
+| Player 2's cursor | A task in the system list right after `MENU_MANAGER::Draw` (priority 70035; owner `*(*0x089D69A8 + 0x2000)`) draws the menu manager again with every other layout and sprite hidden. The cursor is moved to player 2's lock target (the lock-on mode's vtable `+0x70`, its lock point main `0x0883820C`) projected through view 2's view×projection, which the split task keeps. Everything is put back after |
+| Damage numbers | When the spawner projects, the projection records the world point for the ring slot the spawner fills next. Before the second pass, each live popup moves to its place in view 2, keeping its own jitter and rise; afterwards it goes back. Player 1's half needs nothing: its popups are drawn into player 1's frame and cropped with it |
+
+Checked (`build/port/versus/cursor2/`, `popups1/`, local):
+
+- **Order's Sanctuary**, both fighters in view: player 1's cursor rings player 2's fighter in the left half, and
+  player 2's rings player 1's in the right half.
+- **A fight with hits:** the Brave numbers float over the fighter that was hit, in each half where that fighter is
+  in view.
+
+Not done:
+
+- **Player 2's cursor looks like player 1's.** It is the same sprite, so it shares player 1's animation and its
+  distance scale, and it shows only while player 1's cursor is shown.
+- **Player 2's cursor sits a little high.** It aims at the target's lock point, not the bone the game uses for
+  player 1's (`0x088353C8` and `0x08812664`).
+- **Popups matched by position:** a popup takes a recorded point only while it lies within 64 by 160 px of where
+  that point was projected; otherwise it keeps player 1's place in the second pass.
+- **Not looked at:** other world-pinned HUD pieces (called-assist markers, EX core arrows, if any).
+
 ## 8. For later: two copies over the game's ad hoc versus
 
 The owner wants this route for online play and matchmaking, much later. What was found:
