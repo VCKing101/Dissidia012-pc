@@ -28,6 +28,7 @@
 // MIT licence; see port/README.md.
 
 #include "d012_decomp_harness.hpp"
+#include "d012_versus.hpp"
 
 #include <array>
 #include <climits>
@@ -37,6 +38,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <string>
 #include <vector>
 
 namespace d012::split_view {
@@ -80,6 +82,8 @@ constexpr std::uint32_t kCursorRelease = 0x08B41B24u;    // (part): its sprite r
 constexpr std::uint32_t kCursorEnable = 0x08B41B40u;     // (part, shown)
 // Player 2's cursor part, below the EBOOT as the split task.
 constexpr std::uint32_t kPlayer2Cursor = 0x08800400u;
+// View 2's eye (a vec4), made there for the view's eye setter.
+constexpr std::uint32_t kView2Eye = 0x08800600u;
 constexpr std::uint32_t kVec4Copy = 0x089A3868u;         // (out, in)
 constexpr std::uint32_t kMatrixApplyProjected = 0x089A4AF8u;  // (out, matrix, vec4)
 constexpr std::uint32_t kViewProjection = 0x830u;        // gfx: view x projection
@@ -116,12 +120,10 @@ constexpr std::uint32_t kManagerView = 0xC0u + 0x50u;  // view, vectors, matrice
 constexpr std::uint32_t kGraphicsCamera = 0x720u;
 constexpr std::uint32_t kGraphicsCameraSize = 0x8B0u - 0x720u;
 
+// The overrides go in when the mode is built in; they act only while versus
+// is active.
 bool on() {
-    static const bool value = [] {
-        const char *text = std::getenv("D012_LOCAL_VERSUS");
-        return text != nullptr && *text != '\0' && std::strcmp(text, "0") != 0;
-    }();
-    return value;
+    return versus::enabled();
 }
 
 struct State {
@@ -196,14 +198,20 @@ void add_task(Guest *g) {
 
 void run_camera_draw_thunk(Guest *g, const decomp::CallState &, GuestRegs &) {
     g_call1(g, kCameraDraw, g_ld32(g, kCameraManager));
-    if (!state().running) add_task(g);
+    if (!state().running && versus::active()) add_task(g);
 }
 
 // The opponent's camera slot in the manager, or -1.
 int opponent_slot(Guest *g, std::uint32_t manager) {
     const std::uint32_t field = g_ld32(g, kBattleManager);
     if (field == 0u) return -1;
-    const std::uint32_t fighter = g_ld32(g, field + 0x3Cu);
+    // D012_SPLIT_SAME_VIEW=1, a test switch: the second view from player 1's
+    // camera too, to tell a second-pass problem from a player 2 one.
+    static const bool same = [] {
+        const char *text = std::getenv("D012_SPLIT_SAME_VIEW");
+        return text != nullptr && *text != '\0' && std::strcmp(text, "0") != 0;
+    }();
+    const std::uint32_t fighter = g_ld32(g, field + (same ? 0x38u : 0x3Cu));
     if (fighter == 0u) return -1;
     const std::uint32_t camera = g_ld32(g, fighter + 0x5ACu);
     if (camera == 0u) return -1;
@@ -341,6 +349,306 @@ void frame_start_state(Guest *g, std::uint32_t graphics) {
 void popups_to_view2(Guest *g, std::vector<std::pair<gaddr, std::array<std::uint32_t, 2>>> &saved);
 bool trace_markers();
 
+// The map's fading of objects close to the camera (docs/port/local-versus.md,
+// section 7.5). The map (*0x089D6AC8) keeps 16 fade slots of 10 bytes at
+// +0x612 (object id, value 0..100, marked, flags, alpha, timer). The camera
+// update marks the objects around its eye (main 0x0889B37C, radius 1, the
+// third of every three frames) and on the line from its eye to its fighter
+// (main 0x0889ACA8, the first) through main 0x08892FD0, which takes a slot and
+// switches the object's model part to fading (main 0x0886BB44, the map
+// model's display list patched); the map's update (main 0x08893DAC) ages the
+// slots, and frees a slot faded back in, switching its part back. The map's
+// draw draws the fading parts at their slots' alpha (main 0x0889245C). It all
+// follows the on-screen camera. Player 2 keeps a table of its own, swapped in
+// for the second pass with the parts switched to match, aged and marked
+// there from view 2's camera by the game's own functions, and swapped out.
+constexpr std::uint32_t kMap = 0x089D6AC8u;
+constexpr std::uint32_t kMapSlots = 0x612u;
+constexpr std::uint32_t kMapSlotsSize = 16u * 10u;
+constexpr std::uint32_t kMapModel = 0x74u;
+constexpr std::uint32_t kMapGrid = 0x08899300u;          // () -> the map's collision grid
+constexpr std::uint32_t kMapPartOf = 0x088985F0u;        // (grid, object) -> model part
+constexpr std::uint32_t kMapHasPart = 0x088987E8u;       // (grid, object) -> nonzero when it has one
+constexpr std::uint32_t kPartFading = 0x0886BB44u;       // (model, part, on, 1, 1)
+constexpr std::uint32_t kMapAgeSlots = 0x08893DACu;      // (map)
+constexpr std::uint32_t kMarkNearEye = 0x0889B37Cu;      // (f12 radius, grid, eye)
+constexpr std::uint32_t kMarkEyeToFighter = 0x0889ACA8u; // (grid, eye, point)
+constexpr std::uint32_t kFighterCheck = 0x08837990u;     // (fighter): 0 when the line is marked
+
+using SlotTable = std::array<std::uint8_t, kMapSlotsSize>;
+
+SlotTable empty_slots() {
+    SlotTable t{};
+    for (std::uint32_t i = 0; i < 16u; ++i) {
+        std::uint8_t *slot = t.data() + 10u * i;
+        slot[0] = slot[1] = 0xFFu;  // no object
+        slot[6] = 0xFFu;            // alpha
+    }
+    return t;
+}
+
+struct MapFade {
+    SlotTable view2 = empty_slots();
+    std::uint32_t phase = 0;  // the camera's three-frame cycle, for view 2
+    std::uint32_t owner = 0;  // the battle the table belongs to
+};
+
+MapFade &map_fade() {
+    static MapFade f;
+    return f;
+}
+
+std::int16_t slot_object(const SlotTable &t, std::uint32_t i) {
+    std::int16_t object;
+    std::memcpy(&object, t.data() + 10u * i, 2u);
+    return object;
+}
+
+// Switches the parts of the objects `from` fades and `to` does not off, and
+// those `to` fades and `from` does not on, as taking and freeing the slots
+// would have.
+void switch_parts(Guest *g, gaddr map, const SlotTable &from, const SlotTable &to) {
+    const gaddr model = g_ld32(g, map + kMapModel);
+    if (model == 0u) return;
+    const gaddr grid = g_call4(g, kMapGrid, 0u, 0u, 0u, 0u);
+    if (grid == 0u || g_ld32(g, grid) == 0u) return;
+    const auto has = [](const SlotTable &t, std::int16_t object) {
+        for (std::uint32_t i = 0; i < 16u; ++i)
+            if (slot_object(t, i) == object) return true;
+        return false;
+    };
+    const auto flip = [&](const SlotTable &mine, const SlotTable &other, std::uint32_t on) {
+        for (std::uint32_t i = 0; i < 16u; ++i) {
+            const std::int16_t object = slot_object(mine, i);
+            if (object < 0 || has(other, object)) continue;
+            const std::uint32_t id = static_cast<std::uint32_t>(static_cast<std::int32_t>(object));
+            if (g_call2(g, kMapHasPart, grid, id) == 0u) continue;
+            const std::int32_t part = static_cast<std::int32_t>(g_call2(g, kMapPartOf, grid, id));
+            if (part < 0) continue;
+            g_call5(g, kPartFading, model, static_cast<std::uint32_t>(part), on, 1u, 1u);
+        }
+    };
+    flip(from, to, 0u);
+    flip(to, from, 1u);
+}
+
+// Before the second pass: player 2's table in, aged and marked from view 2's
+// camera. `view1` keeps player 1's table to put back.
+bool map_fade_to_view2(Guest *g, gaddr manager, int slot, gaddr fighter, std::uint32_t owner, SlotTable &view1) {
+    const gaddr map = g_ld32(g, kMap);
+    if (map == 0u || g_ld32(g, map + kMapModel) == 0u) return false;
+    MapFade &f = map_fade();
+    if (f.owner != owner) {  // a new battle: player 2's table starts empty
+        f.view2 = empty_slots();
+        f.phase = 0u;
+        f.owner = owner;
+    }
+    std::memcpy(view1.data(), g_ptr(g, map + kMapSlots, kMapSlotsSize), kMapSlotsSize);
+    switch_parts(g, map, view1, f.view2);
+    std::memcpy(g_ptr(g, map + kMapSlots, kMapSlotsSize), f.view2.data(), kMapSlotsSize);
+    g_call1(g, kMapAgeSlots, map);
+    const gaddr grid = g_call4(g, kMapGrid, 0u, 0u, 0u, 0u);
+    const gaddr eye = manager + static_cast<std::uint32_t>(slot) * 0xB0u + 0x110u;
+    if (grid != 0u && fighter != 0u) {
+        if (f.phase == 0u && g_call1(g, kFighterCheck, fighter) == 0u) {
+            g_call3(g, kMarkEyeToFighter, grid, eye, fighter + 0xC0u);
+        } else if (f.phase == 2u) {
+            const gaddr frame = g_push(g, 0x10u);
+            g_call2(g, kVec4Copy, frame, eye);
+            g_call_f4(g, kMarkNearEye, 1.0f, grid, frame, 0u, 0u);
+            g_pop(g, 0x10u);
+        }
+    }
+    f.phase = (f.phase + 1u) % 3u;
+    return true;
+}
+
+// D012_TRACE_MAP_FADE=1: the objects each view's table fades, when they change.
+void trace_map_fade(const SlotTable &view1, const SlotTable &view2) {
+    static const bool on = [] {
+        const char *text = std::getenv("D012_TRACE_MAP_FADE");
+        return text != nullptr && *text != '\0' && std::strcmp(text, "0") != 0;
+    }();
+    if (!on) return;
+    static std::string last;
+    std::string line;
+    for (const SlotTable *t : {&view1, &view2}) {
+        line += t == &view1 ? "view 1:" : " | view 2:";
+        for (std::uint32_t i = 0; i < 16u; ++i) {
+            const std::int16_t object = slot_object(*t, i);
+            if (object >= 0) line += " " + std::to_string(object) + "/" + std::to_string((*t)[10u * i + 6u]);
+        }
+    }
+    if (line == last) return;
+    last = line;
+    std::printf("[map-fade] split %llu %s\n", static_cast<unsigned long long>(state().frames), line.c_str());
+    std::fflush(stdout);
+}
+
+// After the second pass: player 2's table kept, player 1's back.
+void map_fade_back(Guest *g, const SlotTable &view1) {
+    const gaddr map = g_ld32(g, kMap);
+    if (map == 0u) return;
+    MapFade &f = map_fade();
+    std::memcpy(f.view2.data(), g_ptr(g, map + kMapSlots, kMapSlotsSize), kMapSlotsSize);
+    trace_map_fade(view1, f.view2);
+    switch_parts(g, map, f.view2, view1);
+    std::memcpy(g_ptr(g, map + kMapSlots, kMapSlotsSize), view1.data(), kMapSlotsSize);
+}
+
+// Fighters close to the camera turn see-through. The camera manager keeps, per
+// camera slot, a value, a target and a rate at +0x6F0 (12 bytes each); its
+// update (battle 0x08B3CA24) moves them for the on-screen camera (battle
+// 0x08B3C1E0: towards 0.5 while the slot's fighter is within its radius + 0.5
+// of the camera, else back to 1) when the camera's mode allows (mode vtable
+// +0x68), else resets them (battle 0x08B3C1A8), and sets each fighter's fade
+// bit (+0x380, bit 0x200000) and alpha (+0x490) from them; the draw tasks
+// leave a fighter with the bit to DrawAlphaScreenTask (main 0x088419EC).
+// Player 2 keeps values of its own, moved from player 2's camera right after
+// the update (the fighters' spheres the step reads hold only then), and
+// applied to the fighters for the second pass.
+constexpr std::uint32_t kFadeValues = 0x6F0u;
+constexpr std::uint32_t kFadeValuesSize = 8u * 12u;
+constexpr std::uint32_t kFadeStep = 0x08B3C1E0u;   // (manager, camera)
+constexpr std::uint32_t kFadeReset = 0x08B3C1A8u;  // (manager)
+constexpr std::uint32_t kCameraUpdateThunk = 0x08B3C41Cu;  // OBJ_CAMERA_MANAGER's update task
+constexpr std::uint32_t kCameraUpdate = 0x08B3CA24u;       // (manager)
+
+struct FighterFade {
+    std::array<std::uint8_t, kFadeValuesSize> view2{};
+    std::uint32_t owner = 0;
+};
+
+FighterFade &fighter_fade() {
+    static FighterFade f;
+    return f;
+}
+
+struct FighterFadeSaved {
+    std::vector<std::array<std::uint32_t, 3>> fighters;  // fighter, +0x380, +0x490
+};
+
+// Player 2's values, a step on from player 2's camera; after the update.
+void step_fighter_fade_view2(Guest *g, gaddr manager) {
+    State &s = state();
+    if (s.owner == 0u || g_ld8(g, manager + 0x8BCu) != 1u) return;
+    const int slot = opponent_slot(g, manager);
+    if (slot < 0) return;
+    const gaddr camera = g_ld32(g, manager + 0x6D0u + 4u * static_cast<std::uint32_t>(slot));
+    if (camera == 0u) return;
+    FighterFade &f = fighter_fade();
+    std::array<std::uint8_t, kFadeValuesSize> view1;
+    std::memcpy(view1.data(), g_ptr(g, manager + kFadeValues, kFadeValuesSize), kFadeValuesSize);
+    if (f.owner != s.owner) {  // a new battle: player 2's values start as the reset leaves them
+        g_call1(g, kFadeReset, manager);
+        std::memcpy(f.view2.data(), g_ptr(g, manager + kFadeValues, kFadeValuesSize), kFadeValuesSize);
+        f.owner = s.owner;
+    }
+    std::memcpy(g_ptr(g, manager + kFadeValues, kFadeValuesSize), f.view2.data(), kFadeValuesSize);
+    const std::int32_t mode = g_ld32s(g, camera + 0x108u);
+    const gaddr object = mode >= 0 && mode < 4 ? g_ld32(g, camera + 300u + 4u * static_cast<std::uint32_t>(mode)) : 0u;
+    bool step = false;
+    if (object != 0u) {
+        const gaddr vtable = g_ld32(g, object);
+        const std::int16_t adjust = g_ld16s(g, vtable + 0x68u);
+        step = g_call1(g, g_ld32(g, vtable + 0x6Cu), object + static_cast<std::uint32_t>(static_cast<std::int32_t>(adjust))) == 1u;
+    }
+    if (step) g_call2(g, kFadeStep, manager, camera);
+    else g_call1(g, kFadeReset, manager);
+    std::memcpy(f.view2.data(), g_ptr(g, manager + kFadeValues, kFadeValuesSize), kFadeValuesSize);
+    std::memcpy(g_ptr(g, manager + kFadeValues, kFadeValuesSize), view1.data(), kFadeValuesSize);
+    static const bool trace = [] {
+        const char *text = std::getenv("D012_TRACE_MAP_FADE");
+        return text != nullptr && *text != '\0' && std::strcmp(text, "0") != 0;
+    }();
+    if (trace && s.frames % 15u == 0u) {
+        std::string line;
+        for (std::uint32_t i = 0; i < 8u; ++i) {
+            if (g_ld32(g, manager + 0x6D0u + 4u * i) == 0u) continue;
+            float v[2], w[2];
+            std::memcpy(v, view1.data() + 12u * i, 8u);
+            std::memcpy(w, f.view2.data() + 12u * i, 8u);
+            char text[80];
+            std::snprintf(text, sizeof text, " %u: %.2f->%.2f / %.2f->%.2f", i, v[0], v[1], w[0], w[1]);
+            line += text;
+        }
+        std::printf("[fighter-fade] split %llu step %d, view 1 / view 2:%s\n", static_cast<unsigned long long>(s.frames),
+                    step ? 1 : 0, line.c_str());
+        std::fflush(stdout);
+    }
+}
+
+void run_camera_update_thunk(Guest *g, const decomp::CallState &, GuestRegs &) {
+    const gaddr manager = g_ld32(g, kCameraManager);
+    g_call1(g, kCameraUpdate, manager);
+    if (manager != 0u && versus::active()) step_fighter_fade_view2(g, manager);
+}
+
+// Player 2's values on the fighters, as the update sets player 1's.
+void fighter_fade_to_view2(Guest *g, gaddr manager, FighterFadeSaved &saved) {
+    const FighterFade &f = fighter_fade();
+    if (f.owner != state().owner) return;
+    for (std::uint32_t i = 0; i < 8u; ++i) {
+        const gaddr slot_camera = g_ld32(g, manager + 0x6D0u + 4u * i);
+        const gaddr fighter = slot_camera != 0u ? g_ld32(g, slot_camera + 0xF8u) : 0u;
+        if (fighter == 0u) continue;
+        saved.fighters.push_back({fighter, g_ld32(g, fighter + 0x380u), g_ld32(g, fighter + 0x490u)});
+        float value;
+        std::memcpy(&value, f.view2.data() + 12u * i, 4u);
+        if (value < 1.0f) {
+            g_st32(g, fighter + 0x380u, g_ld32(g, fighter + 0x380u) | 0x200000u);
+            g_stf(g, fighter + 0x490u, value);
+        } else {
+            g_st32(g, fighter + 0x380u, g_ld32(g, fighter + 0x380u) & 0xFFDFFFFFu);
+            g_stf(g, fighter + 0x490u, 1.0f);
+        }
+    }
+}
+
+void fighter_fade_back(Guest *g, const FighterFadeSaved &saved) {
+    for (auto it = saved.fighters.rbegin(); it != saved.fighters.rend(); ++it) {
+        g_st32(g, (*it)[0] + 0x380u, (*it)[1]);
+        g_st32(g, (*it)[0] + 0x490u, (*it)[2]);
+    }
+}
+
+// A model's draw (main 0x0886ACCC), as the game has it, but for the count at
+// model +0x128: a model that lets go of its buffer (main 0x0886CA58) keeps it
+// for two more draws, counted down here, then frees it (main 0x0886CAA0), so
+// the list still being drawn can read it. Two draws a frame would free it a
+// frame early; the second pass leaves the count alone. Calls from main
+// 0x0886AED0, in the same unit, do not come through here.
+constexpr std::uint32_t kModelDraw = 0x0886ACCCu;
+
+void run_model_draw(Guest *g, const decomp::CallState &in, GuestRegs &) {
+    const gaddr model = in.gpr[4];
+    const std::uint32_t a1 = in.gpr[5], a2 = in.gpr[6];
+    g_call4(g, 0x0886A908u, model, a1, a2, in.gpr[7]);
+    g_call1(g, 0x0886A54Cu, model);
+    g_call1(g, 0x0886A180u, model);
+    if (g_ld32(g, g_ld32(g, model + 0x84u)) != 0u) g_call1(g, 0x0886D618u, model);
+    if (((g_ld32(g, model + 0x90u) & 1u) != 0u || a2 == 0u) && g_ld32(g, model + 0x128u) == 0u) {
+        if (g_ld32(g, model + 0x94u) == 0u) g_call3(g, 0x0886E86Cu, model, a1, a2);
+        if (g_ld32(g, model + 0x94u) != 0u) g_call2(g, 0x0886A24Cu, model, a1);
+    } else {
+        g_call2(g, 0x0886A3F4u, model, a1);
+    }
+    const std::uint32_t count = g_ld32(g, model + 0x128u);
+    if (state().running) {
+        static bool told = false;
+        if (count != 0u && !told) {
+            told = true;
+            std::printf("[versus] a model's buffer count (%u) left alone in the second pass\n", count);
+            std::fflush(stdout);
+        }
+        return;
+    }
+    if (count != 0u) {
+        g_st32(g, model + 0x128u, count - 1u);
+        if (count == 1u) g_call1(g, 0x0886CAA0u, model);
+    }
+}
+
 // Player 2's lock-on cursor part: set up as the camera manager sets up its
 // own (battle 0x08B41A54, then a sprite of the cursor's layout and the
 // manager's part's two flags), once a battle, when the layout exists.
@@ -391,15 +699,41 @@ void run_split_task(Guest *g, const decomp::CallState &in, GuestRegs &) {
     const std::uint32_t manager = g_ld32(g, kCameraManager);
     const std::uint32_t graphics = g_ld32(g, kGraphics);
     s.split_active = false;
-    if (manager == 0u || graphics == 0u || g_ld8(g, manager + 0x8BCu) != 1u) return;
-    // A scripted camera (manager +0x804 == 2) or an event camera (+0x9E0):
-    // the frame stays one full view, and player 2's cursor is hidden.
-    if (g_ld32(g, manager + 0x804u) == 2u || g_ld8(g, manager + 0x9E0u) == 1u) {
+    if (!versus::active() || manager == 0u || graphics == 0u || g_ld8(g, manager + 0x8BCu) != 1u) return;
+    // A scripted camera (manager +0x804 == 2), an event camera (+0x9E0), or a
+    // battle event between the fighters, such as an EX Burst (either
+    // fighter's +0x5B1 bit 0x80, set at its start, battle 0x08A3EE44, and
+    // cleared at its end, 0x08A3F448): the frame stays one full view, and
+    // player 2's cursor is hidden.
+    const gaddr field = g_ld32(g, kBattleManager);
+    const auto in_event = [&](std::uint32_t slot_offset) {
+        const gaddr fighter = field != 0u ? g_ld32(g, field + slot_offset) : 0u;
+        return fighter != 0u && (g_ld8(g, fighter + 0x5B1u) & 0x80u) != 0u;
+    };
+    if (g_ld32(g, manager + 0x804u) == 2u || g_ld8(g, manager + 0x9E0u) == 1u || in_event(0x38u) ||
+        in_event(0x3Cu)) {
         if (s.cursor2) g_call2(g, kCursorShow, kPlayer2Cursor + 8u, 0u);
         return;
     }
     const int slot = opponent_slot(g, manager);
     if (slot < 0) return;
+    // The display list (libGu's context: +4 its start, +8 the write cursor,
+    // +0xC its size, 0x58400 bytes) must hold a second view about as long as
+    // the first: when it would not, the frame stays one full view. Both views
+    // reach 86% of it on Planet's Core (7.5).
+    {
+        const gaddr context = g_ld32(g, kGuContext);
+        const std::uint32_t start = g_ld32(g, context + 4u), cursor = g_ld32(g, context + 8u);
+        const std::uint32_t size = g_ld32(g, context + 12u);
+        const std::uint32_t used = cursor - start;
+        if (size != 0u && used < size && used > (size - 0x2000u) / 2u) {
+            static std::uint32_t told = 0;
+            if (told++ < 5u)
+                std::printf("[versus] the display list is %u of %u bytes full: this frame is not split\n", used, size);
+            if (s.cursor2) g_call2(g, kCursorShow, kPlayer2Cursor + 8u, 0u);
+            return;
+        }
+    }
     // From here the frame is split (the HUD's placements read it).
     s.split_active = true;
     set_up_cursor2(g, manager);
@@ -413,11 +747,62 @@ void run_split_task(Guest *g, const decomp::CallState &in, GuestRegs &) {
 
     // The opponent's blended eye, look-at, up and field of view, as the
     // manager's update builds the on-screen camera's (battle 0x08B3CA24),
-    // without the roll and the screen shake.
+    // without the roll and the screen shake. The update moves the eye back
+    // along the view by the slot camera's +0xD4 (in modes other than 2 and
+    // 3); without that, a camera backed against a wall sits inside its
+    // fighter, which then draws nothing.
     const std::uint32_t blended = manager + static_cast<std::uint32_t>(slot) * 0xB0u;
     float fov = 0.0f;
     std::memcpy(&fov, g_ptr(g, blended + 0x140u, 4u), 4u);
-    g_call2(g, kViewSetEye, manager, blended + 0x110u);
+    {
+        float eye[4], at[4];
+        std::memcpy(eye, g_ptr(g, blended + 0x110u, 16u), 16u);
+        std::memcpy(at, g_ptr(g, blended + 0x120u, 16u), 16u);
+        const gaddr camera = g_ld32(g, manager + 0x6D0u + 4u * static_cast<std::uint32_t>(slot));
+        const std::int32_t mode = camera != 0u ? g_ld32s(g, camera + 0x108u) : 2;
+        if (mode != 2 && mode != 3) {
+            float back;
+            std::memcpy(&back, g_ptr(g, camera + 0xD4u, 4u), 4u);
+            const float d[3] = {at[0] - eye[0], at[1] - eye[1], at[2] - eye[2]};
+            const float length = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+            if (length > 0.0f && std::isfinite(back))
+                for (int k = 0; k < 3; ++k) eye[k] -= d[k] / length * back;
+        }
+        std::memcpy(g_ptr(g, kView2Eye, 16u), eye, 16u);
+    }
+    // D012_TRACE_VIEWS=1: every 15 frames, both views' eye and look-at and
+    // both fighters' positions (fighter +0x30).
+    static const bool trace_views = [] {
+        const char *text = std::getenv("D012_TRACE_VIEWS");
+        return text != nullptr && *text != '\0' && std::strcmp(text, "0") != 0;
+    }();
+    if (trace_views && s.frames % 15u == 0u) {
+        const auto vec = [&](gaddr at) {
+            float v[3];
+            std::memcpy(v, g_ptr(g, at, 12u), 12u);
+            char text[64];
+            std::snprintf(text, sizeof text, "(%.2f %.2f %.2f)", v[0], v[1], v[2]);
+            return std::string(text);
+        };
+        const gaddr field = g_ld32(g, kBattleManager);
+        const gaddr f1 = g_ld32(g, field + 0x38u), f2 = g_ld32(g, field + 0x3Cu);
+        const auto modes = [&](gaddr fighter) {
+            const gaddr camera = fighter != 0u ? g_ld32(g, fighter + 0x5ACu) : 0u;
+            char text[48];
+            std::snprintf(text, sizeof text, "%d/%d/%d", camera != 0u ? g_ld32s(g, camera + 0x108u) : -9,
+                          camera != 0u ? g_ld32s(g, camera + 0x10Cu) : -9, camera != 0u ? g_ld8(g, camera + 0x125u) : -9);
+            return std::string(text);
+        };
+        std::printf("[views] split %llu view1 eye %s at %s | view2 eye %s at %s | p1 %s p2 %s | modes %s %s "
+                    "mgr 804=%d 80c=%X 8b8=%d\n",
+                    static_cast<unsigned long long>(s.frames), vec(manager + 0x40u).c_str(), vec(manager + 0x50u).c_str(),
+                    vec(kView2Eye).c_str(), vec(blended + 0x120u).c_str(),
+                    f1 != 0u ? vec(f1 + 0x30u).c_str() : "-", f2 != 0u ? vec(f2 + 0x30u).c_str() : "-",
+                    modes(f1).c_str(), modes(f2).c_str(), g_ld32s(g, manager + 0x804u), g_ld32(g, manager + 0x80Cu),
+                    g_ld32s(g, manager + 0x8B8u));
+        std::fflush(stdout);
+    }
+    g_call2(g, kViewSetEye, manager, kView2Eye);
     g_call2(g, kViewSetAt, manager, blended + 0x120u);
     g_call2(g, kViewSetUp, manager, blended + 0x130u);
     g_call1(g, kViewBuild, manager);
@@ -462,6 +847,11 @@ void run_split_task(Guest *g, const decomp::CallState &in, GuestRegs &) {
     }
     std::vector<std::pair<gaddr, std::array<std::uint32_t, 2>>> popups;
     popups_to_view2(g, popups);
+    SlotTable view1_fade{};
+    const bool faded = map_fade_to_view2(g, manager, slot, g_ld32(g, g_ld32(g, kBattleManager) + 0x3Cu), s.owner,
+                                         view1_fade);
+    FighterFadeSaved fighters_view1;
+    fighter_fade_to_view2(g, manager, fighters_view1);
 
     // The battle's draw tasks again, as the dispatcher (main 0x0888245C)
     // calls them.
@@ -492,6 +882,17 @@ void run_split_task(Guest *g, const decomp::CallState &in, GuestRegs &) {
     for (const auto &[position, words] : popups) {
         g_st32(g, position, words[0]);
         g_st32(g, position + 4u, words[1]);
+    }
+    if (faded) map_fade_back(g, view1_fade);
+    fighter_fade_back(g, fighters_view1);
+    // Where both views leave the display list's write cursor (the context:
+    // 4, the list's start, the cursor, its size, 0x58400 bytes).
+    if (trace_views && s.frames % 15u == 0u) {
+        const std::uint32_t context = g_ld32(g, kGuContext);
+        std::printf("[views] split %llu list context 0x%08X: 0x%08X 0x%08X cursor 0x%08X 0x%08X\n",
+                    static_cast<unsigned long long>(s.frames), context, g_ld32(g, context), g_ld32(g, context + 4u),
+                    g_ld32(g, context + 8u), g_ld32(g, context + 12u));
+        std::fflush(stdout);
     }
 
     std::memcpy(g_ptr(g, manager, kManagerView), saved_view, kManagerView);
@@ -696,12 +1097,15 @@ struct Install {
              &run_cursor_enable},
             {kWorldToScreen, "versus_world_to_screen", decomp::Module::Main, decomp::Returns::Integer,
              &run_world_to_screen},
+            {kModelDraw, "versus_model_draw", decomp::Module::Main, decomp::Returns::Nothing, &run_model_draw},
+            {kCameraUpdateThunk, "versus_camera_update_thunk", decomp::Module::BattleOverlay, decomp::Returns::Nothing,
+             &run_camera_update_thunk},
             {kCameraDrawThunk, "versus_camera_draw_thunk", decomp::Module::BattleOverlay, decomp::Returns::Nothing,
              &run_camera_draw_thunk},
             {kSplitTask, "versus_split_view_task", decomp::Module::Main, decomp::Returns::Nothing, &run_split_task},
         };
         decomp::add_overrides(overrides, sizeof overrides / sizeof overrides[0], true);
-        std::cout << "[versus] local versus spike on: the battle is drawn a second time from the opponent's camera"
+        std::cout << "[versus] split view built in: a versus battle is drawn a second time from player 2's camera"
                   << std::endl;
     }
 } install;

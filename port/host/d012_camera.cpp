@@ -149,7 +149,7 @@ int local_camera(Guest *g, gaddr camera) {
     if ((g_ld32(g, pads + PAD_FLAGS) & (PAD_FLAG_REPLAY | PAD_FLAG_MUTED)) != 0) return -1;
     const gaddr listens = g_ld32(g, camera + CAM_PAD);
     if (listens == pads + PAD_LOGICAL0) return g_ld32s(g, pads + PAD_RAW0_MODE) != 1 ? 0 : -1;
-    if (versus::on() && listens == pads + PAD_LOGICAL0 + PAD_LOGICAL_SIZE) return 1;
+    if (versus::active() && listens == pads + PAD_LOGICAL0 + PAD_LOGICAL_SIZE) return 1;
     return -1;
 }
 

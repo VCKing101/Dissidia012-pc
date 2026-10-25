@@ -1,5 +1,6 @@
 // Local versus: player 2 on a second controller (docs/port/local-versus.md,
-// section 1). On only with D012_LOCAL_VERSUS=1.
+// section 1). Everything below acts only while versus is active (chosen from
+// the Battle Mode row, or forced with D012_LOCAL_VERSUS=1).
 //
 // PortableKit opens a second gamepad as player 2's while a port wants one
 // (hle_extension::want_second_pad); the game's own pad read (sceCtrl) stays
@@ -17,7 +18,9 @@
 //   - Player 2's pad lost in battle: START on raw pad 1 for one read, so the
 //     game's own pause opens as player 2's (the battle checks START on each
 //     fighter's pad, battle 0x08B20458, and the pause menu answers the pad
-//     that opened it) and waits for player 2's pad to return.
+//     that opened it) and waits for player 2's pad to return. Player 1's
+//     gamepad lost the same way: START in the game's own pad for one read.
+//     A notice over the battle says which controller to plug in again.
 //   - The opponent's AI mode: the battle set-up switches slot 1 to the CPU
 //     through battle 0x08B2F2E4(fighter, 0) (calls at main 0x0888BE5C and
 //     0x0888BE90). In a Quick Battle (FIELD+0x4C == 4) that call asks for
@@ -38,7 +41,13 @@
 
 #include "psprecomp/runtime.hpp"
 
+#if defined(PORTABLEKIT_HAS_RENDERER)
+#include "imgui.h"
+#include "ui/ui.hpp"
+#endif
+
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -96,7 +105,24 @@ struct State {
     // Pad reads left with START pressed on raw pad 1: player 2's pad went
     // away in battle, and the game's pause, as player 2's, waits for it.
     std::uint32_t pause_reads = 0;
+    // The same for player 1's gamepad, on the game's own pad. A player on the
+    // keyboard has no gamepad to lose.
+    bool first_connected = false;
+    std::uint32_t pause1_reads = 0;
+    // Whose controller went away in this battle (kLostPlayer1, kLostPlayer2),
+    // for the notice; cleared as each comes back and when the battle ends.
+    std::uint32_t lost = 0;
+    // In a versus battle, player 1's fighter played (not the CPU's, as in the
+    // intro), at the last pad read: the 1P / 2P labels show.
+    bool fighting = false;
+    bool chosen = false;      // the Battle Mode row was chosen
+    bool start_menu = false;  // the start menu is up (player 2's pad looked for)
+    // Pad reads left for the notice "Connect a second controller".
+    std::uint32_t ask_reads = 0;
 };
+
+constexpr std::uint32_t kLostPlayer1 = 1u;
+constexpr std::uint32_t kLostPlayer2 = 2u;
 
 State &state() {
     static State s;
@@ -161,13 +187,39 @@ void trace_fighters(psprecomp::GuestMemory &memory, const State &s) {
         return value;
     };
     const std::uint32_t ai = memory.load32(opponent + kFighterAi);
-    std::printf("[versus] read %u p1 (%.2f, %.2f, %.2f) p2 (%.2f, %.2f, %.2f) p2 ai %d pad1 0x%04X %u,%u\n",
+    // Each fighter's camera eye (camera +0x00) and its distance to the fighter.
+    const auto eye = [&](std::uint32_t fighter, float out[4]) {
+        const std::uint32_t camera = memory.load32(fighter + 0x5ACu);
+        if (!user_ram(camera)) {
+            out[0] = out[1] = out[2] = out[3] = 0.0f;
+            return;
+        }
+        for (int k = 0; k < 3; ++k) out[k] = f(camera + 4u * static_cast<std::uint32_t>(k));
+        const float dx = out[0] - f(fighter + 0x30u), dy = out[1] - f(fighter + 0x34u), dz = out[2] - f(fighter + 0x38u);
+        out[3] = std::sqrt(dx * dx + dy * dy + dz * dz);
+    };
+    float e1[4], e2[4];
+    eye(player, e1);
+    eye(opponent, e2);
+    std::printf("[versus] read %u p1 (%.2f, %.2f, %.2f) p2 (%.2f, %.2f, %.2f) p2 ai %d pad1 0x%04X %u,%u "
+                "eye1 (%.2f, %.2f, %.2f) d %.2f eye2 (%.2f, %.2f, %.2f) d %.2f\n",
                 s.reads, f(player + 0x30u), f(player + 0x34u), f(player + 0x38u), f(opponent + 0x30u),
                 f(opponent + 0x34u), f(opponent + 0x38u),
                 user_ram(ai) ? static_cast<int>(memory.load32(ai + 0x54u)) : -1,
                 memory.load32(kRawPad1 + kRawInjectButtons), memory.load8(kRawPad1 + kRawInjectStick),
-                memory.load8(kRawPad1 + kRawInjectStick + 1u));
+                memory.load8(kRawPad1 + kRawInjectStick + 1u), e1[0], e1[1], e1[2], e1[3], e2[0], e2[1], e2[2], e2[3]);
     std::fflush(stdout);
+}
+
+// Whether player 1's fighter is played: the intro hands it to the CPU (its
+// AI, fighter +0x5C4, in mode 0 at +0x54).
+void read_fighting(psprecomp::GuestMemory &memory, State &s, bool battle) {
+    s.fighting = false;
+    const std::uint32_t field = battle ? memory.load32(kBattleManager) : 0u;
+    if (!user_ram(field)) return;
+    const std::uint32_t player = memory.load32(field + 0x38u);
+    const std::uint32_t ai = user_ram(player) ? memory.load32(player + kFighterAi) : 0u;
+    s.fighting = user_ram(ai) && memory.load32(ai + 0x54u) != 0u;
 }
 
 // battle 0x08B2F2E4, with the Quick Battle set-up's CPU call for slot 1
@@ -177,7 +229,7 @@ void run_set_ai_mode(Guest *g, const decomp::CallState &in, GuestRegs &out) {
     std::uint32_t mode = in.gpr[5];
     const std::uint32_t caller = in.gpr[31];
     const gaddr field = g_ld32(g, kBattleManager);
-    if (mode == 0u && caller >= kFieldSetup && caller < kFieldSetup + kFieldSetupSize && field != 0u &&
+    if (mode == 0u && active() && caller >= kFieldSetup && caller < kFieldSetup + kFieldSetupSize && field != 0u &&
         g_ld32(g, field + kFieldMode) == kModeQuickBattle && g_ld32(g, field + kFieldOpponent) == fighter) {
         mode = kAiHuman;
         State &s = state();
@@ -214,9 +266,73 @@ void check_set_ai_mode(Guest *g, const decomp::CallState &in, GuestRegs &out) {
     out.v0 = g_call2(g, kAiSetMode, ai, mode) == 0u ? 0u : 0xFFFFFFFDu;
 }
 
+#if defined(PORTABLEKIT_HAS_RENDERER)
+// The notice over a paused battle whose controller went away: a band in the
+// middle of the game's picture, in the PSP's pixels scaled to where the
+// picture is.
+// Also "Connect a second controller", when the row is chosen without one.
+bool notice_visible() { return state().lost != 0u || state().ask_reads != 0u; }
+
+void notice_draw() {
+    const std::uint32_t lost = state().lost;
+    const portablekit::ui::GamePicture picture = portablekit::ui::game_picture();
+    const float sx = picture.width / 480.0f;
+    const float sy = picture.height / 272.0f;
+    const auto at = [&](float x, float y) { return ImVec2(picture.left + x * sx, picture.top + y * sy); };
+    ImDrawList *draw = ImGui::GetForegroundDrawList();
+    ImFont *font = portablekit::ui::game_text_font();
+    const char *title = lost == 0u                              ? "Connect a second controller"
+                        : lost == (kLostPlayer1 | kLostPlayer2) ? "Controllers 1 and 2 disconnected"
+                        : (lost & kLostPlayer1) != 0u           ? "Controller 1 disconnected"
+                                                                : "Controller 2 disconnected";
+    const char *hint = lost == 0u                    ? "Player 2 plays on the second gamepad"
+                       : (lost & kLostPlayer2) != 0u ? "Connect it again to go on"
+                                                     : "Connect it again, or play on the keyboard";
+    // Under the pause menu's rows (the game's pause, which the loss opened).
+    const float top = 150.0f;
+    draw->AddRectFilled(at(90.0f, top), at(390.0f, top + 42.0f), IM_COL32(10, 14, 40, 220), 4.0f * sy);
+    draw->AddRect(at(90.0f, top), at(390.0f, top + 42.0f), IM_COL32(255, 196, 64, 255), 4.0f * sy, 0, 1.2f * sy);
+    const auto text = [&](float size, float y, ImU32 colour, const char *line) {
+        const ImVec2 extent = font->CalcTextSizeA(size * sy, 1.0e9f, 0.0f, line);
+        draw->AddText(font, size * sy, ImVec2(at(240.0f, y).x - extent.x * 0.5f, at(240.0f, y).y - extent.y * 0.5f),
+                      colour, line);
+    };
+    text(11.0f, top + 14.0f, IM_COL32(255, 255, 255, 255), title);
+    text(8.0f, top + 30.0f, IM_COL32(255, 220, 140, 255), hint);
+}
+
+// In a versus battle while player 1's fighter is played (not in the intro):
+// "1P" and "2P" over the portraits (the stock HUD names neither player; the
+// word under Lightning's portrait is her paradigm). They stay on the loser's
+// outro, which keeps the fighters played.
+bool hud_visible() { return active() && state().fighting; }
+
+void hud_draw() {
+    const portablekit::ui::GamePicture picture = portablekit::ui::game_picture();
+    const float sx = picture.width / 480.0f;
+    const float sy = picture.height / 272.0f;
+    const auto at = [&](float x, float y) { return ImVec2(picture.left + x * sx, picture.top + y * sy); };
+    ImDrawList *draw = ImGui::GetForegroundDrawList();
+    ImFont *font = portablekit::ui::game_text_font();
+    const auto centred = [&](float size, float x, float y, ImU32 colour, const char *line) {
+        const ImVec2 extent = font->CalcTextSizeA(size * sy, 1.0e9f, 0.0f, line);
+        draw->AddText(font, size * sy, ImVec2(at(x, y).x - extent.x * 0.5f, at(x, y).y - extent.y * 0.5f), colour, line);
+    };
+    const struct {
+        float x;
+        const char *label;
+        ImU32 colour;
+    } tags[2] = {{38.0f, "1P", IM_COL32(70, 130, 255, 235)}, {442.0f, "2P", IM_COL32(235, 70, 70, 235)}};
+    for (const auto &tag : tags) {
+        draw->AddRectFilled(at(tag.x - 11.0f, 190.0f), at(tag.x + 11.0f, 201.0f), tag.colour, 3.0f * sy);
+        centred(8.5f, tag.x, 195.5f, IM_COL32(255, 255, 255, 255), tag.label);
+    }
+}
+#endif
+
 struct Install {
     Install() {
-        if (!on()) return;
+        if (!enabled()) return;
         static const decomp::Override overrides[] = {
             {kSetAiMode, "versus_set_ai_mode", decomp::Module::BattleOverlay, decomp::Returns::Integer,
              &run_set_ai_mode, true, nullptr, &check_set_ai_mode},
@@ -227,13 +343,35 @@ struct Install {
 
 } // namespace
 
-bool on() {
+bool enabled() {
     static const bool value = [] {
         const char *text = std::getenv("D012_LOCAL_VERSUS");
-        return text != nullptr && *text != '\0' && std::strcmp(text, "0") != 0;
+        return text == nullptr || std::strcmp(text, "0") != 0;
     }();
     return value;
 }
+
+bool forced() {
+    static const bool value = [] {
+        const char *text = std::getenv("D012_LOCAL_VERSUS");
+        return text != nullptr && std::strcmp(text, "1") == 0;
+    }();
+    return value;
+}
+
+bool active() { return enabled() && (forced() || state().chosen); }
+
+void set_chosen(bool chosen) {
+    State &s = state();
+    if (s.chosen != chosen) std::cout << "[versus] " << (chosen ? "versus chosen" : "versus off") << std::endl;
+    s.chosen = chosen;
+}
+
+void note_start_menu() { state().start_menu = true; }
+
+bool second_pad_connected() { return state().connected; }
+
+void ask_for_second_pad() { state().ask_reads = 90u; }
 
 RightStick player2_right_stick() {
     const State &s = state();
@@ -245,36 +383,74 @@ void note_camera_live() { state().camera_live_read = state().reads; }
 
 void install(portablekit::HleRegistrar &hle) {
     static bool installed = false;
-    if (installed || !on()) return;
+    if (installed || !enabled()) return;
     installed = true;
     const portablekit::HleFunction previous = hle.bound_function("sceCtrl", kSceCtrlReadBufferPositive);
     if (!previous) {
         std::cerr << "[versus] sceCtrlReadBufferPositive is not bound; player 2 has no pad\n";
         return;
     }
-    std::cout << "[versus] local versus on: a second gamepad is player 2's" << std::endl;
+    std::cout << "[versus] local versus built in" << (forced() ? ", on in every Quick Battle (D012_LOCAL_VERSUS=1)" : "")
+              << ": a second gamepad is player 2's in versus" << std::endl;
+#if defined(PORTABLEKIT_HAS_RENDERER)
+    portablekit::ui::add_game_overlay(&hud_visible, &hud_draw);
+    portablekit::ui::add_game_overlay(&notice_visible, &notice_draw);
+#endif
     hle.bind("sceCtrl", kSceCtrlReadBufferPositive, [previous](psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
         const std::uint32_t buffer = ctx.gpr[4];
         const std::uint32_t count = std::clamp<std::uint32_t>(ctx.gpr[5], 1u, 64u);
         State &s = state();
-        if (!s.wanted) {
-            // The renderer exists by the game's first pad read.
-            s.wanted = true;
-            ext::want_second_pad(true);
+        psprecomp::GuestMemory &memory = rt.memory();
+        const bool battle = battle_resident(memory);
+        // Player 2's gamepad is looked for while versus is on, and on the
+        // start menu so that the row knows whether there is one; otherwise a
+        // second gamepad stays a spare for player 1. (The renderer exists by
+        // the game's first pad read.)
+        if (battle && !active()) s.start_menu = false;
+        const bool want = active() || s.start_menu;
+        if (want != s.wanted) {
+            s.wanted = want;
+            ext::want_second_pad(want);
         }
         previous(rt, ctx);
         ++s.reads;
+        if (s.ask_reads != 0u) --s.ask_reads;
         s.pad = ext::second_pad();
-        psprecomp::GuestMemory &memory = rt.memory();
+        if (!battle) s.lost = 0u;
+        if (!active()) {
+            s.connected = s.pad.connected;
+            s.picking = false;
+            s.fighting = false;
+            return;
+        }
+        read_fighting(memory, s, battle);
         if (s.pad.connected != s.connected) {
             s.connected = s.pad.connected;
             std::cout << "[versus] player 2's pad " << (s.connected ? "connected" : "disconnected") << std::endl;
             // Lost in battle: the battle pauses as player 2 paused it, so
-            // the pause menu waits for player 2's pad to come back.
-            if (!s.connected && battle_resident(memory)) {
-                s.pause_reads = 1u;
+            // the pause menu waits for player 2's pad to come back. Not when
+            // player 1's loss has paused it already: START would resume.
+            if (!s.connected && battle) {
+                if (s.lost == 0u) s.pause_reads = 1u;
+                s.lost |= kLostPlayer2;
                 std::cout << "[versus] the battle pauses until player 2's pad is back" << std::endl;
             }
+        }
+        if (s.connected) s.lost &= ~kLostPlayer2;
+        const bool first = ext::first_pad_connected();
+        if (first != s.first_connected) {
+            s.first_connected = first;
+            if (!first && battle) {
+                if (s.lost == 0u) s.pause1_reads = 1u;
+                s.lost |= kLostPlayer1;
+                std::cout << "[versus] player 1's gamepad disconnected: the battle pauses" << std::endl;
+            }
+        }
+        if (first) s.lost &= ~kLostPlayer1;
+        if (s.pause1_reads != 0u && buffer != 0u) {
+            --s.pause1_reads;
+            for (std::uint32_t i = 0; i < count; ++i)
+                memory.store32(buffer + i * 16u + 4u, memory.load32(buffer + i * 16u + 4u) | kStart);
         }
         feed_raw_pad1(memory, s);
         trace_fighters(memory, s);

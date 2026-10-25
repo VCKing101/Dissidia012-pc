@@ -45,7 +45,8 @@ In:
 - **Results:** the screen says which player won, in new text. Then Quick Battle's own retry, change characters and
   quit, driven by player 1. Change characters goes through both picks again.
 - **HUD:** drawn once across the whole window, laid out as in the stock game (player 1's gauges left, player 2's
-  right), with 1P / 2P labels in place of COM.
+  right), with 1P / 2P labels. (The "COM" under Lightning's portrait is her Commando paradigm, not "computer";
+  the labels sit over the portraits instead. 7.6.)
 - **World-pinned HUD pieces** (lock-on cursor, damage and Brave numbers): per view, each worked out from that half's
   camera.
 - **Views:** each half shows the middle of a full 16:9 render, at full height. A thin dark line between them.
@@ -219,7 +220,7 @@ Decided (0.1): **the HUD is drawn once across the whole window**, laid out as th
   has the renderer put the middle half of each view side by side back into the frame buffer. The game then draws
   its stock HUD over both at full width, with its own blending, and the frame is shown as any other. No separate
   HUD layer is needed.
-- **1P / 2P labels** replace COM under the portraits. Text and layout ids not mapped yet.
+- **1P / 2P labels** over the portraits (built, 7.6). "COM" under Lightning's portrait is her paradigm.
 - **World-pinned pieces** (lock-on cursor, damage and Brave numbers, `0x08866E04` → `0x088D9C60`) are placed from one
   view over a full 480x272 frame, so on the full-width layer they would land in the wrong place. Per view: player
   1's set is moved into the left half's crop, and a second set placed from view 2's matrix goes in the right half.
@@ -255,7 +256,7 @@ Decided (0.1): **the HUD is drawn once across the whole window**, laid out as th
 - The rows are at `menu:0x089E6EA4` (4 rows of 8 bytes and a 0xFFFF terminator, pointed to from `menu:0x089E7544`);
   each row's last u16 indexes the row-type table `menu:0x089E7488`, whose first u16 is "enabled". V.
 - A fifth row needs the array moved, a cursor-4 case in `menu:0x089E4A60` and a destination case in
-  `menu:0x089E0CEC`. Its text and layout ids are not mapped yet. I.
+  `menu:0x089E0CEC`. Its text and layout ids are not mapped yet. I. **Built differently; see 7.6.**
 - When the room exits, `menu:0x08A9D72C` sets FIELD mode 4 (Quick Battle) from the table at `menu:0x08AA3F30`. V.
   Versus stays mode 4, plus a port-side flag.
 
@@ -273,20 +274,22 @@ Decided (0.1): **the HUD is drawn once across the whole window**, laid out as th
 
 ## 6. Phases
 
-Work on the branches `local-versus`; the switch `D012_LOCAL_VERSUS=1` reaches versus until the menu row exists.
+Work on the branches `local-versus`. Versus is reached from the Battle Mode row; `D012_LOCAL_VERSUS=1` still makes
+every Quick Battle a versus one, for the scripted tests (7.6).
 
 0. **Second-view spike (first).** View 2 drawn from the opponent's camera into a second target and shown beside
    view 1, nothing else fixed; the opponent stays CPU. Shows how much breaks. 1 session. **Done (7.1).**
 1. **Controls.** Controller 2 picks the opponent; slot 1 is set human; controller 2 feeds `raw[1]`; the right-stick
    hook covers player 2's camera; either player pauses; disconnects pause. Needs PortableKit's second gamepad. 1 to 2
-   sessions. **Done but for two pieces (7.2):** the on-screen "controller disconnected" message, and player 1's
-   gamepad lost.
+   sessions. **Done (7.2, 7.7).**
 2. **The second view.** The per-view state of 2.3, the cropped halves and divider, the full-width HUD layer, full
    screen during scripted cameras, world-pinned pieces per view, then the screen-capture effects one by one (glass
-   crack, EX Revenge). 5 to 7 sessions.
-3. **60 fps on both halves.** Frame interpolation on two targets. 1 to 2 sessions.
+   crack, EX Revenge). 5 to 7 sessions. **Done but for EX Revenge, untested (7.5).**
+3. **60 fps on both halves.** Frame interpolation on two targets. 1 to 2 sessions. **Not started.**
 4. **The menu row and polish.** Quick Battle (Player vs Player) under Battle Mode, "Connect a second controller",
-   CPU rows hidden, no replays or rewards, versus results wording, 1P / 2P labels. 3 sessions.
+   CPU rows hidden, no replays or rewards, versus results wording, 1P / 2P labels. 3 sessions. **The row, the
+   connect notice and the labels done (7.6); CPU rows, replays, rewards, results wording and the loser's outro
+   open.**
 
 ## 7. Decisions
 
@@ -513,6 +516,164 @@ Not done:
 - **Not swept:** EX Bursts, summons, Kuja's or other fighters' special HUD pieces, other stages.
 - **The lock-on sound** now plays for player 2's lock-on events too, through the game's own cursor update. Not
   listened to.
+
+## 7.5 Phase 2: walls, fades, the draw count and full-screen events (25 October 2026)
+
+V unless marked. Local runs on the walls route (each player backs into a wall on Old Chaos Shrine), the EX Burst,
+Kuja and EX Revenge routes of `gfx_tour.py` played in versus, and a sweep of the 14 stages.
+
+**View 2's eye is pulled back as the game pulls back the on-screen camera's.** After blending the slot cameras, the
+camera update (`battle:0x08B3CA24`) moves the eye back along the view by the on-screen slot camera's `+0xD4` (one
+unit here), in every camera mode but 2 and 3, before the screen shake. View 2 was built from the blended slot alone,
+so with player 2 backed against a wall its eye sat inside player 2's fighter: the near plane and back-face culling
+removed the whole fighter, faded or not. The split task now does the same pull-back, from player 2's slot camera,
+into a vec4 below the EBOOT (`0x08800600`). With `D012_SPLIT_SAME_VIEW=1` both halves now match to within 0.6 of 255
+in mean brightness (`build/port/versus/pull_same/`), which also settles the "player 1's half darker" finding of 7.1:
+neither pass darkens its half, the two views simply differed.
+
+**Fighters near the camera fade per view.** The game's step (`battle:0x08B3C1E0`) reads each fighter's bounding
+sphere, which holds only during the update: run from the split task it never saw a fighter close, and player 2's
+values stayed at 1. Player 2's values are now stepped right after the camera manager's update, through an override
+of its task thunk (`battle:0x08B3C41C`), from player 2's slot camera with the game's own mode check; the split task
+only applies them to the fighters (`+0x380` bit `0x200000`, alpha `+0x490`) for the second pass and puts player 1's
+back after. DrawAlphaScreenTask (main `0x088419EC`) then draws the faded fighter into the alpha screen
+(`0x040CC000`) from view 2's camera (main `0x0886AED0`) and composites it. Checked: each player backed into a wall
+sees their own fighter faded in their own half (`pull_p2/`).
+
+**The stages' near-camera fade per view** (the MAP slot table, 7.1's finding) is built: player 2 keeps a table of
+its own, aged and filled by the game's two eye queries on the update's three-frame phase, and swapped in for the
+second pass with the parts switched. Old Chaos Shrine has no object that fades; see the sweep below.
+
+**A model's buffer count.** A model that lets go of its buffer (main `0x0886CA58`) keeps it for two draws, counted
+at `model+0x128` in the model draw (main `0x0886ACCC`), and frees it at zero (main `0x0886CAA0`), so the list still
+being drawn can read it. The model draw is now a native copy (an override) that leaves the count alone in the second
+pass: two draws a frame no longer free a buffer a frame early. Calls from main `0x0886AED0`, in the same 16 KiB unit
+(a `goto`, not dispatch), still count; that is the alpha-screen draw of a faded fighter. The log line "a model's
+buffer count ... left alone in the second pass" shows it working.
+
+**EX Bursts and other battle events are full screen.** An EX Burst does not change the camera mode or the manager's
+scripted-camera flags; it sets bit `0x80` of `+0x5B1` on both fighters at its start (`battle:0x08A3EE44`, and
+`0x08A3EB70` just before it, I: the glass crack) and clears it at its end (`0x08A3F448`). `battle:0x08AB6348` sets it too, for
+another event between the two fighters (I: a grab). The split task now keeps the frame one full view while either
+fighter has the bit, as it does for scripted cameras. Checked: Lightning's and Kuja's EX Bursts, glass crack to the
+last hit, full screen, and the split back afterwards (`exburst6/`, `kuja/`).
+
+**Screen-capture effects:** with the EX Burst full screen, its background copy (`0x095CD140`) and the glass crack
+are drawn once, from player 1's frame, as in the stock game. Kuja's EX Mode trance draws in both halves.
+EX Revenge's greyscale was not reached: the route needs player 1 hit at the moment of R+□, and no scripted timeline
+gave that. Untested.
+
+**The GE list.** The display list (libGu's context `*0x09AF6830`: 4, the list's start, the write cursor, its size
+0x58400; two lists in turn) has to hold both views. Largest use with both, in the sweep's fights: Old Chaos Shrine
+0x1CF14 (33%), Pandaemonium 59%, Interdimensional Rift 61%, Ultimecia's Castle 65%, Crystal World 61%, **Planet's
+Core 86%**. To keep a heavier frame from running past the end, the split task leaves a frame one full view when the
+first view alone has used more than half the list (less 8 KiB); the log says so, five times at most. It never did in
+the sweep. A list of its own for view 2, or a larger one, would remove the limit (not done).
+
+**The stage sweep** (`build/port/versus/sweep2/`, the marker sweep's fight on each of the 14 stages, both players
+moving and attacking): every stage draws both halves with nothing missing or misplaced that the captures show. The
+per-view stage fade shows its own changes in view 2 on Pandaemonium, Ultimecia's Castle, Crystal World, Dream's End
+and Orphan's Cradle (`D012_TRACE_MAP_FADE`); not looked at in captures. Five stages first stalled on the
+opponent-info screen in the unthrottled route (the NEXT press came before the loading ended); they passed with
+later presses.
+
+Test switches added: `D012_TRACE_VIEWS=1` (both views' eye and look-at, the fighters' positions and camera modes,
+and the list in use, every 15 frames). `D012_TEST_EX_FULL=2` keeps player 2's EX gauge full as well.
+
+## 7.6 The Battle Mode row (phase 4, 25 October 2026)
+
+**The switch.** `D012_LOCAL_VERSUS` now means: `0`, the game as it was (no row, no overrides); unset or anything
+else, the mode built in, reached from the row; `1`, as before, every Quick Battle (1-on-1) a versus one without the
+row (the scripted tests). Everything versus does (player 2's pad into raw pad 1, the opponent's pick, the opponent
+made human, the second view, player 2's camera, the disconnect pause) acts only while versus is active: chosen from
+the row until the start menu comes back, or forced. Player 2's gamepad is looked for on the start menu and while
+versus is active; at other times a second gamepad stays a spare for player 1, as before.
+
+**How the start menu builds Battle Mode** (V, static; menu overlay):
+
+- The submenu table at `0x089E7518` has 0x18 bytes a main-menu row; Battle Mode's (row 1) is at `0x089E7530`:
+  `+0x0C` its parts table, `+0x10` its texts table, `+0x14` its rows table.
+- Every part of the start menu is an instance of the menu's layout 9 (`main:0x088DAA68`, from the list at
+  `0x089E6606`: 70 parts). A part's look is an animation of that layout. Battle Mode's parts table (`0x089E682A`
+  for three rows, `0x089E6862` for four, chosen by the save's flag `0x400000` in `menu:0x089E3DB8`) gives each
+  row's two parts (looks 0x12 and 0x11), their parent (part 0x16, the submenu's frame) and the parent's slot (4, 3,
+  2, 1 from the top). The Communication submenu's five rows use slots 4 to 0 of their frame.
+- The texts table (`0x089E6CCE`) puts text objects (`state+0x8B8`, made from messages by `main:0x088D3F7C`; 77 of
+  them, up to 0x4C) on the parts: the row's label on the first part, two copies of it on the second.
+- A row is `{part, part, the hand pointer's slot, row type}`. The row type indexes `0x089E7488`: enabled, and the
+  help text's index when enabled and when not. Battle Mode's handler (`0x089E4A60`) plays sound 4 and does nothing
+  more for a row whose type is not enabled; otherwise sound 1 and the destination by row index.
+- When Battle Mode opens (`0x089E45E8`, case 1), its cursor gets its last row (2, or 3 with four rows) from
+  `main:0x088D46E4`; then `0x089E23C8` shows the parts and texts of the tables and lights the current row. Moving
+  the cursor (`0x089E56F8`) lights and puts out rows and swaps the help line (`0x089E2A24`: show the new row's help,
+  hide the old row's, `main:0x0887B924` / `0x0887B944`, bit `0x400` of the text's `+0x10`).
+
+- The menu's texts array (`state+0x8B8`) has 0x59 entries. 0x4D to 0x4F are made apart from the table (the
+  player's name, the play time); entries from 0x52 up are made and replaced as the menu goes. 0x50 and 0x51 stayed
+  free in every run.
+- Two ends: leaving for a destination (mode 4, then 5: `0x089E133C` releases the layouts, `main:0x088D3A04`, which
+  takes their parts, then every text) and `0x089E17F8` (parts by table, `main:0x088D3C24`, then layouts, then
+  texts). Mode 6 (`0x089E1428`) then waits until the font has no text objects left (`main:0x0887E718`): a text the
+  menu does not release keeps the game on a white screen for ever.
+
+**What the port does** (`port/host/d012_versus_menu.cpp`): the row is one more row of the same kind. Its two parts
+(ids 71 and 72) are made from layout 9 with looks 0x12 and 0x11 and attached to the frame at the fourth row's slot
+(three rows) or slot 0 (four rows). Its label ("Quick Battle (Player vs Player)") and the label's copy on the bar
+are text objects made from UTF-16 strings (`main:0x0887D868`, as the menu makes the player's name), menu texts 0x50
+and 0x51, so the menu shows, hides and releases them with the others. Its help ("Fight a friend on a second
+controller, on a split screen.") is kept apart (`0x08800A80`), put on the help line's part through that word, and
+released by the port after the layouts. Battle Mode's three tables are copied below the EBOOT (`0x08800800`) with
+the row added, and the submenu is pointed at them when it opens. The row's type is 19, which reads as "not
+enabled, help text 0": the handler leaves the row to the port, and text 0 ("Story Mode") is no Battle Mode row's
+help, so the help line's swap of text 0 becomes the row's help and its highlight. Chosen with player 2's gamepad
+connected, the row leaves for Quick Battle (1-on-1) (destination 2) with versus on; without one, it plays the "not
+allowed" sound and shows "Connect a second controller" for three seconds. Versus goes off when the start menu comes
+back. The hooks are main functions the menu calls, told apart by their callers (the module comment lists them);
+nothing in the menu overlay can be overridden.
+
+**The labels.** "1P" and "2P" tags over the portraits, drawn by the port over the game's picture (as the BGM
+playlist draws its box), while player 1's fighter is played in a versus battle. The stock HUD has no player label to
+change: the "COM" under Lightning's portrait is her Commando paradigm (`docs/decomp/runtime-comparison-milestone.md`).
+
+Checked (`build/port/versus/menu8/` to `menu_final/`, `menu_nopad/`, `plain/`, local, test save with three Battle
+Mode rows):
+
+- The row under Arcade Mode in the game's style; the cursor reaches it, it lights, and the help line reads its help.
+  Moving off it puts it out and brings back the other rows' help; "Story Mode" stays.
+- Chosen: Quick Battle (1-on-1)'s room, player 2's pick, the versus screen and a split battle, with the 1P / 2P tags.
+- Chosen with player 2's gamepad unplugged: the "not allowed" sound and the notice; the menu stays.
+- Quick Battle (1-on-1) chosen as usual with the mode built in: a stock battle against the CPU, full screen, no tags.
+
+Not done or not checked:
+
+- **Four Battle Mode rows** (the save's flag `0x400000`, the "CROOM_T" room unlocked): the row goes to slot 0 of the
+  frame, as the Communication submenu's fifth row does; not seen.
+- **The row's lit label** is drawn dark on the bar: the game's rows put a second copy on the bar at locator 1, and
+  the row has one copy at locator 0 (no third free text id).
+- **Results wording, no rewards, no replays, CPU rows hidden:** not started. A versus battle still ends as a Quick
+  Battle does: player 1 losing gets "Return to Battle Setup / Rematch", player 1 winning the results screen with
+  rewards. The fallen fighter's HP was not found (status block `+0x0C` is the maximum HP), so there is no "Player N
+  wins" banner yet.
+- **The loser's outro is split:** player 1's fighter stays played (not handed to the CPU) after a loss, and no
+  battle-event bit is set, so the frame stays split with player 2's half on an empty floor.
+- `D012_TEST_LOW_HP=1` sets player 1's maximum HP to 50 once a battle, for reaching endings fast.
+
+## 7.7 Phase 1's leftovers (25 October 2026)
+
+- **The notice.** A box in the middle of the game's picture, over the pause the loss opened: "Controller 2
+  disconnected / Connect it again to go on", "Controller 1 disconnected / Connect it again, or play on the keyboard",
+  or both; gone as each comes back. Drawn by the port (`portablekit::ui::add_game_overlay`, no new PortableKit
+  interface needed). Checked (`disconnect2/`): unplugged, the battle pauses with the notice; plugged in, the notice
+  goes and the pause stays until that player presses Start.
+- **Player 1's gamepad lost.** PortableKit's extension interface 7 adds `first_pad_connected()` (player 1 has a
+  gamepad, not only the keyboard). Losing it in a versus battle presses Start on the game's own pad for one read, as
+  player 2's loss does on raw pad 1. Neither presses Start when the other's loss has paused the battle already
+  (Start would resume). The input script gained `detach` / `attach` for its first virtual pad. Player 2's gamepad
+  never takes player 1's place: the scan keeps it as player 2's.
+- **Player 2's EX Burst** (`p2burst/`, `D012_TEST_EX_FULL=2` keeps both gauges full): EX Mode, the burst landing on
+  player 1, its stages full screen (7.5), player 1's defence prompt, and the damage.
+- **A battle player 2 wins** (`p2results4/`): the finishing blow full screen, then the game's own ending for player 1
+  losing. See 7.6 for what is still missing there.
 
 ## 8. For later: two copies over the game's ad hoc versus
 
