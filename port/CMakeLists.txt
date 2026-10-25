@@ -15,6 +15,13 @@ set(D012_WORK_DIR "${D012_REPO_ROOT}/build/port" CACHE PATH
     "Directory for generated/, overlays/ and game/ (never committed)")
 
 set(PSPRECOMP_BUILD_TESTS OFF CACHE BOOL "Build reusable PSPRecomp tests")
+# The sources are UTF-8 (PortableKit's menus and font samples have Japanese
+# text). MSVC otherwise reads them in the PC's ANSI code page, and on a Windows
+# set to Chinese, Japanese or Korean that stops the build (C2001). Set before
+# PortableKit so its targets get it too.
+if(MSVC)
+    add_compile_options(/utf-8)
+endif()
 add_subdirectory("${D012_PORTABLEKIT_DIR}" portablekit)
 
 # portablekit_add_game() reads <profile>/config/nids.csv for NIDs the
