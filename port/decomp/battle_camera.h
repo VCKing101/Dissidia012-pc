@@ -20,6 +20,7 @@ extern "C" {
 
 /* Pad manager. */
 #define PAD_LOGICAL0 0xC0u             /* logical pad 0, the one gameplay reads for player 1 */
+#define PAD_LOGICAL_SIZE 0x50u         /* logical pad 1 follows it: the opponent's */
 #define PAD_RAW0_MODE 0x50u            /* s32: 1 when raw pad 0 is fed by ad-hoc or a replay */
 #define PAD_FLAGS 0x264u               /* bit 0 replay playback, bit 1 input muted */
 #define PAD_FLAG_REPLAY 0x1u

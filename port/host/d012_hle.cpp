@@ -6,6 +6,7 @@
 #include "d012_hle.hpp"
 #include "d012_mods.hpp"
 #include "d012_test_switches.hpp"
+#include "d012_versus.hpp"
 
 #include "hle/hle_common.hpp"
 #include "profile.hpp"
@@ -99,6 +100,9 @@ void register_extra_hle(portablekit::HleRegistrar &hle) {
     playlist::install(hle);
     // The right-stick battle camera and R3 (d012_camera.cpp).
     camera::install(hle);
+    // Local versus: player 2 on a second controller (d012_versus.cpp), after
+    // the camera's wrapper so the menus' pad swap is the last word.
+    versus::install(hle);
     // Test switches, off by default (d012_test_switches.cpp).
     test_switches::install(hle);
 }

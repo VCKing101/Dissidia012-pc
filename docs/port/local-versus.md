@@ -275,10 +275,11 @@ Decided (0.1): **the HUD is drawn once across the whole window**, laid out as th
 Work on the branches `local-versus`; the switch `D012_LOCAL_VERSUS=1` reaches versus until the menu row exists.
 
 0. **Second-view spike (first).** View 2 drawn from the opponent's camera into a second target and shown beside
-   view 1, nothing else fixed; the opponent stays CPU. Shows how much breaks. 1 session.
+   view 1, nothing else fixed; the opponent stays CPU. Shows how much breaks. 1 session. **Done (7.1).**
 1. **Controls.** Controller 2 picks the opponent; slot 1 is set human; controller 2 feeds `raw[1]`; the right-stick
    hook covers player 2's camera; either player pauses; disconnects pause. Needs PortableKit's second gamepad. 1 to 2
-   sessions.
+   sessions. **Done but for two pieces (7.2):** the on-screen "controller disconnected" message, and player 1's
+   gamepad lost.
 2. **The second view.** The per-view state of 2.3, the cropped halves and divider, the full-width HUD layer, full
    screen during scripted cameras, world-pinned pieces per view, then the screen-capture effects one by one (glass
    crack, EX Revenge). 5 to 7 sessions.
@@ -360,6 +361,67 @@ $route = "460:pad a;1080:pad a;1500:pad a;1650:pad a;1900:pad dpdown;2000:pad a;
 
 Next, in phase 2 order: the per-view state of 2.3, starting with the camera's wall fade and the lights, then the
 world-pinned HUD pieces per view.
+
+## 7.2 Player 2's controls (25 October 2026)
+
+Phase 1, on the same branches and switch (`D012_LOCAL_VERSUS=1`). V unless marked.
+
+**PortableKit** (game-agnostic):
+
+- **A second player's gamepad.** `VulkanRenderer::set_second_pad_wanted(true)` opens a gamepad other than player 1's
+  as player 2's, read with the same bindings and tuning into `second_pad()`, never into the game's own pad. Off by
+  default, so without a port asking a second pad stays a spare for player 1 as before.
+- **Extension interface 6:** `hle_extension::want_second_pad(bool)` and `second_pad()` (buttons, extra buttons, both
+  sticks, connected).
+- **Input script:** `pad2`, `axis2`, `detach2` and `attach2` steps drive a second virtual gamepad.
+  - It is named `PortableKit input script 2` and has its own vendor and product ids, because with the first pad's
+    ids SDL gave it the first pad's mapping and gamepad name.
+  - The renderer now tells script pads apart by their joystick names.
+
+**Game side**, `port/host/d012_versus.cpp`:
+
+- **The opponent's pad.** At every pad read, player 2's pad goes into raw pad 1's embedded SceCtrlData and its mode
+  is set to 1, as the ad hoc code does. Logical pad 1, the opponent's fighter's and camera's, reads it.
+- **The opponent is player 2's.** An override of `battle:0x08B2F2E4` turns the field set-up's "slot 1 to the CPU"
+  call into "slot 1 to the player" in a Quick Battle (`FIELD+0x4C == 4`, caller inside main `0x0888BA0C`, fighter
+  `FIELD+0x3C`). The battle intro hands both fighters to the CPU and back, as it does player 1's: the trace shows AI
+  mode 0 through the intro, then 1.
+- **Picking the opponent.** While the character room is in states 8 to 11, the game's pad read gets player 2's pad.
+  - The room object is `*(menu 0x08AA3F44)`, its state `*(*(obj+0x154)+0x910)`.
+  - Its state table at `menu:0x08AA3F48` has 8-byte entries; the first three functions tell the menu overlay from
+    the battle overlay.
+- **Player 2's camera.** The right-stick hook (`d012_camera.cpp`) also acts on the camera listening to logical pad 1,
+  with player 2's right stick and slot 1's direction options. R3 on player 2's pad presses SELECT on raw pad 1 while
+  that camera takes input.
+- **Pause.** Nothing was needed. The battle checks START on each fighter's own pad (`battle:0x08B20458`, through
+  `FIELD + slot*4 + 0x38`, then `+0x5A0`), and the pause menu answers only the pad that opened it.
+- **A disconnect.** When player 2's pad goes away while the battle overlay is loaded, START is pressed on raw pad 1
+  for one read. The game's pause opens as player 2's and waits for that pad.
+- **`D012_TRACE_VERSUS=1`** logs both fighters' positions, the opponent's AI mode and what raw pad 1 was given,
+  every 15 pad reads.
+
+Runs (recompiled, `build/port/data-versus-test`, two virtual pads, every menu press sent on both so the route works
+whichever pad the game listens to; logs in `build/port/versus/logs/`):
+
+| Run | What it showed |
+| --- | --- |
+| `controls2` | Player 2's pad opened as player 2's. "player 2 picks the opponent" logged while the room was in its opponent states, then "player 1's pad again". The opponent was made player 2's |
+| `controls3` (trace) | No input: both fighters stand still. Player 2's left stick alone moves player 2's fighter: x −10.0 to −3.2, z 0 to −19.0, and off a ledge, y 23 to 6. Player 1's stick alone moves player 1. Player 2's circle makes their fighter lunge (a Brave attack); cross makes them jump (y 6.0 to 8.9 and back) |
+| `controls2` | Player 2's right stick, the only stick input at that moment, turned the lock-on camera: player 2's half changed view |
+| `pause2` | Player 2's START paused; player 1's confirm left the menu up; player 2's confirm closed it, and player 2 moved again. The other way round, player 1's pause took only player 1's confirm. The pause menu draws over the split screen |
+| `disconnect1` | `detach2` in battle paused the game. Player 1's confirm left the menu up. `attach2`, then player 2's confirm, closed it, and player 2 moved again |
+| `off1` | `D012_LOCAL_VERSUS` unset: no second pad opened, no versus lines, and player 1's right stick still turned the camera |
+
+Not done or not verified:
+
+- **No on-screen message** when a pad goes away; only the pause. PortableKit has no notice facility yet.
+- **Player 1's gamepad lost** is not handled. Player 1 still has the keyboard.
+- **Real controllers** were not used: only SDL virtual gamepads. Two real pads, or a real pad and the keyboard,
+  need the owner.
+- **Scope of the switch:** while it is on, every Quick Battle is versus, and any character-room opponent pick
+  listens to player 2. The menu row (phase 4) scopes it.
+- **Untested:** EX Burst button sequences for player 2, assists called by player 2, and the results screen after a
+  versus battle.
 
 ## 8. For later: two copies over the game's ad hoc versus
 

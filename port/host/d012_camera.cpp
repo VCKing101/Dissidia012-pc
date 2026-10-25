@@ -27,6 +27,7 @@
 #include "d012_camera.hpp"
 #include "d012_decomp_harness.hpp"
 #include "d012_decomp_pad.hpp"
+#include "d012_versus.hpp"
 
 #include "../decomp/battle_camera.h"
 
@@ -138,34 +139,52 @@ float stick_axis(std::uint8_t raw) {
 // The local player's camera with manual input on, while the game takes
 // input: the gates of the game's own pad accessors (input muted, a replay
 // playing) and hardware feeding pad 0 (not ad-hoc).
-bool local_camera(Guest *g, gaddr camera) {
-    if (g_ld8(g, camera + CAM_MANUAL) == 0) return false;
+// In local versus (d012_versus.cpp) the camera on logical pad 1 is player
+// 2's, fed by player 2's pad: 0 for player 1's camera, 1 for player 2's, -1
+// for any other.
+int local_camera(Guest *g, gaddr camera) {
+    if (g_ld8(g, camera + CAM_MANUAL) == 0) return -1;
     const gaddr pads = g_ld32(g, G_PAD_MANAGER);
-    if (pads == 0 || g_ld32(g, camera + CAM_PAD) != pads + PAD_LOGICAL0) return false;
-    if ((g_ld32(g, pads + PAD_FLAGS) & (PAD_FLAG_REPLAY | PAD_FLAG_MUTED)) != 0) return false;
-    return g_ld32s(g, pads + PAD_RAW0_MODE) != 1;
+    if (pads == 0) return -1;
+    if ((g_ld32(g, pads + PAD_FLAGS) & (PAD_FLAG_REPLAY | PAD_FLAG_MUTED)) != 0) return -1;
+    const gaddr listens = g_ld32(g, camera + CAM_PAD);
+    if (listens == pads + PAD_LOGICAL0) return g_ld32s(g, pads + PAD_RAW0_MODE) != 1 ? 0 : -1;
+    if (versus::on() && listens == pads + PAD_LOGICAL0 + PAD_LOGICAL_SIZE) return 1;
+    return -1;
 }
 
 // What the stick asks of this camera: turn > 0 is what D-pad right does,
 // closer > 0 what D-pad up does, after the player's two direction options.
 bool camera_stick(Guest *g, gaddr camera, float &turn, float &closer) {
-    if (!local_camera(g, camera)) return false;
+    const int player = local_camera(g, camera);
+    if (player < 0) return false;
     Pad &p = pad();
     // R3 presses SELECT only for a battle combatant's camera (time step
     // source 0, battle 0x08B0E200): the Story Mode world map runs this
     // camera too (source 1, main 0x08918E90), and SELECT is not its recentre.
-    if (g_ld32s(g, camera + CAM_STEP_SOURCE) == 0) p.live_read = p.reads;
-    turn = stick_axis(p.x);
-    closer = -stick_axis(p.y);  // the Y axis grows downward
+    const bool battle = g_ld32s(g, camera + CAM_STEP_SOURCE) == 0;
+    std::uint8_t x = p.x, y = p.y;
+    if (player == 1) {
+        if (battle) versus::note_camera_live();
+        const versus::RightStick stick = versus::player2_right_stick();
+        x = stick.x;
+        y = stick.y;
+    } else if (battle) {
+        p.live_read = p.reads;
+    }
+    turn = stick_axis(x);
+    closer = -stick_axis(y);  // the Y axis grows downward
     if (turn == 0.0f && closer == 0.0f) return false;
     const Options &o = options();
     if (o.invert_x) turn = -turn;
     if (o.invert_y) closer = -closer;
     turn *= o.sensitivity;
     closer *= o.sensitivity;
-    const std::uint16_t player = static_cast<std::uint16_t>(g_ld32(g, G_PLAYER_FLAGS) & 0xFFFFu);
-    if ((player & PLAYER_INVERT_HORIZONTAL) != 0) turn = -turn;
-    if ((player & PLAYER_INVERT_VERTICAL) != 0) closer = -closer;
+    // Each player's own direction options (slot 1's are copied from player 1's).
+    const std::uint16_t flags =
+        static_cast<std::uint16_t>(g_ld32(g, G_PLAYER_FLAGS + 4u * static_cast<std::uint32_t>(player)) & 0xFFFFu);
+    if ((flags & PLAYER_INVERT_HORIZONTAL) != 0) turn = -turn;
+    if ((flags & PLAYER_INVERT_VERTICAL) != 0) closer = -closer;
     return true;
 }
 
