@@ -192,7 +192,8 @@ second view has to come from the game's own draw code.
 | OBJ draw list | `DrawTask` (`0x08841144`) clears it; re-running `AddDrawTask` (58000) rebuilds it | V |
 | Effect manager's camera copy | Set once in the camera update (`0x088A5F1C`); every effect draw loads it (`0x088A60B8` and siblings) | V |
 | Near-camera fade of fighters | `char+0x380` bit 0x200000, `char+0x490`, set by `battle:0x08B3C1E0` for the on-screen camera; read by `DrawAlphaScreenTask` `0x088419EC` | V |
-| Lights | Set at frame start from the previous frame's camera | V |
+| Lights | Set at frame start from the previous frame's camera. Now set again from view 2's camera (7.3) | V |
+| libGu render state | The list start task sets the frame's state (scissor test, stencil, fog, lighting, blend, culling and more); view 1's last passes change it. Now replayed before view 2 (7.3) | V |
 | Sound listener | `0x088A08CC`; stays player 1's | V |
 | Shadows | Drawn to the scratch target `0xCC000`, composited back by `0x088763B8` with fixed screen strips | V |
 | Blur and glow chain, 64-wide pass, render-to-texture with its own view | `0x08861208`, `0x0885E150`, `0x08870DBC` | V |
@@ -422,6 +423,44 @@ Not done or not verified:
   listens to player 2. The menu row (phase 4) scopes it.
 - **Untested:** EX Burst button sequences for player 2, assists called by player 2, and the results screen after a
   versus battle.
+
+## 7.3 Order's Sanctuary blown out on player 2's half (fixed 25 October 2026)
+
+The owner, playing with a real controller, saw Order's Sanctuary very bright on player 2's half. V:
+
+- **Reproduced** with the graphics tour's Quick Battle route to stage 11. Player 2's water was solid white: mean
+  brightness of the middle band 251 against player 1's 187 (`halves.py`, captures `build/port/versus/order_v1b/`).
+- **Bisected** with `D012_SPLIT_ONLY=lo:hi` and `D012_SPLIT_SKIP=p,...` (new test switches; the first frame also
+  logs every task the second pass runs).
+  - Only the scene's tasks (58000 to 61000): still white.
+  - Without `MAP::DrawTask` (60000): black.
+  - So the map draw itself drew the water white.
+- **The display list of one battle frame** (`D012_TRACE_GE_LIST=8440:1:600000`, split at the two markers), compared
+  pass by pass with `ge_list_summary.py`:
+  - In pass 1, the half-size frame copies the water samples (into `0x04168000` and `0x04178000`, and a 120×68 pass
+    into `0x000CC000`) are drawn with their own scissor, 256×128 and 120×68.
+  - In pass 2 the same draws had the full-screen scissor: the draw buffer was set (`D2`, `9D`, `9C`), but no scissor
+    or region (`D4`, `D5`, `15`, `16`) was sent.
+- **Cause.** libGu's scissor (main `0x089A204C`) records the rectangle in its context but sends it only while the
+  context's scissor-test flag (`ctx+0xA8`) is on. The list start task turns it on at each frame's start, and view 1's
+  last passes turn it off. Pass 2 started from what pass 1 left, not from the frame's starting state.
+- **Fix** (`d012_split_view.cpp`, `frame_start_state`). Before view 2, replay the list start task's state block
+  (main `0x088659F0..0x08865E24`) call for call, with the same arguments:
+  - screen target, scissor test on, stencil function and op, the clears, the camera;
+  - fog from `gfx+0x8B0`, lighting, the two lights that follow the camera (from view 2's camera);
+  - depth test, blend, culling and the rest of the enables.
+  - After view 2, the lights are set again from player 1's camera.
+- **Checked.**
+  - Order's Sanctuary: player 2's half 164 to 179 against player 1's 177 to 183 over five captures, the water
+    drawn on both (`build/port/versus/order_fix/`).
+  - Old Chaos Shrine and Lunar Subterrane: both halves alike (`stage1`, `stage4`).
+  - Orphan's Cradle: not checked, the run ended on its Opponent Info screen.
+  - Setting only the camera lights for view 2, tried first, changed nothing on its own.
+
+Also found on the way: with a real gamepad connected, the scripted runs gave the real pad player 2's place. When the
+port asked for a second pad, PortableKit's scan stopped at the first spare pad. The scan now offers every pad while
+a second player is wanted, so the input script's second pad takes player 2's place from a real one, as its first
+pad does player 1's.
 
 ## 8. For later: two copies over the game's ad hoc versus
 
