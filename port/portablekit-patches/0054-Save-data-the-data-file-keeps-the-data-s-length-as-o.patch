@@ -1,0 +1,221 @@
+From 4799bb3bb9293cabfa23114961049d1482cef8f8 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Mon, 26 Oct 2026 13:13:41 +1030
+Subject: [PATCH] Save data: the data file keeps the data's length, as on a PSP
+
+An encrypted save's data file was padded with zeros to a multiple of 16
+bytes, and its SAVEDATA_FILE_LIST hash was taken over the file as stored.
+A PSP and PPSSPP write the header and the data at its own length, and hash
+that file padded with zeros to 16 bytes. So a save of a length that is not
+a multiple of 16 failed both ways: PPSSPP refused this framework's file
+("Unable to load data": longer than the buffer the game gives it), and this
+framework refused PPSSPP's as broken (the hash did not match).
+
+encrypt_data now writes exactly the data's length, and data_file_hash
+hashes the file padded with zeros, which for a file of whole blocks is the
+hash as before, so saves written by earlier builds still load. When the
+game loads such a padded save into a buffer of its own length, the save is
+written again at that length, so it moves to PPSSPP or a PSP without the
+player saving first; <prefix>_NO_SAVEDATA_REPAIR leaves it as it is.
+
+Verified with Dissidia 012 (USA) against PPSSPP 1.20.4 on Windows, both
+ways: a save this build wrote loads in PPSSPP, and a save PPSSPP wrote
+loads here with the setting changed in PPSSPP. A padded save from an
+earlier build loads and is rewritten at 257,224 bytes, then loads in
+PPSSPP. portablekit_savedata_tests: 0 failures. Not tested: a real PSP,
+other games, or saves of mode 1 and 3.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ docs/BRINGING_UP_A_GAME.md         |  1 +
+ docs/DESKTOP_APP.md                |  2 +-
+ host/hle/hle_savedata.cpp          | 28 +++++++++++++++-----
+ host/save_data/savedata_crypto.cpp |  8 ++++--
+ host/save_data/savedata_crypto.hpp | 12 ++++++---
+ tests/savedata_tests.cpp           | 42 +++++++++++++++++++++++++++---
+ 6 files changed, 75 insertions(+), 18 deletions(-)
+
+diff --git a/docs/BRINGING_UP_A_GAME.md b/docs/BRINGING_UP_A_GAME.md
+index 803c807..bd7de3e 100644
+--- a/docs/BRINGING_UP_A_GAME.md
++++ b/docs/BRINGING_UP_A_GAME.md
+@@ -97,6 +97,7 @@ Every one of these takes the profile's own prefix, so `TENKAWA_TRACE_KERNEL` for
+ | `<PREFIX>_PRESENT_AFTER_FLIP` | Presents on the emulation thread (as `<PREFIX>_NO_PRESENT_THREAD`), with frame interpolation's delay allowing for the game's code up to its flip only, as before patch 0048, not up to its first idle time after it (`PresentClock::note_idle`); the presents then fall in the game's code and come up to 7 ms late |
+ | `<PREFIX>_NO_PRESENT_THREAD` | Make every present on the emulation thread, as before the present thread: frame interpolation's presents between flips in the kernel's idle time and at the runtime's starvation boundaries (patch 0048's pacing, about 9 ms more delay), a frame without interpolation at its flip. By default a thread of the renderer's own acquires, records, submits and presents every present at its due time while the game's code runs (`host/gpu/present_queue.hpp`, `VulkanRenderer::Impl::present_loop`); with `<PREFIX>_PERF=log` or `<PREFIX>_TRACE_INTERPOLATION` it prints a `[present-thread]` line a second (presents, its CPU time, its waits for the renderer and for an image, the latest present, the emulation thread's waits for it) |
+ | `<PREFIX>_TEST_GUEST_SPIN_MS=N` | Test only: after every flip the emulation thread spins N ms (at most 30), polling for presents due each millisecond, as a slower CPU's game code would; for trying the pacing as on a handheld PC |
++| `<PREFIX>_NO_SAVEDATA_REPAIR` | Leave a save that an earlier build padded to 16 bytes as it is when the game loads it, instead of writing it again at the length the game asks for (`do_load()` in `host/hle/hle_savedata.cpp`) |
+ | `<PREFIX>_NO_FAST_HLE_COPIES` | `sceKernelMemcpy`, `sceKernelMemset` and `sceDmacMemcpy` copy a byte at a time through the checked accessors, as before, instead of one host copy |
+ | `<PREFIX>_NO_BUSY_CLOCK` | Keep emulated time still for a thread that never waits, as before the busy clock (`Kernel::charge_busy_time`) |
+ | `PSPRECOMP_NO_INTERPRETER=1` | Turn the interpreter off. Nothing runs without a corpus; with one, the runtime stops at the first address the recompiler missed and names it |
+diff --git a/docs/DESKTOP_APP.md b/docs/DESKTOP_APP.md
+index adcae86..8fffa3c 100644
+--- a/docs/DESKTOP_APP.md
++++ b/docs/DESKTOP_APP.md
+@@ -187,7 +187,7 @@ Without the keys, the file is refused with the I/O error (what a PSP answers for
+ ## Saves
+ 
+ - **Without keys** the game's key is still read from its save request and remembered, but the save is written unencrypted (`SAVEDATA_PARAMS` flags 0), as early PPSSPP versions wrote them. The game sees exactly the same data. Such saves load in PPSSPP; a PSP does not accept them.
+-- **With keys**, saves are written exactly as a PSP writes them (mode 5), which is what the framework has always done. Import checks hashes and decrypts; export copies.
++- **With keys**, saves are written as a PSP writes them (mode 5): the encrypted data file is the 16-byte header and the data at its own length, and its hash in `SAVEDATA_FILE_LIST` is of the file padded with zeros to 16 bytes. Import checks hashes and decrypts; export copies. Earlier builds padded the file itself to 16 bytes, which PPSSPP refuses ("Unable to load data") when the game's buffer is exactly the length it saved, and they computed the hash over the file as stored, so a save of any other length from PPSSPP or a PSP was refused as broken. A padded save still loads, and is written again at the game's length the first time the game loads it (`<PREFIX>_NO_SAVEDATA_REPAIR` leaves it). Measured with Dissidia 012's saves against PPSSPP 1.20.4, both ways.
+ - **Keys added later**: saves written without keys stay readable (flags 0 needs no key), and the menu's Export now writes such a save the way a PSP does, with the game's key remembered from its save request, so the exported copy loads on a PSP; the menu says which saves it encrypted. Tested with a save written without a key (`portablekit_savedata_tests`).
+ - An encrypted save (from a PSP, or from a port built with keys) in a no-keys installation is refused with the message above rather than handed to the game broken.
+ 
+diff --git a/host/hle/hle_savedata.cpp b/host/hle/hle_savedata.cpp
+index d16b583..198dfaa 100644
+--- a/host/hle/hle_savedata.cpp
++++ b/host/hle/hle_savedata.cpp
+@@ -259,15 +259,29 @@ std::uint32_t do_load(psprecomp::GuestMemory &memory, std::uint32_t params, cons
+     std::cerr << "[savedata] loaded " << count << " bytes from "
+               << savedata::save_folder(state().memory_stick, files).string()
+               << (files.key ? " (decrypted)" : "") << "\n";
+-    // An encrypted file is padded with zeros to a multiple of 16 bytes, so a
+-    // buffer the size the game saved leaves up to 15 zero bytes behind. Only
+-    // data that does not fit is worth saying.
+-    const bool cut = data.size() > capacity &&
+-                     (data.size() - capacity >= 16u ||
+-                      std::any_of(data.begin() + capacity, data.end(), [](std::uint8_t b) { return b != 0u; }));
+-    if (cut)
++    // Earlier builds padded an encrypted file with zeros to a multiple of 16
++    // bytes, so a buffer the size the game saved leaves up to 15 zero bytes
++    // behind. Only data that does not fit is worth saying.
++    const bool padded = data.size() > capacity && data.size() - capacity < 16u && data.size() % 16u == 0u &&
++                        std::all_of(data.begin() + capacity, data.end(), [](std::uint8_t b) { return b == 0u; });
++    if (data.size() > capacity && !padded)
+         std::cerr << "[savedata] " << files.file_name << " holds " << data.size() << " bytes; the buffer takes "
+                   << capacity << "\n";
++    // PPSSPP and a PSP refuse such a file, longer than the buffer the game
++    // gives them, so write it again at the length the game asks for: the
++    // save then moves to them without the player saving first.
++    // <prefix>_NO_SAVEDATA_REPAIR leaves it as it is.
++    static const bool no_repair = portablekit::env("NO_SAVEDATA_REPAIR") != nullptr;
++    if (padded && files.key && !no_repair) {
++        savedata::SaveContents repaired = loaded.contents;
++        repaired.data.resize(capacity);
++        std::string error;
++        if (savedata::write_save(state().memory_stick, files, repaired, error))
++            std::cerr << "[savedata] wrote " << files.file_name << " again at " << capacity
++                      << " bytes, without the padding earlier builds added\n";
++        else
++            std::cerr << "[savedata] could not write " << files.file_name << " again: " << error << "\n";
++    }
+     return result::kOk;
+ }
+ 
+diff --git a/host/save_data/savedata_crypto.cpp b/host/save_data/savedata_crypto.cpp
+index f21670d..d22ba3d 100644
+--- a/host/save_data/savedata_crypto.cpp
++++ b/host/save_data/savedata_crypto.cpp
+@@ -146,7 +146,11 @@ Block cmac(const Aes128 &cipher, std::span<const std::uint8_t> data) {
+ }
+ 
+ Block data_file_hash(std::span<const std::uint8_t> encrypted_file, CryptMode mode, const Block *game_key) {
+-    return mode_hash(encrypted_file, mode, mode == CryptMode::Mode1 ? nullptr : game_key);
++    const Block *key = mode == CryptMode::Mode1 ? nullptr : game_key;
++    if (encrypted_file.size() % 16u == 0u) return mode_hash(encrypted_file, mode, key);
++    std::vector<std::uint8_t> padded(encrypted_file.begin(), encrypted_file.end());
++    padded.resize((padded.size() + 15u) & ~std::size_t{15u}, 0u);
++    return mode_hash(padded, mode, key);
+ }
+ 
+ std::vector<std::uint8_t> encrypt_data(std::span<const std::uint8_t> plain, CryptMode mode, const Block *game_key,
+@@ -158,7 +162,7 @@ std::vector<std::uint8_t> encrypt_data(std::span<const std::uint8_t> plain, Cryp
+     std::fill(seed.begin() + 12, seed.end(), std::uint8_t{0});
+     const Block header = masked(kirk_key(p.header_seed).encrypt(masked(seed, p.header_mask_out)), p.header_mask_in);
+ 
+-    std::vector<std::uint8_t> out(kEncryptedHeaderSize + ((plain.size() + 15u) & ~std::size_t{15u}), 0u);
++    std::vector<std::uint8_t> out(kEncryptedHeaderSize + plain.size(), 0u);
+     std::copy(header.begin(), header.end(), out.begin());
+     std::copy(plain.begin(), plain.end(), out.begin() + kEncryptedHeaderSize);
+     apply_stream(std::span(out).subspan(kEncryptedHeaderSize), header, mode,
+diff --git a/host/save_data/savedata_crypto.hpp b/host/save_data/savedata_crypto.hpp
+index 691ba86..76dd378 100644
+--- a/host/save_data/savedata_crypto.hpp
++++ b/host/save_data/savedata_crypto.hpp
+@@ -52,13 +52,17 @@ inline constexpr std::size_t kParamsHashModeOffset = 0x70u;     // mode 3 or 5 h
+ // AES-CMAC (NIST SP 800-38B / RFC 4493).
+ [[nodiscard]] Block cmac(const Aes128 &cipher, std::span<const std::uint8_t> data);
+ 
+-// Hash of an encrypted data file as stored in SAVEDATA_FILE_LIST.
++// Hash of an encrypted data file as stored in SAVEDATA_FILE_LIST: the hash
++// of the file padded with zeros to a multiple of 16 bytes. (A file of whole
++// blocks, such as those this code wrote before it kept the data's length,
++// hashes as it is.)
+ [[nodiscard]] Block data_file_hash(std::span<const std::uint8_t> encrypted_file, CryptMode mode,
+                                    const Block *game_key);
+ 
+-// Encrypts `plain`, padded with zeros to a multiple of 16 bytes; the result
+-// starts with the 16-byte header. `random` stands in for the random number
+-// the PSP draws for the header.
++// Encrypts `plain`; the result is the 16-byte header followed by exactly
++// plain.size() bytes, as the PSP and PPSSPP write it: a game usually asks
++// for exactly the length it saved, and there a longer file does not load.
++// `random` stands in for the random number the PSP draws for the header.
+ [[nodiscard]] std::vector<std::uint8_t> encrypt_data(std::span<const std::uint8_t> plain, CryptMode mode,
+                                                      const Block *game_key, const Block &random);
+ // Decrypts a data file written by encrypt_data or by a PSP. The result is
+diff --git a/tests/savedata_tests.cpp b/tests/savedata_tests.cpp
+index 509d4ae..fa8788a 100644
+--- a/tests/savedata_tests.cpp
++++ b/tests/savedata_tests.cpp
+@@ -93,13 +93,25 @@ void test_encryption() {
+     for (const CryptMode mode : {CryptMode::Mode1, CryptMode::Mode3, CryptMode::Mode5}) {
+         const std::string name = "mode " + std::to_string(static_cast<int>(mode)) + ": ";
+         const auto encrypted = encrypt_data(plain, mode, &key, random);
+-        check(encrypted.size() == kEncryptedHeaderSize + 5008u, (name + "encryption adds the header and pads to 16").c_str());
++        check(encrypted.size() == kEncryptedHeaderSize + 5000u,
++              (name + "encryption adds the header and keeps the data's length").c_str());
+         check(!std::equal(plain.begin(), plain.end(), encrypted.begin() + kEncryptedHeaderSize),
+               (name + "encrypted data differs from the plaintext").c_str());
+         const auto decrypted = decrypt_data(encrypted, mode, &key);
+-        check(decrypted && std::equal(plain.begin(), plain.end(), decrypted->begin()) &&
+-                  std::all_of(decrypted->begin() + 5000, decrypted->end(), [](std::uint8_t b) { return b == 0u; }),
+-              (name + "decryption restores the plaintext").c_str());
++        check(decrypted && *decrypted == plain, (name + "decryption restores the plaintext").c_str());
++        // The cipher is a key stream, so the data's length does not change
++        // the bytes before it: earlier builds wrote the same file padded.
++        std::vector<std::uint8_t> padded_plain = plain;
++        padded_plain.resize(5008u, 0u);
++        const auto padded = encrypt_data(padded_plain, mode, &key, random);
++        check(std::equal(encrypted.begin(), encrypted.end(), padded.begin()),
++              (name + "a padded file starts with the same bytes").c_str());
++        // The listed hash is of the file padded with zeros to 16 bytes, as
++        // PPSSPP and the PSP compute it (measured on a save PPSSPP wrote).
++        std::vector<std::uint8_t> zero_padded = encrypted;
++        zero_padded.resize(kEncryptedHeaderSize + 5008u, 0u);
++        check(data_file_hash(encrypted, mode, &key) == data_file_hash(zero_padded, mode, &key),
++              (name + "the file hash is of the file padded with zeros").c_str());
+         if (mode == CryptMode::Mode1) continue;
+         Block other = key;
+         other[0] ^= 1u;
+@@ -148,6 +160,28 @@ void test_store() {
+     check(loaded.status == LoadStatus::Ok && loaded.contents.data == contents.data, "the save loads back");
+     check(loaded.contents.title == "Title" && loaded.contents.detail == "Detail", "the titles load back");
+ 
++    // Data of a length that is not a multiple of 16, as most games save: the
++    // file keeps that length and loads back.
++    {
++        SaveContents odd = contents;
++        odd.data.resize(4100u, 0x37u);
++        check(write_save(root, files, odd, error), "a save of 4100 bytes is written");
++        check(std::filesystem::file_size(folder / "DATA.BIN") == kEncryptedHeaderSize + 4100u,
++              "its data file is the header and 4100 bytes");
++        const auto odd_loaded = load_save(root, files);
++        check(odd_loaded.status == LoadStatus::Ok && odd_loaded.contents.data == odd.data, "the 4100 bytes load back");
++
++        // A file from an earlier build: padded to 4112 bytes, with the hash
++        // of the padded file. It still loads, with its zeros.
++        SaveContents padded = odd;
++        padded.data.resize(4112u, 0u);
++        check(write_save(root, files, padded, error), "a padded save is written");
++        const auto padded_loaded = load_save(root, files);
++        check(padded_loaded.status == LoadStatus::Ok && padded_loaded.contents.data == padded.data,
++              "a save padded by an earlier build still loads");
++        check(write_save(root, files, contents, error), "the 4096-byte save is written again");
++    }
++
+     // A changed data file must be reported as broken. Flip the byte: the
+     // encrypted data is different every run, so writing a fixed value can
+     // leave it unchanged.
+-- 
+2.53.0.windows.1
+

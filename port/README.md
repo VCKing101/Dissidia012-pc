@@ -231,6 +231,7 @@ fresh clone of `33800c4`, apply them with `git checkout -b dissidia 33800c4` and
 | 0051 | Tests of the present thread's hand-off and timing (`tests/present_queue_tests.cpp`) | |
 | 0052 | The last stretch of a present's wait spins without yielding | Present timing to well under a millisecond (99th percentile 0.6 ms late) |
 | 0053 | No present before its time when a flip moves the timing grid | Keeps presents from coming early |
+| 0054 | Save data: the encrypted data file keeps the data's own length, and its hash is of the file padded with zeros to 16 bytes, as a PSP and PPSSPP write it; a save an earlier build padded is written again at the game's length when it loads (`<prefix>_NO_SAVEDATA_REPAIR` leaves it) | Saves move between the port and PPSSPP both ways: PPSSPP said "Unable to load data" for the port's saves, and the port refused PPSSPP's as broken |
 
 Patches 0012 and 0013 were made on a separate worktree branch during the recompiled-build work and merged onto
 `dissidia` on 18 October 2026; patches 0014 and 0015 followed the same day (bring-up log, section "Stencil"), and
@@ -239,7 +240,8 @@ patches 0016 to 0022 that evening (section "HP bar, orbs and saves"), patches 00
 ([bgm-playlist-design.md](../docs/port/bgm-playlist-design.md), section 10); patch 0028 that evening, for analog
 diagonals that felt dead on a real controller. Patches 0036 to 0039 came on 20 October with the graphics census
 ([graphics-census.md](../docs/port/graphics-census.md)), and 0040 to 0043 on 21 October from its findings (depth clipping, findings 3 and 6, stays on the
-unmerged branch `depth-clip`: no visible change here); 0044 the same day for a report from the Steam Deck, and 0045 to 0048 for the frame-rate dips; 0049 to 0053 on 22 October for the present thread.
+unmerged branch `depth-clip`: no visible change here); 0044 the same day for a report from the Steam Deck, and 0045 to 0048 for the frame-rate dips; 0049 to 0053 on 22 October for the present thread. Patch 0054 came on 26 October, for a player whose save would not move between the port
+and PPSSPP (`portablekit_savedata_tests` and both directions checked against PPSSPP 1.20.4).
 PortableKit's 21 framework tests pass on the branch and `portablekit_host_check` builds.
 
 ## Recompiled build
