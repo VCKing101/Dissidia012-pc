@@ -36,6 +36,8 @@ game's executable and overlays.
   ([design](docs/port/bgm-playlist-design.md)).
 - **A Battle BGM Maker**: a local browser tool for writing a mod's `mod.json` and setting its loop points
   ([README](port/tools/bgm_maker/README.md)).
+- **Local split-screen versus**: two players on one PC, each with their own controller and camera
+  ([notes](docs/port/local-versus.md)).
 
 ## BGM playlist selector
 
@@ -59,6 +61,23 @@ and L2 or R2 again hands the D-pad back. Mods add series of their own after the 
 
 The FINAL FANTASY XV and CRISIS CORE series in these captures come from a test mod with track titles only; it plays
 generated tones.
+
+## Local split-screen versus
+
+Battle Mode has a new row, **Quick Battle (Player vs Player)**: a 1-on-1 between two players on one PC, the second
+on a second controller. Player 2 picks the opponent with their own controller, and the battle setup drops the CPU's
+rows. In battle the screen is split down the middle, each half from its player's own camera and at 60 fps, with the
+game's HUD across both. EX Bursts and the finishing blow play full screen. A versus battle gives no rewards. Either player can pause, and a controller that goes away pauses the battle until it
+comes back ([notes](docs/port/local-versus.md)).
+
+<p>
+  <img src="docs/images/versus-menu-row.png" width="49%" alt="Battle Mode's rows with Quick Battle (Player vs Player) highlighted under Arcade Mode, and its help line: Fight a friend on a second controller, on a split screen">
+  <img src="docs/images/versus-battle-setup.png" width="49%" alt="The battle setup with Enter Battle, Stage, Rules and Judgment only, and a GUEST badge on player 2's name plate instead of CPU">
+</p>
+
+![A split-screen battle: player 1's view on the left, player 2's on the right, each with its own lock-on cursor, and the HUD across both](docs/images/versus-split-battle.png)
+
+`D012_LOCAL_VERSUS=0` leaves the game as it was, without the row.
 
 ## Quick start (Windows)
 

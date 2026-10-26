@@ -1,0 +1,520 @@
+From 888b820f7be19e6d0ed0bd7418a2a25a3c099c13 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Mon, 26 Oct 2026 08:54:29 +1030
+Subject: [PATCH 60/61] Frame interpolation: a split screen's two views
+
+Each draw now carries the view of a split frame it belongs to (before the
+left marker, between the markers, after the compose). Draws pair only within
+their view, each view has its own camera motion for the blend and the
+own-motion guard, and the cut limits apply to every view. The compose moves
+each view's middle into its half instead of scaling it by a pixel, so a
+replay draws each view's draws straight into its half (viewport moved, scissor
+cut at the half) and clears the dark line before what lies over both. A frame
+that starts or ends the split is a cut.
+
+Checked on Dissidia 012 (Windows, RX 9070 XT): a split frame drawn again from
+its recording matches the frame (no pixel off by more than 8/255), 60 of 60
+fps through a fight, and a one-view battle unchanged (replay checks exact).
+New test: split_views. Not checked: the Steam Deck.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/gpu/frame_interpolation.cpp |  84 ++++++++++++++---------
+ host/gpu/frame_interpolation.hpp |  25 +++++--
+ host/gpu/vulkan_renderer.cpp     | 112 ++++++++++++++++++++++++++-----
+ tests/interpolation_tests.cpp    |  40 +++++++++++
+ 4 files changed, 208 insertions(+), 53 deletions(-)
+
+diff --git a/host/gpu/frame_interpolation.cpp b/host/gpu/frame_interpolation.cpp
+index e927840..f009760 100644
+--- a/host/gpu/frame_interpolation.cpp
++++ b/host/gpu/frame_interpolation.cpp
+@@ -57,6 +57,7 @@ std::size_t Matcher::KeyHash::operator()(const Key &key) const noexcept {
+     mix(key.texture_address);
+     mix(key.count);
+     mix(key.primitive);
++    mix(key.split_view);
+     return static_cast<std::size_t>(hash);
+ }
+ 
+@@ -75,7 +76,7 @@ std::array<float, 3> Matcher::eye_translation_of(const DrawSummary &draw) noexce
+ 
+ Matcher::Key Matcher::key_of(const DrawSummary &draw) noexcept {
+     return Key{draw.vertex_address, draw.index_address, draw.vertex_type, draw.texture_address, draw.count,
+-               static_cast<std::uint8_t>(draw.primitive)};
++               static_cast<std::uint8_t>(draw.primitive), draw.split_view};
+ }
+ 
+ const Matching &Matcher::match(const std::vector<DrawSummary> &older, const std::vector<DrawSummary> &newer,
+@@ -135,11 +136,12 @@ const Matching &Matcher::match(const std::vector<DrawSummary> &older, const std:
+     // a scene stands still, so the median over the matched draws is the
+     // camera's turn and move, and characters moving on their own do not
+     // count. A sample of up to 256 pairs spread over the frame is enough.
++    // Each view of a split frame has its own camera.
+     struct Sample {
+         float turn;
+         Matrix motion;
+     };
+-    std::vector<Sample> samples;
++    std::array<std::vector<Sample>, kViews> samples;
+     const std::size_t stride = std::max<std::size_t>(1u, out.matched / 256u);
+     std::size_t seen = 0u;
+     for (std::size_t i = 0; i < older.size(); ++i) {
+@@ -152,23 +154,30 @@ const Matching &Matcher::match(const std::vector<DrawSummary> &older, const std:
+         const Matrix motion = multiply(multiply(to.view, to.world), before_inverse);
+         Matrix identity{};
+         identity[0] = identity[5] = identity[10] = identity[15] = 1.0f;
+-        samples.push_back({rotation_angle_degrees(identity, motion), motion});
++        samples[std::min<std::size_t>(from.split_view, kViews - 1u)].push_back(
++            {rotation_angle_degrees(identity, motion), motion});
+     }
+-    if (!samples.empty()) {
+-        const auto middle = samples.begin() + static_cast<std::ptrdiff_t>(samples.size() / 2u);
+-        std::nth_element(samples.begin(), middle, samples.end(),
++    for (std::size_t view = 0; view < kViews; ++view) {
++        std::vector<Sample> &taken = samples[view];
++        if (taken.empty()) continue;
++        const auto middle = taken.begin() + static_cast<std::ptrdiff_t>(taken.size() / 2u);
++        std::nth_element(taken.begin(), middle, taken.end(),
+                          [](const Sample &a, const Sample &b) { return a.turn < b.turn; });
++        Matching::ViewCamera &camera = out.views[view];
++        camera.found = true;
++        camera.angle_degrees = middle->turn;
++        camera.camera = middle->motion;
++        camera.distance = std::sqrt(camera.camera[12] * camera.camera[12] + camera.camera[13] * camera.camera[13] +
++                                    camera.camera[14] * camera.camera[14]);
++        if (!out.camera_found) out.camera = camera.camera;
+         out.camera_found = true;
+-        out.camera_angle_degrees = middle->turn;
+-        out.camera = middle->motion;
+-        out.camera_distance = std::sqrt(out.camera[12] * out.camera[12] + out.camera[13] * out.camera[13] +
+-                                        out.camera[14] * out.camera[14]);
++        out.camera_angle_degrees = std::max(out.camera_angle_degrees, camera.angle_degrees);
++        out.camera_distance = std::max(out.camera_distance, camera.distance);
+     }
+ 
+-    // Each pair's own motion: where the camera's motion would have taken the
+-    // older draw against where the newer one is, in eye space.
++    // Each pair's own motion: where its view's camera motion would have
++    // taken the older draw against where the newer one is, in eye space.
+     if (out.camera_found && thresholds.max_own_motion > 0.0f) {
+-        const Matrix &c = out.camera;
+         // Only the translation column of view times world is used; summarize()
+         // stores it (eye_translation_of, the same sums as multiply()).
+         for (std::size_t i = 0; i < older.size(); ++i) {
+@@ -176,6 +185,9 @@ const Matching &Matcher::match(const std::vector<DrawSummary> &older, const std:
+             if (partner < 0) continue;
+             const DrawSummary &from = older[i];
+             const DrawSummary &to = newer[static_cast<std::size_t>(partner)];
++            const Matching::ViewCamera &camera = out.views[std::min<std::size_t>(from.split_view, kViews - 1u)];
++            if (!camera.found) continue;
++            const Matrix &c = camera.camera;
+             const std::array<float, 3> before_column = from.prepared ? from.eye_translation : eye_translation_of(from);
+             const std::array<float, 3> after_column = to.prepared ? to.eye_translation : eye_translation_of(to);
+             float distance = 0.0f;
+@@ -197,32 +209,42 @@ const Matching &Matcher::match(const std::vector<DrawSummary> &older, const std:
+         }
+     }
+ 
+-    float max_angle = thresholds.max_camera_angle_degrees;
+-    float max_distance = thresholds.max_camera_distance;
+-    if (previous_blended_) {
+-        max_angle = std::clamp(previous_angle_degrees_ * thresholds.continuous_growth +
+-                                   thresholds.continuous_angle_margin_degrees,
+-                               max_angle, std::max(max_angle, thresholds.max_continuous_angle_degrees));
+-        max_distance = std::clamp(previous_distance_ * thresholds.continuous_growth +
+-                                      thresholds.continuous_distance_margin,
+-                                  max_distance, std::max(max_distance, thresholds.max_continuous_distance));
++    // Each view's camera against the limits, continuing the same view's
++    // motion in the pair before.
++    bool continued = false;
++    const char *camera_cut = nullptr;
++    for (std::size_t view = 0; view < kViews; ++view) {
++        const Matching::ViewCamera &camera = out.views[view];
++        if (!camera.found) continue;
++        float max_angle = thresholds.max_camera_angle_degrees;
++        float max_distance = thresholds.max_camera_distance;
++        if (previous_blended_) {
++            max_angle = std::clamp(previous_angle_degrees_[view] * thresholds.continuous_growth +
++                                       thresholds.continuous_angle_margin_degrees,
++                                   max_angle, std::max(max_angle, thresholds.max_continuous_angle_degrees));
++            max_distance = std::clamp(previous_distance_[view] * thresholds.continuous_growth +
++                                          thresholds.continuous_distance_margin,
++                                      max_distance, std::max(max_distance, thresholds.max_continuous_distance));
++        }
++        if (camera_cut == nullptr && camera.angle_degrees > max_angle) camera_cut = "camera turned";
++        if (camera_cut == nullptr && camera.distance > max_distance) camera_cut = "camera moved";
++        continued = continued || camera.angle_degrees > thresholds.max_camera_angle_degrees ||
++                    camera.distance > thresholds.max_camera_distance;
+     }
+     if (out.eligible_newer == 0u || out.matched == 0u) {
+         out.cut = "nothing to blend";
+     } else if (static_cast<float>(out.matched) <
+                thresholds.min_matched_fraction * static_cast<float>(std::max(out.eligible_newer, out.eligible_older))) {
+         out.cut = "few draws match";
+-    } else if (out.camera_found && out.camera_angle_degrees > max_angle) {
+-        out.cut = "camera turned";
+-    } else if (out.camera_found && out.camera_distance > max_distance) {
+-        out.cut = "camera moved";
++    } else {
++        out.cut = camera_cut;
+     }
+-    out.continued = out.cut == nullptr && out.camera_found &&
+-                    (out.camera_angle_degrees > thresholds.max_camera_angle_degrees ||
+-                     out.camera_distance > thresholds.max_camera_distance);
++    out.continued = out.cut == nullptr && continued;
+     previous_blended_ = out.cut == nullptr;
+-    previous_angle_degrees_ = out.camera_found ? out.camera_angle_degrees : 0.0f;
+-    previous_distance_ = out.camera_found ? out.camera_distance : 0.0f;
++    for (std::size_t view = 0; view < kViews; ++view) {
++        previous_angle_degrees_[view] = out.views[view].found ? out.views[view].angle_degrees : 0.0f;
++        previous_distance_[view] = out.views[view].found ? out.views[view].distance : 0.0f;
++    }
+     return out;
+ }
+ 
+diff --git a/host/gpu/frame_interpolation.hpp b/host/gpu/frame_interpolation.hpp
+index cddc85a..6f51ed6 100644
+--- a/host/gpu/frame_interpolation.hpp
++++ b/host/gpu/frame_interpolation.hpp
+@@ -29,6 +29,11 @@ struct DrawSummary {
+     std::uint32_t count{};
+     PrimitiveType primitive{};
+     std::uint32_t target{};  // framebuffer address drawn into
++    // The picture of a split frame the draw belongs to (VulkanRenderer::
++    // kMarkerSplitLeft): 0 the first view, or the only one; 1 the second; 2
++    // what is drawn over both once they are side by side. Draws pair only
++    // within one view, and each view has a camera motion of its own.
++    std::uint8_t split_view{};
+     // Filled by summarize() while the draw's matrices are at hand, so that
+     // matching a frame need not read them again: the identity's hash, and
+     // the translation column of view times world. `prepared` says they are
+@@ -62,6 +67,8 @@ void mark_eligible(std::vector<DrawSummary> &draws, std::uint32_t displayed, boo
+ // True for a projection without perspective division.
+ [[nodiscard]] bool is_orthographic(const Matrix &projection) noexcept;
+ 
++inline constexpr std::size_t kViews = 3u;  // DrawSummary::split_view
++
+ // How two consecutive frames' draws correspond.
+ struct Matching {
+     // For each draw of the older frame, the index of the same draw in the
+@@ -87,6 +94,15 @@ struct Matching {
+     // characters moving on their own do not count. The angle is its turn;
+     // the distance is how far the eye itself moved, not how far distant
+     // scenery swings when the camera turns.
++    struct ViewCamera {
++        bool found{};
++        float angle_degrees{};
++        float distance{};
++        Matrix camera{};
++    };
++    std::array<ViewCamera, kViews> views{};  // by DrawSummary::split_view
++    // Over every view found: the largest turn and the largest move, and the
++    // first view's motion. With one view, that view's.
+     bool camera_found{};
+     float camera_angle_degrees{};
+     float camera_distance{};
+@@ -145,7 +161,7 @@ public:
+ private:
+     struct Key {
+         std::uint32_t vertex_address, index_address, vertex_type, texture_address, count;
+-        std::uint8_t primitive;
++        std::uint8_t primitive, split_view;
+         bool operator==(const Key &) const = default;
+     };
+     struct KeyHash {
+@@ -174,10 +190,11 @@ private:
+     std::vector<std::int32_t> next_;  // for each newer draw, the next with its key
+     std::vector<std::uint8_t> shared_;  // for each older draw: its key had several newer draws
+     Matching result_;
+-    // The previous pair's camera motion, when that pair was blended.
++    // The previous pair's camera motion in each view, when that pair was
++    // blended.
+     bool previous_blended_{};
+-    float previous_angle_degrees_{};
+-    float previous_distance_{};
++    std::array<float, kViews> previous_angle_degrees_{};
++    std::array<float, kViews> previous_distance_{};
+ };
+ 
+ // Blends two affine transforms: each basis vector keeps a length between the
+diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
+index d64203d..e45570c 100644
+--- a/host/gpu/vulkan_renderer.cpp
++++ b/host/gpu/vulkan_renderer.cpp
+@@ -1871,6 +1871,7 @@ struct VulkanRenderer::Impl {
+         std::uint32_t skinned{kNone}; // FrameRecord::skinned: the vertices of a group of skinned draws
+         bool raw{};                   // drawn from the guest's vertex bytes at vertex_base (first instance)
+         std::uint32_t raw_block{kNone}; // FrameRecord::raws: its format and bones
++        std::uint8_t split_view{};    // interpolation::DrawSummary::split_view
+     };
+     struct FrameRecord {
+         std::vector<interpolation::DrawSummary> summaries;
+@@ -1886,6 +1887,12 @@ struct VulkanRenderer::Impl {
+         std::uint64_t texture_clock{};        // texture_clock when the frame began
+         bool recorded{};                      // recorded for drawing again, in full
+         bool valid{};
++        // A split screen: the view being drawn (take_split_left() and
++        // compose_split() move it on), and whether the frame put two views
++        // side by side, which a replay then does by drawing each view's
++        // draws straight into its half.
++        std::uint8_t split_view{};
++        bool split{};
+         void clear() {
+             summaries.clear();
+             group_of.clear();
+@@ -1897,6 +1904,8 @@ struct VulkanRenderer::Impl {
+             object_offset = kNone;
+             recorded = false;
+             valid = false;
++            split_view = 0u;
++            split = false;
+         }
+     };
+     struct InterpolationStats {
+@@ -1941,7 +1950,8 @@ struct VulkanRenderer::Impl {
+     interpolation::Matcher matcher;
+     interpolation::CutThresholds cut_thresholds;
+     interpolation::Matching matching;  // older_frame against newer_frame
+-    interpolation::RigidMotion camera_motion;  // matching.camera taken apart
++    // Each view's camera motion of `matching` taken apart.
++    std::array<interpolation::RigidMotion, interpolation::kViews> camera_motions;
+     pacing::PresentClock present_clock;
+     pacing::RateGovernor governor;
+     InterpolationStats interpolation_stats;
+@@ -2148,6 +2158,18 @@ struct VulkanRenderer::Impl {
+     Target split_left{};
+     Target split_right{};
+     bool split_taken{};
++    // Where the halves go: the left half is the left view's middle moved left
++    // by `quarter`, the right half the right view's moved right by as much,
++    // with a dark line `line` pixels each side of `middle` between them.
++    struct SplitGeometry {
++        std::int32_t width, height, middle, line, quarter;
++    };
++    [[nodiscard]] SplitGeometry split_geometry() const {
++        const auto width = static_cast<std::int32_t>(target_extent.width);
++        // One guest pixel each side of the middle.
++        return {width, static_cast<std::int32_t>(target_extent.height), width / 2,
++                std::max<std::int32_t>(1, width / 480), width / 4};
++    }
+     void take_split_left(std::uint32_t target_address);
+     void compose_split(std::uint32_t target_address);
+     std::vector<std::uint32_t> read_image(VkImage image);
+@@ -5785,6 +5807,7 @@ void VulkanRenderer::Impl::take_split_left(std::uint32_t target_address) {
+     transition(command_buffer, target.color, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+     split_taken = true;
++    if (recording_frame.recorded) recording_frame.split_view = 1u;
+ }
+ 
+ // kMarkerSplitCompose: puts the middle half of the left view (split_left)
+@@ -5830,24 +5853,22 @@ void VulkanRenderer::Impl::compose_split(std::uint32_t target_address) {
+     vkCmdClearColorImage(command_buffer, target.color, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &dark, 1u, &range);
+     transition(command_buffer, target.color, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+-    const std::int32_t width = static_cast<std::int32_t>(target_extent.width);
+-    const std::int32_t height = static_cast<std::int32_t>(target_extent.height);
+-    const std::int32_t middle = width / 2;
+-    // One guest pixel each side of the middle.
+-    const std::int32_t line = std::max<std::int32_t>(1, width / 480);
+-    VkImageBlit half{};
++    // Moved, not scaled, so that a replay can draw each view straight into
++    // its half (replay()).
++    const SplitGeometry at = split_geometry();
++    VkImageCopy half{};
+     half.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0u, 0u, 1u};
+     half.dstSubresource = half.srcSubresource;
+-    half.srcOffsets[0] = {width / 4, 0, 0};
+-    half.srcOffsets[1] = {width - width / 4, height, 1};
+-    half.dstOffsets[0] = {0, 0, 0};
+-    half.dstOffsets[1] = {middle - line, height, 1};
+-    vkCmdBlitImage(command_buffer, split_left.color, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, target.color,
+-                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1u, &half, VK_FILTER_LINEAR);
+-    half.dstOffsets[0] = {middle + line, 0, 0};
+-    half.dstOffsets[1] = {width, height, 1};
+-    vkCmdBlitImage(command_buffer, split_right.color, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, target.color,
+-                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1u, &half, VK_FILTER_LINEAR);
++    half.srcOffset = {at.quarter, 0, 0};
++    half.dstOffset = {0, 0, 0};
++    half.extent = {static_cast<std::uint32_t>(at.middle - at.line), static_cast<std::uint32_t>(at.height), 1u};
++    vkCmdCopyImage(command_buffer, split_left.color, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, target.color,
++                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1u, &half);
++    half.srcOffset = {at.middle + at.line - at.quarter, 0, 0};
++    half.dstOffset = {at.middle + at.line, 0, 0};
++    half.extent.width = static_cast<std::uint32_t>(at.width - at.middle - at.line);
++    vkCmdCopyImage(command_buffer, split_right.color, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, target.color,
++                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1u, &half);
+     perf::count_target_copy();
+     transition(command_buffer, split_left.color, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+@@ -5856,6 +5877,10 @@ void VulkanRenderer::Impl::compose_split(std::uint32_t target_address) {
+     transition(command_buffer, target.color, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+     ++target.draw_serial;
++    if (recording_frame.recorded) {
++        recording_frame.split_view = 2u;
++        recording_frame.split = true;
++    }
+ }
+ 
+ // The pass of palette_view(): one triangle over the picture (level.vert),
+@@ -9534,6 +9559,7 @@ void VulkanRenderer::Impl::record_draw_for_replay(const DrawCall &call, bool lit
+         }
+         added.skinned = skinned;
+         added.raw = raw;
++        added.split_view = frame.split_view;
+         if (raw && ((call.vertex_type >> 9u) & 3u) != 0u) {
+             // A skinned raw group is blended through its bones.
+             if (frame.raws.empty() || frame.raw_offset != raw_offset) {
+@@ -9546,6 +9572,7 @@ void VulkanRenderer::Impl::record_draw_for_replay(const DrawCall &call, bool lit
+     }
+     ++frame.groups.back().draws;
+     frame.summaries.push_back(interpolation::summarize(call));
++    frame.summaries.back().split_view = frame.split_view;
+     frame.group_of.push_back(static_cast<std::uint32_t>(frame.groups.size() - 1u));
+ }
+ 
+@@ -9588,12 +9615,20 @@ void VulkanRenderer::Impl::finish_interpolated_frame(VkImage source, std::uint32
+ 
+     if (older_frame.valid && older_frame.recorded && newer_frame.recorded) {
+         matching = matcher.match(older_frame.summaries, newer_frame.summaries, cut_thresholds);
++        // A split screen starting or ending: the halves do not blend into
++        // one picture.
++        if (matching.cut == nullptr && older_frame.split != newer_frame.split) {
++            matching.cut = "split changed";
++            matcher.forget_motion();
++        }
+     } else {
+         matcher.forget_motion();
+         matching = interpolation::Matching{};
+         matching.cut = older_frame.valid ? "not recorded" : "no frame before";
+     }
+-    camera_motion = matching.camera_found ? interpolation::rigid_motion(matching.camera) : interpolation::RigidMotion{};
++    for (std::size_t view = 0; view < interpolation::kViews; ++view)
++        camera_motions[view] = matching.views[view].found ? interpolation::rigid_motion(matching.views[view].camera)
++                                                          : interpolation::RigidMotion{};
+     perf::note_pairing(matching.cut, matching.matched, matching.eligible_newer);
+     InterpolationStats &stats = interpolation_stats;
+     ++stats.frames;
+@@ -9919,6 +9954,25 @@ void VulkanRenderer::Impl::replay(VkCommandBuffer commands, std::uint32_t slot,
+     static const bool flipbook_guard = portablekit::env("INTERPOLATION_NO_FLIPBOOK_GUARD") == nullptr;
+     static const bool motion_guard = portablekit::env("INTERPOLATION_NO_MOTION_GUARD") == nullptr;
+ 
++    // A split frame (FrameRecord::split): each view's draws go straight into
++    // its half, moved as compose_split() moves the view's picture and cut off
++    // at the half's edges, and the dark line between the halves is drawn
++    // before what lies over both.
++    const SplitGeometry halves = split_geometry();
++    bool divided = !older.split;
++    const auto divide = [&] {
++        VkClearAttachment dark{};
++        dark.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
++        dark.colorAttachment = 0u;
++        dark.clearValue.color = {{0.02f, 0.02f, 0.02f, 1.0f}};
++        const VkClearRect line{{{halves.middle - halves.line, 0},
++                                {static_cast<std::uint32_t>(2 * halves.line), static_cast<std::uint32_t>(halves.height)}},
++                               0u, 1u};
++        vkCmdClearAttachments(commands, 1u, &dark, 1u, &line);
++        divided = true;
++    };
++    std::uint8_t last_view = 0u;
++
+     replay_regions = 0u;
+     for (const ReplayGroup &drawn : older.groups) {
+         if (drawn.target != older.displayed) continue;
+@@ -9926,6 +9980,27 @@ void VulkanRenderer::Impl::replay(VkCommandBuffer commands, std::uint32_t slot,
+         if (drawn.vertex_base < static_cast<VkDeviceSize>(kFrameRegions) * kVertexBufferBytes)
+             replay_regions |= 1u << static_cast<std::uint32_t>(drawn.vertex_base / kVertexBufferBytes);
+         DrawState state = drawn.state;
++        const interpolation::RigidMotion &camera_motion =
++            camera_motions[std::min<std::size_t>(drawn.split_view, interpolation::kViews - 1u)];
++        if (drawn.split_view != last_view) {
++            // Another camera: nothing blended for the view before holds.
++            last_view = drawn.split_view;
++            transform_valid = false;
++            view_pair = projection_pair = world_pair = Pair{};
++        }
++        if (!divided && drawn.split_view >= 2u) divide();
++        if (older.split && drawn.split_view < 2u) {
++            const bool left = drawn.split_view == 0u;
++            const std::int32_t move = left ? -halves.quarter : halves.quarter;
++            const std::int32_t from = left ? 0 : halves.middle + halves.line;
++            const std::int32_t to = left ? halves.middle - halves.line : halves.width;
++            state.viewport.x += static_cast<float>(move);
++            const std::int32_t x0 = std::max(state.scissor.offset.x + move, from);
++            const std::int32_t x1 =
++                std::min(state.scissor.offset.x + static_cast<std::int32_t>(state.scissor.extent.width) + move, to);
++            state.scissor.offset.x = x0;
++            state.scissor.extent.width = static_cast<std::uint32_t>(std::max(0, x1 - x0));
++        }
+         VkDeviceSize vertex_base = drawn.vertex_base;
+         std::int32_t partner = -1;
+         std::uint32_t member = drawn.first_draw;
+@@ -10091,6 +10166,7 @@ void VulkanRenderer::Impl::replay(VkCommandBuffer commands, std::uint32_t slot,
+         }
+         ++replayed;
+     }
++    if (!divided) divide();
+     vkCmdEndRenderPass(commands);
+     interpolation_stats.groups += replayed;
+     interpolation_stats.flipbook_steps += flipbook_steps;
+diff --git a/tests/interpolation_tests.cpp b/tests/interpolation_tests.cpp
+index eb33795..7e5fede 100644
+--- a/tests/interpolation_tests.cpp
++++ b/tests/interpolation_tests.cpp
+@@ -591,11 +591,51 @@ void sixty() {
+     set_game_frame_vblanks(2);
+ }
+ 
++// A split screen draws the same scene twice, once from each player's camera.
++void split_views() {
++    const CutThresholds thresholds{};
++    // View 0's camera turns 2 degrees, view 1's 10 degrees and slides 30
++    // units: each view's draws go with its own camera.
++    const auto frame = [](float first, float second, float slide) {
++        std::vector<DrawSummary> both = scene(50u, first);
++        std::vector<DrawSummary> right = scene(50u, second, slide);
++        for (DrawSummary &d : right) d.split_view = 1u;
++        both.insert(both.end(), right.begin(), right.end());
++        return both;
++    };
++    Matcher matcher;
++    const Matching &split = matcher.match(frame(0.0f, 0.0f, 0.0f), frame(2.0f, 10.0f, 30.0f), thresholds);
++    bool own_view = true;
++    for (std::size_t i = 0; i < 100u; ++i)
++        own_view = own_view && split.newer_of[i] >= 0 && (split.newer_of[i] < 50) == (i < 50u);
++    check(split.matched == 100u && own_view && split.cut == nullptr,
++          "a split frame's draws pair within their own view and blend");
++    check(split.views[0].found && near(split.views[0].angle_degrees, 2.0f, 0.01f) && split.views[1].found &&
++              near(split.views[1].angle_degrees, 10.0f, 0.01f),
++          "each view has its own camera motion");
++    check(split.rejected == 0u, "and the scenery of neither view counts as moving on its own");
++    check(near(split.camera_angle_degrees, 10.0f, 0.01f), "the larger turn is the frame's for the cut limits");
++
++    // The second view jumping 40 degrees is a cut, though the first view
++    // hardly moves.
++    Matcher fresh;
++    const Matching &jump = fresh.match(frame(0.0f, 0.0f, 0.0f), frame(1.0f, 40.0f, 0.0f), thresholds);
++    check(jump.cut != nullptr && std::strcmp(jump.cut, "camera turned") == 0, "a cut in one view is a cut");
++
++    // A frame split against one that is not (a full-screen moment): only
++    // the first view's draws pair; the renderer treats the change as a cut.
++    const Matching &change = fresh.match(frame(0.0f, 0.0f, 0.0f), scene(100u), thresholds);
++    bool first_only = true;
++    for (std::size_t i = 50u; i < 100u; ++i) first_only = first_only && change.newer_of[i] == Matching::kNoPartner;
++    check(change.matched == 50u && first_only, "a whole-screen frame pairs only with the first view");
++}
++
+ int main() {
+     blending();
+     rigid();
+     guards();
+     matching();
++    split_views();
+     continuous_motion();
+     rates();
+     present_clock();
+-- 
+2.53.0.windows.1
+

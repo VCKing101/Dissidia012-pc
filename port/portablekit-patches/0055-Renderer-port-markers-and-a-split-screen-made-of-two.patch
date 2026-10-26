@@ -1,0 +1,286 @@
+From 098e9e8c13c3425c0fada5a59a718762a1828cac Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Sun, 25 Oct 2026 12:43:35 +1030
+Subject: [PATCH 55/61] Renderer: port markers and a split screen made of two
+ views
+
+A profile can write a GE NOP whose data has 0xA5 in its top byte into a
+display list; GeState hands the low 16 bits to a marker sink, and the
+renderer acts on them at that point of the list. Two markers make a split
+screen: kMarkerSplitLeft copies the target drawn so far (the left view)
+aside, and kMarkerSplitCompose puts the middle half of that view and of the
+target as drawn since (the right view) side by side back into the target,
+with a dark line between them. What the game draws after the second marker,
+its interface, lies over both, and the frame is shown as any other.
+
+Checked with Dissidia 012 on Windows at 30 fps without the present thread: a
+Quick Battle drawn a second time from the opponent's camera, both views side
+by side, the game's HUD over both. Not done: frame interpolation's
+in-between presents redraw the recorded draws without the two copies, so
+they don't show the split.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/gpu/ge_state.cpp        |   2 +
+ host/gpu/ge_state.hpp        |   7 ++
+ host/gpu/vulkan_renderer.cpp | 137 +++++++++++++++++++++++++++++++++++
+ host/gpu/vulkan_renderer.hpp |   9 +++
+ host/hle/hle_media.cpp       |   3 +
+ 5 files changed, 158 insertions(+)
+
+diff --git a/host/gpu/ge_state.cpp b/host/gpu/ge_state.cpp
+index a7654a2..2c63e99 100644
+--- a/host/gpu/ge_state.cpp
++++ b/host/gpu/ge_state.cpp
+@@ -884,6 +884,8 @@ void GeState::handle_command(const GuestMemory &memory, std::uint32_t command, s
+     }
+ 
+     case kNop:
++        if ((data >> 16u) == kMarkerTag && marker_sink_) marker_sink_(data & 0xFFFFu);
++        break;
+     case kTextureFlush:
+         break;
+ 
+diff --git a/host/gpu/ge_state.hpp b/host/gpu/ge_state.hpp
+index 3cbb6a7..4d9af65 100644
+--- a/host/gpu/ge_state.hpp
++++ b/host/gpu/ge_state.hpp
+@@ -269,11 +269,17 @@ public:
+     using DrawSink = std::function<void(const DrawCall &)>;
+     using SignalSink = std::function<void(std::uint32_t signal, std::uint32_t pc)>;
+     using TransferSink = std::function<void(const BlockTransfer &)>;
++    // A port marker: a NOP whose data has kMarkerTag in its top byte, which
++    // a profile writes into a display list to tell the renderer something
++    // at that point of the list. The sink gets the low 16 bits.
++    using MarkerSink = std::function<void(std::uint32_t marker)>;
++    static constexpr std::uint32_t kMarkerTag = 0xA5u;
+ 
+     void set_draw_sink(DrawSink sink) { draw_sink_ = std::move(sink); }
+     void set_signal_sink(SignalSink sink) { signal_sink_ = std::move(sink); }
+     // Block transfers are carried out by the sink, which can write guest memory.
+     void set_transfer_sink(TransferSink sink) { transfer_sink_ = std::move(sink); }
++    void set_marker_sink(MarkerSink sink) { marker_sink_ = std::move(sink); }
+     // On, transformed triangles, strips and fans of one morph target whose
+     // vertices lie contiguously in host memory reach the sink undecoded
+     // (DrawCall::raw_vertices), for the renderer to decode on the GPU.
+@@ -358,6 +364,7 @@ private:
+     DrawSink draw_sink_;
+     SignalSink signal_sink_;
+     TransferSink transfer_sink_;
++    MarkerSink marker_sink_;
+     std::uint64_t draw_count_{};
+     std::uint64_t vertex_count_{};
+     std::uint64_t unhandled_commands_{};
+diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
+index de488d2..ad94dd2 100644
+--- a/host/gpu/vulkan_renderer.cpp
++++ b/host/gpu/vulkan_renderer.cpp
+@@ -2139,6 +2139,17 @@ struct VulkanRenderer::Impl {
+     void reset_interpolation();
+     void destroy_interpolation_targets();
+     void check_replay();
++
++    // Split screen (VulkanRenderer::kMarkerSplitLeft, kMarkerSplitCompose):
++    // the left view, copied out of the target it was drawn into before the
++    // right view was drawn over it, and a copy of the right view for putting
++    // the two halves back into the target. `split_taken` is set by the first
++    // marker and cleared by the second.
++    Target split_left{};
++    Target split_right{};
++    bool split_taken{};
++    void take_split_left(std::uint32_t target_address);
++    void compose_split(std::uint32_t target_address);
+     std::vector<std::uint32_t> read_image(VkImage image);
+     bool create_target(Target &target, std::string &error);
+     void initialize_layouts(VkCommandBuffer commands, Target &target);
+@@ -5686,6 +5697,114 @@ VkDescriptorSet VulkanRenderer::Impl::framebuffer_snapshot(Target &target, bool
+     return map(*slot);
+ }
+ 
++// kMarkerSplitLeft: copies the target drawn into so far, whole, into
++// split_left, for record_game_blit() to show beside the finished frame.
++void VulkanRenderer::Impl::take_split_left(std::uint32_t target_address) {
++    const auto found = targets.find(target_address);
++    if (found == targets.end()) return;
++    Target &target = found->second;
++    if (split_left.color == VK_NULL_HANDLE) {
++        std::string error;
++        if (!create_target(split_left, error)) {
++            std::cout << "[render] split screen: cannot make the left view's image: " << error << "\n";
++            destroy_target(split_left);
++            split_left = {};
++            return;
++        }
++    }
++    initialize_layouts(command_buffer, target);
++    initialize_layouts(command_buffer, split_left);
++    bring_alpha_up_to_date(target);
++    end_pass();
++    transition(command_buffer, target.color, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
++               VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
++    transition(command_buffer, split_left.color, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
++               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
++    VkImageCopy region{};
++    region.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0u, 0u, 1u};
++    region.dstSubresource = region.srcSubresource;
++    region.extent = {target_extent.width, target_extent.height, 1u};
++    vkCmdCopyImage(command_buffer, target.color, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, split_left.color,
++                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1u, &region);
++    perf::count_target_copy();
++    transition(command_buffer, split_left.color, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
++               VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
++    transition(command_buffer, target.color, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
++               VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
++    split_taken = true;
++}
++
++// kMarkerSplitCompose: puts the middle half of the left view (split_left)
++// and of the right view (the target as drawn now) side by side back into the
++// target, with a dark line between them, so whatever the game draws next (its
++// interface) lies over both, and the frame is shown as any other.
++void VulkanRenderer::Impl::compose_split(std::uint32_t target_address) {
++    if (!split_taken || split_left.color == VK_NULL_HANDLE) return;
++    split_taken = false;
++    const auto found = targets.find(target_address);
++    if (found == targets.end()) return;
++    Target &target = found->second;
++    if (split_right.color == VK_NULL_HANDLE) {
++        std::string error;
++        if (!create_target(split_right, error)) {
++            std::cout << "[render] split screen: cannot make the right view's image: " << error << "\n";
++            destroy_target(split_right);
++            split_right = {};
++            return;
++        }
++    }
++    initialize_layouts(command_buffer, split_right);
++    bring_alpha_up_to_date(target);
++    end_pass();
++    transition(command_buffer, target.color, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
++               VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
++    transition(command_buffer, split_right.color, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
++               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
++    VkImageCopy region{};
++    region.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0u, 0u, 1u};
++    region.dstSubresource = region.srcSubresource;
++    region.extent = {target_extent.width, target_extent.height, 1u};
++    vkCmdCopyImage(command_buffer, target.color, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, split_right.color,
++                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1u, &region);
++    transition(command_buffer, split_right.color, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
++               VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
++    transition(command_buffer, split_left.color, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
++               VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
++    transition(command_buffer, target.color, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
++               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
++    const VkClearColorValue dark{{0.02f, 0.02f, 0.02f, 1.0f}};
++    const VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0u, 1u, 0u, 1u};
++    vkCmdClearColorImage(command_buffer, target.color, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &dark, 1u, &range);
++    transition(command_buffer, target.color, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
++               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
++    const std::int32_t width = static_cast<std::int32_t>(target_extent.width);
++    const std::int32_t height = static_cast<std::int32_t>(target_extent.height);
++    const std::int32_t middle = width / 2;
++    // One guest pixel each side of the middle.
++    const std::int32_t line = std::max<std::int32_t>(1, width / 480);
++    VkImageBlit half{};
++    half.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0u, 0u, 1u};
++    half.dstSubresource = half.srcSubresource;
++    half.srcOffsets[0] = {width / 4, 0, 0};
++    half.srcOffsets[1] = {width - width / 4, height, 1};
++    half.dstOffsets[0] = {0, 0, 0};
++    half.dstOffsets[1] = {middle - line, height, 1};
++    vkCmdBlitImage(command_buffer, split_left.color, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, target.color,
++                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1u, &half, VK_FILTER_LINEAR);
++    half.dstOffsets[0] = {middle + line, 0, 0};
++    half.dstOffsets[1] = {width, height, 1};
++    vkCmdBlitImage(command_buffer, split_right.color, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, target.color,
++                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1u, &half, VK_FILTER_LINEAR);
++    perf::count_target_copy();
++    transition(command_buffer, split_left.color, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
++               VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
++    transition(command_buffer, split_right.color, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
++               VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
++    transition(command_buffer, target.color, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
++               VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
++    ++target.draw_serial;
++}
++
+ // The pass of palette_view(): one triangle over the picture (level.vert),
+ // shaders/fb_clut.frag with the target's copy in set 0 and the palette in
+ // set 1, both in the renderer's one-texture set layout.
+@@ -7062,6 +7181,11 @@ void VulkanRenderer::Impl::resize_targets(VkExtent2D extent) {
+     // Recorded frames name the old targets and hold viewports of the old size.
+     reset_interpolation();
+     destroy_interpolation_targets();
++    destroy_target(split_left);
++    destroy_target(split_right);
++    split_left = {};
++    split_right = {};
++    split_taken = false;
+     std::cout << "[render] internal resolution " << extent.width << "x" << extent.height << "\n";
+ }
+ 
+@@ -7583,6 +7707,15 @@ void VulkanRenderer::begin_display_list() {
+     impl_->last_texture = nullptr;
+ }
+ 
++void VulkanRenderer::marker(std::uint32_t marker, std::uint32_t target_address) {
++    Impl &impl = *impl_;
++    if (!impl.ready) return;
++    const Impl::Guard guard(impl);
++    if (!impl.recording) begin_frame();
++    if (marker == kMarkerSplitLeft) impl.take_split_left(target_address);
++    if (marker == kMarkerSplitCompose) impl.compose_split(target_address);
++}
++
+ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+     Impl &impl = *impl_;
+     if (!impl.ready) return;
+@@ -10873,6 +11006,10 @@ void VulkanRenderer::shutdown() {
+     impl.held = {};
+     impl.holding = false;
+     impl.destroy_interpolation_targets();
++    impl.destroy_target(impl.split_left);
++    impl.destroy_target(impl.split_right);
++    impl.split_left = {};
++    impl.split_right = {};
+     vkDestroyDescriptorPool(impl.device, impl.descriptor_pool, nullptr);
+     impl.descriptor_pool = VK_NULL_HANDLE;
+     vkDestroyDescriptorSetLayout(impl.device, impl.descriptor_layout, nullptr);
+diff --git a/host/gpu/vulkan_renderer.hpp b/host/gpu/vulkan_renderer.hpp
+index aec296a..a878472 100644
+--- a/host/gpu/vulkan_renderer.hpp
++++ b/host/gpu/vulkan_renderer.hpp
+@@ -136,6 +136,15 @@ public:
+     [[nodiscard]] bool gpu_decode() const;
+     [[nodiscard]] bool check_gpu_decode() const;
+     void submit(const DrawCall &call, const GuestMemory &memory);
++    // Port markers in display lists (GeState::MarkerSink), with the colour
++    // buffer being drawn into at that point. A split screen: kMarkerSplitLeft
++    // says that what the target holds so far is the left view; the game then
++    // draws the right view over it, and kMarkerSplitCompose puts the middle
++    // half of each view side by side back into the target, so that what the
++    // game draws after it (its interface) lies over both.
++    static constexpr std::uint32_t kMarkerSplitLeft = 1u;
++    static constexpr std::uint32_t kMarkerSplitCompose = 2u;
++    void marker(std::uint32_t marker, std::uint32_t target_address);
+     // Writes the framebuffer shown a frame or two ago back to guest VRAM, in
+     // the guest's pixel format at 480x272, so game code that copies a frame
+     // out of VRAM with the CPU or DMA finds the picture instead of stale
+diff --git a/host/hle/hle_media.cpp b/host/hle/hle_media.cpp
+index d478e07..1a64e70 100644
+--- a/host/hle/hle_media.cpp
++++ b/host/hle/hle_media.cpp
+@@ -197,6 +197,9 @@ void run_ge_list(Runtime &rt, std::uint32_t id) {
+         renderer.begin_display_list();
+         media().ge.set_raw_vertices(renderer.gpu_decode(), renderer.check_gpu_decode());
+         media().ge.set_draw_sink([&renderer, &memory](const gpu::DrawCall &call) { renderer.submit(call, memory); });
++        media().ge.set_marker_sink([&renderer](std::uint32_t marker) {
++            renderer.marker(marker, media().ge.target().color_address);
++        });
+     }
+ #endif
+     media().ge.set_transfer_sink([&rt](const gpu::BlockTransfer &transfer) { block_transfer(rt, transfer); });
+-- 
+2.53.0.windows.1
+

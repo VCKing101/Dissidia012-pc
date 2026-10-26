@@ -1,0 +1,236 @@
+From 01e710314046f15c07fa4ea8f435dc18e1f75814 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Mon, 26 Oct 2026 08:54:29 +1030
+Subject: [PATCH 61/61] Disc: read the image through in the background from
+ launch
+
+A thread reads the whole disc image once at the system's background I/O
+priority (Windows) and throws the bytes away, so the file cache holds it by
+the time the game reads; a game's synchronous reads from its main loop no
+longer stall a frame on a cold hard drive. Not started for an image larger
+than half the machine's memory. <prefix>_NO_DISC_READ_THROUGH turns it off.
+<prefix>_TRACE_IO now gives each read's time and whether it was asynchronous.
+
+Measured on Dissidia 012 with a cold cache on a 5400 rpm drive: the battle's
+first music block 85 ms -> 11.5 ms, the first battle frame 116 -> 47 ms.
+Not checked: the Steam Deck (no lower I/O priority on Linux).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/hle/hle_io.cpp       | 18 ++++++++---
+ host/kernel/iso_image.cpp | 66 ++++++++++++++++++++++++++++++++++++++-
+ host/kernel/iso_image.hpp | 19 +++++++++++
+ 3 files changed, 98 insertions(+), 5 deletions(-)
+
+diff --git a/host/hle/hle_io.cpp b/host/hle/hle_io.cpp
+index 263487d..bbd0c35 100644
+--- a/host/hle/hle_io.cpp
++++ b/host/hle/hle_io.cpp
+@@ -15,6 +15,7 @@
+ #include <algorithm>
+ #include <cctype>
+ #include <charconv>
++#include <chrono>
+ #include <cstdio>
+ #include <ctime>
+ #include <fstream>
+@@ -460,8 +461,10 @@ std::int64_t read_guest_file(const std::string &path, std::uint64_t offset, std:
+ namespace {
+ 
+ // The work of sceIoRead, sceIoWrite and sceIoLseek, shared with their
+-// asynchronous forms.
+-std::uint32_t read_file_op(Runtime &rt, std::uint32_t fd, std::uint32_t address, std::uint32_t requested) {
++// asynchronous forms (`async`, for the trace).
++std::uint32_t read_file_op(Runtime &rt, std::uint32_t fd, std::uint32_t address, std::uint32_t requested,
++                           bool async = false) {
++    const auto started = std::chrono::steady_clock::now();
+     auto found = io().files.find(fd);
+     if (found == io().files.end() ||
+         (found->second.kind != OpenFile::Kind::Disc && found->second.kind != OpenFile::Kind::Host))
+@@ -498,7 +501,10 @@ std::uint32_t read_file_op(Runtime &rt, std::uint32_t fd, std::uint32_t address,
+     if (trace_io())
+         std::cerr << "[io] read fd=" << fd << " " << file.path
+                   << (file.sector_units ? " sector=" : " offset=") << file.position << " got=" << result
+-                  << (file.sector_units ? " sectors" : " bytes") << " -> " << psprecomp::hex32(address) << "\n";
++                  << (file.sector_units ? " sectors" : " bytes") << " -> " << psprecomp::hex32(address)
++                  << (async ? " async" : "") << " in "
++                  << std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count()
++                  << " ms\n";
+     file.position += file.kind == OpenFile::Kind::Disc && file.sector_units ? result : buffer.size();
+     return result;
+ }
+@@ -723,7 +729,7 @@ void register_async_io(HleRegistrar &hle) {
+             kernel().finish(ctx, error);
+             return;
+         }
+-        const std::uint32_t result = read_file_op(rt, arg(ctx, 0), arg(ctx, 1), arg(ctx, 2));
++        const std::uint32_t result = read_file_op(rt, arg(ctx, 0), arg(ctx, 1), arg(ctx, 2), true);
+         complete_async(*file, static_cast<std::int32_t>(result));
+         kernel().finish(ctx, 0u);
+     });
+@@ -802,6 +808,10 @@ void register_async_io(HleRegistrar &hle) {
+ 
+ void register_io(HleRegistrar &hle, const std::filesystem::path &disc_image, const std::filesystem::path &memory_stick) {
+     if (!disc_image.empty()) io().disc = std::make_unique<IsoImage>(disc_image);
++    // The image into the file cache while the game boots
++    // (IsoImage::read_through_in_background); <prefix>_NO_DISC_READ_THROUGH
++    // leaves every read to the drive, as before.
++    if (io().disc && portablekit::env("NO_DISC_READ_THROUGH") == nullptr) io().disc->read_through_in_background();
+     io().memory_stick = memory_stick;
+ 
+     hle.add("IoFileMgrForUser", "sceIoOpen", [](Runtime &rt, AllegrexContext &ctx) {
+diff --git a/host/kernel/iso_image.cpp b/host/kernel/iso_image.cpp
+index a0272e2..12d24f4 100644
+--- a/host/kernel/iso_image.cpp
++++ b/host/kernel/iso_image.cpp
+@@ -4,10 +4,37 @@
+ 
+ #include <algorithm>
+ #include <cctype>
++#include <chrono>
++#include <iostream>
++
++#if defined(_WIN32)
++#ifndef WIN32_LEAN_AND_MEAN
++#define WIN32_LEAN_AND_MEAN
++#endif
++#ifndef NOMINMAX
++#define NOMINMAX
++#endif
++#include <windows.h>
++#else
++#include <unistd.h>
++#endif
+ 
+ namespace portablekit {
+ namespace {
+ 
++// The machine's memory in bytes, 0 when unknown.
++std::uint64_t physical_memory() {
++#if defined(_WIN32)
++    MEMORYSTATUSEX status{};
++    status.dwLength = sizeof(status);
++    return GlobalMemoryStatusEx(&status) ? status.ullTotalPhys : 0u;
++#else
++    const long pages = sysconf(_SC_PHYS_PAGES);
++    const long page = sysconf(_SC_PAGESIZE);
++    return pages > 0 && page > 0 ? static_cast<std::uint64_t>(pages) * static_cast<std::uint64_t>(page) : 0u;
++#endif
++}
++
+ std::uint32_t read_le32(const std::vector<std::uint8_t> &data, std::size_t offset) {
+     return static_cast<std::uint32_t>(data[offset]) | (static_cast<std::uint32_t>(data[offset + 1]) << 8u) |
+            (static_cast<std::uint32_t>(data[offset + 2]) << 16u) | (static_cast<std::uint32_t>(data[offset + 3]) << 24u);
+@@ -15,7 +42,7 @@ std::uint32_t read_le32(const std::vector<std::uint8_t> &data, std::size_t offse
+ 
+ } // namespace
+ 
+-IsoImage::IsoImage(const std::filesystem::path &path) : file_(path, std::ios::binary) {
++IsoImage::IsoImage(const std::filesystem::path &path) : path_(path), file_(path, std::ios::binary) {
+     if (!file_) throw psprecomp::Error("Cannot open disc image: " + path.string());
+     size_bytes_ = std::filesystem::file_size(path);
+     std::vector<std::uint8_t> primary(kSectorSize);
+@@ -28,6 +55,43 @@ IsoImage::IsoImage(const std::filesystem::path &path) : file_(path, std::ios::bi
+     scan_directory(root_lba, root_size, "", 0);
+ }
+ 
++IsoImage::~IsoImage() {
++    stop_ = true;
++    if (reader_.joinable()) reader_.join();
++}
++
++void IsoImage::read_through_in_background() {
++    if (reader_.joinable() || size_bytes_ == 0u) return;
++    const std::uint64_t memory = physical_memory();
++    if (memory != 0u && size_bytes_ > memory / 2u) {
++        std::cout << "[io] the disc image (" << (size_bytes_ >> 20u) << " MiB) is not read through: more than half "
++                  << "of this machine's memory\n";
++        return;
++    }
++    std::cout << "[io] reading the disc image through in the background (" << (size_bytes_ >> 20u)
++              << " MiB), so that later reads come from memory\n";
++    reader_ = std::thread([this] {
++#if defined(_WIN32)
++        // Background mode lowers the thread's I/O priority too, so the
++        // game's own reads go first.
++        SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN);
++#endif
++        const auto started = std::chrono::steady_clock::now();
++        std::ifstream in(path_, std::ios::binary);
++        std::vector<char> chunk(1u << 20u);
++        std::uint64_t done = 0u;
++        while (in && !stop_ && done < size_bytes_) {
++            in.read(chunk.data(), static_cast<std::streamsize>(chunk.size()));
++            if (in.gcount() <= 0) break;
++            done += static_cast<std::uint64_t>(in.gcount());
++        }
++        if (stop_) return;
++        const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
++        std::cout << "[io] disc image read through: " << (done >> 20u) << " MiB in " << seconds << " s\n"
++                  << std::flush;
++    });
++}
++
+ std::string IsoImage::normalize(std::string path) {
+     std::replace(path.begin(), path.end(), '\\', '/');
+     std::string result;
+diff --git a/host/kernel/iso_image.hpp b/host/kernel/iso_image.hpp
+index e52d6a9..442a68f 100644
+--- a/host/kernel/iso_image.hpp
++++ b/host/kernel/iso_image.hpp
+@@ -1,5 +1,6 @@
+ #pragma once
+ 
++#include <atomic>
+ #include <cstdint>
+ #include <filesystem>
+ #include <fstream>
+@@ -7,6 +8,7 @@
+ #include <optional>
+ #include <span>
+ #include <string>
++#include <thread>
+ #include <vector>
+ 
+ namespace portablekit {
+@@ -28,6 +30,9 @@ public:
+     };
+ 
+     explicit IsoImage(const std::filesystem::path &path);
++    ~IsoImage();
++    IsoImage(const IsoImage &) = delete;
++    IsoImage &operator=(const IsoImage &) = delete;
+ 
+     [[nodiscard]] std::optional<Entry> find(std::string path) const;
+     [[nodiscard]] std::uint64_t size_bytes() const noexcept { return size_bytes_; }
+@@ -35,13 +40,27 @@ public:
+     std::size_t read(std::uint64_t offset, std::span<std::uint8_t> output);
+     [[nodiscard]] std::vector<std::string> list(std::string directory) const;
+ 
++    // Reads the whole image once on a thread of its own, at the system's
++    // background I/O priority where there is one (Windows), and throws the
++    // bytes away: what it leaves is the image in the system's file cache, so
++    // that the game's own reads later come from memory and not from a cold
++    // drive. A game reads synchronously from its main loop at times (the
++    // first block of a battle's music as the battle starts); from a hard
++    // drive with a cold cache such a read stalls a frame. Not started for an
++    // image larger than half the machine's memory, which the cache could not
++    // keep. Stopped when the image is closed.
++    void read_through_in_background();
++
+ private:
+     void scan_directory(std::uint32_t lba, std::uint32_t size, const std::string &prefix, int depth);
+     [[nodiscard]] static std::string normalize(std::string path);
+ 
++    std::filesystem::path path_;
+     std::ifstream file_;
+     std::uint64_t size_bytes_{};
+     std::map<std::string, Entry> entries_;
++    std::thread reader_;
++    std::atomic<bool> stop_{false};
+ };
+ 
+ } // namespace portablekit
+-- 
+2.53.0.windows.1
+

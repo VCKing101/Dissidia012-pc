@@ -1,0 +1,48 @@
+From dcbb4efb32b64959454a0a90ed32af8cd01bca05 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Mon, 26 Oct 2026 08:54:28 +1030
+Subject: [PATCH 59/61] Runtime: hand a port the recompiled function registered
+ at an address
+
+registered_function() returns what lookup_function() finds, so a port's
+override can keep the original and run it when it does not replace it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ include/psprecomp/runtime.hpp | 4 ++++
+ src/runtime.cpp               | 4 ++++
+ 2 files changed, 8 insertions(+)
+
+diff --git a/include/psprecomp/runtime.hpp b/include/psprecomp/runtime.hpp
+index 236d3ab..67a15ba 100644
+--- a/include/psprecomp/runtime.hpp
++++ b/include/psprecomp/runtime.hpp
+@@ -73,6 +73,10 @@ public:
+     // an AOT build keeps the wrapper its own code registered.
+     bool register_import_stub(std::uint32_t address, std::string library, std::uint32_t nid);
+     [[nodiscard]] bool has_function(std::uint32_t address) const;
++    // The function registered at `address` now, or null: a port that puts a
++    // native replacement there can keep the recompiled function it replaces
++    // and still call it (a replacement that changes the game only sometimes).
++    [[nodiscard]] RecompiledFunction registered_function(std::uint32_t address) const noexcept;
+     [[nodiscard]] std::size_t function_count() const noexcept;
+ 
+     void set_game_root(std::filesystem::path root);
+diff --git a/src/runtime.cpp b/src/runtime.cpp
+index 930a027..72c0ad7 100644
+--- a/src/runtime.cpp
++++ b/src/runtime.cpp
+@@ -572,6 +572,10 @@ bool Runtime::register_import_stub(std::uint32_t address, std::string library, s
+ }
+ 
+ bool Runtime::has_function(std::uint32_t address) const { return lookup_function(address) != nullptr; }
++
++Runtime::RecompiledFunction Runtime::registered_function(std::uint32_t address) const noexcept {
++    return lookup_function(address);
++}
+ std::size_t Runtime::function_count() const noexcept { return functions_.size(); }
+ 
+ void Runtime::set_game_root(std::filesystem::path root) { game_root_ = std::filesystem::weakly_canonical(std::move(root)); }
+-- 
+2.53.0.windows.1
+

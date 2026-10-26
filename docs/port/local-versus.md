@@ -793,6 +793,22 @@ Not checked:
 - **The intro's white flash** blends one frame towards the white frame without a cut (`sixty1/replay_8250_*`). It
   is not specific to the split.
 
+## 7.10 Before the merge (26 October 2026)
+
+- **Rebased** onto `main` (`305467f`, v0.1.2) and PortableKit's `dissidia` (`4799bb3`, patch 0054). The framework
+  commits are patches 0055 to 0061 in `port/portablekit-patches/` (table in `port/README.md`).
+- **The 1P / 2P tags** showed on the VS screen before the battle too: the fighters are already played there. They
+  now show only while the frames are drawn split (the split task reports each frame, `versus::note_split_frame`).
+  Checked: none on the VS screen, both in the fight (`shots1/`).
+- **The graphics tour on stock play** (`gfx_tour.py`, all 12 routes, the rebased versus build, versus built in but
+  not chosen; `build/port/gfx-tour-versus/`): 174 captures, none with problems. Menus, Story Mode and the water
+  route match the baseline. 68 battle captures differ from the baseline of 20 October: each a different moment of
+  a CPU fight, rendered whole and full screen. The replay checks match in colour on every route. Not done: the same
+  tour on a build of `main` without this branch, which would separate the CPU's variation from any change.
+- **README screenshots** (`docs/images/versus-*.png`): the Battle Mode row, the setup screen with GUEST and no CPU
+  rows, and a split battle (Tifa against Cloud, Order's Sanctuary). The route is a scratch script:
+  player 1's and player 2's own grid moves, stage 11, captures every 20 frames of the fight.
+
 ## 8. For later: two copies over the game's ad hoc versus
 
 The owner wants this route for online play and matchmaking, much later. What was found:

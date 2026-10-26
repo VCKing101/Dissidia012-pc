@@ -1,0 +1,484 @@
+From ef32fcfe43e384941656bd13121078d5de5a5157 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Sun, 25 Oct 2026 13:18:13 +1030
+Subject: [PATCH 56/61] Input: a second player's gamepad for ports with local
+ multiplayer
+
+While a port wants one (VulkanRenderer::set_second_pad_wanted, or
+hle_extension::want_second_pad), a gamepad other than player 1's is opened
+as player 2's and read with the same bindings and tuning into second_pad(),
+never into the game's own pad. Off by default, so a second pad otherwise
+stays a spare for player 1 as before. Extension interface 6 adds
+want_second_pad() and second_pad().
+
+The input script gets pad2, axis2, detach2 and attach2 steps on a second
+virtual gamepad with its own vendor and product ids: with the first pad's,
+SDL gave it the first pad's mapping and gamepad name. The renderer tells the
+script's pads apart by their joystick names.
+
+Checked with Dissidia 012 on Windows, with virtual pads only: player 2's pad
+opened as player 2's and drove the opponent, unplugging and plugging it in
+again was seen by the port, and with no port asking for it no second pad was
+opened. Not tried with real controllers.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/gpu/vulkan_renderer.cpp          | 83 ++++++++++++++++++++++++++-
+ host/gpu/vulkan_renderer.hpp          |  8 +++
+ host/hle/hle_common.hpp               | 13 +++++
+ host/hle/hle_extension_host.cpp       |  8 +++
+ host/hle/hle_media.cpp                | 25 ++++++++
+ host/ui/input_script.cpp              | 63 ++++++++++++++++----
+ host/ui/input_script.hpp              |  6 ++
+ include/portablekit/hle_extension.hpp | 22 ++++++-
+ 8 files changed, 215 insertions(+), 13 deletions(-)
+
+diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
+index ad94dd2..7c044b8 100644
+--- a/host/gpu/vulkan_renderer.cpp
++++ b/host/gpu/vulkan_renderer.cpp
+@@ -2280,6 +2280,13 @@ struct VulkanRenderer::Impl {
+     PadState pad{};
+     SDL_Gamepad *gamepad{};
+     SDL_JoystickID gamepad_id{};
++    // A second player's gamepad, opened only while a port asks for one
++    // (set_second_pad_wanted): another gamepad than the first, read into
++    // pad2 the way the first is read into pad, and never into pad.
++    bool second_pad_wanted{};
++    SDL_Gamepad *gamepad2{};
++    SDL_JoystickID gamepad2_id{};
++    PadState pad2{};
+     bool recording{};
+     bool quit{};
+     bool ready{};
+@@ -2289,10 +2296,25 @@ struct VulkanRenderer::Impl {
+     // Only the first pad is used; a second one arriving is ignored rather than
+     // stealing the stick from whoever is already playing.
+     void open_gamepad(SDL_JoystickID id) {
++        if ((gamepad != nullptr && id == gamepad_id) || (gamepad2 != nullptr && id == gamepad2_id)) return;
++        // The script's two virtual pads by their joystick names: SDL may give
++        // both the first one's gamepad name.
++        if (const char *id_name = SDL_GetJoystickNameForID(id); second_pad_wanted) {
++            // The input script's second virtual pad is always player 2's;
++            // any other pad is player 2's once player 1 has one.
++            const bool script2 = id_name != nullptr && std::strcmp(id_name, portablekit::kInputScriptName2) == 0;
++            const bool script1 = id_name != nullptr && std::strcmp(id_name, portablekit::kInputScriptName) == 0;
++            if (script2 || (gamepad != nullptr && !script1)) {
++                open_second_gamepad(id, script2);
++                return;
++            }
++        } else if (id_name != nullptr && std::strcmp(id_name, portablekit::kInputScriptName2) == 0) {
++            return;  // only ever player 2's
++        }
+         if (gamepad != nullptr) {
+             // The virtual pad of <prefix>_INPUT_SCRIPT takes over from a real
+             // one, so a controller within reach does not steal a scripted run.
+-            const char *name = SDL_GetGamepadNameForID(id);
++            const char *name = SDL_GetJoystickNameForID(id);
+             if (name == nullptr || std::strcmp(name, portablekit::kInputScriptName) != 0) return;
+             SDL_CloseGamepad(gamepad);
+             gamepad = nullptr;
+@@ -2336,7 +2358,8 @@ struct VulkanRenderer::Impl {
+         int count = 0;
+         SDL_JoystickID *ids = SDL_GetGamepads(&count);
+         if (ids != nullptr) {
+-            for (int i = 0; i < count && gamepad == nullptr; ++i) open_gamepad(ids[i]);
++            for (int i = 0; i < count && (gamepad == nullptr || (second_pad_wanted && gamepad2 == nullptr)); ++i)
++                open_gamepad(ids[i]);
+             SDL_free(ids);
+         }
+         if (gamepad != nullptr) return;
+@@ -2357,7 +2380,35 @@ struct VulkanRenderer::Impl {
+         if (joysticks == 0) std::cout << "[pad] no gamepad connected, keyboard only\n";
+     }
+ 
++    // Player 2's pad; a scripted one takes over from a real one, as for
++    // player 1.
++    void open_second_gamepad(SDL_JoystickID id, bool scripted) {
++        if (gamepad2 != nullptr) {
++            if (!scripted) return;
++            SDL_CloseGamepad(gamepad2);
++            gamepad2 = nullptr;
++        }
++        SDL_Gamepad *device = SDL_OpenGamepad(id);
++        if (device == nullptr) {
++            std::cout << "[pad] SDL_OpenGamepad failed: " << SDL_GetError() << "\n";
++            return;
++        }
++        gamepad2 = device;
++        gamepad2_id = id;
++        const char *name = SDL_GetGamepadName(device);
++        std::cout << "[pad] player 2: " << (name != nullptr ? name : "gamepad") << " connected\n";
++    }
++
+     void close_gamepad(SDL_JoystickID id) {
++        if (gamepad2 != nullptr && id == gamepad2_id) {
++            SDL_CloseGamepad(gamepad2);
++            gamepad2 = nullptr;
++            gamepad2_id = 0;
++            pad2 = PadState{};
++            std::cout << "[pad] player 2's gamepad disconnected\n";
++            scan_gamepads();
++            return;
++        }
+         if (gamepad == nullptr || id != gamepad_id) return;
+         input::motion::gamepad_changed(nullptr);
+         SDL_CloseGamepad(gamepad);
+@@ -6827,6 +6878,7 @@ void VulkanRenderer::Impl::sample_pad(bool focused) {
+     // While a menu or the on-screen keyboard is open, nothing reaches the game.
+     if (!impl_->game_input) {
+         impl_->pad = PadState{};
++        impl_->pad2 = PadState{};
+         return;
+     }
+ 
+@@ -6861,6 +6913,16 @@ void VulkanRenderer::Impl::sample_pad(bool focused) {
+ 
+     // The gamepad adds to the same bits and offsets, so both sources are live.
+     if (impl_->gamepad != nullptr) read_gamepad(impl_->gamepad, pad, analog_x, analog_y);
++    // Player 2's gamepad is a pad of its own.
++    PadState second{};
++    if (impl_->gamepad2 != nullptr) {
++        int second_x = 0;
++        int second_y = 0;
++        read_gamepad(impl_->gamepad2, second, second_x, second_y);
++        second.analog_x = static_cast<std::uint8_t>(std::clamp(0x80 + second_x, 0, 255));
++        second.analog_y = static_cast<std::uint8_t>(std::clamp(0x80 + second_y, 0, 255));
++    }
++    impl_->pad2 = second;
+     // So do the on-screen controls.
+     if (impl_->touch_visible) {
+         pad.buttons |= impl_->touch.buttons();
+@@ -6924,6 +6986,23 @@ void VulkanRenderer::Impl::sample_pad(bool focused) {
+ 
+ PadState VulkanRenderer::pad() const noexcept { return impl_ ? impl_->pad : PadState{}; }
+ 
++void VulkanRenderer::set_second_pad_wanted(bool wanted) {
++    if (!impl_ || impl_->second_pad_wanted == wanted) return;
++    impl_->second_pad_wanted = wanted;
++    if (wanted) {
++        impl_->scan_gamepads();
++    } else if (impl_->gamepad2 != nullptr) {
++        SDL_CloseGamepad(impl_->gamepad2);
++        impl_->gamepad2 = nullptr;
++        impl_->gamepad2_id = 0;
++        impl_->pad2 = PadState{};
++    }
++}
++
++bool VulkanRenderer::second_pad_connected() const noexcept { return impl_ && impl_->gamepad2 != nullptr; }
++
++PadState VulkanRenderer::second_pad() const noexcept { return impl_ ? impl_->pad2 : PadState{}; }
++
+ bool VulkanRenderer::touch_controls_visible() const noexcept {
+     return impl_ && impl_->touch_visible && impl_->game_input && settings::current().touch_controls;
+ }
+diff --git a/host/gpu/vulkan_renderer.hpp b/host/gpu/vulkan_renderer.hpp
+index a878472..40748c0 100644
+--- a/host/gpu/vulkan_renderer.hpp
++++ b/host/gpu/vulkan_renderer.hpp
+@@ -101,6 +101,14 @@ public:
+     // Pumps window events; returns false once the window has been closed.
+     bool pump_events();
+     [[nodiscard]] PadState pad() const noexcept;
++    // A second player's gamepad, for a port's local multiplayer: while
++    // wanted, a gamepad other than player 1's is opened as player 2's and
++    // read into second_pad() with the same bindings and tuning, never into
++    // pad(). Off by default, so a second pad otherwise stays a spare for
++    // player 1 as before.
++    void set_second_pad_wanted(bool wanted);
++    [[nodiscard]] bool second_pad_connected() const noexcept;
++    [[nodiscard]] PadState second_pad() const noexcept;
+     // Reads the keyboard, mouse buttons and gamepad again for pad() without
+     // handling window events (issue #8): the game reads its pad each frame,
+     // and taking the state then instead of at the last flip saves up to a
+diff --git a/host/hle/hle_common.hpp b/host/hle/hle_common.hpp
+index 7c603ed..6d4597f 100644
+--- a/host/hle/hle_common.hpp
++++ b/host/hle/hle_common.hpp
+@@ -79,6 +79,19 @@ std::int64_t read_guest_file(const std::string &path, std::uint64_t offset, std:
+ // The extra buttons (input::kExtra*) held when the game last read its pad, 0
+ // before it first does (see hle_extension::extra_buttons).
+ [[nodiscard]] std::uint32_t pad_extra_buttons();
++// Player 2's gamepad (gpu::VulkanRenderer::set_second_pad_wanted), for the
++// extension interface's second_pad().
++void want_second_pad(bool wanted);
++struct SecondPadSample {
++    bool connected{};
++    std::uint32_t buttons{};
++    std::uint32_t extra{};
++    std::uint8_t analog_x{0x80u};
++    std::uint8_t analog_y{0x80u};
++    std::uint8_t right_x{0x80u};
++    std::uint8_t right_y{0x80u};
++};
++[[nodiscard]] SecondPadSample second_pad_sample();
+ 
+ // True when <prefix>_TRACE_SYNC is set: logs kernel object activity.
+ [[nodiscard]] bool trace_sync();
+diff --git a/host/hle/hle_extension_host.cpp b/host/hle/hle_extension_host.cpp
+index d242df0..0fe381b 100644
+--- a/host/hle/hle_extension_host.cpp
++++ b/host/hle/hle_extension_host.cpp
+@@ -115,6 +115,14 @@ static_assert(kExtraL2 == input::kExtraL2 && kExtraR2 == input::kExtraR2 && kExt
+               kExtraR3 == input::kExtraR3);
+ std::uint32_t extra_buttons() { return ::portablekit::pad_extra_buttons(); }
+ 
++void want_second_pad(bool wanted) { ::portablekit::want_second_pad(wanted); }
++
++SecondPad second_pad() {
++    const SecondPadSample sample = ::portablekit::second_pad_sample();
++    return SecondPad{sample.connected, sample.buttons,  sample.extra,  sample.analog_x,
++                     sample.analog_y,  sample.right_x, sample.right_y};
++}
++
+ } // namespace hle_extension
+ 
+ HleExtensionReport install_linked_hle_extensions(Runtime &runtime, HleRegistrar &hle) {
+diff --git a/host/hle/hle_media.cpp b/host/hle/hle_media.cpp
+index 1a64e70..2be6d5f 100644
+--- a/host/hle/hle_media.cpp
++++ b/host/hle/hle_media.cpp
+@@ -1153,6 +1153,31 @@ void register_audio(HleRegistrar &hle) {
+ 
+ std::uint32_t pad_extra_buttons() { return sampled_extra(); }
+ 
++void want_second_pad(bool wanted) {
++#if defined(PORTABLEKIT_HAS_RENDERER)
++    if (media().renderer && media().renderer->available()) media().renderer->set_second_pad_wanted(wanted);
++#else
++    (void)wanted;
++#endif
++}
++
++SecondPadSample second_pad_sample() {
++    SecondPadSample sample;
++#if defined(PORTABLEKIT_HAS_RENDERER)
++    if (media().renderer && media().renderer->available()) {
++        const gpu::PadState pad = media().renderer->second_pad();
++        sample.connected = media().renderer->second_pad_connected();
++        sample.buttons = pad.buttons;
++        sample.extra = pad.extra;
++        sample.analog_x = pad.analog_x;
++        sample.analog_y = pad.analog_y;
++        sample.right_x = pad.right_x;
++        sample.right_y = pad.right_y;
++    }
++#endif
++    return sample;
++}
++
+ void initialize_renderer() {
+ #if defined(PORTABLEKIT_HAS_RENDERER)
+     (void)ensure_renderer();
+diff --git a/host/ui/input_script.cpp b/host/ui/input_script.cpp
+index d90d699..f036525 100644
+--- a/host/ui/input_script.cpp
++++ b/host/ui/input_script.cpp
+@@ -39,12 +39,15 @@ struct State {
+     std::deque<Step> steps;
+     std::uint64_t frame{};
+     SDL_Joystick *pad{};
+-    // Releases due later: frame, key or pad buttons.
++    SDL_Joystick *pad2{};  // the second virtual pad, for pad2 and axis2 steps
++    SDL_JoystickID pad2_id{};
++    // Releases due later: frame, key or pad buttons (of `joystick`).
+     struct Release {
+         std::uint64_t frame{};
+         SDL_Keycode key{};
+         std::vector<SDL_GamepadButton> buttons;
+         std::uint8_t mouse_button{};
++        SDL_Joystick *joystick{};
+     };
+     std::vector<Release> releases;
+     // The virtual pad's motion sensors (tilt, gyro), sent again every frame
+@@ -109,6 +112,8 @@ bool mouse_step(const std::string &action) { return action == "mouse" || action
+ 
+ bool sensor_step(const std::string &action) { return action == "tilt" || action == "gyro"; }
+ 
++void attach_second_pad(State &s);
++
+ void run(const Step &step) {
+     State &s = state();
+     std::cout << "[script] frame " << s.frame << ": " << step.action << " " << step.argument << std::endl;
+@@ -147,8 +152,9 @@ void run(const Step &step) {
+         }
+         push_mouse_button(button, true);
+         s.releases.push_back({s.frame + frames, SDLK_UNKNOWN, {}, button});
+-    } else if (step.action == "pad") {
+-        if (s.pad == nullptr) return;
++    } else if (step.action == "pad" || step.action == "pad2") {
++        SDL_Joystick *const joystick = step.action == "pad2" ? s.pad2 : s.pad;
++        if (joystick == nullptr) return;
+         const auto [held, frames] = name_and_frames(step.argument, kHoldFrames);
+         std::vector<SDL_GamepadButton> buttons;
+         std::stringstream names(held);
+@@ -159,12 +165,22 @@ void run(const Step &step) {
+                 std::cout << "[script] unknown button " << name << std::endl;
+                 continue;
+             }
+-            SDL_SetJoystickVirtualButton(s.pad, button, true);
++            SDL_SetJoystickVirtualButton(joystick, button, true);
+             buttons.push_back(button);
+         }
+-        s.releases.push_back({s.frame + frames, SDLK_UNKNOWN, buttons});
+-    } else if (step.action == "axis") {
+-        if (s.pad == nullptr) return;
++        s.releases.push_back({s.frame + frames, SDLK_UNKNOWN, buttons, 0u, joystick});
++    } else if (step.action == "detach2") {
++        // Player 2's pad unplugged, as a cable pulled or a battery gone flat.
++        if (s.pad2 == nullptr) return;
++        SDL_CloseJoystick(s.pad2);
++        SDL_DetachVirtualJoystick(s.pad2_id);
++        s.pad2 = nullptr;
++        s.pad2_id = 0;
++    } else if (step.action == "attach2") {
++        if (s.pad2 == nullptr) attach_second_pad(s);
++    } else if (step.action == "axis" || step.action == "axis2") {
++        SDL_Joystick *const joystick = step.action == "axis2" ? s.pad2 : s.pad;
++        if (joystick == nullptr) return;
+         const auto space = step.argument.find(' ');
+         const SDL_GamepadAxis axis = SDL_GetGamepadAxisFromString(step.argument.substr(0, space).c_str());
+         const float value = space == std::string::npos ? 0.0f : std::strtof(step.argument.c_str() + space + 1u, nullptr);
+@@ -172,7 +188,7 @@ void run(const Step &step) {
+             std::cout << "[script] unknown axis " << step.argument << std::endl;
+             return;
+         }
+-        SDL_SetJoystickVirtualAxis(s.pad, axis, static_cast<Sint16>(std::clamp(value, -1.0f, 1.0f) * 32767.0f));
++        SDL_SetJoystickVirtualAxis(joystick, axis, static_cast<Sint16>(std::clamp(value, -1.0f, 1.0f) * 32767.0f));
+     } else if (step.action == "tilt") {
+         if (s.pad == nullptr) return;
+         float roll = 0.0f;
+@@ -287,6 +303,7 @@ void attach() {
+     if (s.attached) return;
+     s.attached = true;
+     bool uses_pad = false;
++    bool uses_pad2 = false;
+     bool uses_mouse = false;
+     if (const char *live = portablekit::env("INPUT_LIVE"); live != nullptr && *live != '\0') {
+         s.live_path = live;
+@@ -305,6 +322,7 @@ void attach() {
+             Step step;
+             if (!parse_step(item, 0u, step)) continue;
+             uses_pad = uses_pad || step.action == "pad" || step.action == "axis" || sensor_step(step.action);
++            uses_pad2 = uses_pad2 || step.action == "pad2" || step.action == "axis2" || step.action == "detach2";
+             s.sensors = s.sensors || sensor_step(step.action);
+             uses_mouse = uses_mouse || mouse_step(step.action);
+             s.steps.push_back(step);
+@@ -312,7 +330,8 @@ void attach() {
+         sort_steps(s);
+         std::cout << "[script] " << s.steps.size() << " steps" << std::endl;
+     }
+-    if (uses_pad) attach_pad(s);
++    if (uses_pad || uses_pad2) attach_pad(s);
++    if (uses_pad2) attach_second_pad(s);
+     if (uses_mouse) Layer::get().renderer().set_scripted_input(true);
+ }
+ 
+@@ -346,6 +365,29 @@ void attach_pad(State &s) {
+     s.pad = SDL_OpenJoystick(id);
+ }
+ 
++// A plain second virtual pad, which the renderer gives player 2 by its name.
++void attach_second_pad(State &s) {
++    SDL_VirtualJoystickDesc desc;
++    SDL_INIT_INTERFACE(&desc);
++    desc.type = SDL_JOYSTICK_TYPE_GAMEPAD;
++    desc.naxes = SDL_GAMEPAD_AXIS_COUNT;
++    desc.nbuttons = SDL_GAMEPAD_BUTTON_COUNT;
++    desc.axis_mask = (1u << SDL_GAMEPAD_AXIS_COUNT) - 1u;
++    desc.button_mask = (1u << SDL_GAMEPAD_BUTTON_COUNT) - 1u;
++    desc.name = kInputScriptName2;
++    // A device of its own to SDL: with the first pad's ids it would get the
++    // first pad's mapping and gamepad name.
++    desc.vendor_id = 0x5054u;
++    desc.product_id = 0x0002u;
++    const SDL_JoystickID id = SDL_AttachVirtualJoystick(&desc);
++    if (id == 0) {
++        std::cout << "[script] cannot attach a second virtual gamepad: " << SDL_GetError() << std::endl;
++        return;
++    }
++    s.pad2 = SDL_OpenJoystick(id);
++    s.pad2_id = id;
++}
++
+ } // namespace
+ 
+ void tick() {
+@@ -360,7 +402,8 @@ void tick() {
+         }
+         if (it->key != SDLK_UNKNOWN) push_key(it->key, false);
+         if (it->mouse_button != 0u) push_mouse_button(it->mouse_button, false);
+-        for (SDL_GamepadButton button : it->buttons) SDL_SetJoystickVirtualButton(s.pad, button, false);
++        for (SDL_GamepadButton button : it->buttons)
++            SDL_SetJoystickVirtualButton(it->joystick != nullptr ? it->joystick : s.pad, button, false);
+         it = s.releases.erase(it);
+     }
+     while (!s.steps.empty() && s.steps.front().frame <= s.frame) {
+diff --git a/host/ui/input_script.hpp b/host/ui/input_script.hpp
+index 6897a1b..653d6ec 100644
+--- a/host/ui/input_script.hpp
++++ b/host/ui/input_script.hpp
+@@ -18,6 +18,9 @@
+ //                     leftstick, rightstick, leftshoulder, dpup, dpdown, ...)
+ //   axis NAME VALUE   hold an axis of the virtual gamepad at VALUE, -1 to 1
+ //                     (leftx, lefty, rightx, righty, lefttrigger, righttrigger)
++//   pad2 ..., axis2 ...  the same on a second virtual gamepad, player 2's
++//                     while a port wants one (kInputScriptName2)
++//   detach2, attach2  unplug that second pad, and plug it in again
+ //   tilt ROLL [PITCH] hold the virtual gamepad's accelerometer where it reads
+ //                     with the pad rolled ROLL degrees (right side down
+ //                     positive) and pitched PITCH degrees back from flat, 0 by
+@@ -54,6 +57,9 @@ namespace portablekit {
+ // The name the virtual gamepad reports, so the renderer can tell it from a
+ // real one. It is the framework's, not any game's.
+ inline constexpr const char *kInputScriptName = "PortableKit input script";
++// The second virtual gamepad (pad2 and axis2 steps): player 2's pad while a
++// port wants one (VulkanRenderer::set_second_pad_wanted).
++inline constexpr const char *kInputScriptName2 = "PortableKit input script 2";
+ 
+ }
+ 
+diff --git a/include/portablekit/hle_extension.hpp b/include/portablekit/hle_extension.hpp
+index 7db053f..380f194 100644
+--- a/include/portablekit/hle_extension.hpp
++++ b/include/portablekit/hle_extension.hpp
+@@ -40,7 +40,8 @@
+ // 3: Registry::declare_key, key lookup, read_open_file, set_file_filter.
+ // 4: add_file_provider.
+ // 5: extra_buttons.
+-#define PORTABLEKIT_HLE_EXTENSION_INTERFACE 5
++// 6: want_second_pad, second_pad.
++#define PORTABLEKIT_HLE_EXTENSION_INTERFACE 6
+ 
+ namespace portablekit::hle_extension {
+ 
+@@ -289,6 +290,25 @@ inline constexpr std::uint32_t kExtraL3 = 1u << 2u;
+ inline constexpr std::uint32_t kExtraR3 = 1u << 3u;
+ [[nodiscard]] std::uint32_t extra_buttons();
+ 
++// A second player's pad, for a port with a local multiplayer mode. While
++// wanted, a gamepad other than player 1's (the second one connected) is
++// player 2's: read with player 1's bindings and tuning, and never reaching
++// the game's own pad (sceCtrl), which stays player 1's. The port gives it to
++// the game itself. second_pad() is its state as of the game's last pad read:
++// SceCtrlButtons bits, the extra buttons, the left stick (centre 0x80, the
++// PSP nub's range) and the right stick. Not connected: all neutral.
++struct SecondPad {
++    bool connected{};
++    std::uint32_t buttons{};
++    std::uint32_t extra{};
++    std::uint8_t analog_x{0x80u};
++    std::uint8_t analog_y{0x80u};
++    std::uint8_t right_x{0x80u};
++    std::uint8_t right_y{0x80u};
++};
++void want_second_pad(bool wanted);
++[[nodiscard]] SecondPad second_pad();
++
+ } // namespace portablekit::hle_extension
+ 
+ // Defines a module's entry function. `name` is the module's name as its
+-- 
+2.53.0.windows.1
+

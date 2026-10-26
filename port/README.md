@@ -232,6 +232,13 @@ fresh clone of `33800c4`, apply them with `git checkout -b dissidia 33800c4` and
 | 0052 | The last stretch of a present's wait spins without yielding | Present timing to well under a millisecond (99th percentile 0.6 ms late) |
 | 0053 | No present before its time when a flip moves the timing grid | Keeps presents from coming early |
 | 0054 | Save data: the encrypted data file keeps the data's own length, and its hash is of the file padded with zeros to 16 bytes, as a PSP and PPSSPP write it; a save an earlier build padded is written again at the game's length when it loads (`<prefix>_NO_SAVEDATA_REPAIR` leaves it) | Saves move between the port and PPSSPP both ways: PPSSPP said "Unable to load data" for the port's saves, and the port refused PPSSPP's as broken |
+| 0055 | Port markers in display lists (`GeState::MarkerSink`), and a split screen from them: the first marker copies the left view aside, the second puts the middle half of each view side by side back into the target, under what the game draws next | Local split-screen versus ([local-versus.md](../docs/port/local-versus.md)) |
+| 0056 | A second player's gamepad while a port wants one (extension interface 6: `want_second_pad`, `second_pad`); the input script's `pad2`, `axis2`, `detach2`, `attach2` | Player 2's controller |
+| 0057 | The input script's second pad takes player 2's place from a real one | A real pad connected during a scripted run became player 2's |
+| 0058 | Whether player 1 has a gamepad (extension interface 7, `first_pad_connected`); the input script's `detach`, `attach` | Pausing a versus battle when player 1's gamepad goes |
+| 0059 | `Runtime::registered_function`: the recompiled function registered at an address | An override that only sometimes replaces a function runs the original otherwise |
+| 0060 | Frame interpolation on a split screen: each draw carries its view, pairs within it and blends with its own view's camera; the replay draws each view into its half; the halves are moved, not scaled | 60 fps on both halves (local-versus.md, 7.9) |
+| 0061 | The disc image read through once in the background from launch, at background I/O priority on Windows, so the file cache holds it; `<prefix>_NO_DISC_READ_THROUGH`. `<prefix>_TRACE_IO` gives each read's time | A cold hard drive stalled the first battle frame (116 ms) on the music's first block ([performance.md](../docs/port/performance.md), section 10) |
 
 Patches 0012 and 0013 were made on a separate worktree branch during the recompiled-build work and merged onto
 `dissidia` on 18 October 2026; patches 0014 and 0015 followed the same day (bring-up log, section "Stencil"), and
@@ -241,7 +248,9 @@ patches 0016 to 0022 that evening (section "HP bar, orbs and saves"), patches 00
 diagonals that felt dead on a real controller. Patches 0036 to 0039 came on 20 October with the graphics census
 ([graphics-census.md](../docs/port/graphics-census.md)), and 0040 to 0043 on 21 October from its findings (depth clipping, findings 3 and 6, stays on the
 unmerged branch `depth-clip`: no visible change here); 0044 the same day for a report from the Steam Deck, and 0045 to 0048 for the frame-rate dips; 0049 to 0053 on 22 October for the present thread. Patch 0054 came on 26 October, for a player whose save would not move between the port
-and PPSSPP (`portablekit_savedata_tests` and both directions checked against PPSSPP 1.20.4).
+and PPSSPP (`portablekit_savedata_tests` and both directions checked against PPSSPP 1.20.4). Patches 0055 to 0061
+came from 25 to 26 October for local split-screen versus, made on the worktree branch `local-versus` and moved onto
+`dissidia` when that branch was merged.
 PortableKit's 21 framework tests pass on the branch and `portablekit_host_check` builds.
 
 ## Recompiled build

@@ -1,0 +1,186 @@
+From 0021eb2ee975c0940dc827568c73fa3890b4187c Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Sun, 25 Oct 2026 19:52:44 +1030
+Subject: [PATCH 58/61] Input: tell a port whether player 1 has a gamepad, and
+ unplug the script's first pad
+
+Extension interface 7 adds first_pad_connected(): player 1 has a gamepad,
+not only the keyboard. A port with local multiplayer uses it to notice
+player 1's gamepad going away mid-game, as second_pad().connected does for
+player 2's.
+
+The input script gains `detach` and `attach` for its first virtual pad, as
+`detach2` and `attach2` do for the second, so that losing player 1's pad can
+be tested.
+
+Tested with Dissidia 012 (local versus, Windows): both pads unplugged and
+plugged in again in a scripted battle.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/gpu/vulkan_renderer.cpp          |  2 ++
+ host/gpu/vulkan_renderer.hpp          |  2 ++
+ host/hle/hle_common.hpp               |  2 ++
+ host/hle/hle_extension_host.cpp       |  2 ++
+ host/hle/hle_media.cpp                |  8 ++++++++
+ host/ui/input_script.cpp              | 12 ++++++++++++
+ host/ui/input_script.hpp              |  3 ++-
+ include/portablekit/hle_extension.hpp |  6 +++++-
+ 8 files changed, 35 insertions(+), 2 deletions(-)
+
+diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
+index 6009d4e..d64203d 100644
+--- a/host/gpu/vulkan_renderer.cpp
++++ b/host/gpu/vulkan_renderer.cpp
+@@ -7003,6 +7003,8 @@ void VulkanRenderer::set_second_pad_wanted(bool wanted) {
+ 
+ bool VulkanRenderer::second_pad_connected() const noexcept { return impl_ && impl_->gamepad2 != nullptr; }
+ 
++bool VulkanRenderer::first_pad_connected() const noexcept { return impl_ && impl_->gamepad != nullptr; }
++
+ PadState VulkanRenderer::second_pad() const noexcept { return impl_ ? impl_->pad2 : PadState{}; }
+ 
+ bool VulkanRenderer::touch_controls_visible() const noexcept {
+diff --git a/host/gpu/vulkan_renderer.hpp b/host/gpu/vulkan_renderer.hpp
+index 40748c0..9b08d55 100644
+--- a/host/gpu/vulkan_renderer.hpp
++++ b/host/gpu/vulkan_renderer.hpp
+@@ -109,6 +109,8 @@ public:
+     void set_second_pad_wanted(bool wanted);
+     [[nodiscard]] bool second_pad_connected() const noexcept;
+     [[nodiscard]] PadState second_pad() const noexcept;
++    // Player 1 has a gamepad (pad() reads one, not only the keyboard).
++    [[nodiscard]] bool first_pad_connected() const noexcept;
+     // Reads the keyboard, mouse buttons and gamepad again for pad() without
+     // handling window events (issue #8): the game reads its pad each frame,
+     // and taking the state then instead of at the last flip saves up to a
+diff --git a/host/hle/hle_common.hpp b/host/hle/hle_common.hpp
+index 6d4597f..d3c82a6 100644
+--- a/host/hle/hle_common.hpp
++++ b/host/hle/hle_common.hpp
+@@ -92,6 +92,8 @@ struct SecondPadSample {
+     std::uint8_t right_y{0x80u};
+ };
+ [[nodiscard]] SecondPadSample second_pad_sample();
++// Player 1 has a gamepad, not only the keyboard.
++[[nodiscard]] bool first_pad_connected();
+ 
+ // True when <prefix>_TRACE_SYNC is set: logs kernel object activity.
+ [[nodiscard]] bool trace_sync();
+diff --git a/host/hle/hle_extension_host.cpp b/host/hle/hle_extension_host.cpp
+index 0fe381b..6356f17 100644
+--- a/host/hle/hle_extension_host.cpp
++++ b/host/hle/hle_extension_host.cpp
+@@ -123,6 +123,8 @@ SecondPad second_pad() {
+                      sample.analog_y,  sample.right_x, sample.right_y};
+ }
+ 
++bool first_pad_connected() { return ::portablekit::first_pad_connected(); }
++
+ } // namespace hle_extension
+ 
+ HleExtensionReport install_linked_hle_extensions(Runtime &runtime, HleRegistrar &hle) {
+diff --git a/host/hle/hle_media.cpp b/host/hle/hle_media.cpp
+index 2be6d5f..e690158 100644
+--- a/host/hle/hle_media.cpp
++++ b/host/hle/hle_media.cpp
+@@ -1178,6 +1178,14 @@ SecondPadSample second_pad_sample() {
+     return sample;
+ }
+ 
++bool first_pad_connected() {
++#if defined(PORTABLEKIT_HAS_RENDERER)
++    return media().renderer && media().renderer->available() && media().renderer->first_pad_connected();
++#else
++    return false;
++#endif
++}
++
+ void initialize_renderer() {
+ #if defined(PORTABLEKIT_HAS_RENDERER)
+     (void)ensure_renderer();
+diff --git a/host/ui/input_script.cpp b/host/ui/input_script.cpp
+index f036525..b58cf36 100644
+--- a/host/ui/input_script.cpp
++++ b/host/ui/input_script.cpp
+@@ -39,6 +39,7 @@ struct State {
+     std::deque<Step> steps;
+     std::uint64_t frame{};
+     SDL_Joystick *pad{};
++    SDL_JoystickID pad_id{};
+     SDL_Joystick *pad2{};  // the second virtual pad, for pad2 and axis2 steps
+     SDL_JoystickID pad2_id{};
+     // Releases due later: frame, key or pad buttons (of `joystick`).
+@@ -112,6 +113,7 @@ bool mouse_step(const std::string &action) { return action == "mouse" || action
+ 
+ bool sensor_step(const std::string &action) { return action == "tilt" || action == "gyro"; }
+ 
++void attach_pad(State &s);
+ void attach_second_pad(State &s);
+ 
+ void run(const Step &step) {
+@@ -169,6 +171,15 @@ void run(const Step &step) {
+             buttons.push_back(button);
+         }
+         s.releases.push_back({s.frame + frames, SDLK_UNKNOWN, buttons, 0u, joystick});
++    } else if (step.action == "detach") {
++        // Player 1's pad unplugged.
++        if (s.pad == nullptr) return;
++        SDL_CloseJoystick(s.pad);
++        SDL_DetachVirtualJoystick(s.pad_id);
++        s.pad = nullptr;
++        s.pad_id = 0;
++    } else if (step.action == "attach") {
++        if (s.pad == nullptr) attach_pad(s);
+     } else if (step.action == "detach2") {
+         // Player 2's pad unplugged, as a cable pulled or a battery gone flat.
+         if (s.pad2 == nullptr) return;
+@@ -363,6 +374,7 @@ void attach_pad(State &s) {
+         return;
+     }
+     s.pad = SDL_OpenJoystick(id);
++    s.pad_id = id;
+ }
+ 
+ // A plain second virtual pad, which the renderer gives player 2 by its name.
+diff --git a/host/ui/input_script.hpp b/host/ui/input_script.hpp
+index 653d6ec..6019ec8 100644
+--- a/host/ui/input_script.hpp
++++ b/host/ui/input_script.hpp
+@@ -20,7 +20,8 @@
+ //                     (leftx, lefty, rightx, righty, lefttrigger, righttrigger)
+ //   pad2 ..., axis2 ...  the same on a second virtual gamepad, player 2's
+ //                     while a port wants one (kInputScriptName2)
+-//   detach2, attach2  unplug that second pad, and plug it in again
++//   detach, attach    unplug the virtual gamepad, and plug it in again
++//   detach2, attach2  the same for the second pad
+ //   tilt ROLL [PITCH] hold the virtual gamepad's accelerometer where it reads
+ //                     with the pad rolled ROLL degrees (right side down
+ //                     positive) and pitched PITCH degrees back from flat, 0 by
+diff --git a/include/portablekit/hle_extension.hpp b/include/portablekit/hle_extension.hpp
+index 380f194..e53b36b 100644
+--- a/include/portablekit/hle_extension.hpp
++++ b/include/portablekit/hle_extension.hpp
+@@ -41,7 +41,8 @@
+ // 4: add_file_provider.
+ // 5: extra_buttons.
+ // 6: want_second_pad, second_pad.
+-#define PORTABLEKIT_HLE_EXTENSION_INTERFACE 6
++// 7: first_pad_connected.
++#define PORTABLEKIT_HLE_EXTENSION_INTERFACE 7
+ 
+ namespace portablekit::hle_extension {
+ 
+@@ -308,6 +309,9 @@ struct SecondPad {
+ };
+ void want_second_pad(bool wanted);
+ [[nodiscard]] SecondPad second_pad();
++// Player 1 has a gamepad (not only the keyboard): for telling player 1 that
++// it went away, as second_pad().connected tells it for player 2.
++[[nodiscard]] bool first_pad_connected();
+ 
+ } // namespace portablekit::hle_extension
+ 
+-- 
+2.53.0.windows.1
+
