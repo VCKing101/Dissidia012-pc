@@ -699,6 +699,7 @@ void run_split_task(Guest *g, const decomp::CallState &in, GuestRegs &) {
     const std::uint32_t manager = g_ld32(g, kCameraManager);
     const std::uint32_t graphics = g_ld32(g, kGraphics);
     s.split_active = false;
+    versus::note_split_frame(false);
     if (!versus::active() || manager == 0u || graphics == 0u || g_ld8(g, manager + 0x8BCu) != 1u) return;
     // A scripted camera (manager +0x804 == 2), an event camera (+0x9E0), or a
     // battle event between the fighters, such as an EX Burst (either
@@ -743,6 +744,7 @@ void run_split_task(Guest *g, const decomp::CallState &in, GuestRegs &) {
     }
     // From here the frame is split (the HUD's placements read it).
     s.split_active = true;
+    versus::note_split_frame(true);
     set_up_cursor2(g, manager);
 
     emit(g, kMarkerSplitLeft);

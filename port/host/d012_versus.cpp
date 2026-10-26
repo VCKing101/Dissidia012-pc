@@ -115,6 +115,10 @@ struct State {
     // In a versus battle, player 1's fighter played (not the CPU's, as in the
     // intro), at the last pad read: the 1P / 2P labels show.
     bool fighting = false;
+    // The pad read of the last battle frame drawn split (note_split_frame),
+    // and whether there was one.
+    std::uint32_t split_read = 0;
+    bool split = false;
     std::uint32_t fallen = 0;  // bit 0 player 1's fighter, bit 1 player 2's
     bool chosen = false;      // the Battle Mode row was chosen
     bool start_menu = false;  // the start menu is up (player 2's pad looked for)
@@ -357,11 +361,17 @@ void notice_draw() {
     text(8.0f, top + 30.0f, IM_COL32(255, 220, 140, 255), hint);
 }
 
-// In a versus battle while player 1's fighter is played (not in the intro):
-// "1P" and "2P" over the portraits (the stock HUD names neither player; the
-// word under Lightning's portrait is her paradigm). Once a fighter has fallen,
-// the winner instead.
-bool hud_visible() { return active() && (state().fighting || state().fallen != 0u); }
+// In a versus battle while player 1's fighter is played (not in the intro)
+// and the frame is split (not the VS screen before the battle, where the
+// fighters are already played): "1P" and "2P" over the portraits (the stock
+// HUD names neither player; the word under Lightning's portrait is her
+// paradigm). Once a fighter has fallen, the winner instead.
+bool hud_visible() {
+    const State &s = state();
+    // Split within the last few pad reads: the split task runs every battle frame.
+    const bool split = s.split && s.reads - s.split_read < 4u;
+    return active() && ((s.fighting && split) || s.fallen != 0u);
+}
 
 void hud_draw() {
     const portablekit::ui::GamePicture picture = portablekit::ui::game_picture();
@@ -451,6 +461,12 @@ RightStick player2_right_stick() {
 
 void note_camera_live() { state().camera_live_read = state().reads; }
 
+void note_split_frame(bool split) {
+    State &s = state();
+    s.split = split;
+    if (split) s.split_read = s.reads;
+}
+
 void install(portablekit::HleRegistrar &hle) {
     static bool installed = false;
     if (installed || !enabled()) return;
@@ -491,6 +507,7 @@ void install(portablekit::HleRegistrar &hle) {
             s.connected = s.pad.connected;
             s.picking = false;
             s.fighting = false;
+            s.split = false;
             s.fallen = 0u;
             return;
         }

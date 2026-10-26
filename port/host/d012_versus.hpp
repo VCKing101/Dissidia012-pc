@@ -39,6 +39,11 @@ struct RightStick {
 [[nodiscard]] RightStick player2_right_stick();
 void note_camera_live();
 
+// Whether the battle frame the split task last saw was drawn split
+// (d012_split_view.cpp): the 1P / 2P tags show only then, not on the
+// pre-battle VS screen or a full-screen moment.
+void note_split_frame(bool split);
+
 // The pad-read wrapper: controller 2 into raw pad 1, and into the game's own
 // pad while the opponent is picked. The opponent's AI-mode override goes in
 // from this file's static initialiser.
