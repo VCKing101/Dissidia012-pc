@@ -358,6 +358,37 @@ void run_free_layouts(Guest *g, const decomp::CallState &in, GuestRegs &) {
 }
 
 // main 0x088D46E4 (cursor, row, a2, last row, t0, t1).
+// Player 2's level on the setup screen. The setup's start (menu 0x08AA6F0C,
+// on an object with its setup state at +0x1EE4) works the
+// opponent's level out from the CPU level setting (menu 0x08AB13A0, into
+// state +0x1E4C; menu 0x08AA7C3C, which would draw it too, does nothing in
+// this build) and puts it on the right name plate (menu 0x08AA6148: the
+// digits by menu 0x08AB0A08 on the state's parts at +0x10, the digit count's
+// animation on the part at +0xD8 from the table at 0x08AA885E). In versus
+// player 2's fighter is player 1's saved one (d012_versus.cpp), so after
+// that, at the start's cursor call (cursor state +0x1DF0), the plate is given
+// that record's level as the player's plate gets player 1's (menu
+// 0x08AA56C8: main 0x088CB164 and 0x088CBAD0).
+constexpr std::uint32_t kSetupStart = 0x08AA6F0Cu;
+constexpr std::uint32_t kSetupStartSize = 1640u;
+
+void show_player2_level(Guest *g, gaddr cursor) {
+    const gaddr setup = cursor - 0x1DF0u;
+    // The versus setup's rows (run_setup_attach): the state it is.
+    if (g_ld32(g, setup + 0x71Cu) != 0x08AA87A8u) return;
+    const std::int32_t character = g_ld32s(g, setup + 0x594u);
+    if (character <= 0 || character == 0x17) return;
+    const gaddr record = g_call2(g, 0x088CB164u, g_ld32(g, 0x089D712Cu) + 0xF58u, static_cast<std::uint32_t>(character));
+    const std::uint32_t level = g_call1(g, 0x088CBAD0u, record);
+    if (level == 0u || level > 100u || level == g_ld32(g, setup + 0x1E4Cu)) return;
+    g_st32(g, setup + 0x1E4Cu, level);
+    const std::uint32_t digits = g_call4(g, 0x08AB0A08u, setup + 0x10u, level, 0x08AA7EF3u, 0u);
+    if (digits < 1u || digits > 3u) return;
+    g_st32(g, setup + 0x1E6Cu, digits - 1u);
+    g_call3(g, 0x088D9F5Cu, g_ld32(g, setup + 0xD8u), ld16(g, 0x08AA885Eu + (digits - 1u) * 2u), 1u);
+    std::cout << "[versus] player 2's level on the setup screen: " << level << std::endl;
+}
+
 void run_cursor(Guest *g, const decomp::CallState &in, GuestRegs &) {
     const gaddr cursor = in.gpr[4];
     std::int32_t last = static_cast<std::int32_t>(in.gpr[7]);
@@ -378,6 +409,7 @@ void run_cursor(Guest *g, const decomp::CallState &in, GuestRegs &) {
     g_st32(g, cursor + 28u, 0u);
     g_st32(g, cursor + 40u, 0u);
     g_call1(g, kCursorClamp, cursor);
+    if (versus::active() && from(in, kSetupStart, kSetupStart + kSetupStartSize)) show_player2_level(g, cursor);
 }
 
 // The row's highlight, as menu 0x089E56F8 lights a row and puts it out.
@@ -405,7 +437,21 @@ gaddr help_for_row(Guest *g, const decomp::CallState &in, gaddr text) {
 }
 
 // main 0x0887B924 (text): shown.
+// D012_TRACE_TEXTS=1: in a versus battle, each text shown or hidden, with the
+// code that asked (for finding a HUD piece made of texts).
+void trace_text(const char *what, const decomp::CallState &in) {
+    static const bool on = [] {
+        const char *text = std::getenv("D012_TRACE_TEXTS");
+        return text != nullptr && *text != '\0' && std::strcmp(text, "0") != 0;
+    }();
+    static std::uint32_t told = 0;
+    if (!on || !versus::split_recently() || told >= 4000u) return;
+    ++told;
+    std::printf("[text] %s %08X from %08X\n", what, in.gpr[4], in.gpr[31]);
+}
+
 void run_text_show(Guest *g, const decomp::CallState &in, GuestRegs &) {
+    trace_text("show", in);
     gaddr text = in.gpr[4];
     if (const gaddr help = help_for_row(g, in, text); help != 0u) {
         text = help;
@@ -414,8 +460,44 @@ void run_text_show(Guest *g, const decomp::CallState &in, GuestRegs &) {
     g_st32(g, text + 0x10u, g_ld32(g, text + 0x10u) | 0x400u);
 }
 
+// main 0x0887B900 (text, id): the text's string (+8), as the game does it; for
+// D012_TRACE_TEXTS, logged with the caller.
+void run_text_string(Guest *g, const decomp::CallState &in, GuestRegs &) {
+    static const bool on = [] {
+        const char *text = std::getenv("D012_TRACE_TEXTS");
+        return text != nullptr && *text != '\0' && std::strcmp(text, "0") != 0;
+    }();
+    static std::uint32_t told = 0;
+    if (on && versus::split_recently() && told < 4000u) {
+        ++told;
+        std::printf("[text] string %08X = %u from %08X\n", in.gpr[4], in.gpr[5] & 0xFFFFu, in.gpr[31]);
+    }
+    g_st16(g, in.gpr[4] + 8u, static_cast<std::uint16_t>(in.gpr[5]));
+}
+
+// main 0x0887AD78 (message file, ?, message, ...): a text made from a
+// message; for D012_TRACE_TEXTS, logged with the caller and the message.
+void run_message_text(Guest *g, const decomp::CallState &in, GuestRegs &out) {
+    GuestRegs regs{};
+    for (int i = 0; i < 8; ++i) regs.a[i] = in.gpr[4 + i];
+    for (int i = 0; i < 4; ++i) regs.f[i] = in.fpr[12 + i];
+    decomp::call_original(g, 0x0887AD78u, regs);
+    out.v0 = regs.v0;
+    static const bool on = [] {
+        const char *text = std::getenv("D012_TRACE_TEXTS");
+        return text != nullptr && *text != '\0' && std::strcmp(text, "0") != 0;
+    }();
+    static std::uint32_t told = 0;
+    if (on && versus::split_recently() && told < 4000u) {
+        ++told;
+        std::printf("[text] made %08X from message file %08X, %08X, message %u, from %08X\n", regs.v0, in.gpr[4],
+                    in.gpr[5], in.gpr[6], in.gpr[31]);
+    }
+}
+
 // main 0x0887B944 (text): hidden.
 void run_text_hide(Guest *g, const decomp::CallState &in, GuestRegs &) {
+    trace_text("hide", in);
     gaddr text = in.gpr[4];
     if (const gaddr help = help_for_row(g, in, text); help != 0u) {
         text = help;
@@ -578,6 +660,15 @@ struct Install {
             {0x088D4BF4u, "versus_menu_sound", Module::Main, Returns::Integer, &run_sound},
         };
         decomp::add_overrides(overrides, sizeof overrides / sizeof overrides[0], true);
+        // Overrides that only trace, there only with their switch.
+        const char *trace = std::getenv("D012_TRACE_TEXTS");
+        if (trace != nullptr && *trace != '\0' && std::strcmp(trace, "0") != 0) {
+            static const decomp::Override traces[] = {
+                {0x0887B900u, "versus_text_string", Module::Main, Returns::Nothing, &run_text_string},
+                {0x0887AD78u, "versus_message_text", Module::Main, Returns::Integer, &run_message_text},
+            };
+            decomp::add_overrides(traces, sizeof traces / sizeof traces[0], true);
+        }
     }
 } install;
 

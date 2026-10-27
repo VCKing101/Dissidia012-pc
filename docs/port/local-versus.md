@@ -37,8 +37,9 @@ In:
 
 - **Battle type:** Quick Battle 1-on-1 only, assists as normal.
 - **Entry:** a new Battle Mode row, "Quick Battle (Player vs Player)". It appears only when everything below works.
-- **Characters:** player 2 picks from player 1's save on their own controller. Level and equipment come from Quick
-  Battle's opponent settings.
+- **Characters:** player 2 picks from player 1's save on their own controller. Level, equipment, abilities,
+  accessories, look and set are player 1's saved build for that character (changed 27 October 2026, section 7.12;
+  first planned as Quick Battle's opponent settings, which the setup screen no longer shows).
 - **Menus:** player 1 runs every menu but player 2's pick: the settings page (CPU strength and behaviour rows
   hidden), the Opponent Info and BGM screen, and the post-battle menu.
 - **Pause:** either player can pause; the pause menu answers to whoever paused.
@@ -808,6 +809,145 @@ Not checked:
 - **README screenshots** (`docs/images/versus-*.png`): the Battle Mode row, the setup screen with GUEST and no CPU
   rows, and a split battle (Tifa against Cloud, Order's Sanctuary). The route is a scratch script:
   player 1's and player 2's own grid moves, stage 11, captures every 20 frames of the fight.
+
+## 7.11 The owner's first sessions: a crash, chases, the stutters (26 October 2026)
+
+The owner played versus with two controllers and their own data (`build/port/data`, `video.present_mode=vsync`,
+their `my-music` mods). Logs from `D012_PERF=log`, `D012_PERF_CSV`, `D012_TRACE_VERSUS`, `D012_TRACE_VIEWS` in
+`build/port/versus/logs/play1.*` to `play3.*`.
+
+**The crash** (twice when both fighters fell off the stage, once at an assist on Planet's Core). V:
+
+- `D012Native error: Guest memory access outside PSP RAM/EDRAM at 0x3D000048`, in the music's refill (main
+  `0x088A0264`, the battle track streamed from the disc through sceAtrac's stream info). The disc read it starts
+  (main `0x08862F2C`) calls through the vtable pointer of the file manager's reader, `*(*(0x089D5EA0) + 4)`, at
+  `+0x154`, which held `0x3D000000`.
+- `D012_TRACE_WATCH=1` (new) checks that word through the split task. It changed between split tasks, not inside
+  the second pass, to `0x000A0039`, then `0x3A000000` and `0xFF000000`: GE commands (0x3D, 0x3A are matrix data).
+- The game's two display lists are back to back (`0x09844B80` and `0x0989D000`, 0x58400 bytes each), and the
+  reader starts 16 bytes after the second one ends (`0x098F5410`). With both views the list ran past its end. On
+  Planet's Core with assists each view takes about 161 KiB of the 353 KiB, so two views and the HUD do not fit. The
+  half-list guard of 7.5 let a 161 KiB first view through, with no room left for the HUD after the second.
+- Reproduced with a scripted fight (Planet's Core, both players attacking and calling assists): the same crash.
+
+**The fix: view 2 in a display list of its own.** After the left marker the frame's list jumps (the GE's signal
+jump, SIGNAL 0x10 and END, an absolute address that leaves BASE alone) to a list of 512 KiB at `0x08300000`, in the
+kernel partition. A PSP game cannot touch it, and PortableKit uses only what is below 0x08200000 and from
+0x08400000. libGu's context is pointed at that list for the second pass and back afterwards, and the second list
+jumps back to where the frame's list goes on. The frame's list then holds what a stock frame holds. In battle the
+user partition has only about 500 KiB free (largest block 310 KiB), too little to allocate from. No draw task of the
+second pass starts within 64 KiB of the list's end (none did). `D012_SPLIT_SHARED_LIST=1` draws view 2 into the
+frame's list as before. Checked: the same scripted fight ran to its end with the reader untouched, view 2's list up
+to 161 KiB, both halves drawn (`list3/`).
+
+**Chases stay split** (the owner: only EX Bursts should go to one view). An EX Burst now goes to one full view from
+its start, an override of battle `0x08A3EB70` (on the EX Burst object `*0x08A405E0`, called from the fighter's EX
+code at `0x08ACB208`), until the battle-event bit (`+0x5B1` bit 0x80) it brings has come and gone. The battle-event
+bit alone, the scripted (`+0x804`) and event (`+0x9E0`) cameras no longer leave one view.
+`D012_SPLIT_FULL_SCREEN_EVENTS=1` brings back the old rule. The ending (a fighter fallen) is still one view. Every
+change of what holds is logged: `[versus] split N view state: ...`. Checked: Lightning's EX Burst one view from
+"Enter the commands shown" to the last hit, split straight after (`exburst8/`). **Not checked:** a chase (none in
+the scripted fights).
+
+**The stutters.** In `play1` (vsync, their data), three battle frames of 42 to 67 ms in 30 seconds, all guest
+time, no pipelines; the owner found them gone in the next session, after the disc read-through
+([performance.md](performance.md), section 10).
+
+**The owner's second round** (`play3`: no crash, chases split). V unless marked:
+
+- **A Bravery break went to one view.** The camera manager's state (`+0x8BC`) is 0 for a moment at a break (a
+  battle event at battle `0x08ADF...` that flashes the screen); the split task required 1. It now splits in state
+  0 during the fight (phases 0 to 2), with the state set to 1 while it builds view 2's graphics camera (battle
+  `0x08B3C0D8` copies the manager's view only in state 1). Not seen in a scripted run: no break was reached.
+- **The battle's phases** (`*(battle 0x08B0CF20) + 8`, logged as they change): 0 to 2 the fight, 1 to 3 the final
+  blow and its replay ("THE FINAL BLOW!"), 8 the white flash, 9 "VICTORY!" (the victory pose), 10 the pose with the
+  winner's words and the rewards, 12 to 14 the results. Seen in `phases1/`.
+- **The winner banner** came up as soon as a fighter's HP reached 0, which does not end the fight (the owner's
+  EX Burst on a fighter at 0 HP). It now shows from phase 9, naming the flow's winner (`+0x20`, set at the final
+  blow by battle `0x08B09D88`). The frame is one view from phase 8; the final blow stays split.
+- **Player 2's victory.** At the final blow the battle's update (main `0x0888C048`) asks main `0x08886A38`
+  whether the local slot won (the battle state `*0x089D69F8`, its winner at `+0xB4`), and the answer picks the
+  victory pose or the player's defeat ("DEFEATED..."). An override answers yes in versus when the winner is player
+  2's fighter, and battle `0x08B09D88` is overridden to make player 2's fighter the local one (fighter `+0x5B0`
+  bit 4) for the rest of the battle. Checked (`p2win5/`): player 2's fighter's "VICTORY!" pose and "Player 2 wins".
+  The menu after it is "Return to Battle Setup / Rematch", as after player 1's defeat.
+- **Player 2's EX Burst prompts were faded.** An EX Burst fades the prompts of the side that is not the player's,
+  by setting each sprite's colour again with alpha 0x50 (main `0x088D9AF4`): the attacker's commands when the
+  attacker is not local (battle `0x08A3DDF4`, the moves' own, such as `0x08A33298`), the defender's gauge when it is
+  (`0x08A3DFD0`). Both test the attacker, so no choice of local fighter shows both at full strength (tried: player 1's
+  gauge faded instead). In versus such a fade from battle `0x08A2F000..0x08A46000` is left out. Checked
+  (`p2prompt8/`): the fade from `0x08A334D8` (player 2's commands) left out, player 1's defence gauge solid.
+- **"CPU Select" over player 2's pick.** The room builds the opponent's grid (menu `0x08AA0D48`, at state 8) with a
+  header animation by mode from `0x08AA3C98` (6, "CPU Select", in modes 0 to 2; 4 in modes 3 and 4; the player's
+  table `0x08AA3C84` has 2, "Player Select"). In versus the port writes 4 there while the menu overlay is loaded,
+  and 6 back otherwise. Checked: "Player Select" with the look and set rows over player 2's pick; a stock Quick
+  Battle's still says "CPU Select". **Not checked:** whether the look and set can be changed by player 2.
+- **The 1P / 2P tags** and the ending: as before, the tags go once the banner shows.
+- **The command guide for player 2** (the owner: the × chase prompt showed for player 1 only). Reproduced with
+  Bartz's aerial down Brave attack (the homing orbs) after two dashes (`versus_shots.py --chase`, `--p2chase`).
+  The guide at the top left ("× : Chase", "○ or □ : Attack", "When attacked, dodge with ×!") is the HUD's guide
+  (`FIELD +0x7A4`, `+0xA8C`). Found with three new traces: `D012_TRACE_HUD_LAYOUTS` (layouts and sprites shown or
+  hidden), `D012_TRACE_TEXTS` (texts shown, hidden, their strings, texts made from messages, with their callers)
+  and `D012_TRACE_GUIDE` (the guide's requests, its halves and lines). V:
+  - Its lines come from five functions (battle `0x08B15AE8`, `0x08B15F80`, `0x08B15D70`, `0x08B164D8`,
+    `0x08B168E4`) that its driver (battle `0x08B158C8`) runs once a frame for the player. Each looks at the player's
+    fighter (main `0x08889E44`) and posts lines (main `0x0888ACE4`) for the player's slot (`FIELD +0x54`): message 8
+    "Chase", 9 the attack, 10 and 7 the defender's, 14 one always there.
+  - The guide keeps a half per slot (`+0x124 + 0x1C + slot*0x84C`), lays a slot whose fighter is not the HUD's
+    player out on the right, right-aligned (battle `0x089E968C`, `0x089EA450`), and drops lines while a half is kept
+    quiet (`+0x82C` reasons, `0x089EA91C`).
+  - Its update keeps the right half quiet in the guide's mode 0 (battle `0x089EAE18` with the mode from
+    `0x089E8EF0`: 0 the player's half only, 1 both, 2 none).
+  - The port: after the game's driver runs (an override), the five run again with player 2's fighter the local one
+    and slot 1 the player's, both put back after; and the mode is answered 1 for a 0 when that update step asks, so
+    player 2's half stays on. Every other reader of the mode gets the setting. `D012_NO_GUIDE_PLAYER2=1` leaves
+    player 2 without one.
+  - Checked (`guide9/`, `guide10/`): with player 1 chasing, player 1's half "× : Chase" and "○ or □ : Attack",
+    player 2's half the defender's lines; with player 2 chasing, the same the other way round, player 2's at the top
+    right of their half. Lines both share ("EX Core in play") show in both.
+
+## 7.12 Player 2's header, the tags after a battle (27 October 2026)
+
+- **"Player 2 Select".** The owner asked for player 2's pick to say it is player 2's. The game has no such header:
+  probing the opponent table's values (`header_probe.png`) gave 0 "Customization" (green), 1 to 5 and 7 "Player
+  Select" (blue), 6 and 8 "CPU Select" (pink). The table stays at 4, and while player 2 picks a red plate in the shape
+  of the game's own, "Player 2 Select", is drawn over it (`pick_header_draw` in `d012_versus.cpp`), faded in as the
+  game's slides in. Checked (`p2header/`).
+- **Tags on the loading screen.** After a battle the white fade to the loading screen is still the battle overlay,
+  drawn split, so the 1P / 2P tags showed on it. The tags now stay off from the ending (phase 8) until the next
+  fight's phases 1 and 2 (a rematch keeps the overlay) or the overlay goes. Checked (`finish4/`, `tagcheck/`).
+- **Cecil's pick (the "back from setup" report).** On the owner's save, Cecil's pick kept the last character's name
+  and drew no portrait, on player 2's pick and on player 1's alike; the owner first saw it going back from the setup
+  screen. Not the way back: Cecil's character record had a look (`+0x774`) of -1, where every other record has 1
+  ("Normal"); a test copy from 26 October (`data-versus-test`) has the same on Lightning, the fighter both players
+  took in those runs. What wrote it was not found: player 2's pick, Look and Set on it (both headers), mirror picks
+  and whole battles with their autosave leave the look alone in this build (`D012_TRACE_RECORDS=1` logs every
+  record's look, set and byte `+2` as they change; byte `+2` counts up once a battle). The port now sets any record's
+  look of -1 back to 1 while the character room is up (`repair_looks` in `d012_versus.cpp`), and the game saves it
+  with its next autosave. Checked on a copy of the owner's save (`data-versus-user`, `fix_cecil/`). Player 2's pick
+  can change the set (SELECT) of player 1's record for that character, as player 1's pick can; Look does nothing
+  where a character has one look.
+- **Player 2's level on the setup screen.** The right name plate showed the CPU level setting's level (Lv1). The
+  setup's start (`menu:0x08AA6F0C`) works it out with `menu:0x08AB13A0` into state `+0x1E4C` and draws it with
+  `menu:0x08AA6148` (digits by `menu:0x08AB0A08` on the state's parts, the digit count's animation on part `+0xD8`;
+  `menu:0x08AA7C3C`, which would draw it too, returns at once in this build). At the start's cursor call (main
+  `0x088D46E4`, already the port's, cursor state `+0x1DF0`) the versus setup takes player 1's record level for player
+  2's character (main `0x088CB164`, `0x088CBAD0`) and draws the digits again. Checked (`fix_level3/`, `fix_level4/`):
+  "Lightning Lv5" on the plate, the VS screen and the Opponent Info, with player 1's Broadsword, Buckler and Bronze
+  Helm.
+- **Player 2's build from player 1's save.** The owner found player 2 always on the CPU's default build (the opponent
+  settings rows are hidden). Battle request sides are built by main `0x0891CFC4` by source type
+  ([roster-and-save.md](../research/roster-and-save.md) 1.7): type 0, the player's own save record (main
+  `0x088F9BB0`: the record with level, five sets, equipment, accessories, abilities, current set and costume, the
+  set's assist and summon), type 5 Quick Battle's CPU (main `0x088FA2AC`). An override of `0x088FA2AC`
+  (`run_build_cpu_side`) lets the CPU build run for side 1, keeps its controller fields (setup `+0xF34`: type 1, so
+  the field setup still asks for the AI mode that becomes player 2's, and the strength fields), builds the side again
+  with `0x088F9BB0` (not the play-style AI, the set's assist) and puts them back. The caller then applies the CPU
+  entry's costume (`+0x79`) and opponent-settings equipment (`+0x88`, `+0x8A`, `+0x8C`, `+0x7F`): the entry gets the
+  record's costume and -1s first. Checked (`savebuild2/`, `savebuild3/`): player 2's Cloud has player 1's
+  unequipped level 1 stats (BRV 95, ATK 11, no Katana or Bronze Helm), player 2's Tifa player 1's six Power Rings;
+  the battle runs as before. The log line `player 2's N from player 1's save` gives the level, set and costume.
+  Player 2 cannot change the look or set on their pick (player 1 can, for the same records).
 
 ## 8. For later: two copies over the game's ad hoc versus
 

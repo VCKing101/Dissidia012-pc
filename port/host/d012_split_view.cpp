@@ -30,6 +30,9 @@
 #include "d012_decomp_harness.hpp"
 #include "d012_versus.hpp"
 
+#include "hle/hle_common.hpp"
+
+#include <algorithm>
 #include <array>
 #include <climits>
 #include <cmath>
@@ -105,6 +108,9 @@ constexpr std::uint32_t kCameraDraw = 0x08B3C0D8u;       // (manager)
 // No code is ever loaded below the EBOOT; the task's function and name live
 // here.
 constexpr std::uint32_t kSplitTask = 0x08800200u;
+// The start of an EX Burst (battle 0x08A3EB70, on the EX Burst object
+// *0x08A405E0, from the fighter's EX code at 0x08ACB208): see ex_burst.
+constexpr std::uint32_t kExBurstStart = 0x08A3EB70u;
 constexpr std::uint32_t kSplitTaskName = 0x08800240u;
 
 constexpr std::uint32_t kDrawFilter = 0xFFFFFFFFu;
@@ -136,6 +142,17 @@ struct State {
     // places the HUD, until a frame that is not split.
     bool split_active = false;
     bool cursor2 = false;  // player 2's cursor part is set up, with a sprite
+    // An EX Burst (run_ex_burst_start): 1 from its start until either
+    // fighter has the battle-event bit, 2 while one has it; 0 otherwise.
+    // `ex_burst_since` counts split-task frames in state 1.
+    std::uint32_t ex_burst = 0;
+    std::uint32_t ex_burst_since = 0;
+    // Player 2's fighter made the local one for a battle player 2 won
+    // (run_winner_decision).
+    bool player2_won = false;
+    // The most each view has used of its display list (view2_list).
+    std::uint32_t peak1 = 0;
+    std::uint32_t peak2 = 0;
 };
 
 State &state() {
@@ -193,8 +210,290 @@ void add_task(Guest *g) {
     s.task = g_call5(g, kTaskFactory, owner, kDrawFilter, static_cast<std::uint32_t>(kSplitPriority), kSplitTask,
                      kSplitTaskName);
     s.owner = owner;
+    s.ex_burst = 0u;
+    s.player2_won = false;
     std::cout << "[versus] split-view task added to the battle's task list" << std::endl;
 }
+
+// A fighter's "local player" flag (fighter +0x5B0 bit 4, which vtable
+// +0x144, battle 0x08B2EF74, tests; battle 0x08B2EF44 sets it on player 1's).
+// The game asks it for the one player it was written for: which fighter
+// main 0x08889E44 hands out as the player's, whose EX Burst prompts are drawn
+// at full strength, whose victory or defeat the ending shows.
+void set_local(Guest *g, gaddr fighter, bool local) {
+    if (fighter == 0u) return;
+    const std::uint8_t flags = g_ld8(g, fighter + 0x5B0u);
+    g_st8(g, fighter + 0x5B0u, static_cast<std::uint8_t>(local ? flags | 4u : flags & ~4u));
+}
+
+std::int32_t fighter_hp(Guest *g, gaddr fighter) {
+    const gaddr status = fighter != 0u ? g_ld32(g, fighter + 0x52Cu) : 0u;
+    return status != 0u ? g_ld32s(g, status + 0x0Cu) - g_ld32s(g, status + 0x08u) : 1;
+}
+
+// The battle's phase (*(battle 0x08B0CF20) + 8): 0 to 2 the fight, 1 to 3 the
+// final blow and its replay, 8 the white flash, 9 the victory pose, 10 the
+// pose with the winner's words (the rewards), 12 to 14 the results. The flow
+// keeps the winner at +0x20 and the fighter knocked out at +0x24 (battle
+// 0x08B09D88). 0xFFFFFFFF without one.
+constexpr std::uint32_t kBattleFlow = 0x08B0CF20u;
+constexpr std::uint32_t kWinnerDecision = 0x08B09D88u;
+
+// battle 0x089DDD74 (HUD, request): a line for the command guide (the HUD's
+// guide at +0xA8C, battle 0x089E6AC0, 0x089EA168: the request's first word
+// picks one of its two halves, +0x1C + n*0x84C, and 0x089EA91C adds an
+// entry). D012_TRACE_GUIDE=1 logs each request's first words and caller.
+constexpr std::uint32_t kGuideRequest = 0x089DDD74u;
+
+void run_guide_request(Guest *g, const decomp::CallState &in, GuestRegs &) {
+    static const bool on = [] {
+        const char *text = std::getenv("D012_TRACE_GUIDE");
+        return text != nullptr && *text != '\0' && std::strcmp(text, "0") != 0;
+    }();
+    static std::uint32_t told = 0;
+    if (on && told < 2000u && in.gpr[5] != 0u) {
+        ++told;
+        std::string words;
+        for (std::uint32_t i = 0; i < 11u; ++i) {
+            char text[16];
+            std::snprintf(text, sizeof text, " %X", g_ld32(g, in.gpr[5] + 4u * i));
+            words += text;
+        }
+        std::printf("[guide] split %llu request from %08X:%s\n", static_cast<unsigned long long>(state().frames),
+                    in.gpr[31], words.c_str());
+        std::fflush(stdout);
+    }
+    GuestRegs regs{};
+    for (int i = 0; i < 8; ++i) regs.a[i] = in.gpr[4 + i];
+    decomp::call_original(g, kGuideRequest, regs);
+}
+
+// Player 2's command guide. The guide's lines (the HUD's guide, above) come
+// from five functions that the guide's driver (battle 0x08B158C8) runs each
+// frame for the player: battle 0x08B15AE8, 0x08B15F80, 0x08B15D70,
+// 0x08B164D8 and 0x08B168E4. Each looks at the player's fighter (main
+// 0x08889E44, the first fighter whose local flag is set) and posts its lines
+// (main 0x0888ACE4) for the player's slot (FIELD +0x54), the request's first
+// word: "× : Chase" (message 8), "○ or □ : Attack" (9), the defender's (10),
+// and so on. The guide keeps a half for each slot and lays out the slot of a
+// fighter that is not the HUD's player on the right (battle 0x089E968C),
+// which is player 2's half of the split screen. So, once a frame in the
+// fight, the five run again for player 2: player 2's fighter the local one and
+// slot 1 the player's, both put back straight after.
+// D012_NO_GUIDE_PLAYER2=1 leaves player 2 without a guide, as before.
+constexpr std::uint32_t kGuideLines[] = {0x08B15AE8u, 0x08B15F80u, 0x08B15D70u, 0x08B164D8u, 0x08B168E4u};
+
+void guide_for_player2(Guest *g) {
+    static const bool off = [] {
+        const char *text = std::getenv("D012_NO_GUIDE_PLAYER2");
+        return text != nullptr && *text != '\0' && std::strcmp(text, "0") != 0;
+    }();
+    if (off) return;
+    const gaddr field = g_ld32(g, kBattleManager);
+    const gaddr p1 = field != 0u ? g_ld32(g, field + 0x38u) : 0u;
+    const gaddr p2 = field != 0u ? g_ld32(g, field + 0x3Cu) : 0u;
+    if (p1 == 0u || p2 == 0u || g_ld32(g, field + 0x7A4u) == 0u || g_ld32(g, field + 0x54u) != 0u) return;
+    const std::uint8_t flags1 = g_ld8(g, p1 + 0x5B0u), flags2 = g_ld8(g, p2 + 0x5B0u);
+    if ((flags1 & 4u) == 0u || (flags2 & 4u) != 0u) return;  // not the usual: player 1 the local one
+    set_local(g, p1, false);
+    set_local(g, p2, true);
+    g_st32(g, field + 0x54u, 1u);
+    for (const std::uint32_t lines : kGuideLines) g_call1(g, lines, 0u);
+    g_st32(g, field + 0x54u, 0u);
+    g_st8(g, p2 + 0x5B0u, flags2);
+    g_st8(g, p1 + 0x5B0u, flags1);
+    static bool told = false;
+    if (!told) {
+        told = true;
+        std::cout << "[versus] player 2's command guide" << std::endl;
+    }
+}
+
+// D012_TRACE_GUIDE: both halves of the command guide and their lines, every
+// 10 frames (from the split task, after the guide's own update).
+void trace_guide(Guest *g) {
+    const gaddr field = g_ld32(g, kBattleManager);
+    if (field == 0u || g_ld32(g, field + 0x7A4u) == 0u) return;
+    static const bool trace = [] {
+        const char *text = std::getenv("D012_TRACE_GUIDE");
+        return text != nullptr && *text != '\0' && std::strcmp(text, "0") != 0;
+    }();
+    if (trace && state().frames % 10u == 0u) {
+        const gaddr guide = g_ld32(g, field + 0x7A4u) + 0xA8Cu + 0x124u;
+        for (std::uint32_t slot = 0; slot < 2u; ++slot) {
+            const gaddr half = guide + 0x1Cu + slot * 0x84Cu;
+            std::uint32_t entries = 0;
+            for (gaddr e = g_ld32(g, half + 0x810u); e >= 0x08800000u && e < 0x0A000000u && entries < 64u; e = g_ld32(g, e)) {
+                ++entries;
+                // The line: its state (+0xC), slot (+0x44), message (+0x48),
+                // sprite (+0x10) with its place and flags.
+                const gaddr sprite = g_ld32(g, e + 0x10u);
+                float at[2] = {};
+                const bool ok = sprite >= 0x08800000u && sprite < 0x0A000000u;
+                if (ok) std::memcpy(at, g_ptr(g, sprite + 0x10u, 8u), 8u);
+                std::printf("[guide]   line %08X state %u slot %u message %u sprite %08X x %.0f y %.0f flags %04X\n", e,
+                            g_ld32(g, e + 0xCu), g_ld32(g, e + 0x44u), g_ld32(g, e + 0x48u), sprite, at[0], at[1],
+                            ok ? static_cast<std::uint16_t>(g_ld16s(g, sprite + 0x20u)) : 0u);
+            }
+            gaddr frame = g_ld32(g, half + 0x81Cu + 4u);
+            if (frame < 0x08800000u || frame >= 0x0A000000u) frame = 0u;
+            float xy[2] = {};
+            if (frame != 0u) std::memcpy(xy, g_ptr(g, frame + 0x10u, 8u), 8u);
+            std::printf("[guide] split %llu half %u at %08X: on %u state %u suppressed %u %u %u, %u entries, "
+                        "frame part %08X x %.0f y %.0f flags %04X\n",
+                        static_cast<unsigned long long>(state().frames), slot, half, g_ld8(g, half),
+                        g_ld32(g, half + 4u), g_ld8(g, half + 0x82Cu), g_ld8(g, half + 0x82Du),
+                        g_ld8(g, half + 0x82Eu), entries, frame, xy[0], xy[1],
+                        frame != 0u ? static_cast<std::uint16_t>(g_ld16s(g, frame + 0x20u)) : 0u);
+        }
+    }
+}
+
+// battle 0x089E8EF0 (&setting): the command guide's mode, the player's
+// setting (0 unless something overrides it). Each frame the guide's update
+// keeps a half quiet when the mode is 2, or when it is 0 and the half is the
+// one on the right (battle 0x089EAE18, with 0x089EAC98 and 0x089EAC30,
+// reason 1); mode 1 keeps both halves on. In versus that step is answered 1
+// for a 0, so player 2's half stays on; every other reader of the mode (how
+// many lines a half shows, other HUD pieces) gets the setting as it is.
+constexpr std::uint32_t kGuideMode = 0x089E8EF0u;
+constexpr std::uint32_t kGuideKeepHalves = 0x089EAE18u;
+constexpr std::uint32_t kGuideKeepHalvesEnd = 0x089EAEECu;
+
+void run_guide_mode(Guest *g, const decomp::CallState &in, GuestRegs &out) {
+    GuestRegs regs{};
+    for (int i = 0; i < 8; ++i) regs.a[i] = in.gpr[4 + i];
+    decomp::call_original(g, kGuideMode, regs);
+    out.v0 = regs.v0;
+    const std::uint32_t caller = in.gpr[31];
+    if (regs.v0 == 0u && caller >= kGuideKeepHalves && caller < kGuideKeepHalvesEnd && versus::active()) out.v0 = 1u;
+}
+
+// battle 0x08B158C8: the guide's driver, once a frame in the battle's update
+// (through a pointer). The game's run for player 1, then player 2's, so that
+// player 2's lines arrive when player 1's do, before the guide's own update
+// keeps or drops each line.
+constexpr std::uint32_t kGuideDriver = 0x08B158C8u;
+std::uint32_t battle_phase(Guest *g);
+
+void run_guide_driver(Guest *g, const decomp::CallState &in, GuestRegs &) {
+    GuestRegs regs{};
+    for (int i = 0; i < 8; ++i) regs.a[i] = in.gpr[4 + i];
+    decomp::call_original(g, kGuideDriver, regs);
+    if (!versus::active()) return;
+    const std::uint32_t phase = battle_phase(g);
+    if (phase <= 2u && !state().player2_won) guide_for_player2(g);
+}
+
+// main 0x08886A38 (battle state *0x089D69F8, slot): whether the winner (+0xB4)
+// is the fighter of that slot (the slot's pointer at state + slot*4). The
+// battle's update (main 0x0888C048) asks it for the local slot (FIELD +0x54)
+// at the final blow, and the answer picks the victory pose or the defeat. In
+// versus a win of player 2's (the winner is FIELD +0x3C's fighter) is a win
+// for the screen: the winner's victory pose, as for player 1.
+constexpr std::uint32_t kSlotWon = 0x08886A38u;
+
+void run_slot_won(Guest *g, const decomp::CallState &in, GuestRegs &out) {
+    const gaddr battle_state = in.gpr[4];
+    const gaddr winner = g_ld32(g, battle_state + 0xB4u);
+    bool won = winner == g_ld32(g, g_ld32(g, battle_state + in.gpr[5] * 4u));
+    if (!won && versus::active()) {
+        const gaddr field = g_ld32(g, kBattleManager);
+        const gaddr p2 = field != 0u ? g_ld32(g, field + 0x3Cu) : 0u;
+        if (p2 != 0u && winner == p2) {
+            won = true;
+            std::cout << "[versus] the final blow is player 2's: player 2's victory pose" << std::endl;
+        }
+    }
+    out.v0 = won ? 1u : 0u;
+}
+
+std::uint32_t battle_phase(Guest *g) {
+    const gaddr flow = g_ld32(g, kBattleFlow);
+    return flow != 0u ? g_ld32(g, flow + 8u) : 0xFFFFFFFFu;
+}
+
+// battle 0x08B09D88 (flow, ...): at the final blow, the winner and the fighter
+// knocked out go to the flow, and whether the winner is the player's fighter
+// (main 0x08889E44) picks the victory pose or the player's defeat. In versus
+// a win of player 2's is player 2's victory: player 2's fighter is made the
+// local one (and player 1's not) for the rest of the battle, so the ending is
+// the winner's own, as player 1's is.
+void run_winner_decision(Guest *g, const decomp::CallState &in, GuestRegs &) {
+    State &s = state();
+    if (versus::active() && !s.player2_won) {
+        const gaddr field = g_ld32(g, kBattleManager);
+        const gaddr p1 = field != 0u ? g_ld32(g, field + 0x38u) : 0u;
+        const gaddr p2 = field != 0u ? g_ld32(g, field + 0x3Cu) : 0u;
+        if (p1 != 0u && p2 != 0u && fighter_hp(g, p1) <= 0 && fighter_hp(g, p2) > 0) {
+            set_local(g, p1, false);
+            set_local(g, p2, true);
+            s.player2_won = true;
+            std::cout << "[versus] player 2 won: the ending is player 2's" << std::endl;
+        }
+    }
+    GuestRegs regs{};
+    for (int i = 0; i < 8; ++i) regs.a[i] = in.gpr[4 + i];
+    for (int i = 0; i < 4; ++i) regs.f[i] = in.fpr[12 + i];
+    decomp::call_original(g, kWinnerDecision, regs);
+}
+
+// battle 0x08A3EB70 (EX Burst object, fighter, ...): an EX Burst starts. Its
+// stages, the glass crack to the last hit, are the one event the split view
+// leaves to one full view (the owner's choice): the second view is left out
+// from this call until the battle-event bit it brings (fighter +0x5B1 bit
+// 0x80) has come and gone. A chase and other events between the fighters set
+// that bit too, and stay split.
+void run_ex_burst_start(Guest *g, const decomp::CallState &in, GuestRegs &) {
+    GuestRegs regs{};
+    for (int i = 0; i < 8; ++i) regs.a[i] = in.gpr[4 + i];
+    for (int i = 0; i < 4; ++i) regs.f[i] = in.fpr[12 + i];
+    decomp::call_original(g, kExBurstStart, regs);
+    if (!versus::active()) return;
+    State &s = state();
+    if (s.ex_burst == 0u) {
+        static std::uint32_t told = 0;
+        if (told++ < 5u) std::cout << "[versus] an EX Burst: one full view until it ends" << std::endl;
+    }
+    s.ex_burst = std::max(s.ex_burst, 1u);
+    s.ex_burst_since = 0u;
+}
+
+// main 0x088D9AF4 (sprite, &colour): a HUD sprite's colour (+0x28) set, and
+// the sprite brought up to date. An EX Burst fades the prompts of the side
+// that is not the player's: the attacker's commands when the attacker is not
+// the local fighter, the defender's gauge when it is (battle 0x08A3DDF4,
+// 0x08A3DFD0 and the moves' own prompts, 0x08A2FB70 to 0x08A4514C), each by
+// setting the sprite's colour again with its alpha down to 0x50. In versus
+// both sides are players, so such a fade from that code is left out and both
+// players' prompts stay as strong as player 1's.
+constexpr std::uint32_t kSpriteColour = 0x088D9AF4u;
+constexpr std::uint32_t kExBurstPromptsFirst = 0x08A2F000u;
+constexpr std::uint32_t kExBurstPromptsEnd = 0x08A46000u;
+
+void run_sprite_colour(Guest *g, const decomp::CallState &in, GuestRegs &) {
+    const gaddr sprite = in.gpr[4];
+    const std::uint32_t caller = in.gpr[31];
+    if (versus::active() && caller >= kExBurstPromptsFirst && caller < kExBurstPromptsEnd && sprite != 0u &&
+        in.gpr[5] != 0u) {
+        const std::uint32_t wanted = g_ld32(g, in.gpr[5]);
+        const std::uint32_t now = g_ld32(g, sprite + 0x28u);
+        if ((wanted >> 24u) == 0x50u && (now >> 24u) > 0x50u && (wanted & 0x00FFFFFFu) == (now & 0x00FFFFFFu)) {
+            // The fade, left out; each caller logged once.
+            static std::vector<std::uint32_t> told;
+            if (told.size() < 32u && std::find(told.begin(), told.end(), caller) == told.end()) {
+                told.push_back(caller);
+                std::printf("[versus] an EX Burst prompt kept at full strength (fade from %08X)\n", caller);
+                std::fflush(stdout);
+            }
+            return;
+        }
+    }
+    GuestRegs regs{};
+    for (int i = 0; i < 8; ++i) regs.a[i] = in.gpr[4 + i];
+    decomp::call_original(g, kSpriteColour, regs);
+}
+
 
 void run_camera_draw_thunk(Guest *g, const decomp::CallState &, GuestRegs &) {
     g_call1(g, kCameraDraw, g_ld32(g, kCameraManager));
@@ -225,6 +524,80 @@ void emit(Guest *g, std::uint32_t word) {
     const std::uint32_t cursor = g_ld32(g, context + 8u);
     g_st32(g, cursor, word);
     g_st32(g, context + 8u, cursor + 4u);
+}
+
+// View 2 in a display list of its own. The frame's list (libGu's context:
+// +4 its start, +8 the write cursor, +0xC its size, 0x58400 bytes; the game
+// keeps two back to back and takes them in turn) holds one view and the HUD
+// with room to spare, but not two views on a heavy stage: on Planet's Core,
+// with assists, view 2 alone took more than 200 KiB on a frame whose first
+// view had used 118 KiB, ran past the end of the second list and over the
+// disc reader that follows it in memory, and the music's next refill crashed.
+// So the second pass goes into a list of its own: the frame's list jumps to
+// it, the game's writes go to it while the second pass runs, and it jumps
+// back. The jumps are the GE's signal jumps (SIGNAL 0x10 with the address's
+// high half, END with its low half), which take an absolute address and leave
+// the BASE register alone.
+//
+// Where: the kernel partition, which a game cannot touch on a PSP and which
+// PortableKit uses only below 0x08200000 (boot arguments, the interrupt
+// stack) and from 0x08400000 (volatile memory). In battle the user partition
+// has about 500 KiB free, too little to take this much from.
+constexpr std::uint32_t kList2 = 0x08300000u;
+constexpr std::uint32_t kList2Size = 0x80000u;
+constexpr std::uint32_t kList2Reserve = 0x10000u;  // left free at the end: no draw task starts past it
+
+// D012_SPLIT_SHARED_LIST=1 draws view 2 into the frame's list, as before,
+// with the half-list guard.
+std::uint32_t view2_list() {
+    static const bool shared = [] {
+        const char *text = std::getenv("D012_SPLIT_SHARED_LIST");
+        return text != nullptr && *text != '\0' && std::strcmp(text, "0") != 0;
+    }();
+    return shared ? 0u : kList2;
+}
+
+void emit_jump(Guest *g, gaddr at, gaddr target) {
+    const std::uint32_t physical = target & 0x0FFFFFFCu;
+    g_st32(g, at, 0x0E100000u | (physical >> 16u));
+    g_st32(g, at + 4u, 0x0C000000u | (physical & 0xFFFFu));
+}
+
+struct ListSwitch {
+    gaddr context = 0;
+    std::uint32_t start = 0, size = 0;
+    gaddr resume = 0;  // where the frame's list goes on after view 2
+    gaddr list = 0;    // view 2's list, at the address the game writes through
+};
+
+ListSwitch list_to_view2(Guest *g, gaddr list2) {
+    ListSwitch sw;
+    sw.context = g_ld32(g, kGuContext);
+    sw.start = g_ld32(g, sw.context + 4u);
+    sw.size = g_ld32(g, sw.context + 12u);
+    const gaddr cursor = g_ld32(g, sw.context + 8u);
+    // The game writes its list through the uncached mirror; so does view 2.
+    sw.list = (list2 & 0x0FFFFFFFu) | (cursor & 0xF0000000u);
+    emit_jump(g, cursor, sw.list);
+    sw.resume = cursor + 8u;
+    g_st32(g, sw.context + 4u, sw.list);
+    g_st32(g, sw.context + 8u, sw.list);
+    g_st32(g, sw.context + 12u, kList2Size);
+    return sw;
+}
+
+// Whether view 2's list has room for another draw task.
+bool view2_list_has_room(Guest *g, const ListSwitch &sw) {
+    return sw.context == 0u || g_ld32(g, sw.context + 8u) - sw.list < kList2Size - kList2Reserve;
+}
+
+std::uint32_t list_back(Guest *g, const ListSwitch &sw) {
+    const gaddr cursor = g_ld32(g, sw.context + 8u);
+    emit_jump(g, cursor, sw.resume);
+    g_st32(g, sw.context + 4u, sw.start);
+    g_st32(g, sw.context + 8u, sw.resume);
+    g_st32(g, sw.context + 12u, sw.size);
+    return cursor + 8u - sw.list;
 }
 
 // The two lights that follow the camera, as the list start task sets them
@@ -693,6 +1066,105 @@ void run_cursor_enable(Guest *g, const decomp::CallState &in, GuestRegs &) {
     }
 }
 
+// D012_TRACE_WATCH=1, a tripwire for a crash in a versus battle: the music's
+// refill (main 0x088A0264) reads from the disc through the file manager's
+// reader, *(*(main 0x089D5EA0) + 4), and calls through the vtable pointer at
+// its +0x154 (main 0x08862F74), which was found holding 0x3D000000. Each step
+// of the split task checks that word; a change is logged with the step, and
+// with what every camera slot's +0xF8 points at.
+// D012_TRACE_HUD_LAYOUTS=1: the HUD's layouts (the menu manager *0x089D7830,
+// its layouts linked from +0x24 through +0x24; one draws while its byte
+// +0x14 has bit 1 and neither 0x0C nor 0x20), logged when one starts or stops
+// drawing, with its first word and its sprites' count (linked through +0x3C).
+void trace_hud_layouts(Guest *g) {
+    static const bool on = [] {
+        const char *text = std::getenv("D012_TRACE_HUD_LAYOUTS");
+        return text != nullptr && *text != '\0' && std::strcmp(text, "0") != 0;
+    }();
+    if (!on) return;
+    static std::vector<std::pair<gaddr, bool>> last;
+    std::vector<std::pair<gaddr, bool>> now;
+    const gaddr menus = g_ld32(g, 0x089D7830u);
+    if (menus == 0u) return;
+    for (gaddr layout = g_ld32(g, menus + 0x24u); layout != 0u && now.size() < 4096u;
+         layout = g_ld32(g, layout + 0x24u)) {
+        const std::uint8_t flags = g_ld8(g, layout + 0x14u);
+        now.push_back({layout, (flags & 1u) != 0u && (flags & 0x2Cu) == 0u});
+        // And each of its sprites (shown while u16 +0x20 has 0x8000), as
+        // layout | 1 (sprite addresses are word aligned).
+        std::uint32_t count = 0;
+        for (gaddr sprite = g_ld32(g, layout + 0x3Cu); sprite != 0u && count < 512u;
+             sprite = g_ld32(g, sprite + 0x3Cu), ++count)
+            now.push_back({sprite | 1u, (g_ld16s(g, sprite + 0x20u) & 0x8000) != 0});
+    }
+    for (const auto &[layout, shown] : now) {
+        bool was = false, known = false;
+        for (const auto &[l, s] : last)
+            if (l == layout) {
+                was = s;
+                known = true;
+            }
+        if (known && was == shown) continue;
+        if ((layout & 1u) != 0u) {
+            if (!known) continue;  // a sprite's first sighting: not logged
+            const gaddr sprite = layout & ~1u;
+            float xy[2];
+            std::memcpy(xy, g_ptr(g, sprite + 0x10u, 8u), 8u);
+            std::printf("[hud] split %llu sprite %08X %s (+0x24 %08X, x %.0f y %.0f)\n",
+                        static_cast<unsigned long long>(state().frames), sprite, shown ? "shown" : "hidden",
+                        g_ld32(g, sprite + 0x24u), xy[0], xy[1]);
+            continue;
+        }
+        std::uint32_t sprites = 0;
+        for (gaddr sprite = g_ld32(g, layout + 0x3Cu); sprite != 0u && sprites < 512u;
+             sprite = g_ld32(g, sprite + 0x3Cu))
+            ++sprites;
+        std::printf("[hud] split %llu layout %08X %s (first word %08X, flags %02X, %u sprites)\n",
+                    static_cast<unsigned long long>(state().frames), layout, shown ? "draws" : "stops",
+                    g_ld32(g, layout), g_ld8(g, layout + 0x14u), sprites);
+    }
+    std::fflush(stdout);
+    last = std::move(now);
+}
+
+bool watching() {
+    static const bool on = [] {
+        const char *text = std::getenv("D012_TRACE_WATCH");
+        return text != nullptr && *text != '\0' && std::strcmp(text, "0") != 0;
+    }();
+    return on;
+}
+
+void watch(Guest *g, gaddr manager, const char *step) {
+    if (!watching()) return;
+    static gaddr last_reader = 0u;
+    static std::uint32_t last_word = 0u;
+    static std::uint32_t told = 0u;
+    const gaddr files = g_ld32(g, 0x089D5EA0u);
+    const gaddr reader = files != 0u ? g_ld32(g, files + 4u) : 0u;
+    const std::uint32_t word = reader != 0u ? g_ld32(g, reader + 0x154u) : 0u;
+    if ((reader != last_reader || word != last_word) && told < 200u) {
+        ++told;
+        std::string slots;
+        for (std::uint32_t i = 0; i < 8u; ++i) {
+            const gaddr camera = g_ld32(g, manager + 0x6D0u + 4u * i);
+            char text[40];
+            std::snprintf(text, sizeof text, " %u:%08X", i, camera != 0u ? g_ld32(g, camera + 0xF8u) : 0u);
+            slots += text;
+        }
+        const gaddr field = g_ld32(g, kBattleManager);
+        std::printf("[watch] split %llu %s: reader %08X +0x154 %08X -> reader %08X +0x154 %08X%s | fighters %08X "
+                    "%08X | slot +0xF8%s\n",
+                    static_cast<unsigned long long>(state().frames), step, last_reader, last_word, reader, word,
+                    word != 0u && (word < 0x08800000u || word >= 0x0A000000u) ? " (NOT IN RAM)" : "",
+                    field != 0u ? g_ld32(g, field + 0x38u) : 0u, field != 0u ? g_ld32(g, field + 0x3Cu) : 0u,
+                    slots.c_str());
+        std::fflush(stdout);
+    }
+    last_reader = reader;
+    last_word = word;
+}
+
 void run_split_task(Guest *g, const decomp::CallState &in, GuestRegs &) {
     State &s = state();
     const std::uint32_t self = in.gpr[4];
@@ -700,41 +1172,95 @@ void run_split_task(Guest *g, const decomp::CallState &in, GuestRegs &) {
     const std::uint32_t graphics = g_ld32(g, kGraphics);
     s.split_active = false;
     versus::note_split_frame(false);
-    if (!versus::active() || manager == 0u || graphics == 0u || g_ld8(g, manager + 0x8BCu) != 1u) return;
-    // A scripted camera (manager +0x804 == 2), an event camera (+0x9E0), or a
-    // battle event between the fighters, such as an EX Burst (either
-    // fighter's +0x5B1 bit 0x80, set at its start, battle 0x08A3EE44, and
-    // cleared at its end, 0x08A3F448): the frame stays one full view, and
-    // player 2's cursor is hidden.
-    // The same once a fighter has fallen (the ending is the game's own, one
-    // view): its HP, the status block's (fighter +0x52C) maximum at +0x0C less
-    // the damage taken at +0x08 (battle 0x089E0110), is 0 or less.
+    if (manager != 0u) watch(g, manager, "the frame's start (since the last split task)");
+    if (versus::active()) trace_hud_layouts(g);
+    if (versus::active()) trace_guide(g);
+    if (!versus::active() || manager == 0u || graphics == 0u) return;
+    // When the frame stays one full view, with player 2's cursor hidden:
+    // - an EX Burst, from its start (run_ex_burst_start) until the
+    //   battle-event bit it brings (either fighter's +0x5B1 bit 0x80, set at
+    //   its start, battle 0x08A3EE44, and cleared at its end, 0x08A3F448) has
+    //   come and gone, or ten seconds if the bit never comes;
+    // - a fighter has fallen (the ending is the game's own, one view): its HP,
+    //   the status block's (fighter +0x52C) maximum at +0x0C less the damage
+    //   taken at +0x08 (battle 0x089E0110), is 0 or less.
+    // A chase, the scripted (manager +0x804 == 2) and event (+0x9E0) cameras
+    // and the other events that set the battle-event bit stay split.
+    // D012_SPLIT_FULL_SCREEN_EVENTS=1 gives one full view for all of those
+    // too, as before.
+    static const bool full_screen_events = [] {
+        const char *text = std::getenv("D012_SPLIT_FULL_SCREEN_EVENTS");
+        return text != nullptr && *text != '\0' && std::strcmp(text, "0") != 0;
+    }();
     const gaddr field = g_ld32(g, kBattleManager);
-    const auto in_event = [&](std::uint32_t slot_offset) {
+    const auto event_bit = [&](std::uint32_t slot_offset) {
         const gaddr fighter = field != 0u ? g_ld32(g, field + slot_offset) : 0u;
-        if (fighter == 0u) return false;
-        if ((g_ld8(g, fighter + 0x5B1u) & 0x80u) != 0u) return true;
-        const gaddr status = g_ld32(g, fighter + 0x52Cu);
+        return fighter != 0u && (g_ld8(g, fighter + 0x5B1u) & 0x80u) != 0u;
+    };
+    const auto fallen = [&](std::uint32_t slot_offset) {
+        const gaddr fighter = field != 0u ? g_ld32(g, field + slot_offset) : 0u;
+        const gaddr status = fighter != 0u ? g_ld32(g, fighter + 0x52Cu) : 0u;
         return status != 0u && g_ld32(g, status + 0x0Cu) != 0u &&
                g_ld32s(g, status + 0x0Cu) - g_ld32s(g, status + 0x08u) <= 0;
     };
-    if (g_ld32(g, manager + 0x804u) == 2u || g_ld8(g, manager + 0x9E0u) == 1u || in_event(0x38u) ||
-        in_event(0x3Cu)) {
+    const bool bits = event_bit(0x38u) || event_bit(0x3Cu);
+    if (s.ex_burst == 1u && bits) s.ex_burst = 2u;
+    else if (s.ex_burst == 2u && !bits) s.ex_burst = 0u;
+    else if (s.ex_burst == 1u && ++s.ex_burst_since > 300u) s.ex_burst = 0u;
+    const std::uint32_t phase = battle_phase(g);
+    const bool scripted = g_ld32(g, manager + 0x804u) == 2u;
+    const bool event_camera = g_ld8(g, manager + 0x9E0u) == 1u;
+    const bool camera_state = g_ld8(g, manager + 0x8BCu) == 1u;
+    // What holds, logged when it changes: the camera manager's state
+    // (+0x8BC, 1 in play), the scripted and event cameras, each fighter's
+    // event bit and fall, the EX Burst, and the two fighters' camera modes
+    // (+0x5AC, +0x108).
+    {
+        const auto mode = [&](std::uint32_t slot_offset) {
+            const gaddr fighter = field != 0u ? g_ld32(g, field + slot_offset) : 0u;
+            const gaddr camera = fighter != 0u ? g_ld32(g, fighter + 0x5ACu) : 0u;
+            return camera != 0u ? g_ld32s(g, camera + 0x108u) : -9;
+        };
+        char reason[192];
+        std::snprintf(reason, sizeof reason,
+                      "phase %d manager state %u scripted %d event %d bits %d %d fallen %d %d EX Burst %u modes %d %d",
+                      static_cast<std::int32_t>(phase), g_ld8(g, manager + 0x8BCu), scripted, event_camera, event_bit(0x38u), event_bit(0x3Cu),
+                      fallen(0x38u), fallen(0x3Cu), s.ex_burst, mode(0x38u), mode(0x3Cu));
+        static std::string last;
+        static std::uint32_t told = 0;
+        if (last != reason && told < 400u) {
+            ++told;
+            last = reason;
+            std::printf("[versus] split %llu view state: %s\n", static_cast<unsigned long long>(s.frames), reason);
+            std::fflush(stdout);
+        }
+    }
+    // The camera manager's state is 0 for a moment at a Bravery break (a
+    // battle event, battle 0x08ADF..., which flashes the screen): the frame
+    // stays split, with view 2's camera built as in state 1 (below).
+    if (!camera_state && !(g_ld8(g, manager + 0x8BCu) == 0u && phase <= 2u)) return;
+    // The ending is one view from the white flash before the victory pose
+    // (phase 8) on; the final blow and its replay (phases 1 to 3) stay split.
+    const bool ending = phase != 0xFFFFFFFFu && phase >= 8u;
+    const bool full = s.ex_burst != 0u || ending ||
+                      (full_screen_events && (scripted || event_camera || bits || fallen(0x38u) || fallen(0x3Cu)));
+    if (full) {
         if (s.cursor2) g_call2(g, kCursorShow, kPlayer2Cursor + 8u, 0u);
         return;
     }
     const int slot = opponent_slot(g, manager);
     if (slot < 0) return;
-    // The display list (libGu's context: +4 its start, +8 the write cursor,
-    // +0xC its size, 0x58400 bytes) must hold a second view about as long as
-    // the first: when it would not, the frame stays one full view. Both views
-    // reach 86% of it on Planet's Core (7.5).
+    // View 2 goes into a display list of its own (view2_list). Without one,
+    // the frame's list must hold a second view about as long as the first:
+    // when it would not, the frame stays one full view.
+    const gaddr list2 = view2_list();
     {
         const gaddr context = g_ld32(g, kGuContext);
         const std::uint32_t start = g_ld32(g, context + 4u), cursor = g_ld32(g, context + 8u);
         const std::uint32_t size = g_ld32(g, context + 12u);
         const std::uint32_t used = cursor - start;
-        if (size != 0u && used < size && used > (size - 0x2000u) / 2u) {
+        s.peak1 = std::max(s.peak1, used);
+        if (list2 == 0u && size != 0u && used < size && used > (size - 0x2000u) / 2u) {
             static std::uint32_t told = 0;
             if (told++ < 5u)
                 std::printf("[versus] the display list is %u of %u bytes full: this frame is not split\n", used, size);
@@ -748,6 +1274,8 @@ void run_split_task(Guest *g, const decomp::CallState &in, GuestRegs &) {
     set_up_cursor2(g, manager);
 
     emit(g, kMarkerSplitLeft);
+    ListSwitch list_switch;
+    if (list2 != 0u) list_switch = list_to_view2(g, list2);
 
     std::uint8_t saved_view[kManagerView];
     std::uint8_t saved_camera[kGraphicsCameraSize];
@@ -823,7 +1351,14 @@ void run_split_task(Guest *g, const decomp::CallState &in, GuestRegs &) {
     // The graphics manager's camera from view 2, then the frame's starting
     // render state (with the screen cleared and the lights that follow the
     // camera), before anything is drawn.
-    g_call1(g, kCameraDraw, manager);
+    {
+        // The graphics manager's camera from the manager's view is taken only
+        // in state 1 (battle 0x08B3C0D8).
+        const std::uint8_t camera_state_now = g_ld8(g, manager + 0x8BCu);
+        g_st8(g, manager + 0x8BCu, 1u);
+        g_call1(g, kCameraDraw, manager);
+        g_st8(g, manager + 0x8BCu, camera_state_now);
+    }
     frame_start_state(g, graphics);
     // Player 2's lock-on cursor, by the game's own cursor update, for player
     // 2's fighter while the camera manager holds view 2.
@@ -854,13 +1389,17 @@ void run_split_task(Guest *g, const decomp::CallState &in, GuestRegs &) {
             std::fflush(stdout);
         }
     }
+    watch(g, manager, "before the second pass");
     std::vector<std::pair<gaddr, std::array<std::uint32_t, 2>>> popups;
     popups_to_view2(g, popups);
+    watch(g, manager, "popups to view 2");
     SlotTable view1_fade{};
     const bool faded = map_fade_to_view2(g, manager, slot, g_ld32(g, g_ld32(g, kBattleManager) + 0x3Cu), s.owner,
                                          view1_fade);
+    watch(g, manager, "stage fade to view 2");
     FighterFadeSaved fighters_view1;
     fighter_fade_to_view2(g, manager, fighters_view1);
+    watch(g, manager, "fighter fade to view 2");
 
     // The battle's draw tasks again, as the dispatcher (main 0x0888245C)
     // calls them.
@@ -877,23 +1416,52 @@ void run_split_task(Guest *g, const decomp::CallState &in, GuestRegs &) {
             priority <= kLastDrawPriority && second_pass_runs(priority)) {
             if (s.frames == 0u)
                 std::printf("[versus] second pass: task %08X priority %d function %08X\n", t, priority, fn);
+            if (list2 != 0u && !view2_list_has_room(g, list_switch)) {
+                // A view too long for its list: the rest of its draws are
+                // left out this frame, rather than written past the end.
+                static std::uint32_t told = 0;
+                if (told++ < 5u)
+                    std::printf("[versus] view 2's display list is full: draw tasks from priority %d left out\n",
+                                priority);
+                break;
+            }
             g_st32(g, kRunningTask, t);
             g_st32(g, owner + 0x10u, t);
             g_st32(g, t + 0x44u, mask);
             g_st32(g, t + 0x48u, value);
             g_call1(g, fn, t);
+            if (watching()) {
+                char step[64];
+                std::snprintf(step, sizeof step, "draw task %d (%08X)", priority, fn);
+                watch(g, manager, step);
+            }
         }
         t = next;
     }
     g_st32(g, kRunningTask, saved_running);
     g_st32(g, owner + 0x10u, self);
     s.running = false;
+    if (list2 != 0u) {
+        const std::uint32_t used2 = list_back(g, list_switch);
+        if (used2 > s.peak2) {
+            s.peak2 = used2;
+            if (used2 > kList2Size / 2u)
+                std::printf("[versus] view 2's display list: %u of %u bytes, the most so far\n", used2, kList2Size);
+        }
+    }
+    if (trace_views && s.frames % 300u == 0u)
+        std::printf("[views] split %llu display lists: view 1's list up to %u bytes at view 2's start, view 2's up "
+                    "to %u\n",
+                    static_cast<unsigned long long>(s.frames), s.peak1, s.peak2);
     for (const auto &[position, words] : popups) {
         g_st32(g, position, words[0]);
         g_st32(g, position + 4u, words[1]);
     }
+    watch(g, manager, "popups back");
     if (faded) map_fade_back(g, view1_fade);
+    watch(g, manager, "stage fade back");
     fighter_fade_back(g, fighters_view1);
+    watch(g, manager, "fighter fade back");
     // Where both views leave the display list's write cursor (the context:
     // 4, the list's start, the cursor, its size, 0x58400 bytes).
     if (trace_views && s.frames % 15u == 0u) {
@@ -913,7 +1481,10 @@ void run_split_task(Guest *g, const decomp::CallState &in, GuestRegs &) {
     // Both views side by side in the frame buffer, before the HUD
     // (MENU_MANAGER::Draw, after the battle's task list) draws over them.
     emit(g, kMarkerSplitCompose);
-    if (s.frames++ == 0u) std::cout << "[versus] second view drawn (opponent camera slot " << slot << ")" << std::endl;
+    if (s.frames++ == 0u)
+        std::cout << "[versus] second view drawn (opponent camera slot " << slot << "); guest memory free "
+                  << (portablekit::kernel().free_memory() >> 10u) << " KiB, largest block "
+                  << (portablekit::kernel().largest_free_memory() >> 10u) << " KiB" << std::endl;
 }
 
 // Damage and Brave number popups (main 0x08858CB8, on *0x089D4DC8 + 0x190): at
@@ -1112,8 +1683,28 @@ struct Install {
             {kCameraDrawThunk, "versus_camera_draw_thunk", decomp::Module::BattleOverlay, decomp::Returns::Nothing,
              &run_camera_draw_thunk},
             {kSplitTask, "versus_split_view_task", decomp::Module::Main, decomp::Returns::Nothing, &run_split_task},
+            {kExBurstStart, "versus_ex_burst_start", decomp::Module::BattleOverlay, decomp::Returns::Nothing,
+             &run_ex_burst_start},
+            {kWinnerDecision, "versus_winner_decision", decomp::Module::BattleOverlay, decomp::Returns::Nothing,
+             &run_winner_decision},
+            {kSlotWon, "versus_slot_won", decomp::Module::Main, decomp::Returns::Integer, &run_slot_won},
+            {kGuideDriver, "versus_guide_driver", decomp::Module::BattleOverlay, decomp::Returns::Nothing,
+             &run_guide_driver},
+            {kGuideMode, "versus_guide_mode", decomp::Module::BattleOverlay, decomp::Returns::Integer,
+             &run_guide_mode},
+            {kSpriteColour, "versus_sprite_colour", decomp::Module::Main, decomp::Returns::Nothing,
+             &run_sprite_colour},
         };
         decomp::add_overrides(overrides, sizeof overrides / sizeof overrides[0], true);
+        // Overrides that only trace, there only with their switch.
+        const char *trace = std::getenv("D012_TRACE_GUIDE");
+        if (trace != nullptr && *trace != '\0' && std::strcmp(trace, "0") != 0) {
+            static const decomp::Override traces[] = {
+                {kGuideRequest, "versus_guide_request", decomp::Module::BattleOverlay, decomp::Returns::Nothing,
+                 &run_guide_request},
+            };
+            decomp::add_overrides(traces, sizeof traces / sizeof traces[0], true);
+        }
         std::cout << "[versus] split view built in: a versus battle is drawn a second time from player 2's camera"
                   << std::endl;
     }

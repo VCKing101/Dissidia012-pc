@@ -47,6 +47,7 @@
 #endif
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -115,11 +116,17 @@ struct State {
     // In a versus battle, player 1's fighter played (not the CPU's, as in the
     // intro), at the last pad read: the 1P / 2P labels show.
     bool fighting = false;
-    // The pad read of the last battle frame drawn split (note_split_frame),
-    // and whether there was one.
-    std::uint32_t split_read = 0;
+    // When the last battle frame was drawn split (note_split_frame), and
+    // whether it was. A time, not a pad read: the loading after a battle
+    // reads no pad.
+    std::chrono::steady_clock::time_point split_time;
     bool split = false;
+    // When player 2's pick began, for the header's fade.
+    std::chrono::steady_clock::time_point picking_time;
     std::uint32_t fallen = 0;  // bit 0 player 1's fighter, bit 1 player 2's
+    // The battle has reached its ending (phase 8 on): no tags again until the
+    // next fight, though the fade to the loading screen is still drawn split.
+    bool ended = false;
     bool chosen = false;      // the Battle Mode row was chosen
     bool start_menu = false;  // the start menu is up (player 2's pad looked for)
     // Pad reads left for the notice "Connect a second controller".
@@ -132,6 +139,12 @@ constexpr std::uint32_t kLostPlayer2 = 2u;
 State &state() {
     static State s;
     return s;
+}
+
+// The split task runs every battle frame; a split frame drawn within this
+// long is a split battle on screen.
+bool split_now(const State &s) {
+    return s.split && std::chrono::steady_clock::now() - s.split_time < std::chrono::milliseconds(150);
 }
 
 bool user_ram(std::uint32_t address) {
@@ -155,6 +168,60 @@ bool picking_opponent(psprecomp::GuestMemory &memory) {
     if (!user_ram(work)) return false;
     const std::uint32_t phase = memory.load32(work + kRoomState);
     return phase >= kFirstOpponentState && phase <= kLastOpponentState;
+}
+
+// The header over the opponent's grid. When the room starts the opponent's
+// pick (state 8, menu 0x08A98458), menu 0x08AA0D48 builds the grid with a
+// header animation from a table by mode: 2 ("Player Select") at
+// 0x08AA3C84 for the player, 6 ("CPU Select") at 0x08AA3C98 for the CPU in
+// modes 0 to 2, 4 in modes 3 and 4. In versus, the CPU's entries take
+// player 2's header; otherwise they are put back. Written only while the
+// menu overlay is the one loaded (the room's state table is there).
+constexpr std::uint32_t kOpponentHeaders = 0x08AA3C98u;
+constexpr std::uint32_t kStockOpponentHeader = 6u;
+
+void set_opponent_header(psprecomp::GuestMemory &memory) {
+    for (std::uint32_t i = 0; i < 3u; ++i)
+        if (memory.load32(kRoomStates + 8u * i + 4u) != kRoomStateSignature[i]) return;
+    // 4, as modes 3 and 4 have it for the opponent too: "Player Select",
+    // with the look and the set, as the player's grid has them (2 looks the
+    // same). No header says player 2's: pick_header_draw() draws one over it.
+    const std::uint32_t header = active() ? 4u : kStockOpponentHeader;
+    for (std::uint32_t mode = 0; mode < 3u; ++mode)
+        if (memory.load32(kOpponentHeaders + 4u * mode) != header) memory.store32(kOpponentHeaders + 4u * mode, header);
+}
+
+// Player 1's character records (save root *0x089D712C + 0xF58, 31 of
+// 0x778 bytes; docs/research/roster-and-save.md 1.6) with a look of -1 at
+// +0x774. A record's look is 1 ("Normal") or more; with -1 the character's
+// panel on a pick (the player's, or player 2's, which reads player 1's
+// records) keeps the last character's name and draws no portrait. Saves from
+// earlier versus builds have one (the owner's Cecil, a test copy's
+// Lightning); it is set back to 1 while the character room is up, and the
+// game saves it with its next autosave. D012_TRACE_RECORDS=1 also logs every
+// record's look, set and byte +2 as they change.
+void repair_looks(psprecomp::GuestMemory &memory, const State &s, bool battle) {
+    const std::uint32_t root = memory.load32(0x089D712Cu);
+    if (!user_ram(root)) return;
+    static const bool trace = std::getenv("D012_TRACE_RECORDS") != nullptr;
+    static std::uint32_t last[31] = {};
+    for (std::uint32_t i = 0; i < 31u; ++i) {
+        const std::uint32_t record = root + 0xF58u + i * 0x778u;
+        const std::int8_t id = static_cast<std::int8_t>(memory.load8(record));
+        if (!battle && id > 0 && static_cast<std::int8_t>(memory.load8(record + 0x774u)) < 0) {
+            memory.store8(record + 0x774u, 1u);
+            std::cout << "[versus] character " << int(id) << "'s record had no look: set back to Normal" << std::endl;
+        }
+        if (!trace) continue;
+        const std::uint32_t now = memory.load8(record + 0x774u) | memory.load8(record + 0x773u) << 8 |
+                                  memory.load8(record + 2u) << 16 | static_cast<std::uint32_t>(memory.load8(record)) << 24;
+        if (last[i] != 0u && now != last[i])
+            std::printf("[versus] read %u record %u (id %d): look %d set %d byte2 %u (was %08X)%s\n", s.reads, i,
+                        static_cast<std::int8_t>(now >> 24), static_cast<std::int8_t>(now),
+                        static_cast<std::int8_t>(now >> 8), (now >> 16) & 0xFFu, last[i], battle ? " in battle" : "");
+        last[i] = now;
+    }
+    if (trace) std::fflush(stdout);
 }
 
 void feed_raw_pad1(psprecomp::GuestMemory &memory, State &s) {
@@ -225,11 +292,39 @@ void trace_fighters(psprecomp::GuestMemory &memory, const State &s) {
 void read_fighting(psprecomp::GuestMemory &memory, State &s, bool battle) {
     s.fighting = false;
     s.fallen = 0u;
+    if (!battle) s.ended = false;
     const std::uint32_t field = battle ? memory.load32(kBattleManager) : 0u;
     if (!user_ram(field)) return;
+    // The battle's phase (*(battle 0x08B0CF20) + 8; 0 to 2 the fight, 9 the
+    // victory pose, then the results), logged as it changes.
+    const std::uint32_t flow = memory.load32(0x08B0CF20u);
+    const std::uint32_t phase = user_ram(flow) ? memory.load32(flow + 8u) : 0xFFFFFFFFu;
+    {
+        static std::uint32_t last = 0xFFFFFFFFu;
+        if (phase != last && phase < 32u) {
+            last = phase;
+            std::cout << "[versus] battle phase " << phase << " at pad read " << s.reads << std::endl;
+        }
+    }
     const std::uint32_t player = memory.load32(field + 0x38u);
     const std::uint32_t ai = user_ram(player) ? memory.load32(player + kFighterAi) : 0u;
-    s.fighting = user_ram(ai) && memory.load32(ai + 0x54u) != 0u;
+    // (A rematch keeps the battle overlay: its fight, phases 1 and 2, clears it.)
+    if (phase >= 8u && phase < 32u) s.ended = true;
+    if (phase == 1u || phase == 2u) s.ended = false;
+    s.fighting = !s.ended && user_ram(ai) && memory.load32(ai + 0x54u) != 0u;
+    // Who won, from the victory pose on (phase 9): the flow's winner (+0x20,
+    // battle 0x08B09D88). Not before, though a fighter's HP is 0: the fight
+    // goes on until the final blow lands (an EX Burst on a fighter at 0 HP).
+    if (phase == 0xFFFFFFFFu || phase < 9u || phase >= 32u) return;
+    const std::uint32_t winner = memory.load32(flow + 0x20u);
+    if (winner != 0u && winner == player) {
+        s.fallen = 2u;
+        return;
+    }
+    if (winner != 0u && winner == memory.load32(field + 0x3Cu)) {
+        s.fallen = 1u;
+        return;
+    }
     for (std::uint32_t i = 0; i < 2u; ++i) {
         const std::uint32_t fighter = memory.load32(field + 0x38u + 4u * i);
         const std::uint32_t status = user_ram(fighter) ? memory.load32(fighter + 0x52Cu) : 0u;
@@ -326,6 +421,52 @@ void run_list_rewards(Guest *g, const decomp::CallState &in, GuestRegs &) {
     decomp::call_original(g, kListRewards, regs);
 }
 
+// Player 2's fighter from player 1's save. The battle request's sides are
+// built by main 0x0891CFC4 by source type (docs/research/roster-and-save.md
+// 1.7): the player's from their save record (type 0, main 0x088F9BB0: the
+// character's record with its level, sets, equipment, accessories, costume,
+// assist and summons), Quick Battle's opponent by main 0x088FA2AC (type 5,
+// a CPU character of the opponent settings' level and equipment). In versus
+// the opponent's side is built the CPU's way first, for the controller type
+// and the strength fields the field setup and the battle read (setup
+// +0xF34..+0xF39), then again from player 1's save record for that
+// character with those fields put back: the controller type stays the CPU's,
+// so the field setup still asks for the AI mode that becomes player 2's.
+constexpr std::uint32_t kBuildCpuSide = 0x088FA2ACu;
+constexpr std::uint32_t kBuildSavedSide = 0x088F9BB0u;
+constexpr std::uint32_t kSideSetups = 0x09AFB8A0u;
+constexpr std::uint32_t kSideSetupSize = 0x1060u;
+constexpr std::uint32_t kSideController = 0xF34u;  // s16 type, s16, s16: 6 bytes
+constexpr std::uint32_t kRecordCostume = 0x774u;
+
+void run_build_cpu_side(Guest *g, const decomp::CallState &in, GuestRegs &) {
+    GuestRegs regs = arguments(in);
+    decomp::call_original(g, kBuildCpuSide, regs);
+    const std::uint32_t side = in.gpr[4];
+    if (!active() || side != 1u) return;
+    const gaddr setup = kSideSetups + side * kSideSetupSize;
+    std::uint8_t controller[6];
+    for (std::uint32_t i = 0; i < 6u; ++i) controller[i] = g_ld8(g, setup + kSideController + i);
+    const std::uint32_t character = in.gpr[5] & 0xFFu;
+    // (side, character, -, not the save's play-style AI, the set's assist).
+    g_call8(g, kBuildSavedSide, side, static_cast<std::uint32_t>(static_cast<std::int8_t>(character)), 0u, 0u,
+            0xFFFFFFFFu, 0xFFFFFFFFu, 0u, 0u);
+    for (std::uint32_t i = 0; i < 6u; ++i) g_st8(g, setup + kSideController + i, controller[i]);
+    // What the caller does with the CPU's entry after this: the costume from
+    // the entry (+0x79), and equipment and a set field from the opponent
+    // settings when set (+0x88, +0x8A, +0x8C, +0x7F). The entry, the first
+    // stack argument less 0x80, takes the record's costume and none of those.
+    const gaddr entry = g_ld32(g, in.gpr[29]) - 0x80u;
+    g_st8(g, entry + 0x79u, g_ld8(g, setup + kRecordCostume));
+    for (const std::uint32_t field : {0x88u, 0x8Au, 0x8Cu}) g_st16(g, entry + field, 0xFFFFu);
+    g_st8(g, entry + 0x7Fu, 0xFFu);
+    std::cout << "[versus] player 2's " << character << " from player 1's save: level "
+              << static_cast<int>(g_ld8(g, setup + 1u)) << ", set " << static_cast<int>(g_ld8s(g, setup + 0x773u))
+              << ", costume " << static_cast<int>(g_ld8s(g, setup + kRecordCostume)) << "; controller "
+              << g_ld16s(g, setup + kSideController) << " " << g_ld16s(g, setup + kSideController + 2u) << " "
+              << g_ld16s(g, setup + kSideController + 4u) << std::endl;
+}
+
 #if defined(PORTABLEKIT_HAS_RENDERER)
 // The notice over a paused battle whose controller went away: a band in the
 // middle of the game's picture, in the PSP's pixels scaled to where the
@@ -368,9 +509,7 @@ void notice_draw() {
 // paradigm). Once a fighter has fallen, the winner instead.
 bool hud_visible() {
     const State &s = state();
-    // Split within the last few pad reads: the split task runs every battle frame.
-    const bool split = s.split && s.reads - s.split_read < 4u;
-    return active() && ((s.fighting && split) || s.fallen != 0u);
+    return active() && ((s.fighting && split_now(s)) || s.fallen != 0u);
 }
 
 void hud_draw() {
@@ -404,6 +543,44 @@ void hud_draw() {
         centred(15.0f, 240.0f, 32.0f, IM_COL32(255, 222, 130, 255), line);
     }
 }
+
+// Player 2's pick: the game has no header for it (its grid headers are
+// "Player Select", "CPU Select" and "Customization"), so a red "Player 2
+// Select" in the shape of the game's own is drawn over its "Player Select",
+// faded in as the game's slides in.
+bool pick_header_visible() { return active() && state().picking; }
+
+void pick_header_draw() {
+    const portablekit::ui::GamePicture picture = portablekit::ui::game_picture();
+    const float sx = picture.width / 480.0f;
+    const float sy = picture.height / 272.0f;
+    const auto at = [&](float x, float y) { return ImVec2(picture.left + x * sx, picture.top + y * sy); };
+    const float since = std::chrono::duration<float>(std::chrono::steady_clock::now() - state().picking_time).count();
+    const float alpha = std::clamp((since - 0.1f) / 0.25f, 0.0f, 1.0f);
+    if (alpha <= 0.0f) return;
+    const auto colour = [&](int r, int g, int b, float a) {
+        return IM_COL32(r, g, b, static_cast<int>(a * alpha));
+    };
+    ImDrawList *draw = ImGui::GetForegroundDrawList();
+    ImFont *font = portablekit::ui::game_text_font();
+    // The game's plate: x 15.5 to 135, y 30.5 to 48.5, pointed ends; this one
+    // is longer for the longer words.
+    const float left = 14.5f, right = 150.0f, top = 30.0f, bottom = 49.0f, mid = (top + bottom) * 0.5f, point = 6.0f;
+    const ImVec2 outline[6] = {at(left, mid),           at(left + point, top),    at(right - point, top),
+                               at(right, mid),          at(right - point, bottom), at(left + point, bottom)};
+    draw->AddConvexPolyFilled(outline, 6, colour(150, 26, 44, 255.0f));
+    const ImVec2 upper[4] = {at(left + point * 0.5f, mid - 4.5f), at(left + point, top + 1.5f),
+                             at(right - point, top + 1.5f), at(right - point * 0.5f, mid - 4.5f)};
+    draw->AddConvexPolyFilled(upper, 4, colour(222, 74, 84, 200.0f));
+    draw->AddPolyline(outline, 6, colour(236, 232, 244, 255.0f), ImDrawFlags_Closed, 1.3f * sy);
+    const char *line = "Player 2 Select";
+    const float size = 12.5f * sy;
+    const ImVec2 extent = font->CalcTextSizeA(size, 1.0e9f, 0.0f, line);
+    const ImVec2 centre = at((left + right) * 0.5f, mid);
+    const ImVec2 origin(centre.x - extent.x * 0.5f, centre.y - extent.y * 0.5f);
+    draw->AddText(font, size, ImVec2(origin.x + 0.8f * sx, origin.y + 0.8f * sy), colour(60, 0, 12, 200.0f), line);
+    draw->AddText(font, size, origin, colour(255, 255, 255, 255.0f), line);
+}
 #endif
 
 struct Install {
@@ -416,6 +593,8 @@ struct Install {
              &run_give_rewards},
             {kListRewards, "versus_list_rewards", decomp::Module::BattleOverlay, decomp::Returns::Nothing,
              &run_list_rewards},
+            {kBuildCpuSide, "versus_build_cpu_side", decomp::Module::Main, decomp::Returns::Nothing,
+             &run_build_cpu_side},
         };
         decomp::add_overrides(overrides, sizeof overrides / sizeof overrides[0], true);
     }
@@ -464,7 +643,12 @@ void note_camera_live() { state().camera_live_read = state().reads; }
 void note_split_frame(bool split) {
     State &s = state();
     s.split = split;
-    if (split) s.split_read = s.reads;
+    if (split) s.split_time = std::chrono::steady_clock::now();
+}
+
+bool split_recently() {
+    const State &s = state();
+    return active() && split_now(s);
 }
 
 void install(portablekit::HleRegistrar &hle) {
@@ -481,6 +665,7 @@ void install(portablekit::HleRegistrar &hle) {
 #if defined(PORTABLEKIT_HAS_RENDERER)
     portablekit::ui::add_game_overlay(&hud_visible, &hud_draw);
     portablekit::ui::add_game_overlay(&notice_visible, &notice_draw);
+    portablekit::ui::add_game_overlay(&pick_header_visible, &pick_header_draw);
 #endif
     hle.bind("sceCtrl", kSceCtrlReadBufferPositive, [previous](psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
         const std::uint32_t buffer = ctx.gpr[4];
@@ -503,6 +688,8 @@ void install(portablekit::HleRegistrar &hle) {
         if (s.ask_reads != 0u) --s.ask_reads;
         s.pad = ext::second_pad();
         if (!battle) s.lost = 0u;
+        if (!battle) set_opponent_header(memory);
+        if (enabled()) repair_looks(memory, s, battle);
         if (!active()) {
             s.connected = s.pad.connected;
             s.picking = false;
@@ -560,6 +747,7 @@ void install(portablekit::HleRegistrar &hle) {
         const bool picking = picking_opponent(memory);
         if (picking != s.picking) {
             s.picking = picking;
+            if (picking) s.picking_time = std::chrono::steady_clock::now();
             std::cout << "[versus] " << (picking ? "player 2 picks the opponent" : "player 1's pad again")
                       << std::endl;
         }
