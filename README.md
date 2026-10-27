@@ -77,7 +77,8 @@ comes back ([notes](docs/port/local-versus.md)).
 
 ![A split-screen battle: player 1's view on the left, player 2's on the right, each with its own lock-on cursor, and the HUD across both](docs/images/versus-split-battle.png)
 
-`D012_LOCAL_VERSUS=0` leaves the game as it was, without the row.
+`game.local_versus=0` in `settings.ini` (in the data folder, next to your saves' `ms0`) leaves the game as it was,
+without the row; set it back to `1` to bring it back. `D012_LOCAL_VERSUS=0` does the same for one run.
 
 ## Quick start (Windows)
 

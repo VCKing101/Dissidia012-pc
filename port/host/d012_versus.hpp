@@ -14,7 +14,8 @@ namespace d012::versus {
 
 // D012_LOCAL_VERSUS: 0 leaves the game as it was (no row, no overrides);
 // unset or anything else builds the mode in. 1 also makes every Quick Battle
-// (1-on-1) a versus one, without the row (scripted tests).
+// (1-on-1) a versus one, without the row (scripted tests). Without the
+// variable, settings.ini's game.local_versus=0 leaves the game as it was too.
 [[nodiscard]] bool enabled();
 [[nodiscard]] bool forced();
 // A versus battle is being set up or played: chosen from the row (until the

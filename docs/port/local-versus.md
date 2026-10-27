@@ -966,8 +966,12 @@ time, no pipelines; the owner found them gone in the next session, after the dis
   stock Quick Battle is not guarded.
 - **Bravery break** split (7.11): confirmed by the owner in play.
 - **The Steam Deck** stays untested and unsupported (0.1).
-- **Turning it off:** `D012_LOCAL_VERSUS=0` in the environment leaves the game as it was: no row, no overrides, no
-  second pad opened, no split view (README). There is no `settings.ini` key or in-game option for it.
+- **Turning it off:** `game.local_versus=0` in `settings.ini` leaves the game as it was: no row, no overrides, no
+  second pad opened, no split view (`versus::enabled`). The key is the game's own: PortableKit's settings rewrite only
+  their keys and keep the rest, and the port writes `game.local_versus=1` when the file lacks it, so a player finds it.
+  `D012_LOCAL_VERSUS` still decides when set (0 off, 1 every Quick Battle versus). No in-game option. Checked: the key
+  missing (written as 1, versus on), 0 (off, Battle Mode with its three stock rows, `key_off_menu/`), 0 with
+  `D012_LOCAL_VERSUS=1` (on), 1 (on).
 
 ## 8. For later: two copies over the game's ad hoc versus
 

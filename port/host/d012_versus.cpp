@@ -37,6 +37,7 @@
 #include "d012_decomp_harness.hpp"
 
 #include "hle/hle_common.hpp"
+#include "install/user_data.hpp"
 #include "portablekit/hle_extension.hpp"
 
 #include "psprecomp/runtime.hpp"
@@ -53,6 +54,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <exception>
+#include <filesystem>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -675,12 +678,35 @@ struct Install {
     }
 } install_overrides;
 
+constexpr const char *kVersusKey = "game.local_versus";
+
 } // namespace
 
 bool enabled() {
     static const bool value = [] {
-        const char *text = std::getenv("D012_LOCAL_VERSUS");
-        return text == nullptr || std::strcmp(text, "0") != 0;
+        if (const char *text = std::getenv("D012_LOCAL_VERSUS"); text != nullptr) return std::strcmp(text, "0") != 0;
+        // settings.ini's game.local_versus, which PortableKit's own settings
+        // leave alone (they rewrite only their keys). Written as 1 when the
+        // file lacks it, so that a player finds it.
+        try {
+            const std::filesystem::path dir = portablekit::install::user_data_directory();
+            if (!std::filesystem::exists(dir / portablekit::install::kSettingsFile)) return true;
+            portablekit::install::SettingsEntries entries = portablekit::install::read_settings_file(dir);
+            const auto found = entries.find(kVersusKey);
+            if (found == entries.end()) {
+                entries[kVersusKey] = "1";
+                portablekit::install::write_settings_file(dir, entries);
+                return true;
+            }
+            const std::string &text = found->second;
+            if (text == "0" || text == "off" || text == "false") {
+                std::cout << "[versus] local versus off (settings.ini " << kVersusKey << "=" << text << ")" << std::endl;
+                return false;
+            }
+        } catch (const std::exception &e) {
+            std::cerr << "[versus] settings.ini not read for " << kVersusKey << ": " << e.what() << "\n";
+        }
+        return true;
     }();
     return value;
 }
