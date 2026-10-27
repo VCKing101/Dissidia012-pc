@@ -129,8 +129,8 @@ struct State {
     // When player 2's pick began, for the header's fade.
     std::chrono::steady_clock::time_point picking_time;
     std::uint32_t fallen = 0;  // bit 0 player 1's fighter, bit 1 player 2's
-    // The battle has reached its ending (phase 8 on): no tags again until the
-    // next fight, though the fade to the loading screen is still drawn split.
+    // The battle has reached its finishing blow (phase 1 on): no tags again
+    // until the next fight (read_fighting).
     bool ended = false;
     bool chosen = false;      // the Battle Mode row was chosen
     bool start_menu = false;  // the start menu is up (player 2's pad looked for)
@@ -236,8 +236,8 @@ void repair_looks(psprecomp::GuestMemory &memory, const State &s, bool battle) {
 // in an 11-step table at 0x089CBCC8, read by main 0x088CBB60), counts up, and
 // the per-character and total battle statistics change. Both are in the
 // image's section 1 (characters, inventory, statistics, play styles: image
-// +0x50, 0x1CEAC bytes), which is kept as the fight starts (phase 1 or 2,
-// once a battle; a rematch keeps the first) and put back in the buffer the
+// +0x50, 0x1CEAC bytes), which is kept as the battle starts (phase 0, once
+// a battle; a rematch keeps the first) and put back in the buffer the
 // savedata utility is handed while the battle is on
 // (sceUtilitySavedataInitStart, a save mode), and in the image itself once
 // the battle overlay has gone. The rest of the image (a running counter at
@@ -292,7 +292,7 @@ void guard_save(psprecomp::GuestMemory &memory, bool battle) {
     if (!before.empty() || image == 0u) return;
     const std::uint32_t flow = memory.load32(0x08B0CF20u);
     const std::uint32_t phase = user_ram(flow) ? memory.load32(flow + 8u) : 0xFFFFFFFFu;
-    if (phase != 1u && phase != 2u) return;
+    if (phase != 0u) return;
     before.resize(kSaveSection1Size);
     memory.copy_out(image + kSaveSection1, before);
 }
@@ -373,8 +373,9 @@ void read_fighting(psprecomp::GuestMemory &memory, State &s, bool battle) {
     if (!battle) s.ended = false;
     const std::uint32_t field = battle ? memory.load32(kBattleManager) : 0u;
     if (!user_ram(field)) return;
-    // The battle's phase (*(battle 0x08B0CF20) + 8; 0 to 2 the fight, 9 the
-    // victory pose, then the results), logged as it changes.
+    // The battle's phase (*(battle 0x08B0CF20) + 8; 0 the intro and the
+    // fight, 1 to 3 the finishing blow, 9 the victory pose, then the
+    // results), logged as it changes.
     const std::uint32_t flow = memory.load32(0x08B0CF20u);
     const std::uint32_t phase = user_ram(flow) ? memory.load32(flow + 8u) : 0xFFFFFFFFu;
     {
@@ -386,10 +387,16 @@ void read_fighting(psprecomp::GuestMemory &memory, State &s, bool battle) {
     }
     const std::uint32_t player = memory.load32(field + 0x38u);
     const std::uint32_t ai = user_ram(player) ? memory.load32(player + kFighterAi) : 0u;
-    // (A rematch keeps the battle overlay: its fight, phases 1 and 2, clears it.)
-    if (phase >= 8u && phase < 32u) s.ended = true;
-    if (phase == 1u || phase == 2u) s.ended = false;
-    s.fighting = !s.ended && user_ram(ai) && memory.load32(ai + 0x54u) != 0u;
+    // Phase 0 is the intro and the fight, 1 on the finishing blow. From the
+    // finishing blow on the HUD shows the fighters as its replay has them
+    // (the striker's portrait on the left), so the tags go until a new
+    // fight's intro hands player 1's fighter to the CPU (phase 0, not
+    // played): a rematch does that without leaving the battle overlay, and
+    // the fade to the loading screen after a battle does not.
+    const bool played = user_ram(ai) && memory.load32(ai + 0x54u) != 0u;
+    if (phase >= 1u && phase < 32u) s.ended = true;
+    if (phase == 0u && !played) s.ended = false;
+    s.fighting = !s.ended && played;
     // Who won, from the victory pose on (phase 9): the flow's winner (+0x20,
     // battle 0x08B09D88). Not before, though a fighter's HP is 0: the fight
     // goes on until the final blow lands (an EX Burst on a fighter at 0 HP).

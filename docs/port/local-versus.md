@@ -1,13 +1,15 @@
 # Local split-screen versus: scope
 
-> Written 25 October 2026, after a Reddit reader asked for local split-screen 1v1. A scope only: nothing here is
-> built or run yet. V = seen in the disassembly, the Ghidra pseudocode or PortableKit's source; I = inferred.
+> Written 25 October 2026, after a Reddit reader asked for local split-screen 1v1, as a scope; sections 0 to 6 are
+> that scope, kept as written apart from 0.1's later decisions, and section 7 is the log of what was built and
+> checked. V = seen in the disassembly, the Ghidra pseudocode or PortableKit's source; I = inferred.
 > All addresses are main unless marked `battle:` or `menu:`.
 >
 > **Route chosen by the owner (25 October 2026): one copy of the game, drawn twice (section 1 onward).** Two copies
 > linked by the game's own ad hoc versus is kept for later online play (section 8).
 >
-> **Spike, 25 October 2026:** the second view works and costs about 1.5 ms of guest time a frame (section 7.1).
+> **Status, 27 October 2026:** the first release (0.1) is built and was played by the owner on two controllers; ready
+> to merge (7.13). Untested and unsupported: the Steam Deck. `game.local_versus=0` in `settings.ini` turns it off.
 
 The request: a **Quick Battle (Player vs Player)** entry under Battle Mode on the main menu. It works like 1-on-1,
 except that a second controller picks the opponent in place of the CPU. In battle the screen is split vertically,
@@ -52,7 +54,8 @@ In:
   camera.
 - **Views:** each half shows the middle of a full 16:9 render, at full height. A thin dark line between them.
 - **Cutscenes:** while a scripted or event camera is in charge (intro, EX Burst, finishing blow, victory), one full
-  16:9 view fills the window; the split returns with control.
+  16:9 view fills the window; the split returns with control. Changed by the owner on 26 October (7.11): only an EX
+  Burst and the ending (the victory on) go full screen; chases, the finishing blow and Bravery breaks stay split.
 - **Frame rate:** both halves at 60 fps.
 - **Controllers:** player 1 keeps the keyboard and the first gamepad; the second gamepad is player 2. With no
   second gamepad, the row says "Connect a second controller" and goes nowhere.
@@ -914,8 +917,11 @@ time, no pipelines; the owner found them gone in the next session, after the dis
   of the game's own, "Player 2 Select", is drawn over it (`pick_header_draw` in `d012_versus.cpp`), faded in as the
   game's slides in. Checked (`p2header/`).
 - **Tags on the loading screen.** After a battle the white fade to the loading screen is still the battle overlay,
-  drawn split, so the 1P / 2P tags showed on it. The tags now stay off from the ending (phase 8) until the next
-  fight's phases 1 and 2 (a rematch keeps the overlay) or the overlay goes. Checked (`finish4/`, `tagcheck/`).
+  drawn split, so the 1P / 2P tags showed on it. The tags now stay off from the finishing blow (phase 1; phase 0 is
+  the intro and the whole fight) until a new fight's intro hands player 1's fighter to the CPU (phase 0, the fighter
+  not played; a rematch keeps the overlay) or the overlay goes. From the finishing blow the HUD shows the fighters as
+  its replay has them (the striker's portrait on the left), so a tag there could name the wrong player (seen while
+  making the showcase video, fixed the same day). Checked (`finish4/`, `tagcheck/`, `rematch1/`).
 - **Cecil's pick (the "back from setup" report).** On the owner's save, Cecil's pick kept the last character's name
   and drew no portrait, on player 2's pick and on player 1's alike; the owner first saw it going back from the setup
   screen. Not the way back: Cecil's character record had a look (`+0x774`) of -1, where every other record has 1
@@ -958,7 +964,7 @@ time, no pipelines; the owner found them gone in the next session, after the dis
   its strength from it), and the per-character and total battle statistics (image `+0x11280` to `+0x11F30`: the
   35 x 200-byte records and the total). That broke 0.1's "no records".
 - **Fix** (`guard_save` and the `sceUtilitySavedataInitStart` wrapper in `d012_versus.cpp`). Section 1 (image `+0x50`,
-  `0x1CEAC` bytes: characters, inventory, statistics, play styles) is kept as the fight starts and put back in the
+  `0x1CEAC` bytes: characters, inventory, statistics, play styles) is kept as the battle starts (phase 0) and put back in the
   buffer the savedata utility gets for a save while the battle is on (only a buffer with the image's header), and in
   the image itself when the battle overlay goes. The rest of the image is left alone: a counter at `+0x1CFD4` (play
   time or the like) moves after the battle and keeps counting. Checked (`saveguard2.log`): "49 bytes of the save put

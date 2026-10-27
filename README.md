@@ -65,10 +65,12 @@ generated tones.
 ## Local split-screen versus
 
 Battle Mode has a new row, **Quick Battle (Player vs Player)**: a 1-on-1 between two players on one PC, the second
-on a second controller. Player 2 picks the opponent with their own controller, and the battle setup drops the CPU's
-rows. In battle the screen is split down the middle, each half from its player's own camera and at 60 fps, with the
-game's HUD across both. EX Bursts and the finishing blow play full screen. A versus battle gives no rewards. Either player can pause, and a controller that goes away pauses the battle until it
-comes back ([notes](docs/port/local-versus.md)).
+on a second controller. Player 2 picks the opponent with their own controller, from player 1's roster, and fights with
+player 1's saved build for that character (level, equipment, abilities, look and set); the battle setup drops the
+CPU's rows. In battle the screen is split down the middle, each half from its player's own camera and at 60 fps, with
+the game's HUD across both and each player's own command prompts. Chases stay split; EX Bursts and the victory play
+full screen. A versus battle gives no rewards and leaves no records in the save. Either player can pause, and a
+controller that goes away pauses the battle until it comes back ([notes](docs/port/local-versus.md)).
 
 <p>
   <img src="docs/images/versus-menu-row.png" width="49%" alt="Battle Mode's rows with Quick Battle (Player vs Player) highlighted under Arcade Mode, and its help line: Fight a friend on a second controller, on a split screen">
