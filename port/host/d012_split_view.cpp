@@ -1,5 +1,5 @@
-// Local versus, the second view (docs/port/local-versus.md, section 2): a
-// spike, on only with D012_LOCAL_VERSUS=1.
+// Local versus, the second view (docs/port/local-versus.md, section 2): built
+// in unless D012_LOCAL_VERSUS=0, and drawn only in a versus battle.
 //
 // Each battle frame, after the battle's own draw tasks, one more task in the
 // battle's task list draws the scene again from the opponent's camera:

@@ -949,6 +949,26 @@ time, no pipelines; the owner found them gone in the next session, after the dis
   the battle runs as before. The log line `player 2's N from player 1's save` gives the level, set and costume.
   Player 2 cannot change the look or set on their pick (player 1 can, for the same records).
 
+## 7.13 No records from a versus battle; before the merge (27 October 2026)
+
+- **What a versus battle still wrote.** Rewards were left out (7.8), but a whole battle on a copy save
+  (`data-versus-save`, `D012_TRACE_RECORDS=1`) showed the ending changing 49 bytes of the save image's section 1 before
+  its autosave: byte `+2` of the record of the character used (image `+0xB392`), the play-style AI's learning level
+  (0 to 150 in an 11-step table at `0x089CBCC8`, read by `0x088CBB60`; the play-style AI, controller type 2, takes
+  its strength from it), and the per-character and total battle statistics (image `+0x11280` to `+0x11F30`: the
+  35 x 200-byte records and the total). That broke 0.1's "no records".
+- **Fix** (`guard_save` and the `sceUtilitySavedataInitStart` wrapper in `d012_versus.cpp`). Section 1 (image `+0x50`,
+  `0x1CEAC` bytes: characters, inventory, statistics, play styles) is kept as the fight starts and put back in the
+  buffer the savedata utility gets for a save while the battle is on (only a buffer with the image's header), and in
+  the image itself when the battle overlay goes. The rest of the image is left alone: a counter at `+0x1CFD4` (play
+  time or the like) moves after the battle and keeps counting. Checked (`saveguard2.log`): "49 bytes of the save put
+  back ... (the battle's save)" just before the AUTOSAVE, and Tifa's learning byte back from 14 to 13 after it. A
+  stock Quick Battle is not guarded.
+- **Bravery break** split (7.11): confirmed by the owner in play.
+- **The Steam Deck** stays untested and unsupported (0.1).
+- **Turning it off:** `D012_LOCAL_VERSUS=0` in the environment leaves the game as it was: no row, no overrides, no
+  second pad opened, no split view (README). There is no `settings.ini` key or in-game option for it.
+
 ## 8. For later: two copies over the game's ad hoc versus
 
 The owner wants this route for online play and matchmaking, much later. What was found:

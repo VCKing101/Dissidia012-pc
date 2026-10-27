@@ -54,6 +54,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <string>
+#include <vector>
 
 namespace d012::versus {
 namespace {
@@ -223,6 +225,79 @@ void repair_looks(psprecomp::GuestMemory &memory, const State &s, bool battle) {
     }
     if (trace) std::fflush(stdout);
 }
+
+// No records from a versus battle (0.1): rewards are left out (below), but
+// the ending still writes other things to player 1's save image (save root
+// *0x089D712C + 0xF08, 0x3ECC8 bytes; docs/research/roster-and-save.md 1.6):
+// a character record's byte +2, the play-style AI's learning level (0 to 150
+// in an 11-step table at 0x089CBCC8, read by main 0x088CBB60), counts up, and
+// the per-character and total battle statistics change. Both are in the
+// image's section 1 (characters, inventory, statistics, play styles: image
+// +0x50, 0x1CEAC bytes), which is kept as the fight starts (phase 1 or 2,
+// once a battle; a rematch keeps the first) and put back in the buffer the
+// savedata utility is handed while the battle is on
+// (sceUtilitySavedataInitStart, a save mode), and in the image itself once
+// the battle overlay has gone. The rest of the image (a running counter at
+// +0x1CFD4, the play time or the like) is left as the game has it.
+constexpr std::uint32_t kSaveRoot = 0x089D712Cu;
+constexpr std::uint32_t kSaveImage = 0xF08u;
+constexpr std::uint32_t kSaveImageSize = 0x3ECC8u;
+constexpr std::uint32_t kSaveSection1 = 0x50u;
+constexpr std::uint32_t kSaveSection1Size = 0x1CEACu;
+
+std::vector<std::uint8_t> &save_before() {
+    static std::vector<std::uint8_t> image;
+    return image;
+}
+
+std::uint32_t save_image(psprecomp::GuestMemory &memory) {
+    const std::uint32_t root = memory.load32(kSaveRoot);
+    return user_ram(root) ? root + kSaveImage : 0u;
+}
+
+// Section 1 put back in the image at `at`; the bytes that differed, logged
+// with the first few ranges (image offsets).
+void put_save_back(psprecomp::GuestMemory &memory, std::uint32_t at, const char *where) {
+    std::vector<std::uint8_t> &before = save_before();
+    std::vector<std::uint8_t> now(before.size());
+    at += kSaveSection1;
+    memory.copy_out(at, now);
+    std::uint32_t changed = 0;
+    std::string ranges;
+    for (std::uint32_t i = 0; i < now.size(); ++i) {
+        if (now[i] == before[i]) continue;
+        if (changed++ < 4096u && ranges.size() < 160u && (i == 0u || now[i - 1u] == before[i - 1u])) {
+            char text[16];
+            std::snprintf(text, sizeof text, " +%05X", kSaveSection1 + i);
+            ranges += text;
+        }
+    }
+    if (changed == 0u) return;
+    memory.copy_in(at, before);
+    std::cout << "[versus] " << changed << " bytes of the save put back as they were before the battle (" << where
+              << "):" << ranges << std::endl;
+}
+
+void guard_save(psprecomp::GuestMemory &memory, bool battle) {
+    std::vector<std::uint8_t> &before = save_before();
+    const std::uint32_t image = save_image(memory);
+    if (!battle) {
+        if (!before.empty() && image != 0u) put_save_back(memory, image, "after the battle");
+        before.clear();
+        return;
+    }
+    if (!before.empty() || image == 0u) return;
+    const std::uint32_t flow = memory.load32(0x08B0CF20u);
+    const std::uint32_t phase = user_ram(flow) ? memory.load32(flow + 8u) : 0xFFFFFFFFu;
+    if (phase != 1u && phase != 2u) return;
+    before.resize(kSaveSection1Size);
+    memory.copy_out(image + kSaveSection1, before);
+}
+
+constexpr std::uint32_t kSavedataInitStart = 0x50C4CD57u;
+constexpr std::uint32_t kSavedataMode = 0x30u;
+constexpr std::uint32_t kSavedataBuffer = 0x74u;
+constexpr std::uint32_t kSavedataBufferSize = 0x78u;
 
 void feed_raw_pad1(psprecomp::GuestMemory &memory, State &s) {
     std::uint32_t buttons = s.pad.connected ? s.pad.buttons : 0u;
@@ -667,6 +742,26 @@ void install(portablekit::HleRegistrar &hle) {
     portablekit::ui::add_game_overlay(&notice_visible, &notice_draw);
     portablekit::ui::add_game_overlay(&pick_header_visible, &pick_header_draw);
 #endif
+    if (const portablekit::HleFunction saving = hle.bound_function("sceUtility", kSavedataInitStart); saving) {
+        hle.bind("sceUtility", kSavedataInitStart, [saving](psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
+            psprecomp::GuestMemory &memory = rt.memory();
+            const std::uint32_t params = ctx.gpr[4];
+            const std::uint32_t mode = user_ram(params) ? memory.load32(params + kSavedataMode) : 0xFFFFFFFFu;
+            // AUTOSAVE, SAVE, LISTSAVE: the game's image as it was before the battle.
+            if (!save_before().empty() && battle_resident(memory) && (mode == 1u || mode == 3u || mode == 5u)) {
+                const std::uint32_t buffer = memory.load32(params + kSavedataBuffer);
+                // Only a buffer laid out as the image (its header: version 10, the size).
+                if (user_ram(buffer) && memory.load32(params + kSavedataBufferSize) >= kSaveImageSize &&
+                    memory.load32(buffer) == 10u && memory.load32(buffer + 4u) == kSaveImageSize)
+                    put_save_back(memory, buffer, "the battle's save");
+                if (const std::uint32_t image = save_image(memory); image != 0u && image != buffer)
+                    put_save_back(memory, image, "the save image");
+            }
+            saving(rt, ctx);
+        });
+    } else {
+        std::cerr << "[versus] sceUtilitySavedataInitStart is not bound; a versus battle's save is not guarded\n";
+    }
     hle.bind("sceCtrl", kSceCtrlReadBufferPositive, [previous](psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
         const std::uint32_t buffer = ctx.gpr[4];
         const std::uint32_t count = std::clamp<std::uint32_t>(ctx.gpr[5], 1u, 64u);
@@ -691,6 +786,7 @@ void install(portablekit::HleRegistrar &hle) {
         if (!battle) set_opponent_header(memory);
         if (enabled()) repair_looks(memory, s, battle);
         if (!active()) {
+            save_before().clear();
             s.connected = s.pad.connected;
             s.picking = false;
             s.fighting = false;
@@ -699,6 +795,7 @@ void install(portablekit::HleRegistrar &hle) {
             return;
         }
         read_fighting(memory, s, battle);
+        guard_save(memory, battle);
         if (s.pad.connected != s.connected) {
             s.connected = s.pad.connected;
             std::cout << "[versus] player 2's pad " << (s.connected ? "connected" : "disconnected") << std::endl;
