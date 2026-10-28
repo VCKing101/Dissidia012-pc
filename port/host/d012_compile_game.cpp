@@ -13,7 +13,9 @@
 // The folder it works in is the program's own (the portable layout of
 // host/d012_portable.cpp):
 //
-//   game/EBOOT.ELF          the decrypted executable `--install <iso>` made
+//   data/EBOOT.ELF          the decrypted executable `--install <iso>` made,
+//                           and data/settings.ini naming the disc image (or
+//                           game/EBOOT.ELF and game/disc.iso: D012_GAME_DIR)
 //   psp_recomp.exe          the recompiler
 //   toolchain/bin/clang++   llvm-mingw, trimmed (D012_TOOLCHAIN_DIR names
 //                           another; D012_RECOMPILER another recompiler)
@@ -155,40 +157,52 @@ void write_all(const fs::path &path, std::string_view data) {
     if (!out) throw Error("cannot write " + text(path));
 }
 
-// Progress, for the console and for the wizard, which polls the status file.
+// Progress, for the console and for the wizard, which reads the lines
+// "[compile-game] <percent>% <message>" from stdout (or polls the status
+// file). The percentage weighs the four steps by their measured share of a
+// compile: the disc 2%, psp_recomp 25%, clang 70%, linking 3%.
 class Progress {
 public:
     explicit Progress(fs::path status) : status_(std::move(status)) {}
 
     void step(const std::string &name, unsigned total) {
         const std::lock_guard<std::mutex> guard(lock_);
+        if (!step_.empty()) start_ += kWeights[std::min<std::size_t>(index_++, std::size(kWeights) - 1)];
         step_ = name;
         done_ = 0;
         total_ = total;
-        std::cout << "[compile-game] " << name << std::endl;
+        print_locked();
         write_locked("running", name);
     }
     void advance() {
         const std::lock_guard<std::mutex> guard(lock_);
         ++done_;
-        if (total_ > 20 && done_ % 10 != 0 && done_ != total_) {
-            write_locked("running", step_);
-            return;
-        }
-        std::cout << "[compile-game]   " << done_ << "/" << total_ << std::endl;
+        if (total_ <= 20 || done_ % 4 == 0 || done_ == total_) print_locked();
         write_locked("running", step_);
     }
     void finish(const std::string &state, const std::string &message) {
         const std::lock_guard<std::mutex> guard(lock_);
-        std::cout << "[compile-game] " << message << std::endl;
+        if (state == "done") start_ = 100, done_ = total_ = 0;
+        std::cout << "[compile-game] " << percent() << "% " << message << std::endl;
         write_locked(state, message);
     }
 
 private:
+    static constexpr unsigned kWeights[] = {2u, 25u, 70u, 3u};
+
+    unsigned percent() const {
+        const unsigned weight = kWeights[std::min<std::size_t>(index_, std::size(kWeights) - 1)];
+        return std::min(100u, start_ + (total_ == 0 ? 0u : weight * done_ / total_));
+    }
+    void print_locked() {
+        std::cout << "[compile-game] " << percent() << "% " << step_;
+        if (total_ > 1) std::cout << " (" << done_ << "/" << total_ << ")";
+        std::cout << std::endl;
+    }
     void write_locked(const std::string &state, const std::string &message) {
         std::ostringstream body;
-        body << "state=" << state << "\nstep=" << step_ << "\ndone=" << done_ << "\ntotal=" << total_
-             << "\nmessage=" << message << "\n";
+        body << "state=" << state << "\npercent=" << percent() << "\nstep=" << step_ << "\ndone=" << done_
+             << "\ntotal=" << total_ << "\nmessage=" << message << "\n";
         const fs::path partial = status_.string() + ".partial";
         std::error_code ec;
         {
@@ -202,6 +216,8 @@ private:
     std::mutex lock_;
     std::string step_;
     unsigned done_ = 0, total_ = 0;
+    std::size_t index_ = 0;
+    unsigned start_ = 0;  // the percentage the current step starts at
 };
 
 // Runs a program and waits; its output is appended to `log`. Returns the exit
@@ -361,9 +377,22 @@ unsigned default_jobs() {
 Paths find_paths(const Options &options) {
     Paths p;
     p.folder = portablekit::executable_directory();
-    const char *game_dir = std::getenv("D012_GAME_DIR");
-    p.game_dir = game_dir != nullptr && *game_dir != '\0' ? path_of(game_dir) : p.folder / "game";
-    p.eboot = p.game_dir / "EBOOT.ELF";
+    // The executable and the disc image as the game finds them: a game/
+    // folder when D012_GAME_DIR names one (game/disc.iso), otherwise what
+    // `--install <iso>` set up in the data directory (host/d012_portable.cpp).
+    if (const char *game_dir = std::getenv("D012_GAME_DIR"); game_dir != nullptr && *game_dir != '\0') {
+        p.game_dir = path_of(game_dir);
+        p.eboot = p.game_dir / "EBOOT.ELF";
+        p.iso = p.game_dir / "disc.iso";
+    } else {
+        p.game_dir = portablekit::install::user_data_directory();
+        p.eboot = p.game_dir / "EBOOT.ELF";
+        if (const auto installation = portablekit::install::find_installation(p.game_dir)) {
+            p.eboot = installation->executable;
+            p.iso = installation->disc_image;
+        }
+    }
+    if (!options.iso.empty()) p.iso = options.iso;
     const char *recompiler = std::getenv("D012_RECOMPILER");
     p.recompiler = recompiler != nullptr && *recompiler != '\0' ? path_of(recompiler) : p.folder / "psp_recomp.exe";
     const char *toolchain = std::getenv("D012_TOOLCHAIN_DIR");
@@ -378,15 +407,6 @@ Paths find_paths(const Options &options) {
     p.work = p.folder / "game-code.new";
     p.status = p.folder / "game-code-status.txt";
     p.log = p.folder / "game-code-build.log";
-    if (!options.iso.empty()) {
-        p.iso = options.iso;
-    } else {
-        for (const fs::path &where : {p.game_dir, portablekit::install::user_data_directory()})
-            if (const auto installation = portablekit::install::find_installation(where)) {
-                p.iso = installation->disc_image;
-                break;
-            }
-    }
     return p;
 }
 
@@ -394,6 +414,7 @@ void check_inputs(const Paths &p) {
     std::error_code ec;
     if (!fs::is_regular_file(p.eboot, ec))
         throw Error("the decrypted executable is missing (" + text(p.eboot) + "): run --install <your ISO> first");
+    if (p.iso.empty()) throw Error("the disc image is not known; pass --iso <your ULUS10566 .iso>");
     if (psprecomp::sha256_file(p.eboot) != portablekit::game().executable_sha256)
         throw Error(text(p.eboot) + " is not the ULUS10566 v1.00 executable this port is made for");
     if (p.iso.empty() || !fs::is_regular_file(p.iso, ec))

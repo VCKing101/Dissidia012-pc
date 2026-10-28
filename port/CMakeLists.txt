@@ -81,6 +81,9 @@ endif()
 if(D012_INSTALLER_BUILD)
     set_property(SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_portable.cpp" APPEND PROPERTY
         COMPILE_DEFINITIONS D012_INSTALLER_BUILD=1)
+    # A windowed program: started from a shortcut, no console opens behind the
+    # game. What it prints goes to data/logs/ then (host/d012_portable.cpp).
+    set_target_properties(D012Native PROPERTIES WIN32_EXECUTABLE TRUE)
     # What --compile-game needs beside the program, so bin/ is laid out as an
     # installation (the toolchain aside: D012_TOOLCHAIN_DIR, or toolchain/):
     # the recompiler, and in sdk/ the three headers the game's code includes,

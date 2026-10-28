@@ -302,6 +302,24 @@ code on the player's PC into `game-code/` beside the program; `host/d012_game_co
 (a corpus library, PortableKit's `host/corpus_library.hpp`) and the portable layout points `D012_OVERLAY_DIR` at
 `game-code/overlays`. `D012_GAME_CODE_DIR` names another folder.
 
+In this build the portable layout always applies: `data/` beside the program holds what `--install <iso>` makes
+(`EBOOT.ELF`, and `settings.ini` naming the player's disc image where it is) with the saves, settings and mods, as
+PortableKit lays out a data directory; `D012_GAME_DIR` is set only when a `game/` folder is there. It is a windowed
+program, so no console opens behind the game; started without one, it writes its output to
+`data/logs/D012Native.log`.
+
+**The Windows setup**: `tools/port/package_installer.py --version X.Y.Z` builds the installer build
+(`tools/port/pk_cmake_mingw.cmd`), stages the folder (program, DLLs, `psp_recomp.exe`, `sdk/`, llvm-mingw trimmed as
+PortableKit's own packaging trims it, `README.txt`, licences and `tools/port/installer/THIRD_PARTY_NOTICES.md`),
+refuses it if it finds a file of the game by name or content, a program with the game's code linked in, or a path of
+this machine, and compiles `tools/port/installer/dissidia012.iss` with Inno Setup 7 (`tools/local/innosetup`) into
+`build/port/installer/dist/Dissidia012-PC-Setup-X.Y.Z.exe` (75 MB). The wizard asks for the folder (no
+administrator rights) and the ISO, installs, runs `--install` and `--compile-game` with a progress bar from the
+latter's output, and makes the shortcuts; running it again over an installation is the update, and uninstalling keeps
+`data/` unless the player says otherwise. Checked on 28 October 2026 with a silent install (`/VERYSILENT /ISO=...`):
+3 min 25 s from the setup to a playable game, an update over it in 18 s (no compile), an uninstall that leaves only
+`data/`. The checks refuse a planted file of each kind they look for.
+
 ```powershell
 cmake -S port -B tools/local/port/build-d012-installer -G Ninja -DCMAKE_BUILD_TYPE=Release `
       -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DD012_INSTALLER_BUILD=ON -DPORTABLEKIT_RELEASE=ON

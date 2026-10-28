@@ -17,6 +17,14 @@
 //   D012_OVERLAY_DIR         <folder>/game-code/overlays, in the installer
 //                            build only (host/d012_game_code.cpp)
 //
+// The installer build always uses the layout, game/ or not: what the
+// installer's `--install <iso>` makes (EBOOT.ELF, and settings.ini naming the
+// player's disc image wherever it is) goes in data/ beside the saves, as
+// PortableKit lays out a data directory of its own, so D012_GAME_DIR is set
+// only when game/EBOOT.ELF is there. Started from a shortcut it has no console
+// (it is built as a windowed program), so its output goes to
+// <data>/logs/D012Native.log, the previous run's to D012Native-previous.log.
+//
 // A variable already set always wins, so run_d012.py, play_d012.ps1 and the
 // test tools, which set all of them, behave as before. A build directory's
 // bin/ has no game/ beside it, so a developer build is unchanged too. A build
@@ -32,11 +40,17 @@
 
 #include "app_paths.hpp"
 
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
 #include <string>
 #include <system_error>
+
+#if defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#endif
 
 #if defined(D012_INSTALLER_BUILD)
 namespace d012::game_code {
@@ -75,6 +89,22 @@ void set(const char *name, const std::string &value) {
 #endif
 }
 
+#if defined(D012_INSTALLER_BUILD) && defined(_WIN32)
+// A windowed program started from a shortcut has no standard output: keep
+// what it prints, for the player's bug reports. Output a parent redirected
+// (the installer, the test tools) is left where it goes.
+void log_to_file_without_console(const std::filesystem::path &logs) {
+    const HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (out != nullptr && out != INVALID_HANDLE_VALUE) return;
+    std::error_code ec;
+    std::filesystem::create_directories(logs, ec);
+    const std::filesystem::path log = logs / "D012Native.log";
+    std::filesystem::rename(log, logs / "D012Native-previous.log", ec);
+    if (std::freopen(log.string().c_str(), "w", stdout) != nullptr) std::setvbuf(stdout, nullptr, _IOLBF, 4096);
+    std::freopen(log.string().c_str(), "a", stderr);
+}
+#endif
+
 struct PortableLayout {
     PortableLayout() {
         try {
@@ -87,7 +117,12 @@ struct PortableLayout {
     static void apply() {
         const std::filesystem::path folder = portablekit::executable_directory();
         std::error_code ec;
-        const bool portable = !folder.empty() && std::filesystem::is_regular_file(folder / "game" / "EBOOT.ELF", ec);
+        const bool game_folder = !folder.empty() && std::filesystem::is_regular_file(folder / "game" / "EBOOT.ELF", ec);
+#if defined(D012_INSTALLER_BUILD)
+        const bool portable = !folder.empty();
+#else
+        const bool portable = game_folder;
+#endif
 #if defined(D012_RELEASE_BUILD)
         const bool no_interpreter = true;
 #else
@@ -96,16 +131,20 @@ struct PortableLayout {
         if (no_interpreter && !is_set(kNoInterpreter) && !is_set(kInterpreter)) set(kNoInterpreter, "1");
         if (!portable) return;
 
-        if (!is_set(kGameDir)) set(kGameDir, utf8(folder / "game"));
+        if (game_folder && !is_set(kGameDir)) set(kGameDir, utf8(folder / "game"));
         if (!is_set(kDataDir)) set(kDataDir, utf8(folder / "data"));
         const std::string data = std::getenv(kDataDir);
         std::filesystem::create_directories(std::filesystem::path(std::u8string(data.begin(), data.end())), ec);
+#if defined(D012_INSTALLER_BUILD) && defined(_WIN32)
+        log_to_file_without_console(std::filesystem::path(std::u8string(data.begin(), data.end())) / "logs");
+#endif
         if (!is_set(kMemoryStickDir))
             set(kMemoryStickDir, utf8(std::filesystem::path(std::u8string(data.begin(), data.end())) / "ms0"));
 #if defined(D012_INSTALLER_BUILD)
         if (!is_set(kOverlayDir)) set(kOverlayDir, utf8(d012::game_code::directory() / "overlays"));
 #endif
-        std::cout << "[portable] game " << std::getenv(kGameDir) << ", data " << data << ", memory stick "
+        const char *game = std::getenv(kGameDir);
+        std::cout << "[portable] game " << (game != nullptr ? game : "<data dir>") << ", data " << data << ", memory stick "
                   << std::getenv(kMemoryStickDir) << ", interpreter " << (is_set(kNoInterpreter) ? "off" : "on")
                   << std::endl;
     }
