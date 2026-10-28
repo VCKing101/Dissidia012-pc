@@ -15,6 +15,12 @@ Playing
   Start "Dissidia 012 (PC port)" from the Start menu or the desktop. Esc on the keyboard, or L3 + R3 on a
   controller, opens the port's menu: video, controls and audio.
 
+Battle music mods
+  Mods add music to the battle music selector; they never replace the game's own. Put a mod's folder in
+  data\mods (the Start menu has a "Mods folder" shortcut). To make your own, tick "Battle BGM Maker" in Setup:
+  it opens in your browser, lets you add tracks (MP3, OGG, FLAC, WAV, BRSTM) and set where each one loops, and
+  writes the mod for you. Close its window to stop it.
+
 Your files, in the install folder
   data\ms0\PSP\SAVEDATA   your saves (back this folder up)
   data\settings.ini       your settings

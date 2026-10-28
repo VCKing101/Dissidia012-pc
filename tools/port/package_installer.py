@@ -6,7 +6,8 @@
    llvm-mingw (tools/port/pk_cmake_mingw.cmd): the program without the game's code, the recompiler and sdk/.
 2. Stages build/port/installer/stage: the program, its DLLs, psp_recomp.exe, sdk/, llvm-mingw trimmed to what
    compiling the game's code needs (as PortableKit's scripts/package_desktop_windows.ps1 trims it), README.txt,
-   LICENSE.txt and licenses/.
+   LICENSE.txt and licenses/; and the optional Battle BGM Maker: bgm-maker/ (the tool and Python's embeddable
+   package, unpacked in tools/local/python-embed-3.14.8) and FFmpeg's ffmpeg.exe and ffprobe.exe.
 3. Checks the staged folder and refuses to package when it finds:
    - a file named like the game's (an executable, disc image, overlay, PRX, PARAM.SFO, save, generated code);
    - a file that is one by its contents (a PSP ELF, a PBP, an encrypted ~PSP executable, a PSF, an ISO 9660
@@ -38,6 +39,12 @@ OUT = ROOT / "build" / "port" / "installer"
 STAGE = OUT / "stage"
 DIST = OUT / "dist"
 SDL3_LICENSE = ROOT / "tools" / "local" / "port-deps" / "sdl3" / "SDL3-3.4.18" / "LICENSE.txt"
+# The Battle BGM Maker, an optional part of the setup: the tool (port/tools/bgm_maker), Python's embeddable package
+# to run it (3.14.8, python.org, unpacked) and the FFmpeg programs it decodes with, from the same LGPL build as the
+# program's DLLs, with the three DLLs they need besides those.
+BGM_MAKER = ROOT / "port" / "tools" / "bgm_maker"
+PYTHON = ROOT / "tools" / "local" / "python-embed-3.14.8"
+FFMPEG_TOOLS = ["ffmpeg.exe", "ffprobe.exe", "avdevice-61.dll", "avfilter-10.dll", "swscale-8.dll"]
 
 PROGRAM_FILES = ["D012Native.exe", "psp_recomp.exe", "SDL3.dll", "avcodec-61.dll", "avformat-61.dll",
                  "avutil-59.dll", "swresample-5.dll", "libc++.dll", "libunwind.dll"]
@@ -132,6 +139,22 @@ def stage(portablekit):
         raise PackagingError("the trimmed toolchain lost clang's x86_64 runtime")
     shutil.copytree(LLVM / "x86_64-w64-mingw32", tool / "x86_64-w64-mingw32")
 
+    # The Battle BGM Maker (the setup installs it only when the player ticks it): bgm-maker\ and, beside the
+    # program, the FFmpeg programs it runs.
+    if not (PYTHON / "python.exe").is_file():
+        raise PackagingError(f"Python's embeddable package is not unpacked in {PYTHON}")
+    shutil.copytree(PYTHON, STAGE / "bgm-maker" / "python")
+    copy(BGM_MAKER / "bgm_maker.py", STAGE / "bgm-maker" / "bgm_maker.py")
+    for path in sorted((BGM_MAKER / "bgmmaker").glob("*.py")):
+        copy(path, STAGE / "bgm-maker" / "bgmmaker" / path.name)
+    for path in sorted((BGM_MAKER / "web").iterdir()):
+        copy(path, STAGE / "bgm-maker" / "web" / path.name)
+    ffmpeg_bins = list((BUILD / "_deps" / "ffmpeg").glob("*/bin"))
+    if len(ffmpeg_bins) != 1:
+        raise PackagingError(f"expected one FFmpeg build in {BUILD / '_deps' / 'ffmpeg'}, found {len(ffmpeg_bins)}")
+    for name in FFMPEG_TOOLS:
+        copy(ffmpeg_bins[0] / name, STAGE / name)
+
     copy(INSTALLER / "README.txt", STAGE / "README.txt")
     copy(ROOT / "LICENSE", STAGE / "LICENSE.txt")
     licenses = STAGE / "licenses"
@@ -144,6 +167,7 @@ def stage(portablekit):
     copy(portablekit / "third_party" / "tiny_aes" / "UNLICENSE", licenses / "tiny-AES-c-UNLICENSE.txt")
     copy(portablekit / "third_party" / "xxhash" / "LICENSE", licenses / "xxHash-LICENSE.txt")
     copy(LLVM / "LICENSE.TXT", licenses / "llvm-mingw-LICENSE.txt")
+    copy(PYTHON / "LICENSE.txt", licenses / "Python-LICENSE.txt")
     notices = LLVM / "x86_64-w64-mingw32" / "share" / "mingw32"
     if notices.is_dir():
         for path in notices.glob("COPYING*"):

@@ -54,6 +54,15 @@ Decodes the game's ATRAC3plus audio and movies, and the music files of battle mu
 BtbN/FFmpeg-Builds, licensed under the GNU Lesser General Public License, version 3 or later:
 `FFmpeg-LICENSE.txt`. Where the build and its source are: `FFmpeg-SOURCE.txt`. <https://ffmpeg.org/>
 
+With the optional Battle BGM Maker, also FFmpeg's programs `ffmpeg.exe` and `ffprobe.exe` and the libraries
+`avdevice-61.dll`, `avfilter-10.dll` and `swscale-8.dll` they need, from the same unmodified LGPL build.
+
+### Python 3.14.8 (with the optional Battle BGM Maker only)
+
+Runs the Battle BGM Maker, in `bgm-maker\python\`: the unmodified Windows embeddable package from python.org
+(<https://www.python.org/downloads/release/python-3148/>). Copyright (c) 2001 Python Software Foundation, under the
+PSF License Agreement, with the licenses of the components it includes: `Python-LICENSE.txt`.
+
 ### llvm-mingw 20260922
 
 The compiler Setup compiles the game's code with, in `toolchain\`, trimmed to what that needs: clang and lld from

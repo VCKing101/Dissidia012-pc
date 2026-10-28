@@ -52,12 +52,27 @@ ExtraDiskSpaceRequired=1500000000
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Shortcuts:"
+Name: "bgmmaker"; Description: "Battle BGM Maker: a tool for making your own battle music mods, with loop points (about 45 MB). Playing mods made by others does not need it."; GroupDescription: "Tools:"; Flags: unchecked
 
 [Files]
-Source: "{#Stage}\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
+; The Battle BGM Maker (port/tools/bgm_maker) with Python's embeddable package, and the FFmpeg programs it decodes
+; with, only when the player chose it.
+#define BgmMakerFiles "\bgm-maker,\ffmpeg.exe,\ffprobe.exe,\avdevice-61.dll,\avfilter-10.dll,\swscale-8.dll"
+Source: "{#Stage}\*"; Excludes: "{#BgmMakerFiles}"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
+Source: "{#Stage}\bgm-maker\*"; DestDir: "{app}\bgm-maker"; Tasks: bgmmaker; Flags: recursesubdirs createallsubdirs ignoreversion
+Source: "{#Stage}\ffmpeg.exe"; DestDir: "{app}"; Tasks: bgmmaker; Flags: ignoreversion
+Source: "{#Stage}\ffprobe.exe"; DestDir: "{app}"; Tasks: bgmmaker; Flags: ignoreversion
+Source: "{#Stage}\avdevice-61.dll"; DestDir: "{app}"; Tasks: bgmmaker; Flags: ignoreversion
+Source: "{#Stage}\avfilter-10.dll"; DestDir: "{app}"; Tasks: bgmmaker; Flags: ignoreversion
+Source: "{#Stage}\swscale-8.dll"; DestDir: "{app}"; Tasks: bgmmaker; Flags: ignoreversion
+
+[Dirs]
+Name: "{app}\data\mods"; Flags: uninsneveruninstall
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExe}"; WorkingDir: "{app}"
+Name: "{group}\Battle BGM Maker"; Filename: "{app}\bgm-maker\python\python.exe"; Parameters: """{app}\bgm-maker\bgm_maker.py"" ""{app}\data\mods"" --ffmpeg ""{app}"""; WorkingDir: "{app}\bgm-maker"; Comment: "Make battle music mods: opens in your browser; close this window to stop it"; Tasks: bgmmaker
+Name: "{group}\Mods folder"; Filename: "{app}\data\mods"
 Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; WorkingDir: "{app}"; Tasks: desktopicon
 
@@ -72,6 +87,7 @@ Type: filesandordirs; Name: "{app}\game-code.old"
 Type: files; Name: "{app}\game-code-status.txt"
 Type: files; Name: "{app}\game-code-build.log"
 Type: files; Name: "{app}\setup-install.log"
+Type: filesandordirs; Name: "{app}\bgm-maker"
 Type: files; Name: "{app}\data\EBOOT.ELF"
 Type: files; Name: "{app}\data\disc.iso"
 Type: dirifempty; Name: "{app}"
