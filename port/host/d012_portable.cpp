@@ -14,6 +14,8 @@
 //   PSPRECOMP_NO_INTERPRETER 1, unless D012_INTERPRETER is set: a packaged
 //                            build runs its recompiled code only, as
 //                            tools/port/play_d012.ps1 does
+//   D012_OVERLAY_DIR         <folder>/game-code/overlays, in the installer
+//                            build only (host/d012_game_code.cpp)
 //
 // A variable already set always wins, so run_d012.py, play_d012.ps1 and the
 // test tools, which set all of them, behave as before. A build directory's
@@ -36,6 +38,12 @@
 #include <string>
 #include <system_error>
 
+#if defined(D012_INSTALLER_BUILD)
+namespace d012::game_code {
+std::filesystem::path directory();  // host/d012_game_code.cpp
+}
+#endif
+
 namespace d012::portable {
 namespace {
 
@@ -46,6 +54,7 @@ constexpr const char *kDataDir = "D012_DATA_DIR";
 constexpr const char *kMemoryStickDir = "D012_MEMORY_STICK_DIR";
 constexpr const char *kInterpreter = "D012_INTERPRETER";
 constexpr const char *kNoInterpreter = "PSPRECOMP_NO_INTERPRETER";
+constexpr const char *kOverlayDir = "D012_OVERLAY_DIR";
 
 bool is_set(const char *name) {
     const char *value = std::getenv(name);
@@ -93,6 +102,9 @@ struct PortableLayout {
         std::filesystem::create_directories(std::filesystem::path(std::u8string(data.begin(), data.end())), ec);
         if (!is_set(kMemoryStickDir))
             set(kMemoryStickDir, utf8(std::filesystem::path(std::u8string(data.begin(), data.end())) / "ms0"));
+#if defined(D012_INSTALLER_BUILD)
+        if (!is_set(kOverlayDir)) set(kOverlayDir, utf8(d012::game_code::directory() / "overlays"));
+#endif
         std::cout << "[portable] game " << std::getenv(kGameDir) << ", data " << data << ", memory stick "
                   << std::getenv(kMemoryStickDir) << ", interpreter " << (is_set(kNoInterpreter) ? "off" : "on")
                   << std::endl;

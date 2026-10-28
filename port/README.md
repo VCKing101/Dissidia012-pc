@@ -240,6 +240,7 @@ fresh clone of `33800c4`, apply them with `git checkout -b dissidia 33800c4` and
 | 0060 | Frame interpolation on a split screen: each draw carries its view, pairs within it and blends with its own view's camera; the replay draws each view into its half; the halves are moved, not scaled | 60 fps on both halves (local-versus.md, 7.9) |
 | 0061 | The disc image read through once in the background from launch, at background I/O priority on Windows, so the file cache holds it; `<prefix>_NO_DISC_READ_THROUGH`. `<prefix>_TRACE_IO` gives each read's time | A cold hard drive stalled the first battle frame (116 ms) on the music's first block ([performance.md](../docs/port/performance.md), section 10) |
 | 0062 | `ui::add_menu_rows`: a port's own settings rows at the end of the menu's Video page | The split-screen field of view slider (local-versus.md, 7.14) |
+| 0063 | MinGW: a port's program links with `--export-all-symbols` (MSVC's `WINDOWS_EXPORT_ALL_SYMBOLS` does nothing there, so it had no import library for its overlay libraries) and with dbghelp, and llvm-mingw's libc++ and libunwind are copied next to it | The installer build with llvm-mingw (below) |
 
 Patches 0012 and 0013 were made on a separate worktree branch during the recompiled-build work and merged onto
 `dissidia` on 18 October 2026; patches 0014 and 0015 followed the same day (bring-up log, section "Stencil"), and
@@ -252,7 +253,7 @@ unmerged branch `depth-clip`: no visible change here); 0044 the same day for a r
 and PPSSPP (`portablekit_savedata_tests` and both directions checked against PPSSPP 1.20.4). Patches 0055 to 0061
 came from 25 to 26 October for local split-screen versus, made on the worktree branch `local-versus` and moved onto
 `dissidia` when that branch was merged. Patch 0062 came on 28 October for the split halves' field of view, on
-`local-versus` again (the branch `versus-fov` here), and moved onto `dissidia` when that was merged the same day.
+`local-versus` again (the branch `versus-fov` here), and moved onto `dissidia` when that was merged the same day. Patch 0063 came on 28 October for the installer build.
 PortableKit's 21 framework tests pass on the branch and `portablekit_host_check` builds.
 
 ## Recompiled build
@@ -291,6 +292,24 @@ Copy-Item orig/ULUS10566/PSP_GAME/USRDIR/DATA/MODULE/LIBSUPPREACC.PRX build/port
 Generating takes seconds and compiling minutes, not hours (no ccache). A good run logs
 `[overlay] installed suppreacc` and `[overlay] installed menu` and never `No recompiled function registered`.
 The PRX corpus only matches while the profile loads the PRX at `0x09B81000`.
+
+## Installer build
+
+For an installer that needs nothing else installed: the program
+without the game's code, built with llvm-mingw, the compiler the installer ships. The installer compiles the game's
+code on the player's PC into `game-code/` beside the program; `host/d012_game_code.cpp` loads `game-code/main.dll`
+(a corpus library, PortableKit's `host/corpus_library.hpp`) and the portable layout points `D012_OVERLAY_DIR` at
+`game-code/overlays`. `D012_GAME_CODE_DIR` names another folder.
+
+```powershell
+cmake -S port -B tools/local/port/build-d012-installer -G Ninja -DCMAKE_BUILD_TYPE=Release `
+      -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DD012_INSTALLER_BUILD=ON -DPORTABLEKIT_RELEASE=ON
+```
+
+with llvm-mingw's `bin` on `PATH` and the dependency paths `tools/port/pk_cmake.cmd` passes. It reads no
+`generated/` or `overlays/`, so it builds without the game: a 7.5 MB program, against 120 MB with the corpus linked
+in. Measured on 28 October 2026 (i7-12700K, 8 jobs): the game's code compiles at clang -O1 in about 3 minutes and
+runs about three times faster than the MSVC build's (2.3 against 6.8 ms of game code a frame in battle).
 
 ## Steam Deck
 

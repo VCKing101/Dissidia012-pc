@@ -1,0 +1,67 @@
+From 6c1f8cbac0d8162972bf07875511d128e27d9d0d Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Wed, 28 Oct 2026 13:05:41 +1030
+Subject: [PATCH] MinGW: a port's program exports its symbols for its overlay
+ libraries
+
+Built with llvm-mingw, a port's program linked without an export table:
+WINDOWS_EXPORT_ALL_SYMBOLS is MSVC's, and MinGW's linker exports nothing
+from an executable by itself, so there was no import library and the
+overlay libraries could not link. The program now links with
+--export-all-symbols and with dbghelp, which host/perf/frame_stats.cpp
+needs and takes from a #pragma comment(lib) only under MSVC. libc++ and
+libunwind, which llvm-mingw links dynamically, are copied next to the
+program, so the build's bin/ runs as it is.
+
+Verified on Windows with llvm-mingw 20260922 (clang 23.1.2) and Dissidia
+012 (USA): the program, four overlay libraries and the main corpus build
+and run, from the title to battles, with no interpreter fallback. MSVC
+builds are unchanged (checked). Not tested: GCC MinGW, other games.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ cmake/PortableKit.cmake | 21 +++++++++++++++++++++
+ 1 file changed, 21 insertions(+)
+
+diff --git a/cmake/PortableKit.cmake b/cmake/PortableKit.cmake
+index c64c322..4e1ec2a 100644
+--- a/cmake/PortableKit.cmake
++++ b/cmake/PortableKit.cmake
+@@ -455,6 +455,18 @@ inline constexpr const char *kBuildLabel = \"${PORTABLEKIT_BUILD_LABEL}\";
+                         "$<TARGET_FILE:SDL3::SDL3-shared>" "$<TARGET_FILE_DIR:${target}>")
+         endif()
+     endif()
++    # llvm-mingw links its C++ runtime dynamically: put libc++ and libunwind
++    # next to the executable too, so the build's bin/ runs as it is.
++    if(MINGW)
++        get_filename_component(toolchain_bin "${CMAKE_CXX_COMPILER}" DIRECTORY)
++        foreach(runtime_dll libc++.dll libunwind.dll)
++            if(EXISTS "${toolchain_bin}/${runtime_dll}")
++                add_custom_command(TARGET ${target} POST_BUILD
++                    COMMAND ${CMAKE_COMMAND} -E copy_if_different
++                            "${toolchain_bin}/${runtime_dll}" "$<TARGET_FILE_DIR:${target}>")
++            endif()
++        endforeach()
++    endif()
+     target_include_directories(${target} PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated_version")
+     # The host only: the generated code never sees FFmpeg.
+     portablekit_use_ffmpeg(${target})
+@@ -474,6 +486,15 @@ inline constexpr const char *kBuildLabel = \"${PORTABLEKIT_BUILD_LABEL}\";
+     # The overlay libraries resolve psprecomp and runtime symbols against the
+     # executable that loads them, so it has to export them.
+     set_target_properties(${target} PROPERTIES ENABLE_EXPORTS TRUE WINDOWS_EXPORT_ALL_SYMBOLS TRUE)
++    if(MINGW)
++        # WINDOWS_EXPORT_ALL_SYMBOLS is MSVC's: MinGW's linker exports nothing
++        # from a program by itself, which leaves it without an import library
++        # for the overlay libraries to link against.
++        target_link_options(${target} PRIVATE "LINKER:--export-all-symbols")
++        # The stall sampler's symbol names (host/perf/frame_stats.cpp); MSVC
++        # links dbghelp from that file's #pragma comment(lib), MinGW does not.
++        target_link_libraries(${target} PRIVATE dbghelp)
++    endif()
+ 
+     # The NID table is compiled in, so the program reads nothing from the
+     # checkout it was built in. A profile may add its own rows in
+-- 
+2.53.0.windows.1
+
