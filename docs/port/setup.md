@@ -6,7 +6,10 @@ files, builds the recompiled port and makes a desktop shortcut. This page covers
 and what to do when something goes wrong. The short version is in the [README](../../README.md#quick-start), and
 the build steps it automates are in [port/README.md](../../port/README.md).
 
-A download that needs no Visual Studio, Python or Git is planned. Until then, the port is built on your PC.
+**To play, you do not need this page:** the Windows setup on the
+[releases page](https://github.com/VCKing101/Dissidia012-pc/releases) installs the port from your ISO with nothing
+else installed first (README, "Quick start"). `setup.ps1` is for building from source: following the latest
+changes, developing the port, or making the Steam Deck package.
 
 ## What you need
 

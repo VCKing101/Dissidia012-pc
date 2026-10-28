@@ -18,7 +18,7 @@ game's executable and overlays.
   fallbacks. Message, save-data and keyboard dialogs are drawn by the port. Expect rough edges; see the
   [bring-up log](docs/port/bring-up-log.md).
 - **Steam Deck:** plays through Proton as a non-Steam game, built on a Windows PC (`setup.ps1 -Deck`; see
-  [docs/port/steam-deck.md](docs/port/steam-deck.md)).
+  [docs/port/steam-deck.md](docs/port/steam-deck.md)). The Windows setup has not been tried on the Deck.
 - **Linux (native):** untested. PortableKit supports it, but this port has not been built natively there yet.
 - **Matching decompilation:** a few hundred functions are matching C; most of the game is still machine code. See the
   [decompilation notes](docs/decomp/README.md) and the [progress report](docs/decomp/progress.md).
@@ -88,8 +88,30 @@ without the row; set it back to `1` to bring it back. `D012_LOCAL_VERSUS=0` does
 
 ## Quick start (Windows)
 
-The port is built on your PC from this repository and your own copy of the game. One script does it all. A
-download that needs no build tools is planned.
+**1. Download** `Dissidia012-PC-Setup-<version>.exe` from the
+[latest release](https://github.com/VCKing101/Dissidia012-pc/releases). Nothing else needs to be installed first.
+
+**2. Have your game ready:** your own USA disc image (**ULUS10566**), as an `.iso` file.
+
+**3. Run the setup.** It is not code-signed, so Windows may say "Windows protected your PC": choose **More info**,
+then **Run anyway**. The wizard asks where to install (no administrator rights needed) and for your ISO, then sets the
+game up from it: it decrypts the game's program and compiles the game's code for your PC with the compiler that comes
+with it. That takes a few minutes (about 4 on a recent 8-core PC). Nothing is downloaded, and nothing made from your
+disc leaves your PC. Tick **Battle BGM Maker** if you want to make your own music mods.
+
+**4. Play** with the "Dissidia 012 (PC port)" shortcut in the Start menu (and on the desktop, if you chose it). Esc,
+or L3 + R3 on a controller, opens the port's menu. Your saves are in `data\ms0` in the install folder, and mods go in
+`data\mods` (the Start menu has a shortcut to it).
+
+**To update:** run the new release's setup and install into the same folder. Your saves, settings and mods stay, and
+the game's code is compiled again only when the new version needs it.
+
+You need Windows 10 or 11 (64-bit), a graphics driver with Vulkan (any GPU from about 2016 on) and about 2.5 GB of
+free disk space.
+
+### Building from source
+
+To build the port yourself, or to follow the latest changes, `setup.ps1` builds it from this repository and your ISO.
 
 **1. Install these** (free; the defaults are fine unless noted):
 
@@ -97,12 +119,9 @@ download that needs no build tools is planned.
   **Desktop development with C++** (or Build Tools 2022 with the same workload).
 - [Python](https://www.python.org/downloads/windows/) 3.10 or newer. Tick "Add python.exe to PATH".
 - [Git for Windows](https://git-scm.com/download/win).
-- An up-to-date graphics driver (Vulkan support: any GPU from about 2016 on).
 - About 5 GB of free disk space.
 
-**2. Have your game ready:** your own USA ISO (**ULUS10566**), as an `.iso` file.
-
-**3. Run the setup** in PowerShell:
+**2. Run the setup** in PowerShell:
 
 ```powershell
 git clone https://github.com/VCKing101/Dissidia012-pc.git
@@ -111,14 +130,12 @@ powershell -ExecutionPolicy Bypass -File .\setup.ps1
 ```
 
 (Or double-click `setup.cmd`.) It checks what is installed, downloads and verifies the dependencies, asks for your
-ISO, checks it, and builds the port. The first time takes about 10 to 30 minutes, most of it compiling.
-
-**4. Play** with the new "Dissidia 012 (PC port)" shortcut on the desktop or in the Start menu. Esc, or L3 + R3 on a
-controller, opens the port's menu. Your saves are in `build/port/data/ms0`, and mods go in `build/port/data/mods`.
+ISO, checks it, and builds the port. The first time takes about 10 to 30 minutes, most of it compiling. It makes the
+same "Dissidia 012 (PC port)" shortcut; saves are in `build/port/data/ms0` and mods in `build/port/data/mods`.
 
 **To update:** `git pull`, then run `setup.ps1` again. It rebuilds only what changed.
 
-Options, what each step does, and troubleshooting: [docs/port/setup.md](docs/port/setup.md). The manual build steps
+The source build's options, what each step does, and troubleshooting: [docs/port/setup.md](docs/port/setup.md). The manual build steps
 for developers are in [`port/README.md`](port/README.md). For the Steam Deck, see
 [docs/port/steam-deck.md](docs/port/steam-deck.md) (`setup.ps1 -Deck` builds its package).
 
