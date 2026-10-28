@@ -252,7 +252,7 @@ unmerged branch `depth-clip`: no visible change here); 0044 the same day for a r
 and PPSSPP (`portablekit_savedata_tests` and both directions checked against PPSSPP 1.20.4). Patches 0055 to 0061
 came from 25 to 26 October for local split-screen versus, made on the worktree branch `local-versus` and moved onto
 `dissidia` when that branch was merged. Patch 0062 came on 28 October for the split halves' field of view, on
-`local-versus` again (the branch `versus-fov` here).
+`local-versus` again (the branch `versus-fov` here), and moved onto `dissidia` when that was merged the same day.
 PortableKit's 21 framework tests pass on the branch and `portablekit_host_check` builds.
 
 ## Recompiled build
