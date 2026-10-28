@@ -2,6 +2,7 @@
 
     python tools/port/deploy_deck.py [--host deck@steamdeck.local] [--dest /home/deck/Games/Dissidia012]
                                      [--identity KEY] [--dry-run] [--local-target DIR] [--no-build] [--rehash]
+                                     [--build-dir DIR]
 
 Defaults for --host, --dest and --identity come from tools/local/deck.json when it exists
 (git-ignored, so the owner's host and key path stay out of the repository):
@@ -11,7 +12,8 @@ Defaults for --host, --dest and --identity come from tools/local/deck.json when 
 Command-line options win over the file.
 
 First builds the release target and refreshes build/port/deck-package/Dissidia012 with
-package_deck.py (--no-build uses the package as it is). Then it compares the package's
+package_deck.py (--no-build uses the package as it is). The release build is the clang one
+when it is configured, else MSVC's (package_deck.py); --build-dir picks another. Then it compares the package's
 SHA-256 manifest with the .deploy-manifest.json the last deploy left in the destination
 and:
 
@@ -335,6 +337,8 @@ def main():
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--local-target", type=Path, help="deploy to this local folder instead of over ssh")
     parser.add_argument("--no-build", action="store_true", help="use the package as it is")
+    parser.add_argument("--build-dir", type=Path, default=package_deck.BUILD_DIR,
+                        help="the release build to package (default: the clang one when configured, else MSVC's)")
     parser.add_argument("--rehash", action="store_true", help="hash the destination's files, not its manifest")
     parser.add_argument("--package", type=Path, default=PACKAGE, help=argparse.SUPPRESS)
     parser.add_argument("--with-mods", action="store_true",
@@ -351,9 +355,10 @@ def main():
 
     package = options.package.resolve()
     if not options.no_build:
-        package_deck.check_release_build(package_deck.BUILD_DIR)
-        package_deck.build_release(package_deck.BUILD_DIR)
-        package = package_deck.assemble(package_deck.BUILD_DIR, package_deck.OUT_DIR, package_deck.GAME_DIR, False)
+        build_dir = options.build_dir if options.build_dir.is_absolute() else ROOT / options.build_dir
+        package_deck.check_release_build(build_dir)
+        package_deck.build_release(build_dir)
+        package = package_deck.assemble(build_dir, package_deck.OUT_DIR, package_deck.GAME_DIR, False)
     if not (package / package_deck.EXE_NAME).exists():
         raise SystemExit(f"deploy: no package at {package} (run tools/port/package_deck.py)")
 

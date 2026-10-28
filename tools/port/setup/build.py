@@ -239,7 +239,7 @@ def ensure_release(state):
     info("compiling the release build for the Steam Deck (the first time as long as the main build)")
     build(RELEASE, ninja_jobs, "release build", "setup-build-release.log")
     check_outputs(RELEASE)
-    run([sys.executable, ROOT / "tools/port/package_deck.py"], "setup-package-deck.log")
+    run([sys.executable, ROOT / "tools/port/package_deck.py", "--build-dir", RELEASE], "setup-package-deck.log")
     log = (ROOT / "build/port/logs/setup-package-deck.log").read_text(encoding="utf-8", errors="replace")
     for line in log.splitlines():
         if line.startswith("package:"):

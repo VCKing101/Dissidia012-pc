@@ -92,6 +92,21 @@ first build compiles the whole corpus and takes several minutes.
 nothing on this PC. A release build runs its recompiled code only: no interpreter fallback (as
 `PSPRECOMP_NO_INTERPRETER=1` does in `play_d012.ps1`).
 
+**Faster: the clang release build.** With llvm-mingw unpacked in `tools/local` (as for the installer build,
+[port/README.md](../../port/README.md)), the same release built with clang runs the game's code about three times
+faster than MSVC's, which compiles it without inlining. The package and the deploy use it whenever it is configured
+(`--build-dir` picks another):
+
+```powershell
+.\tools\port\pk_cmake_mingw.cmd -S port -B tools/local/port/build-d012-release-clang -DPORTABLEKIT_RELEASE=ON `
+    "-DD012_PORTABLEKIT_DIR=$PWD/tools/local/port/PortableKit" `
+    "-DD012_WORK_DIR=$PWD/build/port/recomp" -DPSPRECOMP_GENERATED_OPT_LEVEL=1 -DPSPRECOMP_GENERATED_JOBS=8
+.\tools\port\pk_cmake_mingw.cmd --build tools/local/port/build-d012-release-clang -j8
+```
+
+`-O1` is the installer's level too: about 3 minutes to compile here, and `-O2` is barely faster for over three times
+the compile.
+
 ## 4. First deploy
 
 The Deck must be on and awake (Desktop or Game Mode), on the same network.

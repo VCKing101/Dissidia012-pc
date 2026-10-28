@@ -2,11 +2,13 @@
 
     python tools/port/package_deck.py [--build] [--build-dir DIR] [--out DIR] [--game-dir DIR] [--copy-iso]
 
-Makes build/port/deck-package/Dissidia012/ from the release build
-(tools/local/port/build-d012-release, configured with PORTABLEKIT_RELEASE=ON):
+Makes build/port/deck-package/Dissidia012/ from the release build, configured with
+PORTABLEKIT_RELEASE=ON: tools/local/port/build-d012-release-clang (llvm-mingw, game code
+about three times faster) when it is configured, else tools/local/port/build-d012-release
+(MSVC, what setup.ps1 -Deck makes; docs/port/steam-deck.md):
 
     Dissidia012/D012Native.exe        the program
-    Dissidia012/*.dll                 SDL3 and FFmpeg
+    Dissidia012/*.dll                 SDL3 and FFmpeg (and libc++, libunwind from clang)
     Dissidia012/overlays/*.dll        the recompiled overlay libraries
     Dissidia012/licenses/             FFmpeg's, SDL's and PortableKit's licence texts
     Dissidia012/dissidia012.ico       the launcher icon, if build/port/launcher has it (for Steam)
@@ -22,7 +24,8 @@ data/ is never emptied or overwritten. No saves and no mods are ever put in it: 
 script refuses to go on if data/ holds ms0/ or mods/ (a run from the package folder
 would have made them), so the package stays clean for deploy_deck.py.
 
---build first builds the release target with tools/port/pk_cmake.cmd. --copy-iso copies
+--build first builds the release target with tools/port/pk_cmake.cmd, or pk_cmake_mingw.cmd
+for a clang build. --copy-iso copies
 the disc image instead of hard-linking it. The package holds game code and data: it
 stays in the ignored build/ and goes nowhere but the owner's Deck.
 """
@@ -36,7 +39,9 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-BUILD_DIR = ROOT / "tools/local/port/build-d012-release"
+MSVC_BUILD_DIR = ROOT / "tools/local/port/build-d012-release"
+CLANG_BUILD_DIR = ROOT / "tools/local/port/build-d012-release-clang"
+BUILD_DIR = CLANG_BUILD_DIR if (CLANG_BUILD_DIR / "CMakeCache.txt").exists() else MSVC_BUILD_DIR
 OUT_DIR = ROOT / "build/port/deck-package"
 GAME_DIR = ROOT / "build/port/game"
 PACKAGE_NAME = "Dissidia012"
@@ -107,8 +112,14 @@ def place_iso(source, target, copy):
     return "copy"
 
 
+def is_clang_build(build_dir):
+    cache = (build_dir / "CMakeCache.txt").read_text(encoding="utf-8", errors="replace")
+    return any(line.startswith("CMAKE_CXX_COMPILER:") and "clang" in line for line in cache.splitlines())
+
+
 def build_release(build_dir):
-    command = ["cmd", "/c", str(ROOT / "tools/port/pk_cmake.cmd"), "--build", str(build_dir), "-j4"]
+    wrapper = "tools/port/pk_cmake_mingw.cmd" if is_clang_build(build_dir) else "tools/port/pk_cmake.cmd"
+    command = ["cmd", "/c", str(ROOT / wrapper), "--build", str(build_dir), "-j4"]
     print("package: building", build_dir)
     result = subprocess.run(command, cwd=ROOT)
     if result.returncode != 0:
