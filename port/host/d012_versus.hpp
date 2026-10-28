@@ -47,6 +47,13 @@ void note_split_frame(bool split);
 // A versus battle drawn split within the last few pad reads.
 [[nodiscard]] bool split_recently();
 
+// The split halves' field of view, in percent of the game's own: the menu's
+// Video page, kept as settings.ini's game.versus_fov (100 when it is not
+// there). D012_VERSUS_FOV overrides it for a run.
+constexpr int kSplitFovMin = 80;
+constexpr int kSplitFovMax = 150;
+[[nodiscard]] int split_fov_percent();
+
 // The pad-read wrapper: controller 2 into raw pad 1, and into the game's own
 // pad while the opponent is picked. The opponent's AI-mode override goes in
 // from this file's static initialiser.

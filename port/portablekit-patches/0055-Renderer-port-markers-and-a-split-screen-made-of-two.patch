@@ -1,7 +1,7 @@
 From 098e9e8c13c3425c0fada5a59a718762a1828cac Mon Sep 17 00:00:00 2001
 From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
 Date: Sun, 25 Oct 2026 12:43:35 +1030
-Subject: [PATCH 55/61] Renderer: port markers and a split screen made of two
+Subject: [PATCH 55/62] Renderer: port markers and a split screen made of two
  views
 
 A profile can write a GE NOP whose data has 0xA5 in its top byte into a

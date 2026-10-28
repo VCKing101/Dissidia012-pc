@@ -979,6 +979,49 @@ time, no pipelines; the owner found them gone in the next session, after the dis
   missing (written as 1, versus on), 0 (off, Battle Mode with its three stock rows, `key_off_menu/`), 0 with
   `D012_LOCAL_VERSUS=1` (on), 1 (on).
 
+## 7.14 The halves' framing and field of view (28 October 2026)
+
+The owner and players found the split halves cut off the fighters too easily, their own one included.
+
+- **The cause.** Each half shows columns 120 to 360 of its view (2.5), but the lock-on camera (mode 1, update
+  `battle:0x08B40CDC`) turns and pulls back to keep the fighters inside frustums of the whole 480x272 screen: three
+  calls of `main:0x08882958(frustum, view, f12 field of view in degrees, f13 aspect, f14 near, f15 far)` (returning
+  to `0x08B40EC8`, `0x08B40F10`, `0x08B40F4C`), with the aspect 480/272 (`0x3FE1E1E2`) written into the code and the
+  angle the camera's `+0xD0` times rows `0x4C`, `0x44`, `0x48` of its table. Its tests (`main:0x08882D78`, outcode
+  bits 1 and 2 left and right) then see a fighter as in frame when the half crops it away. V. Two other frustums
+  with that aspect are left alone: the lock-on cursor's (`battle:0x08B41BDC`, from the camera update for the
+  on-screen camera) and one at `battle:0x08B0FE78` (in `0x08B0FD08`, not traced).
+- **The field of view.** `main:0x08873500` builds the projection with sceGumPerspective from its words: the angle
+  in degrees (`+0`, set by `main:0x0887358C`), the aspect, near and far. The camera update sets the angle at
+  `battle:0x08B3D25C` from the blended camera's `+0x140` (the split task does the same for view 2). V.
+- **Built** (`d012_split_view.cpp`). The camera update (`run_camera_update_thunk`) marks a frame that will be split
+  (the last one was, with no EX Burst or ending since). Within it, an override of `0x08882958` gives the three
+  framing frustums the half's aspect, 240/272, and an override of `0x0887358C` scales the angle of the call from
+  `0x08B3D25C`. The split task scales view 2's angle, and the framing frustums' angle is scaled too, so the camera
+  frames for the view it draws. Everything that places from the view's matrices (the lock-on cursors, the damage
+  numbers, effects, interpolation) follows it. `D012_SPLIT_FRAMING=0` leaves the game's aspect.
+- **The setting.** **Split-screen field of view**, 80% to 150% in steps of 5, at the end of the menu's Video page
+  (PortableKit patch 0062, `ui::add_menu_rows`, a port's own rows on that page), kept as `game.versus_fov` in
+  `settings.ini` (100 when it is not there) and taking effect at once. `D012_VERSUS_FOV` overrides it for a run.
+  The owner's call: it stays at 100% by default.
+- **Checked.** The same scripted fight on Old Chaos Shrine (`versus_shots.py 1 --roam`: both players strafe, jump,
+  dash and attack around each other for 3600 frames, unthrottled), with `D012_TRACE_FRAMING=1` counting the split
+  frames where a fighter's position (fighter `+0x30`, through the view's view x projection) lies outside its half:
+
+  | 4500 split frames | own fighter, view 1 | other, view 1 | own fighter, view 2 | other, view 2 |
+  | --- | --- | --- | --- | --- |
+  | Framing as before (`D012_SPLIT_FRAMING=0`) | 1499 | 1045 | 1321 | 638 |
+  | Framing for the half | 313 | 181 | 61 | 126 |
+  | Framing for the half, field of view 120% | 311 | 239 | 42 | 107 |
+  | Framing for the half, field of view 150% | 130 | 162 | 53 | 124 |
+
+  Camera-relative movement makes the three runs part ways, so the numbers are for the same inputs, not the same
+  frames. The captures (`build/port/versus/framing/`) show the camera further back with the fix, and at 120% and
+  150% more of the stage with nothing missing or misplaced that they show. The menu row was checked in a run: it
+  shows, moves in steps, and writes the key. Not checked: other stages, whether the stage's culling ever drops scenery at
+  the top and bottom edges of a wider view, and the frames still outside (mostly player 1's, which jumps and dashes
+  more in the route; the chase and special camera, mode 2, has no framing test).
+
 ## 8. For later: two copies over the game's ad hoc versus
 
 The owner wants this route for online play and matchmaking, much later. What was found:

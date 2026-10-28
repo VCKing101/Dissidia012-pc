@@ -1,7 +1,7 @@
 From ef32fcfe43e384941656bd13121078d5de5a5157 Mon Sep 17 00:00:00 2001
 From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
 Date: Sun, 25 Oct 2026 13:18:13 +1030
-Subject: [PATCH 56/61] Input: a second player's gamepad for ports with local
+Subject: [PATCH 56/62] Input: a second player's gamepad for ports with local
  multiplayer
 
 While a port wants one (VulkanRenderer::set_second_pad_wanted, or

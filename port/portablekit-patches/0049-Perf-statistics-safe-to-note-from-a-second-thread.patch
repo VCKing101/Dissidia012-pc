@@ -1,7 +1,7 @@
 From 3b47ed8213e73f3b0492828d98fbe406fff6ecd8 Mon Sep 17 00:00:00 2001
 From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
 Date: Thu, 22 Oct 2026 19:00:51 +1030
-Subject: [PATCH 49/53] Perf: statistics safe to note from a second thread
+Subject: [PATCH 49/62] Perf: statistics safe to note from a second thread
 
 The frame statistics, the CSV and the overlay's readings are kept behind one
 lock, so a thread other than the emulation thread (the renderer's present

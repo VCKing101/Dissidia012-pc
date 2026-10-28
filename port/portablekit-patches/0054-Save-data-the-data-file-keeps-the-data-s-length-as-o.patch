@@ -1,7 +1,8 @@
 From 4799bb3bb9293cabfa23114961049d1482cef8f8 Mon Sep 17 00:00:00 2001
 From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
 Date: Mon, 26 Oct 2026 13:13:41 +1030
-Subject: [PATCH] Save data: the data file keeps the data's length, as on a PSP
+Subject: [PATCH 54/62] Save data: the data file keeps the data's length, as on
+ a PSP
 
 An encrypted save's data file was padded with zeros to a multiple of 16
 bytes, and its SAVEDATA_FILE_LIST hash was taken over the file as stored.

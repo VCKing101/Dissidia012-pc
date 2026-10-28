@@ -1,7 +1,7 @@
 From 8f4addcd42abe160c6427598d55d9c1c51d1fb62 Mon Sep 17 00:00:00 2001
 From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
 Date: Wed, 21 Oct 2026 23:32:17 +1030
-Subject: [PATCH 46/53] Runtime: an overlay swapped out keeps its registrations
+Subject: [PATCH 46/62] Runtime: an overlay swapped out keeps its registrations
 
 Swapping one 1.5 MB overlay for another dropped 390,000 registrations
 (a walk over the whole table, an erase and a freed name each) and

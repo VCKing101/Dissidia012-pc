@@ -1,7 +1,7 @@
 From 2b83ebedf07cacce6fc110a45725f58e634ae522 Mon Sep 17 00:00:00 2001
 From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
 Date: Wed, 21 Oct 2026 23:32:33 +1030
-Subject: [PATCH 48/53] Frame pacing: presents between flips fall in the idle
+Subject: [PATCH 48/62] Frame pacing: presents between flips fall in the idle
  time
 
 With frame interpolation the presents are made on the emulation thread.

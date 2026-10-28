@@ -1,0 +1,80 @@
+From d2d0215087da7bbb51e402d89ee55ba43bdb1f4e Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Wed, 28 Oct 2026 12:38:50 +1030
+Subject: [PATCH 62/62] Menu: rows a port adds to the Video page
+
+ui::add_menu_rows(rows): a port's own settings at the end of the Video
+page, after PortableKit's. `rows` is called each frame the page shows and
+draws its rows with widgets.hpp (section, choice_row, slider_row...); the
+port keeps what they change itself, in settings.ini keys that
+settings::save() already leaves alone. "Restore video defaults" does not
+touch them.
+
+Used by Dissidia 012 for its split-screen field of view. Checked on
+Windows with Dissidia 012: the row shows on the Video page, moves with
+left/right and the port's key is written. Not checked: another game, the
+touch interface.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/ui/menu.cpp | 11 +++++++++++
+ host/ui/ui.hpp   |  7 +++++++
+ 2 files changed, 18 insertions(+)
+
+diff --git a/host/ui/menu.cpp b/host/ui/menu.cpp
+index 2e8c18f..1b830d9 100644
+--- a/host/ui/menu.cpp
++++ b/host/ui/menu.cpp
+@@ -90,6 +90,12 @@ RowOptions options_for(const char *key, std::string description) {
+ 
+ float font_gap() { return Layer::get().font_size() * 0.5f; }
+ 
++// The port's own rows at the end of the Video page (add_menu_rows).
++std::vector<void (*)()> &port_rows() {
++    static std::vector<void (*)()> list;
++    return list;
++}
++
+ int cycle(int value, int delta, int count) { return ((value + delta) % count + count) % count; }
+ 
+ // Percent-encodes a path for a file:// URL.
+@@ -416,6 +422,7 @@ void Menu::video() {
+         }
+     }
+     font_rows();
++    for (void (*rows)() : port_rows()) rows();
+     ImGui::Dummy({0.0f, font_gap()});
+     if (button_row("Restore video defaults", {false, {}, std::string("Every setting on this page back to how ") + portablekit::game().project_name + " ships."})) {
+         const settings::Settings &d = settings::defaults();
+@@ -1577,6 +1584,10 @@ void add_game_overlay(bool (*visible)(), void (*draw)()) {
+     if (visible != nullptr && draw != nullptr) game_overlays().push_back({visible, draw});
+ }
+ 
++void add_menu_rows(void (*rows)()) {
++    if (rows != nullptr) port_rows().push_back(rows);
++}
++
+ void draw_over_game() {
+     Layer &layer = Layer::get();
+     if (!layer.attached()) return;
+diff --git a/host/ui/ui.hpp b/host/ui/ui.hpp
+index 8733bbf..20ce284 100644
+--- a/host/ui/ui.hpp
++++ b/host/ui/ui.hpp
+@@ -38,6 +38,13 @@ void set_status_overlay(bool (*visible)(), void (*draw)());
+ // game_picture(). The game's dialogs and the menu, when open, are drawn
+ // instead. Several may be added; they are drawn in the order added.
+ void add_game_overlay(bool (*visible)(), void (*draw)());
++// Settings of the port's own, at the end of the menu's Video page, after
++// PortableKit's: `rows` is called each frame the page is shown and draws its
++// rows with widgets.hpp (a section(), then choice_row, toggle_row,
++// slider_row...). It keeps what they change itself; settings::save()
++// leaves keys it does not know in settings.ini alone. "Restore video
++// defaults" does not touch them.
++void add_menu_rows(void (*rows)());
+ // Where the game's 480x272 picture was last drawn, in ImGui's coordinates
+ // (window coordinates): a point (x, y) of the PSP's screen is at
+ // (left + x * width / 480, top + y * height / 272). The whole PSP screen
+-- 
+2.53.0.windows.1
+

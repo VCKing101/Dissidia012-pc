@@ -239,6 +239,7 @@ fresh clone of `33800c4`, apply them with `git checkout -b dissidia 33800c4` and
 | 0059 | `Runtime::registered_function`: the recompiled function registered at an address | An override that only sometimes replaces a function runs the original otherwise |
 | 0060 | Frame interpolation on a split screen: each draw carries its view, pairs within it and blends with its own view's camera; the replay draws each view into its half; the halves are moved, not scaled | 60 fps on both halves (local-versus.md, 7.9) |
 | 0061 | The disc image read through once in the background from launch, at background I/O priority on Windows, so the file cache holds it; `<prefix>_NO_DISC_READ_THROUGH`. `<prefix>_TRACE_IO` gives each read's time | A cold hard drive stalled the first battle frame (116 ms) on the music's first block ([performance.md](../docs/port/performance.md), section 10) |
+| 0062 | `ui::add_menu_rows`: a port's own settings rows at the end of the menu's Video page | The split-screen field of view slider (local-versus.md, 7.14) |
 
 Patches 0012 and 0013 were made on a separate worktree branch during the recompiled-build work and merged onto
 `dissidia` on 18 October 2026; patches 0014 and 0015 followed the same day (bring-up log, section "Stencil"), and
@@ -250,7 +251,8 @@ diagonals that felt dead on a real controller. Patches 0036 to 0039 came on 20 O
 unmerged branch `depth-clip`: no visible change here); 0044 the same day for a report from the Steam Deck, and 0045 to 0048 for the frame-rate dips; 0049 to 0053 on 22 October for the present thread. Patch 0054 came on 26 October, for a player whose save would not move between the port
 and PPSSPP (`portablekit_savedata_tests` and both directions checked against PPSSPP 1.20.4). Patches 0055 to 0061
 came from 25 to 26 October for local split-screen versus, made on the worktree branch `local-versus` and moved onto
-`dissidia` when that branch was merged.
+`dissidia` when that branch was merged. Patch 0062 came on 28 October for the split halves' field of view, on
+`local-versus` again (the branch `versus-fov` here).
 PortableKit's 21 framework tests pass on the branch and `portablekit_host_check` builds.
 
 ## Recompiled build

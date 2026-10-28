@@ -1,7 +1,7 @@
 From 6fa810bec5908ae3e3dea59d983d5d0f3efaf174 Mon Sep 17 00:00:00 2001
 From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
 Date: Thu, 22 Oct 2026 19:01:07 +1030
-Subject: [PATCH 50/53] Renderer: presents on a thread of their own
+Subject: [PATCH 50/62] Renderer: presents on a thread of their own
 
 With frame interpolation the presents between flips were made on the
 emulation thread, in the kernel's idle time or wherever the game's code let

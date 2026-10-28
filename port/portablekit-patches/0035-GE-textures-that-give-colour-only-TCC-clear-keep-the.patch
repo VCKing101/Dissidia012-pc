@@ -1,7 +1,7 @@
 From e8143854858baeb74b72a935565be110d10dac53 Mon Sep 17 00:00:00 2001
 From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
 Date: Tue, 20 Oct 2026 21:33:55 +1030
-Subject: [PATCH 35/53] GE: textures that give colour only (TCC clear) keep the
+Subject: [PATCH 35/62] GE: textures that give colour only (TCC clear) keep the
  vertex alpha
 
 The texture function's TCC bit (bit 8) says whether the texture gives

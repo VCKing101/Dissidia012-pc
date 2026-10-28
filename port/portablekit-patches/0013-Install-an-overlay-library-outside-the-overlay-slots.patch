@@ -1,7 +1,7 @@
 From 686838a41f6e96c90efd69c6fe4542426b7f339e Mon Sep 17 00:00:00 2001
 From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
 Date: Sun, 18 Oct 2026 18:35:54 +1030
-Subject: [PATCH 13/53] Install an overlay library outside the overlay slots
+Subject: [PATCH 13/62] Install an overlay library outside the overlay slots
 
 install_overlay_for only looked at misses inside the profile's overlay
 slots. A module that a game (or its profile) loads at the same fixed

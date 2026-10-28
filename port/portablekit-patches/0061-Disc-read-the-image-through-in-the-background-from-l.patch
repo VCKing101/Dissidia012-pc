@@ -1,7 +1,7 @@
 From 01e710314046f15c07fa4ea8f435dc18e1f75814 Mon Sep 17 00:00:00 2001
 From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
 Date: Mon, 26 Oct 2026 08:54:29 +1030
-Subject: [PATCH 61/61] Disc: read the image through in the background from
+Subject: [PATCH 61/62] Disc: read the image through in the background from
  launch
 
 A thread reads the whole disc image once at the system's background I/O

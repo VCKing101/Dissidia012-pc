@@ -1,7 +1,7 @@
 From a1d1c22884cc0c227dd339d53d59179d6b42b997 Mon Sep 17 00:00:00 2001
 From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
 Date: Thu, 22 Oct 2026 19:17:40 +1030
-Subject: [PATCH 52/53] Present thread: the last stretch of a wait spun without
+Subject: [PATCH 52/62] Present thread: the last stretch of a wait spun without
  yielding
 
 With two CPUs to share (a handheld's game thread busy), a yield in the wait's

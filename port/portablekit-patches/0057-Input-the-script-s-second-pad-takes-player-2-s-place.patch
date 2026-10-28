@@ -1,7 +1,7 @@
 From 1185b9ff328871cae7e07445be7d2c9a2a5ae028 Mon Sep 17 00:00:00 2001
 From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
 Date: Sun, 25 Oct 2026 13:53:51 +1030
-Subject: [PATCH 57/61] Input: the script's second pad takes player 2's place
+Subject: [PATCH 57/62] Input: the script's second pad takes player 2's place
  from a real one
 
 With a second player wanted, the gamepad scan stopped at the first spare pad

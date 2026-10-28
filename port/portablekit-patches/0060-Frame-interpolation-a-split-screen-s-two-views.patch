@@ -1,7 +1,7 @@
 From 888b820f7be19e6d0ed0bd7418a2a25a3c099c13 Mon Sep 17 00:00:00 2001
 From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
 Date: Mon, 26 Oct 2026 08:54:29 +1030
-Subject: [PATCH 60/61] Frame interpolation: a split screen's two views
+Subject: [PATCH 60/62] Frame interpolation: a split screen's two views
 
 Each draw now carries the view of a split frame it belongs to (before the
 left marker, between the markers, after the compose). Draws pair only within

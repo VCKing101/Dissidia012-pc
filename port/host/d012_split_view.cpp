@@ -142,6 +142,9 @@ struct State {
     // places the HUD, until a frame that is not split.
     bool split_active = false;
     bool cursor2 = false;  // player 2's cursor part is set up, with a sprite
+    // Inside the camera update of a frame that will be split
+    // (split_frame_expected): the cameras frame for a half.
+    bool split_camera = false;
     // An EX Burst (run_ex_burst_start): 1 from its start until either
     // fighter has the battle-event bit, 2 while one has it; 0 otherwise.
     // `ex_burst_since` counts split-task frames in state 1.
@@ -951,9 +954,131 @@ void step_fighter_fade_view2(Guest *g, gaddr manager) {
     }
 }
 
+// The split halves' framing (docs/port/local-versus.md, 7.14). Each half
+// shows the middle 240 of its view's 480 columns, but the lock-on camera
+// (mode 1, battle 0x08B40CDC) turns and pulls back to keep the fighters inside
+// a frustum of the whole 480x272 screen: main 0x08882958(frustum, view, f12
+// field of view in degrees, f13 aspect, f14 near, f15 far), with the aspect
+// 480/272 written into the code. On a split frame those three frustums get
+// the half's aspect, so the camera keeps the fighters inside the half.
+// D012_SPLIT_FRAMING=0 leaves the game's aspect, as before.
+//
+// The halves' field of view (versus::split_fov_percent) scales the angle the
+// camera update gives the projection (battle 0x08B3D25C, main 0x0887358C),
+// view 2's in the split task, and the angle of those frustums.
+constexpr std::uint32_t kFrustumBuild = 0x08882958u;
+constexpr std::uint32_t kFramingCalls[] = {0x08B40EC8u, 0x08B40F10u, 0x08B40F4Cu};  // their return addresses
+constexpr std::uint32_t kViewFovCall = 0x08B3D264u;  // the camera update's call of kProjectionSetFov returns here
+constexpr float kHalfAspect = 240.0f / 272.0f;
+
+bool framing_fix() {
+    static const bool value = [] {
+        const char *text = std::getenv("D012_SPLIT_FRAMING");
+        return text == nullptr || std::strcmp(text, "0") != 0;
+    }();
+    return value;
+}
+
+float fov_scale() { return static_cast<float>(versus::split_fov_percent()) / 100.0f; }
+
+// Whether the camera update about to run is for a split frame: the last frame
+// was split, and no EX Burst or ending has made the next one full screen.
+bool split_frame_expected(Guest *g) {
+    const State &s = state();
+    if (!versus::active() || !s.split_active || s.ex_burst != 0u) return false;
+    const std::uint32_t phase = battle_phase(g);
+    return phase == 0xFFFFFFFFu || phase < 8u;
+}
+
+void run_frustum_build(Guest *g, const decomp::CallState &in, GuestRegs &out) {
+    GuestRegs regs{};
+    for (int i = 0; i < 8; ++i) regs.a[i] = in.gpr[4 + i];
+    for (int i = 0; i < 4; ++i) regs.f[i] = in.fpr[12 + i];
+    if (state().split_camera &&
+        std::find(std::begin(kFramingCalls), std::end(kFramingCalls), in.gpr[31]) != std::end(kFramingCalls)) {
+        regs.f[0] *= fov_scale();
+        if (framing_fix()) regs.f[1] = kHalfAspect;
+    }
+    decomp::call_original(g, kFrustumBuild, regs);
+    out = regs;
+}
+
+// D012_TRACE_FRAMING=1: how often each fighter's position (fighter +0x30) is
+// outside the half that shows a view (columns 120 to 360 of its 480), from
+// the view's view x projection (gfx +0x830), counted over split frames and
+// logged every 300.
+struct FramingCount {
+    std::uint64_t frames = 0;
+    std::uint64_t outside[2][2]{};  // [view][fighter: 0 the view's own player's, 1 the other]
+    float least[2][2]{{480.0f, 480.0f}, {480.0f, 480.0f}};
+    float most[2][2]{{0.0f, 0.0f}, {0.0f, 0.0f}};
+};
+
+bool trace_framing() {
+    static const bool value = [] {
+        const char *text = std::getenv("D012_TRACE_FRAMING");
+        return text != nullptr && *text != '\0' && std::strcmp(text, "0") != 0;
+    }();
+    return value;
+}
+
+FramingCount &framing_count() {
+    static FramingCount count;
+    return count;
+}
+
+// A point's column in a 480-wide view, through the view x projection at
+// `matrix` (four columns of four floats, as libGu keeps them); -1 behind the
+// camera.
+float view_column(Guest *g, gaddr matrix, gaddr point) {
+    float m[16], p[3];
+    std::memcpy(m, g_ptr(g, matrix, 64u), 64u);
+    std::memcpy(p, g_ptr(g, point, 12u), 12u);
+    const float x = p[0] * m[0] + p[1] * m[4] + p[2] * m[8] + m[12];
+    const float w = p[0] * m[3] + p[1] * m[7] + p[2] * m[11] + m[15];
+    return w > 0.0f ? 240.0f + 240.0f * x / w : -1.0f;
+}
+
+void count_framing(Guest *g, gaddr graphics, int view) {
+    if (!trace_framing()) return;
+    const gaddr field = g_ld32(g, kBattleManager);
+    if (field == 0u) return;
+    FramingCount &c = framing_count();
+    for (int i = 0; i < 2; ++i) {
+        // The view's own player's fighter first: player 1's for view 1.
+        const gaddr fighter = g_ld32(g, field + ((i == 0) == (view == 0) ? 0x38u : 0x3Cu));
+        if (fighter == 0u) continue;
+        const float column = view_column(g, graphics + kViewProjection, fighter + 0x30u);
+        if (column < 120.0f || column > 360.0f) ++c.outside[view][i];
+        c.least[view][i] = std::min(c.least[view][i], column);
+        c.most[view][i] = std::max(c.most[view][i], column);
+    }
+    if (view != 1) return;
+    if (++c.frames % 300u != 0u) return;
+    std::printf("[framing] %llu split frames, fov %d%%, framing fix %s: outside its half, view 1 player 1 %llu "
+                "player 2 %llu, view 2 player 2 %llu player 1 %llu; columns view 1 %.0f..%.0f / %.0f..%.0f, "
+                "view 2 %.0f..%.0f / %.0f..%.0f\n",
+                static_cast<unsigned long long>(c.frames), versus::split_fov_percent(), framing_fix() ? "on" : "off",
+                static_cast<unsigned long long>(c.outside[0][0]), static_cast<unsigned long long>(c.outside[0][1]),
+                static_cast<unsigned long long>(c.outside[1][0]), static_cast<unsigned long long>(c.outside[1][1]),
+                c.least[0][0], c.most[0][0], c.least[0][1], c.most[0][1], c.least[1][0], c.most[1][0], c.least[1][1],
+                c.most[1][1]);
+    std::fflush(stdout);
+}
+
+// main 0x0887358C (f12, projection): the projection's field of view, its
+// first word.
+void run_projection_set_fov(Guest *g, const decomp::CallState &in, GuestRegs &) {
+    float fov = in.fpr[12];
+    if (in.gpr[31] == kViewFovCall && state().split_camera) fov *= fov_scale();
+    g_stf(g, in.gpr[4], fov);
+}
+
 void run_camera_update_thunk(Guest *g, const decomp::CallState &, GuestRegs &) {
     const gaddr manager = g_ld32(g, kCameraManager);
+    state().split_camera = split_frame_expected(g);
     g_call1(g, kCameraUpdate, manager);
+    state().split_camera = false;
     if (manager != 0u && versus::active()) step_fighter_fade_view2(g, manager);
 }
 
@@ -1273,6 +1398,7 @@ void run_split_task(Guest *g, const decomp::CallState &in, GuestRegs &) {
     versus::note_split_frame(true);
     set_up_cursor2(g, manager);
 
+    count_framing(g, graphics, 0);
     emit(g, kMarkerSplitLeft);
     ListSwitch list_switch;
     if (list2 != 0u) list_switch = list_to_view2(g, list2);
@@ -1343,7 +1469,7 @@ void run_split_task(Guest *g, const decomp::CallState &in, GuestRegs &) {
     g_call2(g, kViewSetAt, manager, blended + 0x120u);
     g_call2(g, kViewSetUp, manager, blended + 0x130u);
     g_call1(g, kViewBuild, manager);
-    g_call_f4(g, kProjectionSetFov, fov, manager + 0xC0u, 0u, 0u, 0u);
+    g_call_f4(g, kProjectionSetFov, fov * fov_scale(), manager + 0xC0u, 0u, 0u, 0u);
     g_call1(g, kProjectionBuild, manager + 0xC0u);
     const std::uint32_t effects = g_ld32(g, kEffectManager);
     if (effects != 0u) g_call3(g, kEffectCamera, effects, manager, manager + 0xC0u);
@@ -1360,6 +1486,7 @@ void run_split_task(Guest *g, const decomp::CallState &in, GuestRegs &) {
         g_st8(g, manager + 0x8BCu, camera_state_now);
     }
     frame_start_state(g, graphics);
+    count_framing(g, graphics, 1);
     // Player 2's lock-on cursor, by the game's own cursor update, for player
     // 2's fighter while the camera manager holds view 2.
     if (s.cursor2) {
@@ -1694,6 +1821,10 @@ struct Install {
              &run_guide_mode},
             {kSpriteColour, "versus_sprite_colour", decomp::Module::Main, decomp::Returns::Nothing,
              &run_sprite_colour},
+            {kFrustumBuild, "versus_frustum_build", decomp::Module::Main, decomp::Returns::Nothing,
+             &run_frustum_build},
+            {kProjectionSetFov, "versus_projection_set_fov", decomp::Module::Main, decomp::Returns::Nothing,
+             &run_projection_set_fov},
         };
         decomp::add_overrides(overrides, sizeof overrides / sizeof overrides[0], true);
         // Overrides that only trace, there only with their switch.

@@ -1,7 +1,7 @@
 From 7fbdb6eba98a967d56b24ddf0de1caf46f3ea679 Mon Sep 17 00:00:00 2001
 From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
 Date: Wed, 21 Oct 2026 23:32:07 +1030
-Subject: [PATCH 45/53] Perf: a per-frame CSV and a stall sampler
+Subject: [PATCH 45/62] Perf: a per-frame CSV and a stall sampler
 
 <prefix>_PERF_CSV=<file> writes one row per present (interval, what it
 showed: the flip's frame, a blended in-between frame, a frame as it is or

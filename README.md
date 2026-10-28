@@ -79,6 +79,10 @@ controller that goes away pauses the battle until it comes back ([notes](docs/po
 
 ![A split-screen battle: player 1's view on the left, player 2's on the right, each with its own lock-on cursor, and the HUD across both](docs/images/versus-split-battle.png)
 
+Each player's camera keeps both fighters inside their own half of the screen. To see more around them, raise
+**Split-screen field of view** at the end of the menu's Video page (100% is the game's own view, up to 150%); it
+is kept as `game.versus_fov` in `settings.ini`.
+
 `game.local_versus=0` in `settings.ini` (in the data folder, next to your saves' `ms0`) leaves the game as it was,
 without the row; set it back to `1` to bring it back. `D012_LOCAL_VERSUS=0` does the same for one run.
 

@@ -1,7 +1,7 @@
 From cb3f376bc2338f09c9a81e552d3a8789e849bd80 Mon Sep 17 00:00:00 2001
 From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
 Date: Wed, 21 Oct 2026 10:59:49 +1030
-Subject: [PATCH 43/53] GE: environment (shade) mapping, texture map mode 2
+Subject: [PATCH 43/62] GE: environment (shade) mapping, texture map mode 2
 
 Texture map mode 2 (0xC0 bits 0-1) was ignored and drawn with the vertex
 UVs. The vertex shader now makes U and V as (1 + N.L) / 2 from the

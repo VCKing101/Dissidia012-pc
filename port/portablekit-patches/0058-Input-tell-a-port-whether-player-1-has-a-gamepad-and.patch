@@ -1,7 +1,7 @@
 From 0021eb2ee975c0940dc827568c73fa3890b4187c Mon Sep 17 00:00:00 2001
 From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
 Date: Sun, 25 Oct 2026 19:52:44 +1030
-Subject: [PATCH 58/61] Input: tell a port whether player 1 has a gamepad, and
+Subject: [PATCH 58/62] Input: tell a port whether player 1 has a gamepad, and
  unplug the script's first pad
 
 Extension interface 7 adds first_pad_connected(): player 1 has a gamepad,

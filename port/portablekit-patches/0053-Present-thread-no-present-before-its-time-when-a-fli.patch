@@ -1,7 +1,7 @@
 From 81bfc74faed68a27bc846fb78cc70cefbac729d5 Mon Sep 17 00:00:00 2001
 From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
 Date: Thu, 22 Oct 2026 19:48:08 +1030
-Subject: [PATCH 53/53] Present thread: no present before its time when a flip
+Subject: [PATCH 53/62] Present thread: no present before its time when a flip
  moves the grid
 
 A blended present falls about a millisecond after the next flip, which may

@@ -45,9 +45,11 @@
 #if defined(PORTABLEKIT_HAS_RENDERER)
 #include "imgui.h"
 #include "ui/ui.hpp"
+#include "ui/widgets.hpp"
 #endif
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -686,8 +688,59 @@ struct Install {
 } install_overrides;
 
 constexpr const char *kVersusKey = "game.local_versus";
+constexpr const char *kFovKey = "game.versus_fov";
+
+int clamp_fov(int percent) { return std::clamp(percent, kSplitFovMin, kSplitFovMax); }
+
+// The split halves' field of view, in percent: D012_VERSUS_FOV, else
+// settings.ini's game.versus_fov, else 100.
+std::atomic<int> &split_fov() {
+    static std::atomic<int> value = [] {
+        if (const char *text = std::getenv("D012_VERSUS_FOV"); text != nullptr && *text != '\0')
+            return clamp_fov(std::atoi(text));
+        try {
+            const std::filesystem::path dir = portablekit::install::user_data_directory();
+            const portablekit::install::SettingsEntries entries = portablekit::install::read_settings_file(dir);
+            if (const auto found = entries.find(kFovKey); found != entries.end() && !found->second.empty())
+                return clamp_fov(std::atoi(found->second.c_str()));
+        } catch (const std::exception &e) {
+            std::cerr << "[versus] settings.ini not read for " << kFovKey << ": " << e.what() << "\n";
+        }
+        return 100;
+    }();
+    return value;
+}
+
+#if defined(PORTABLEKIT_HAS_RENDERER)
+// The menu's Video page: the split halves' field of view, kept in
+// settings.ini as PortableKit keeps its own (it leaves this key alone).
+void menu_rows() {
+    namespace ui = portablekit::ui;
+    ui::section("Local versus");
+    int percent = split_fov().load();
+    ui::RowOptions options;
+    options.description = "How much each half of a two-player split screen shows: 100% is the game's own view. "
+                          "Higher sees more around both fighters, and draws them smaller.";
+    if (const char *text = std::getenv("D012_VERSUS_FOV"); text != nullptr && *text != '\0') {
+        options.disabled = true;
+        options.note = "Set by D012_VERSUS_FOV";
+    }
+    if (!ui::slider_row("Split-screen field of view", percent, kSplitFovMin, kSplitFovMax, 5, "%d%%", options)) return;
+    split_fov().store(clamp_fov(percent));
+    try {
+        const std::filesystem::path dir = portablekit::install::user_data_directory();
+        portablekit::install::SettingsEntries entries = portablekit::install::read_settings_file(dir);
+        entries[kFovKey] = std::to_string(split_fov().load());
+        portablekit::install::write_settings_file(dir, entries);
+    } catch (const std::exception &e) {
+        std::cerr << "[versus] settings.ini not written for " << kFovKey << ": " << e.what() << "\n";
+    }
+}
+#endif
 
 } // namespace
+
+int split_fov_percent() { return split_fov().load(); }
 
 bool enabled() {
     static const bool value = [] {
@@ -774,6 +827,7 @@ void install(portablekit::HleRegistrar &hle) {
     portablekit::ui::add_game_overlay(&hud_visible, &hud_draw);
     portablekit::ui::add_game_overlay(&notice_visible, &notice_draw);
     portablekit::ui::add_game_overlay(&pick_header_visible, &pick_header_draw);
+    portablekit::ui::add_menu_rows(&menu_rows);
 #endif
     if (const portablekit::HleFunction saving = hle.bound_function("sceUtility", kSavedataInitStart); saving) {
         hle.bind("sceUtility", kSavedataInitStart, [saving](psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
