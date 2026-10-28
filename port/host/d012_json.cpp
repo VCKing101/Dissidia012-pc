@@ -1,10 +1,12 @@
 // A small JSON reader (RFC 8259): objects, arrays, strings with escapes
-// (\uXXXX and surrogate pairs to UTF-8), numbers, true, false, null. MIT
-// licence; see port/README.md.
+// (\uXXXX and surrogate pairs to UTF-8), numbers, true, false, null; and a
+// writer in Python's json.dumps layout. MIT licence; see port/README.md.
 
 #include "d012_json.hpp"
 
 #include <charconv>
+#include <cmath>
+#include <cstdio>
 #include <cstdlib>
 
 namespace d012::json {
@@ -267,5 +269,147 @@ const char *Value::kind_name(Kind kind) {
 }
 
 std::optional<Value> parse(std::string_view text, std::string &error) { return Parser(text).document(error); }
+
+namespace {
+
+void write_string(std::string &out, std::string_view text) {
+    out += '"';
+    for (const char c : text) {
+        switch (c) {
+        case '"': out += "\\\""; break;
+        case '\\': out += "\\\\"; break;
+        case '\n': out += "\\n"; break;
+        case '\r': out += "\\r"; break;
+        case '\t': out += "\\t"; break;
+        case '\b': out += "\\b"; break;
+        case '\f': out += "\\f"; break;
+        default:
+            if (static_cast<unsigned char>(c) < 0x20u) {
+                char escape[8];
+                std::snprintf(escape, sizeof escape, "\\u%04x", static_cast<unsigned>(c));
+                out += escape;
+            } else {
+                out += c;
+            }
+        }
+    }
+    out += '"';
+}
+
+// Python's repr of a float: the shortest digits that read back the same, in
+// fixed notation from 1e-4 up to 1e16 and in exponent notation (two digits at
+// least) outside it.
+void write_number(std::string &out, double number) {
+    if (!std::isfinite(number)) {
+        out += "null";  // JSON has no infinity or NaN; the reader never makes one
+        return;
+    }
+    if (number == std::floor(number) && std::fabs(number) < 9007199254740992.0) {
+        out += std::to_string(static_cast<long long>(number));
+        return;
+    }
+    char buffer[64];
+    const auto [end, ec] = std::to_chars(buffer, buffer + sizeof buffer, number, std::chars_format::scientific);
+    const std::string_view text(buffer, static_cast<std::size_t>(end - buffer));
+    const std::size_t e = text.find('e');
+    std::string_view mantissa = text.substr(0u, e);
+    const int exponent = std::atoi(std::string(text.substr(e + 1u)).c_str());
+    const bool negative = mantissa.starts_with('-');
+    if (negative) mantissa.remove_prefix(1u);
+    std::string digits;
+    for (const char c : mantissa)
+        if (c != '.') digits += c;
+    if (negative) out += '-';
+    if (exponent >= -4 && exponent < 16) {
+        if (exponent < 0) {
+            out += "0." + std::string(static_cast<std::size_t>(-exponent - 1), '0') + digits;
+        } else if (static_cast<std::size_t>(exponent) + 1u >= digits.size()) {
+            out += digits + std::string(static_cast<std::size_t>(exponent) + 1u - digits.size(), '0') + ".0";
+        } else {
+            out += digits.substr(0u, static_cast<std::size_t>(exponent) + 1u) + "." +
+                   digits.substr(static_cast<std::size_t>(exponent) + 1u);
+        }
+        return;
+    }
+    out += digits.substr(0u, 1u);
+    if (digits.size() > 1u) out += "." + digits.substr(1u);
+    char exponent_text[16];
+    std::snprintf(exponent_text, sizeof exponent_text, "e%c%02d", exponent < 0 ? '-' : '+', std::abs(exponent));
+    out += exponent_text;
+}
+
+void write_value(std::string &out, const Value &value, int depth) {
+    const auto indent = [&](int level) { out += '\n' + std::string(static_cast<std::size_t>(level) * 2u, ' '); };
+    switch (value.kind) {
+    case Value::Kind::Null: out += "null"; break;
+    case Value::Kind::Bool: out += value.boolean ? "true" : "false"; break;
+    case Value::Kind::Number: write_number(out, value.number); break;
+    case Value::Kind::String: write_string(out, value.text); break;
+    case Value::Kind::Array:
+        if (value.items.empty()) {
+            out += "[]";
+            break;
+        }
+        out += '[';
+        for (std::size_t i = 0; i < value.items.size(); ++i) {
+            if (i > 0u) out += ',';
+            indent(depth + 1);
+            write_value(out, value.items[i], depth + 1);
+        }
+        indent(depth);
+        out += ']';
+        break;
+    case Value::Kind::Object:
+        if (value.members.empty()) {
+            out += "{}";
+            break;
+        }
+        out += '{';
+        for (std::size_t i = 0; i < value.members.size(); ++i) {
+            if (i > 0u) out += ',';
+            indent(depth + 1);
+            write_string(out, value.members[i].first);
+            out += ": ";
+            write_value(out, value.members[i].second, depth + 1);
+        }
+        indent(depth);
+        out += '}';
+        break;
+    }
+}
+
+} // namespace
+
+std::string write(const Value &value) {
+    std::string out;
+    write_value(out, value, 0);
+    return out;
+}
+
+Value string_value(std::string text) {
+    Value value;
+    value.kind = Value::Kind::String;
+    value.text = std::move(text);
+    return value;
+}
+
+Value number_value(double number) {
+    Value value;
+    value.kind = Value::Kind::Number;
+    value.number = number;
+    return value;
+}
+
+Value object_value() {
+    Value value;
+    value.kind = Value::Kind::Object;
+    return value;
+}
+
+Value array_value() {
+    Value value;
+    value.kind = Value::Kind::Array;
+    return value;
+}
 
 } // namespace d012::json

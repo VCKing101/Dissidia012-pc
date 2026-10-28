@@ -55,6 +55,7 @@ portablekit_add_game(D012Native ${d012_corpus}
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_hle.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_prx.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_json.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_mod_manifest.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_mods.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_nintendo_stream.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_decomp_harness.cpp"
@@ -115,3 +116,64 @@ add_library(d012_decomp STATIC "${CMAKE_CURRENT_SOURCE_DIR}/decomp/bgm_table.c"
                                "${CMAKE_CURRENT_SOURCE_DIR}/decomp/pad.c"
                                "${CMAKE_CURRENT_SOURCE_DIR}/decomp/pad_walk.c")
 target_link_libraries(D012Native PRIVATE d012_decomp)
+
+# The Battle BGM Maker (bgm_maker/): a program of its own beside D012Native,
+# for making battle music mods. It checks a mod with the game's own manifest
+# rules (host/d012_mod_manifest.cpp, which the game builds too) and draws with
+# PortableKit's copy of Dear ImGui; it has none of the game's code, so the
+# installer ships it as it is. SDL3 and Vulkan are the targets
+# portablekit_add_game() found above.
+add_library(d012_manifest STATIC "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_json.cpp"
+                                 "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_mod_manifest.cpp"
+                                 "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_nintendo_stream.cpp"
+                                 "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/model.cpp"
+                                 "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/checks.cpp")
+target_compile_features(d012_manifest PUBLIC cxx_std_20)
+target_include_directories(d012_manifest PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/host" "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker")
+
+set(d012_imgui "${D012_PORTABLEKIT_DIR}/third_party/imgui")
+add_executable(BgmMaker WIN32
+    "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/main.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/app.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/input_script.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/mods_folder.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/theme.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/widgets.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/window.cpp"
+    "${d012_imgui}/imgui.cpp"
+    "${d012_imgui}/imgui_draw.cpp"
+    "${d012_imgui}/imgui_tables.cpp"
+    "${d012_imgui}/imgui_widgets.cpp"
+    "${d012_imgui}/backends/imgui_impl_sdl3.cpp"
+    "${d012_imgui}/backends/imgui_impl_vulkan.cpp")
+target_include_directories(BgmMaker PRIVATE "${d012_imgui}" "${d012_imgui}/backends"
+                                            "${D012_PORTABLEKIT_DIR}/third_party")
+target_link_libraries(BgmMaker PRIVATE d012_manifest SDL3::SDL3 Vulkan::Vulkan)
+set_target_properties(BgmMaker PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+if(D012_INSTALLER_BUILD)
+    # Beside the installed game, whose data/ is always there.
+    target_compile_definitions(BgmMaker PRIVATE D012_INSTALLER_BUILD=1)
+endif()
+# The DLLs it runs with, in bin/ even when only BgmMaker is built.
+if(WIN32 AND TARGET SDL3::SDL3-shared)
+    add_custom_command(TARGET BgmMaker POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:SDL3::SDL3-shared>" "$<TARGET_FILE_DIR:BgmMaker>")
+endif()
+if(MINGW)
+    get_filename_component(d012_toolchain_bin "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    foreach(runtime_dll libc++.dll libunwind.dll)
+        if(EXISTS "${d012_toolchain_bin}/${runtime_dll}")
+            add_custom_command(TARGET BgmMaker POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different "${d012_toolchain_bin}/${runtime_dll}"
+                        "$<TARGET_FILE_DIR:BgmMaker>")
+        endif()
+    endforeach()
+endif()
+
+# The port's own tests (tools/port/pk_ctest.cmd <build dir>): the manifest
+# rules, the JSON writer and the BGM Maker's model. No game needed.
+enable_testing()
+add_executable(d012_tests "${CMAKE_CURRENT_SOURCE_DIR}/tests/d012_tests.cpp")
+target_link_libraries(d012_tests PRIVATE d012_manifest)
+set_target_properties(d012_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+add_test(NAME d012_tests COMMAND d012_tests)
