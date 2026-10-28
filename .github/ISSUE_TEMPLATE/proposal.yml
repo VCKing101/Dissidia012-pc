@@ -1,0 +1,30 @@
+name: Idea or proposal
+description: A feature, tool, mod type or larger change you'd like to add or see.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For anything bigger than a small fix, please describe it here before opening a pull request, so we can agree on where it fits. [CONTRIBUTING.md](https://github.com/VCKing101/Dissidia012-pc/blob/main/CONTRIBUTING.md) explains the rules, above all that no game data goes in the repository.
+  - type: textarea
+    id: what
+    attributes:
+      label: What and why
+      description: What you'd like to add or change, and what it's for.
+    validations:
+      required: true
+  - type: textarea
+    id: how
+    attributes:
+      label: How it would work
+      description: Which parts of the repository it touches (port, PortableKit patches, decompilation, tools, mods), and anything you've already built.
+  - type: dropdown
+    id: building
+    attributes:
+      label: Are you planning to build it?
+      options:
+        - Yes, I'd like to send a pull request
+        - I've started or have something working already
+        - No, it's a suggestion
+    validations:
+      required: true

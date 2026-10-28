@@ -1,0 +1,55 @@
+name: Bug report
+description: Something doesn't build, install or play as it should.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Please don't attach game files, extracted data or save files; see [CONTRIBUTING.md](https://github.com/VCKing101/Dissidia012-pc/blob/main/CONTRIBUTING.md).
+  - type: dropdown
+    id: install
+    attributes:
+      label: How did you install it?
+      options:
+        - Windows setup (release installer)
+        - Built from source (setup.ps1)
+        - Built manually (port/README.md)
+        - Steam Deck package
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: A release such as v0.2.0, or the commit you built from (`git rev-parse --short HEAD`).
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: System
+      description: Windows version, GPU and, for source builds, the Visual Studio and Python versions.
+      placeholder: Windows 11 24H2, RTX 3060, VS 2022 17.14, Python 3.12
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Error text or log
+      description: Paste any error message or the end of the log. It will be shown as code.
+      render: text
+  - type: checkboxes
+    id: no-game-data
+    attributes:
+      label: Game data
+      options:
+        - label: This report doesn't include any game files, extracted data or saves.
+          required: true

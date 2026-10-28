@@ -167,6 +167,12 @@ python -m unittest discover -s port/tools/bgm_maker/tests
 
 Many tool tests need the locally extracted game files and skip or fail without them.
 
+## Contributing
+
+Bug reports, fixes, features, tools and mods are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for how to propose a
+change and send a pull request, and for the one hard rule: no game data, from this or any other game, goes in the
+repository.
+
 ## Credits
 
 - [PortableKit](https://github.com/TeamGDB/PortableKit) by TeamGDB (MIT): the recompiler, runtime, HLE and renderer
