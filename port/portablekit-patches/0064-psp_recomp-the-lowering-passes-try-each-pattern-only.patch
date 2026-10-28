@@ -1,0 +1,208 @@
+From 1f6c6d75c8253eacb71604606c021c6940099a4a Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Wed, 28 Oct 2026 14:29:16 +1030
+Subject: [PATCH] psp_recomp: the lowering passes try each pattern only where
+ it can start
+
+The regex passes over each generated unit (memory accesses, FPR reads,
+the VFPU templates) ran std::regex_replace over the whole unit, which
+tries a match at each of its ~650,000 positions. libc++'s engine is much
+slower at that than MSVC's: built with llvm-mingw, psp_recomp took about
+11 minutes for a 113-unit executable instead of 10 seconds.
+
+Every pattern starts with fixed text and ends on its line, so
+rewrite_matches() finds that text with a plain search and tries the
+pattern only there, anchored (match_continuous) and up to the line's end.
+The output is the same by construction.
+
+Verified with Dissidia 012 (USA) on Windows: the main executable and its
+four overlays generate byte for byte the same C++ as before, with MSVC
+and with clang. Main executable: llvm-mingw 11 min to 21 s, MSVC 10.4 s
+to 3.3 s. PortableKit's 21 framework tests pass (MSVC; ad hoc tests not
+run). Not tested: macOS and Linux builds, other games.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ tools/codegen_main.cpp | 100 +++++++++++++++++++++++------------------
+ 1 file changed, 57 insertions(+), 43 deletions(-)
+
+diff --git a/tools/codegen_main.cpp b/tools/codegen_main.cpp
+index 589d1ee..9a0d74e 100644
+--- a/tools/codegen_main.cpp
++++ b/tools/codegen_main.cpp
+@@ -1448,13 +1448,49 @@ std::string lower_constant_gpr_writes(std::string text) {
+     return text;
+ }
+ 
++// Replaces each match of `pattern` in `text` with on_match(match). Every
++// pattern of the lowering passes below starts with fixed text, `literal`, and
++// never runs past the end of its line, so the pattern is tried only where the
++// literal starts, anchored there (match_continuous) and up to the line's end.
++// The result is the same as std::regex_replace's over the whole unit, which
++// tries a match at each of its ~650,000 positions: libc++'s engine
++// (llvm-mingw, macOS) took about six seconds a unit for these passes that way.
++template <typename OnMatch>
++std::string rewrite_matches(const std::string &text, std::string_view literal, const std::regex &pattern,
++                            OnMatch on_match) {
++    std::string result;
++    result.reserve(text.size() + text.size() / 8u);
++    std::size_t copied = 0u;
++    std::size_t search = 0u;
++    for (std::size_t hit; (hit = text.find(literal, search)) != std::string::npos;) {
++        const std::size_t newline = text.find('\n', hit);
++        const auto line_end = text.cbegin() + static_cast<std::ptrdiff_t>(newline == std::string::npos ? text.size() : newline);
++        std::smatch match;
++        if (std::regex_search(text.cbegin() + static_cast<std::ptrdiff_t>(hit), line_end, match, pattern,
++                              std::regex_constants::match_continuous)) {
++            result.append(text, copied, hit - copied);
++            result += on_match(match);
++            copied = search = hit + static_cast<std::size_t>(match.length(0));
++        } else {
++            search = hit + 1u;
++        }
++    }
++    result.append(text, copied, std::string::npos);
++    return result;
++}
++
++std::string regex_replace_anchored(const std::string &text, std::string_view literal, const std::regex &pattern,
++                                const char *format) {
++    return rewrite_matches(text, literal, pattern, [&](const std::smatch &match) { return match.format(format); });
++}
++
+ std::string lower_aot_memory_accesses(std::string text) {
+     // the outer generated-unit wrapper creates one AotFastView and
+     // compile-time direct chains pass it by reference across unit boundaries.
+     // Lower ordinary aligned byte/half/word accesses to that shared view.
+     static const std::regex access_pattern(
+         R"(rt\.memory\(\)\.aot_(load|store)(8|16|32)\()" );
+-    return std::regex_replace(text, access_pattern, "aot_mem.aot_$1$2(");
++    return regex_replace_anchored(text, "rt.memory().aot_", access_pattern, "aot_mem.aot_$1$2(");
+ }
+ 
+ std::string lower_constant_fpr_accesses(std::string text) {
+@@ -1462,21 +1498,10 @@ std::string lower_constant_fpr_accesses(std::string text) {
+     // constants in [0,31]. Avoid helper calls/bounds branches in enormous AOT
+     // functions so MSVC can keep float lanes in registers across basic blocks.
+     const std::regex read_pattern(R"(ctx\.fpr_bits\(([0-9]+)\))");
+-    std::smatch match;
+-    std::string lowered;
+-    lowered.reserve(text.size());
+-    std::string::const_iterator begin = text.cbegin();
+-    while (std::regex_search(begin, text.cend(), match, read_pattern)) {
+-        lowered.append(begin, match[0].first);
++    text = rewrite_matches(text, "ctx.fpr_bits(", read_pattern, [](const std::smatch &match) {
+         const auto index = static_cast<std::uint32_t>(std::strtoul(match[1].str().c_str(), nullptr, 10));
+-        if (index < 32u)
+-            lowered += "std::bit_cast<std::uint32_t>(ctx.fpr[" + std::to_string(index) + "])";
+-        else
+-            lowered.append(match[0].first, match[0].second);
+-        begin = match[0].second;
+-    }
+-    lowered.append(begin, text.cend());
+-    text = std::move(lowered);
++        return index < 32u ? "std::bit_cast<std::uint32_t>(ctx.fpr[" + std::to_string(index) + "])" : match.str(0);
++    });
+ 
+     constexpr std::string_view needle = "ctx.set_fpr_bits(";
+     std::size_t search = 0u;
+@@ -1526,79 +1551,68 @@ std::string lower_constant_fpr_accesses(std::string text) {
+ std::string lower_constant_vfpu_accesses(std::string text) {
+     const std::regex read_prefix(
+         R"(ctx\.read_vfpu_vector_with_source_prefix\(([A-Za-z0-9_]+), ([0-9]+)u, ([1-4])u, ([01])u\);)" );
+-    text = std::regex_replace(text, read_prefix,
++    text = regex_replace_anchored(text, "ctx.read_vfpu_vector_with_source_prefix(", read_prefix,
+         "ctx.read_vfpu_vector_with_source_prefix_ct<$2u, $3u, $4u>($1);");
+ 
+     const std::regex read_plain(
+         R"(ctx\.read_vfpu_vector\(([A-Za-z0-9_]+), ([0-9]+)u, ([1-4])u\);)" );
+-    text = std::regex_replace(text, read_plain,
++    text = regex_replace_anchored(text, "ctx.read_vfpu_vector(", read_plain,
+         "ctx.read_vfpu_vector_ct<$2u, $3u>($1);");
+ 
+     const std::regex write_prefix(
+         R"(ctx\.write_vfpu_vector_with_destination_prefix\(([A-Za-z0-9_]+), ([0-9]+)u, ([1-4])u\);)" );
+-    text = std::regex_replace(text, write_prefix,
++    text = regex_replace_anchored(text, "ctx.write_vfpu_vector_with_destination_prefix(", write_prefix,
+         "ctx.write_vfpu_vector_with_destination_prefix_ct<$2u, $3u>($1);");
+ 
+     const std::regex write_plain(
+         R"(ctx\.write_vfpu_vector\(([A-Za-z0-9_]+), ([0-9]+)u, ([1-4])u\);)" );
+-    text = std::regex_replace(text, write_plain,
++    text = regex_replace_anchored(text, "ctx.write_vfpu_vector(", write_plain,
+         "ctx.write_vfpu_vector_ct<$2u, $3u>($1);");
+ 
+     const std::regex source_prefix_plain(
+         R"(ctx\.apply_vfpu_source_prefix\(([A-Za-z0-9_]+), ([1-4])u, ([01])u\);)" );
+-    text = std::regex_replace(text, source_prefix_plain,
++    text = regex_replace_anchored(text, "ctx.apply_vfpu_source_prefix(", source_prefix_plain,
+         "ctx.apply_vfpu_source_prefix_ct<$2u, $3u>($1);");
+ 
+     const std::regex fpu_to_word(
+         R"(ctx\.fpu_float_to_word\(([^,\n]+), ([0-3])u\))" );
+-    text = std::regex_replace(text, fpu_to_word,
++    text = regex_replace_anchored(text, "ctx.fpu_float_to_word(", fpu_to_word,
+         "ctx.fpu_float_to_word_ct<$2u>($1)");
+ 
+     const std::regex vcmp(
+         R"(ctx\.execute_vfpu_vcmp\(([0-9]+)u, ([0-9]+)u, ([1-4])u, ([0-9]+)u\);)" );
+-    text = std::regex_replace(text, vcmp,
++    text = regex_replace_anchored(text, "ctx.execute_vfpu_vcmp(", vcmp,
+         "ctx.execute_vfpu_vcmp_ct<$1u, $2u, $3u, $4u>();");
+ 
+     const std::regex vcmov(
+         R"(ctx\.execute_vfpu_vcmov\(([0-9]+)u, ([0-9]+)u, ([1-4])u, ([0-7])u, (true|false)\);)" );
+-    text = std::regex_replace(text, vcmov,
++    text = regex_replace_anchored(text, "ctx.execute_vfpu_vcmov(", vcmov,
+         "ctx.execute_vfpu_vcmov_ct<$1u, $2u, $3u, $4u, $5>();");
+ 
+     const std::regex vdot(
+         R"(ctx\.execute_vfpu_vdot\(([0-9]+)u, ([0-9]+)u, ([0-9]+)u, ([1-4])u\);)" );
+-    text = std::regex_replace(text, vdot,
++    text = regex_replace_anchored(text, "ctx.execute_vfpu_vdot(", vdot,
+         "ctx.execute_vfpu_vdot_ct<$1u, $2u, $3u, $4u>();");
+ 
+     const std::regex vscl(
+         R"(ctx\.execute_vfpu_vscl\(([0-9]+)u, ([0-9]+)u, ([0-9]+)u, ([1-4])u\);)" );
+-    text = std::regex_replace(text, vscl,
++    text = regex_replace_anchored(text, "ctx.execute_vfpu_vscl(", vscl,
+         "ctx.execute_vfpu_vscl_ct<$1u, $2u, $3u, $4u>();");
+ 
+     // Only real registers can be specialised: there are 128 scalar and 16
+     // control registers, and the compile-time form asserts that. Data decoded as
+     // an MTV can name any of 256, and the runtime form ignores those the way the
+     // hardware does, so leave them as calls rather than failing the build.
+-    const auto specialise_scalar = [&text](const std::regex &pattern, const std::string &replacement) {
+-        std::string result;
+-        auto begin = std::sregex_iterator(text.begin(), text.end(), pattern);
+-        std::size_t copied = 0u;
+-        for (auto it = begin; it != std::sregex_iterator(); ++it) {
+-            const std::smatch &match = *it;
+-            const auto position = static_cast<std::size_t>(match.position(0));
+-            result.append(text, copied, position - copied);
+-            if (std::stoul(match[1].str()) < 144u)
+-                result.append(match.format(replacement));
+-            else
+-                result.append(match.str(0));
+-            copied = position + static_cast<std::size_t>(match.length(0));
+-        }
+-        result.append(text, copied, std::string::npos);
+-        text = std::move(result);
++    const auto specialise_scalar = [&text](std::string_view literal, const std::regex &pattern,
++                                           const std::string &replacement) {
++        text = rewrite_matches(text, literal, pattern, [&](const std::smatch &match) {
++            return std::stoul(match[1].str()) < 144u ? match.format(replacement) : match.str(0);
++        });
+     };
+ 
+-    specialise_scalar(std::regex(R"(ctx\.vfpu_scalar_bits\(([0-9]+)u\))"), "ctx.vfpu_scalar_bits_ct<$1u>()");
++    specialise_scalar("ctx.vfpu_scalar_bits(", std::regex(R"(ctx\.vfpu_scalar_bits\(([0-9]+)u\))"), "ctx.vfpu_scalar_bits_ct<$1u>()");
+     // set_vfpu_scalar_bits second arguments in generated code stay on one line.
+-    specialise_scalar(std::regex(R"(ctx\.set_vfpu_scalar_bits\(([0-9]+)u, ([^;\n]+)\);)"),
++    specialise_scalar("ctx.set_vfpu_scalar_bits(", std::regex(R"(ctx\.set_vfpu_scalar_bits\(([0-9]+)u, ([^;\n]+)\);)"),
+                       "ctx.set_vfpu_scalar_bits_ct<$1u>($2);");
+     return text;
+ }
+-- 
+2.53.0.windows.1
+

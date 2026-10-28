@@ -37,8 +37,11 @@ add_subdirectory("${D012_PORTABLEKIT_DIR}" portablekit)
 # corpus and overlays in D012_WORK_DIR are never built into it.
 if(D012_INSTALLER_BUILD)
     set(d012_profile_dir "${CMAKE_BINARY_DIR}/installer-profile")
-    set(d012_corpus NO_CORPUS)
-    set(d012_game_code "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_game_code.cpp")
+    # PortableKit's main() becomes d012_portablekit_main, behind the port's
+    # own, which adds --compile-game (host/d012_compile_game.cpp).
+    set(d012_corpus NO_CORPUS HOST_MAIN_NAME d012_portablekit_main)
+    set(d012_game_code "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_game_code.cpp"
+                       "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_compile_game.cpp")
 else()
     set(d012_profile_dir "${D012_WORK_DIR}")
     set(d012_corpus)
@@ -78,6 +81,26 @@ endif()
 if(D012_INSTALLER_BUILD)
     set_property(SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_portable.cpp" APPEND PROPERTY
         COMPILE_DEFINITIONS D012_INSTALLER_BUILD=1)
+    # What --compile-game needs beside the program, so bin/ is laid out as an
+    # installation (the toolchain aside: D012_TOOLCHAIN_DIR, or toolchain/):
+    # the recompiler, and in sdk/ the three headers the game's code includes,
+    # the two entry-point templates and the dispatch calls.
+    # A target of its own, so a new psp_recomp is copied whether or not the
+    # program relinks.
+    set(d012_sdk "${CMAKE_BINARY_DIR}/bin/sdk")
+    add_custom_target(D012Native_installer_files ALL
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:psp_recomp>" "${CMAKE_BINARY_DIR}/bin"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${d012_sdk}/include/psprecomp"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${D012_PORTABLEKIT_DIR}/include/psprecomp/corpus_abi.hpp"
+                "${D012_PORTABLEKIT_DIR}/include/psprecomp/allegrex_context.hpp" "${d012_sdk}/include/psprecomp"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${D012_PORTABLEKIT_DIR}/host/overlay_module.hpp" "${d012_sdk}/include"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${D012_PORTABLEKIT_DIR}/host/corpus_module.cpp.in" "${D012_PORTABLEKIT_DIR}/host/overlay_module.cpp.in"
+                "${CMAKE_CURRENT_SOURCE_DIR}/config/dispatch-calls.txt" "${d012_sdk}"
+        VERBATIM)
+    add_dependencies(D012Native_installer_files psp_recomp D012Native)
 endif()
 
 # Decompiled game functions (C), run as native overrides (port/decomp/). C is
