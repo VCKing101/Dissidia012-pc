@@ -83,6 +83,9 @@ std::filesystem::path App::files_folder() {
 void App::leave_mod() {
     ++import_generation_;
     player_.stop();
+    suggester_.cancel();
+    candidates_.clear();
+    suggest_status_.clear();
     decoder_.clear();
     wave_file_.clear();
     std::error_code ec;
@@ -289,7 +292,7 @@ bool App::frame() {
     }
     handle_drops();
     take_imports();
-    window_.set_animating(importer_.busy() || decoder_.busy() || player_.playing() ||
+    window_.set_animating(importer_.busy() || decoder_.busy() || player_.playing() || suggester_.busy() ||
                           std::chrono::steady_clock::now() < status_until_);
 
     const ImGuiIO &io = ImGui::GetIO();

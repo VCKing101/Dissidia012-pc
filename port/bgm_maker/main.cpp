@@ -14,6 +14,7 @@
 #include "app.hpp"
 #include "audio_file.hpp"
 #include "input_script.hpp"
+#include "suggest.hpp"
 #include "mods_folder.hpp"
 #include "window.hpp"
 
@@ -58,6 +59,25 @@ int main(int argc, char **argv) {
         std::fwrite(audio.samples.data(), 2u, audio.samples.size(), out);
         std::fclose(out);
         std::cout << audio.frames << " frames at " << audio.rate << " Hz, " << audio.channels << " channel(s)\n";
+        return 0;
+    }
+    // The same for the loop suggester: its candidates, one per line
+    // (start end length score level_db), for "any" or for a loop end kept.
+    if (argc >= 4 && std::strcmp(argv[1], "--suggest") == 0) {
+        DecodedTrack track;
+        track.audio = decode_audio(d012::mod_manifest::path_from_utf8(argv[2]));
+        if (!track.audio.error.empty()) {
+            std::cerr << track.audio.error << "\n";
+            return 1;
+        }
+        const std::int64_t end = std::strcmp(argv[3], "any") == 0 ? -1 : std::atoll(argv[3]);
+        const double min_loop = argc >= 5 ? std::atof(argv[4]) : 8.0;
+        const SuggestResult result =
+            suggest_loops(mono_signal(track), track.audio.rate, end, min_loop, [](double) {});
+        std::cout.precision(17);
+        for (const LoopCandidate &c : result.candidates)
+            std::cout << c.start << " " << c.end << " " << c.length << " " << c.score << " " << c.level_db << "\n";
+        if (!result.note.empty()) std::cout << "note: " << result.note << "\n";
         return 0;
     }
     std::optional<std::filesystem::path> chosen;

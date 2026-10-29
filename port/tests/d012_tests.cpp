@@ -9,7 +9,10 @@
 #include "d012_mod_manifest.hpp"
 #include "model.hpp"
 #include "names.hpp"
+#include "suggest.hpp"
 #include "undo.hpp"
+
+#include <cmath>
 
 #include <filesystem>
 #include <fstream>
@@ -325,6 +328,52 @@ void test_names() {
                 "upper case");
 }
 
+// The loop suggester finds a loop that is there: a tune of notes (an intro,
+// a body played twice, the body's start fading out), its loop exactly the
+// body's length.
+void test_suggest() {
+    constexpr int kRate = 22050;
+    std::uint32_t seed = 12345u;
+    const auto random = [&] {
+        seed = seed * 1664525u + 1013904223u;
+        return seed >> 8u;
+    };
+    const auto notes = [&](double seconds) {
+        std::vector<float> out;
+        while (out.size() < static_cast<std::size_t>(seconds * kRate)) {
+            const double freq = 220.0 * std::pow(2.0, static_cast<double>(random() % 19u) / 12.0);
+            const std::size_t count = static_cast<std::size_t>(kRate * (0.25 + 0.25 * (random() % 3u)));
+            for (std::size_t i = 0; i < count && out.size() < static_cast<std::size_t>(seconds * kRate); ++i) {
+                const double env = std::min(1.0, i / 100.0) * std::min(1.0, (count - i) / 200.0);
+                out.push_back(static_cast<float>(0.3 * env * std::sin(2.0 * 3.14159265358979 * freq * i / kRate)));
+            }
+        }
+        return out;
+    };
+    const std::vector<float> intro = notes(3.0);
+    const std::vector<float> body = notes(12.5);
+    std::vector<float> tune = intro;
+    tune.insert(tune.end(), body.begin(), body.end());
+    tune.insert(tune.end(), body.begin(), body.end());
+    const std::size_t fade = 2u * kRate;
+    for (std::size_t i = 0; i < fade; ++i) tune.push_back(body[i] * static_cast<float>(1.0 - static_cast<double>(i) / fade));
+    const auto result = d012::bgm_maker::suggest_loops(tune, kRate, -1, 5.0, [](double) {});
+    expect(!result.candidates.empty(), "the suggester finds the tune's loop");
+    if (!result.candidates.empty()) {
+        const auto &best = result.candidates.front();
+        expect(best.length == static_cast<std::int64_t>(body.size()),
+               "the loop's length to the sample: " + std::to_string(best.length) + " for " + std::to_string(body.size()));
+        expect(best.score > 0.999, "the seam matches");
+        expect(best.start >= static_cast<std::int64_t>(intro.size()) - kRate / 10, "the loop starts after the intro");
+    }
+    // Kept end: starts for the end of the second body.
+    const std::int64_t end = static_cast<std::int64_t>(intro.size() + 2u * body.size());
+    const auto starts = d012::bgm_maker::suggest_loops(tune, kRate, end, 5.0, [](double) {});
+    expect(!starts.candidates.empty() && starts.candidates.front().end == end &&
+               starts.candidates.front().start == end - static_cast<std::int64_t>(body.size()),
+           "starts for a kept end");
+}
+
 void test_undo() {
     d012::bgm_maker::UndoStack<int> undo;
     undo.reset(1);
@@ -343,6 +392,7 @@ int main() {
     test_manifest();
     test_checks();
     test_names();
+    test_suggest();
     test_undo();
     if (g_failures == 0) std::cout << "all passed\n";
     return g_failures == 0 ? 0 : 1;

@@ -142,6 +142,7 @@ add_executable(BgmMaker WIN32
     "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/input_script.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/mods_folder.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/player.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/suggest.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/tab_loops.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/tab_music.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/theme.cpp"
@@ -188,7 +189,8 @@ endif()
 # The port's own tests (tools/port/pk_ctest.cmd <build dir>): the manifest
 # rules, the JSON writer and the BGM Maker's model. No game needed.
 enable_testing()
-add_executable(d012_tests "${CMAKE_CURRENT_SOURCE_DIR}/tests/d012_tests.cpp")
-target_link_libraries(d012_tests PRIVATE d012_manifest)
+add_executable(d012_tests "${CMAKE_CURRENT_SOURCE_DIR}/tests/d012_tests.cpp"
+                          "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/suggest.cpp")
+target_link_libraries(d012_tests PRIVATE d012_manifest Threads::Threads)
 set_target_properties(d012_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 add_test(NAME d012_tests COMMAND d012_tests)

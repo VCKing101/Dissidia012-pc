@@ -44,5 +44,6 @@ void apply(bool dark, float scale);
 [[nodiscard]] ImFont *heading_font();  // bold, or the text font
 [[nodiscard]] ImFont *mono_font();     // for samples and times, or the text font
 [[nodiscard]] float heading_size();    // in the style's units (FontSizeBase)
+[[nodiscard]] float mono_size();       // the mono font's size beside the text's (Consolas looks larger)
 
 } // namespace d012::bgm_maker::theme

@@ -198,8 +198,10 @@ void App::toggle_play(const TrackModel &track, std::shared_ptr<const DecodedTrac
     play_from(track, std::move(audio), wave_.cursor);
 }
 
-void App::audition(const TrackModel &track, std::shared_ptr<const DecodedTrack> audio) {
-    const LoopShown loop = shown_loop(track, *audio);
+void App::audition(const TrackModel &track, std::shared_ptr<const DecodedTrack> audio,
+                   std::optional<std::pair<std::int64_t, std::int64_t>> points) {
+    LoopShown loop = shown_loop(track, *audio);
+    if (points) loop = {LoopShown::Kind::Custom, points->first, points->second};
     if (loop.kind == LoopShown::Kind::None) {
         say("No loop to audition: pick Custom loop or Whole file.", true);
         return;
@@ -324,6 +326,10 @@ void App::loop_editor(int s, int t) {
     if (wave_file_ != file) {
         wave_.reset(*audio);
         wave_file_ = file;
+        // Suggestions were for the track before.
+        suggester_.cancel();
+        candidates_.clear();
+        suggest_status_.clear();
     }
     // Its exact length and rate, for the checks and for saving.
     if (auto found = infos_.find(track.file); found != infos_.end() && !found->second.samples) {
@@ -362,8 +368,84 @@ void App::loop_editor(int s, int t) {
     wave_.draw_overview("##overview", *audio, loop, playhead, ImVec2(ImGui::GetContentRegionAvail().x, em() * 2.2f));
 
     loop_markers(track, *audio);
+    // The seam on the left, the suggestions beside it.
+    ImGui::Spacing();
+    const float rest = ImGui::GetContentRegionAvail().y;
+    const float seam_width = std::floor(ImGui::GetContentRegionAvail().x * 0.56f);
+    ImGui::BeginChild("##seampart", ImVec2(seam_width, rest), ImGuiChildFlags_None);
     loop_seam(track, *audio);
+    ImGui::EndChild();
+    ImGui::SameLine();
+    ImGui::BeginChild("##suggest", ImVec2(0.0f, rest), ImGuiChildFlags_Borders);
+    loop_suggestions(track, audio);
+    ImGui::EndChild();
     loop_keys(track, *audio);
+}
+
+void App::loop_suggestions(TrackModel &track, std::shared_ptr<const DecodedTrack> audio) {
+    if (auto done = suggester_.take(); done && done->file == wave_file_) {
+        candidates_ = std::move(done->result.candidates);
+        suggest_status_ = !candidates_.empty()
+                              ? std::to_string(candidates_.size()) + " found in " +
+                                    fixed(done->seconds, done->seconds < 1.0 ? 2 : 1) + " s"
+                              : (!done->result.note.empty() ? done->result.note : std::string("No repeat found"));
+    }
+    const int rate = audio->audio.rate;
+    const bool busy = suggester_.busy();
+    ImGui::TextUnformatted("Suggested loops");
+    ImGui::BeginDisabled(busy);
+    if (ImGui::Button("Suggest loops")) suggester_.start(audio, -1, min_loop_);
+    widgets::tooltip("Search the whole file for a start and an end whose audio matches");
+    ImGui::SameLine();
+    if (ImGui::Button("Starts for my end")) {
+        const LoopShown loop = shown_loop(track, *audio);
+        suggester_.start(audio, loop.end, min_loop_);
+    }
+    widgets::tooltip("Keep the loop end; find starts that match it");
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(em() * 3.0f);
+    ImGui::InputDouble("##min", &min_loop_, 0.0, 0.0, "%.0f");
+    if (!(min_loop_ > 0.0)) min_loop_ = 8.0;
+    widgets::tooltip("The shortest loop to look for, in seconds");
+    ImGui::SameLine();
+    widgets::muted("s at least");
+    if (busy) {
+        widgets::muted("Searching" + std::string("\xE2\x80\xA6") + " " + std::to_string(static_cast<int>(suggester_.progress() * 100.0)) + "%");
+        return;
+    }
+    ImGui::PushTextWrapPos(0.0f);
+    widgets::muted(suggest_status_.empty() ? std::string("Suggestions only: audition each seam and choose by ear. The file "
+                                                         "must hold the repeat (most rips play the loop twice).")
+                                           : suggest_status_ + ". Suggestions only: audition each and choose by ear.");
+    ImGui::PopTextWrapPos();
+    const theme::Palette &colours = theme::palette();
+    for (std::size_t i = 0; i < candidates_.size(); ++i) {
+        const LoopCandidate &c = candidates_[i];
+        ImGui::PushID(static_cast<int>(i));
+        ImGui::Separator();
+        const bool weak = c.score < 0.9;
+        ImGui::PushFont(theme::mono_font(), theme::mono_size());
+        ImGui::PushStyleColor(ImGuiCol_Text, weak ? colours.text_muted : ImGui::GetStyleColorVec4(ImGuiCol_Text));
+        ImGui::TextUnformatted((format_time(c.start, rate) + " \xE2\x86\x92 " + format_time(c.end, rate) + "  loop " +
+                                format_time(c.length, rate))
+                                   .c_str());
+        ImGui::PopStyleColor();
+        ImGui::PopFont();
+        if (ImGui::SmallButton("Audition")) audition(track, audio, std::pair{c.start, c.end});
+        widgets::tooltip("Hear this seam");
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Use")) {
+            set_loop(track, c.start, c.end, audio->audio.frames);
+            wave_.zoom_around(static_cast<double>(c.end), rate * 4.0);
+        }
+        widgets::tooltip("Make it the track's loop");
+        std::string score = "match " + fixed(c.score * 100.0, 1) + "%";
+        if (std::fabs(c.level_db) > 1.0) score += ", level " + std::string(c.level_db > 0 ? "+" : "") + fixed(c.level_db, 1) + " dB";
+        ImGui::SameLine();
+        widgets::muted(score + "  " + kMiddle + "  " + with_commas(c.start) + " to " + with_commas(c.end));
+        ImGui::PopID();
+    }
 }
 
 void App::loop_mode_row(TrackModel &track, const DecodedTrack &audio, const AudioInfo *info) {
@@ -449,7 +531,7 @@ void App::loop_transport(TrackModel &track, const DecodedTrack &audio) {
     ImGui::SameLine();
     const std::int64_t at = here();
     ImGui::AlignTextToFramePadding();
-    ImGui::PushFont(theme::mono_font(), 0.0f);
+    ImGui::PushFont(theme::mono_font(), theme::mono_size());
     widgets::muted(format_time(at, audio.audio.rate) + "  " + kMiddle + "  " + with_commas(at));
     ImGui::PopFont();
 }
@@ -553,7 +635,8 @@ void App::loop_seam(const TrackModel &track, const DecodedTrack &audio) {
         return;
     }
     const std::int64_t width = std::llround(kSeam[seam_choice_] * audio.audio.rate);
-    const float height = std::max(em() * 5.0f, ImGui::GetContentRegionAvail().y - ImGui::GetTextLineHeightWithSpacing() * 1.5f);
+    // Room under it for its numbers, which wrap onto two lines.
+    const float height = std::max(em() * 4.0f, ImGui::GetContentRegionAvail().y - ImGui::GetTextLineHeightWithSpacing() * 2.6f);
     const auto stats = draw_seam("##seamview", audio, loop.start, loop.end, width,
                                  ImVec2(ImGui::GetContentRegionAvail().x, height));
     if (!stats) return;

@@ -10,6 +10,7 @@
 #include "decoder.hpp"
 #include "importer.hpp"
 #include "player.hpp"
+#include "suggest.hpp"
 #include "waveform.hpp"
 #include "model.hpp"
 #include "mods_folder.hpp"
@@ -120,6 +121,7 @@ private:
     void loop_transport(TrackModel &track, const DecodedTrack &audio);
     void loop_markers(TrackModel &track, const DecodedTrack &audio);
     void loop_seam(const TrackModel &track, const DecodedTrack &audio);
+    void loop_suggestions(TrackModel &track, std::shared_ptr<const DecodedTrack> audio);
     void loop_keys(TrackModel &track, const DecodedTrack &audio);
     [[nodiscard]] LoopShown shown_loop(const TrackModel &track, const DecodedTrack &audio);
     void set_loop(TrackModel &track, std::int64_t start, std::int64_t end, std::int64_t frames);
@@ -129,7 +131,9 @@ private:
     void snap_zero(TrackModel &track, const DecodedTrack &audio, Marker which);
     void toggle_play(const TrackModel &track, std::shared_ptr<const DecodedTrack> audio);
     void play_from(const TrackModel &track, std::shared_ptr<const DecodedTrack> audio, std::int64_t from);
-    void audition(const TrackModel &track, std::shared_ptr<const DecodedTrack> audio);
+    // The seam of the track's loop, or of `points` (a suggestion's start and end).
+    void audition(const TrackModel &track, std::shared_ptr<const DecodedTrack> audio,
+                  std::optional<std::pair<std::int64_t, std::int64_t>> points = std::nullopt);
     [[nodiscard]] std::int64_t here();
     [[nodiscard]] std::int64_t step_samples(int rate) const;
     [[nodiscard]] std::filesystem::path track_path_on_disk(const TrackModel &track);
@@ -197,6 +201,10 @@ private:
     bool repeat_{};
     int seam_choice_{1};     // 10 ms
     std::string start_samples_, start_time_, end_samples_, end_time_;
+    Suggester suggester_;
+    std::vector<LoopCandidate> candidates_;  // for wave_file_
+    std::string suggest_status_;
+    double min_loop_{8.0};
 
     std::string status_;
     bool status_error_{};

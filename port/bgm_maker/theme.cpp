@@ -185,5 +185,6 @@ const Palette &palette() { return g_palette; }
 ImFont *heading_font() { return g_heading != nullptr ? g_heading : g_text; }
 ImFont *mono_font() { return g_mono != nullptr ? g_mono : g_text; }
 float heading_size() { return kHeadingSize; }
+float mono_size() { return kTextSize * 0.9f; }
 
 } // namespace d012::bgm_maker::theme
