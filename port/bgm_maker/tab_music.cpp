@@ -241,6 +241,7 @@ void App::take_imports() {
         const int index = static_cast<int>(tracks.size()) - 1;
         tracks[index].key = track_key_for(tracks[index].title, series, index);
         infos_[result.file] = result.info;
+        ++infos_changed_;
         added_files_.push_back(result.copy);
         selected_ = {series, index};
         say("Added " + result.source + " as " + track_label(tracks[index]) + ".");
@@ -269,6 +270,7 @@ const AudioInfo *App::info_for(const std::string &file) {
         if (std::filesystem::is_regular_file(full, ec)) info = probe_audio(full);
         else info.error = "the file is not in the mod's folder";
         found = infos_.emplace(file, std::move(info)).first;
+        ++infos_changed_;
     }
     return &found->second;
 }

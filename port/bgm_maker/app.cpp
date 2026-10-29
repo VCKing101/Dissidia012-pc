@@ -82,6 +82,11 @@ std::filesystem::path App::files_folder() {
 
 void App::leave_mod() {
     ++import_generation_;
+    measurer_.clear();
+    measuring_.clear();
+    save_wanted_ = false;
+    save_note_.clear();
+    try_series_ = try_track_ = -1;
     player_.stop();
     suggester_.cancel();
     candidates_.clear();
@@ -165,7 +170,7 @@ void App::new_mod() {
 }
 
 void App::set_mods_folder(const std::filesystem::path &folder) {
-    mods_ = {folder, "chosen in this window"};
+    mods_ = {folder, "chosen in this window", true, mods_.checkout};
     refresh_list();
     update_title();
 }
@@ -186,23 +191,40 @@ void App::update_checks() {
         checked_.reset();
         return;
     }
-    if (checked_ && *checked_ == open_->model && checked_folder_ == open_->folder) return;
-    std::vector<ModSummary> others;
-    for (const ModSummary &summary : list_)
-        if (open_->is_new || summary.folder != open_->folder) others.push_back(summary);
+    if (checked_ && *checked_ == open_->model && checked_folder_ == open_->folder && checked_infos_ == infos_changed_)
+        return;
+    const std::vector<ModSummary> others = other_mods();
     // Until the first change, the file's own problems, with their lines: some
     // (a loop in samples and seconds, a series that is not an object) cannot
     // be in the editor's model, and saving would quietly change them.
     const bool as_on_disc = !open_->is_new && open_->model == open_->saved && !open_->saved_text.empty();
     const std::filesystem::path files = open_->is_new ? staging_ : mod_folder();
-    problems_ = as_on_disc ? check_text(open_->saved_text, open_->model.id, files, others)
-                           : check_mod(open_->model, files, others);
+    problems_ = as_on_disc ? check_text(open_->saved_text, open_->model.id, files, others, known_facts())
+                           : check_mod(open_->model, files, others, known_facts());
     if (open_->is_new) {
         if (const std::string why = folder_name_problem(open_->folder, mods_.path); !why.empty())
             problems_.push_back({Problem::Level::Error, "mod.folder", why, 0});
     }
     checked_ = open_->model;
     checked_folder_ = open_->folder;
+    checked_infos_ = infos_changed_;
+}
+
+FactsOf App::known_facts() const {
+    // A copy: saving may outlive a change to infos_.
+    std::map<std::string, FileFacts> facts;
+    for (const auto &[file, info] : infos_) facts.emplace(file, facts_of(info));
+    return [facts = std::move(facts)](const std::string &file) -> std::optional<FileFacts> {
+        const auto found = facts.find(file);
+        return found != facts.end() ? std::optional(found->second) : std::nullopt;
+    };
+}
+
+std::vector<ModSummary> App::other_mods() const {
+    std::vector<ModSummary> others;
+    for (const ModSummary &summary : list_)
+        if (open_ && (open_->is_new || summary.folder != open_->folder)) others.push_back(summary);
+    return others;
 }
 
 void App::undo() {
@@ -292,8 +314,9 @@ bool App::frame() {
     }
     handle_drops();
     take_imports();
+    take_measured();
     window_.set_animating(importer_.busy() || decoder_.busy() || player_.playing() || suggester_.busy() ||
-                          std::chrono::steady_clock::now() < status_until_);
+                          measurer_.busy() || save_wanted_ || std::chrono::steady_clock::now() < status_until_);
 
     const ImGuiIO &io = ImGui::GetIO();
     if (!io.WantTextInput && !prompt_) {
@@ -302,7 +325,17 @@ bool App::frame() {
             ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_Z))
             redo();
     }
+    // Saving happens on Check & save: Ctrl+S goes there and saves.
+    if (!prompt_ && open_ && ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_S)) {
+        switch_to_ = Tab::Check;
+        save_wanted_ = true;
+        measure_all();
+    }
     update_checks();
+    if (save_wanted_ && open_ && all_measured() && !importer_.busy()) {
+        save_wanted_ = false;
+        save();
+    }
 
     const ImGuiViewport *viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->WorkPos);
@@ -617,43 +650,6 @@ void App::mod_form() {
     ImGui::PopID();
     ImGui::EndGroup();
     ImGui::PopItemWidth();
-}
-
-// --- 4. Check & save ---------------------------------------------------------
-
-void App::tab_check() {
-    if (!open_) {
-        widgets::centred_note("Pick or make a mod on the Mod step first.");
-        return;
-    }
-    show_all_problems_ = true;
-    widgets::heading("Check");
-    const auto errors = std::count_if(problems_.begin(), problems_.end(),
-                                      [](const Problem &p) { return p.level == Problem::Level::Error; });
-    if (problems_.empty()) {
-        ImGui::PushStyleColor(ImGuiCol_Text, theme::palette().good);
-        ImGui::TextUnformatted((std::string(kTick) + " The game would load this mod as it is.").c_str());
-        ImGui::PopStyleColor();
-    } else {
-        const auto others = problems_.size() - static_cast<std::size_t>(errors);
-        widgets::muted(std::to_string(errors) + " problem(s) to fix before saving" +
-                       (others > 0 ? ", " + std::to_string(others) + " warning(s)" : std::string()) + ".");
-    }
-    ImGui::Spacing();
-    static constexpr const char *kTabNames[kTabs] = {"Mod", "Music", "Loops", "Check & save"};
-    int row = 0;
-    for (const Problem &problem : problems_) {
-        ImGui::PushID(row++);
-        const Tab tab = tab_of(problem);
-        if (ImGui::SmallButton((std::string("Go to ") + kTabNames[static_cast<int>(tab)]).c_str())) switch_to_ = tab;
-        ImGui::SameLine();
-        widgets::problem_lines({&problem});
-        ImGui::PopID();
-    }
-    ImGui::Spacing();
-    ImGui::Separator();
-    widgets::heading("Save");
-    widgets::muted("Saving comes in a later stage of the C++ tool.");
 }
 
 } // namespace d012::bgm_maker

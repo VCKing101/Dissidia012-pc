@@ -56,7 +56,8 @@ struct DecodedAudio {
     std::vector<std::int16_t> samples;  // frames * channels
 };
 
-[[nodiscard]] DecodedAudio decode_audio(const std::filesystem::path &file);
+// Without `keep_samples`, only counted: a file's exact length, for the checks.
+[[nodiscard]] DecodedAudio decode_audio(const std::filesystem::path &file, bool keep_samples = true);
 
 // One line for the editor: "MP3, 44,100 Hz, stereo, 3:21".
 [[nodiscard]] std::string describe(const AudioInfo &info);

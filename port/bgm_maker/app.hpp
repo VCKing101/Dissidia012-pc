@@ -9,6 +9,8 @@
 #include "checks.hpp"
 #include "decoder.hpp"
 #include "importer.hpp"
+#include "launcher.hpp"
+#include "measurer.hpp"
 #include "player.hpp"
 #include "suggest.hpp"
 #include "waveform.hpp"
@@ -24,6 +26,7 @@
 #include <map>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -79,6 +82,16 @@ private:
     // is saved, a folder of its own in the temporary folder.
     [[nodiscard]] std::filesystem::path files_folder();
     void update_checks();
+    // What the checks know of the open mod's files (infos_).
+    [[nodiscard]] FactsOf known_facts() const;
+    [[nodiscard]] std::vector<ModSummary> other_mods() const;
+    // Check & save: every track's file read to the end (on the worker), then saved.
+    void measure_all();
+    [[nodiscard]] bool all_measured() const;
+    void take_measured();
+    void save();
+    void save_section();
+    void try_section();
     void undo();
     void redo();
     void say(std::string text, bool error = false);
@@ -152,6 +165,7 @@ private:
     std::vector<Problem> problems_;
     std::optional<ModModel> checked_;  // the model problems_ are for
     std::string checked_folder_;
+    int checked_infos_{-1};
 
     Tab tab_{Tab::Mod};
     std::optional<Tab> switch_to_;
@@ -170,6 +184,7 @@ private:
     Importer importer_;
     int import_generation_{};  // results of an earlier mod's imports are dropped
     std::map<std::string, AudioInfo> infos_;  // by the file's text in the manifest
+    int infos_changed_{};  // counts changes to infos_, for the checks
     std::vector<std::filesystem::path> added_files_;  // copied in since the mod was opened
     std::filesystem::path staging_;
     struct SeriesArea {
@@ -205,6 +220,17 @@ private:
     std::vector<LoopCandidate> candidates_;  // for wave_file_
     std::string suggest_status_;
     double min_loop_{8.0};
+
+    // Check & save.
+    Measurer measurer_;
+    std::set<std::string> measuring_;  // files asked of measurer_
+    bool save_wanted_{};               // once every file is measured
+    std::string save_note_;            // what the last save did
+    bool save_note_error_{};
+    GameLauncher launcher_;
+    int try_series_{-1}, try_track_{-1};
+    bool game_seen_running_{};
+    std::chrono::steady_clock::time_point game_checked_{};
 
     std::string status_;
     bool status_error_{};

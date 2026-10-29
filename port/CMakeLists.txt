@@ -128,7 +128,8 @@ add_library(d012_manifest STATIC "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_json.cpp
                                  "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_nintendo_stream.cpp"
                                  "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/model.cpp"
                                  "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/names.cpp"
-                                 "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/checks.cpp")
+                                 "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/checks.cpp"
+                                 "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/saving.cpp")
 target_compile_features(d012_manifest PUBLIC cxx_std_20)
 target_include_directories(d012_manifest PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/host" "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker")
 
@@ -137,12 +138,16 @@ add_executable(BgmMaker WIN32
     "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/main.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/app.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/audio_file.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/cli.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/decoder.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/importer.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/input_script.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/launcher.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/measurer.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/mods_folder.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/player.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/suggest.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/tab_check.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/tab_loops.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/tab_music.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/theme.cpp"
@@ -187,10 +192,13 @@ if(MINGW)
 endif()
 
 # The port's own tests (tools/port/pk_ctest.cmd <build dir>): the manifest
-# rules, the JSON writer and the BGM Maker's model. No game needed.
+# rules (with tests/manifest_cases.json, which the Python tool's tests run
+# too), the JSON writer, and the BGM Maker's model, names, saving and loop
+# suggester. No game needed.
 enable_testing()
 add_executable(d012_tests "${CMAKE_CURRENT_SOURCE_DIR}/tests/d012_tests.cpp"
                           "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/suggest.cpp")
 target_link_libraries(d012_tests PRIVATE d012_manifest Threads::Threads)
+target_compile_definitions(d012_tests PRIVATE D012_TESTS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests")
 set_target_properties(d012_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 add_test(NAME d012_tests COMMAND d012_tests)

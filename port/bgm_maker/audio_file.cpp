@@ -200,7 +200,7 @@ AudioInfo probe_audio(const std::filesystem::path &file) {
     return info;
 }
 
-DecodedAudio decode_audio(const std::filesystem::path &file) {
+DecodedAudio decode_audio(const std::filesystem::path &file, bool keep_samples) {
     DecodedAudio out;
     Input input;
     if (!input.open(file, out.error)) return out;
@@ -263,7 +263,9 @@ DecodedAudio decode_audio(const std::filesystem::path &file) {
             too_long = true;
             return;
         }
-        out.samples.insert(out.samples.end(), chunk.begin(), chunk.begin() + static_cast<std::ptrdiff_t>(made) * out.channels);
+        if (keep_samples)
+            out.samples.insert(out.samples.end(), chunk.begin(),
+                               chunk.begin() + static_cast<std::ptrdiff_t>(made) * out.channels);
         out.frames += made;
     };
     AVPacket *packet = av_packet_alloc();

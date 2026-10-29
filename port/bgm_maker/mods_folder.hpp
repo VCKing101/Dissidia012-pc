@@ -16,6 +16,11 @@ namespace d012::bgm_maker {
 struct ModsFolder {
     std::filesystem::path path;
     std::string found_by;  // for the window: "D012_MODS_DIR", "the game's data folder", ...
+    // How the game, started from here, finds these mods: on its own (the
+    // folder it would find), or told with D012_MODS_DIR (`tell_game`); in a
+    // checkout, as play_d012.ps1 starts it (`checkout`: the checkout's root).
+    bool tell_game{};
+    std::filesystem::path checkout;
 };
 
 // In order: `chosen` (the command line), D012_MODS_DIR, D012_DATA_DIR/mods,

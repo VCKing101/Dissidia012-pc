@@ -13,8 +13,9 @@ Test tones only (stream_fixtures.py writes the file; FFmpeg cannot).
    the end of the stream. The header says: loop flag on, loop start 88,207,
    176,407 samples. Phases as in port_check.py, so a seam one sample off is a
    whole peak-to-peak step.
-3. Through the tool's API: create the mod "brstm-test", import the BRSTM, see
-   the header's loop pre-filled, save it as "auto".
+3. With BgmMaker's command line: --import the BRSTM into a new mod
+   "brstm-test" (a file with a loop of its own comes in as "auto"), --check it
+   (the header's loop noted), and --decode it for the analysis.
 4. A second mod, "brstm-variants", written directly (it has entries the tool
    refuses): the same tones as BCSTM, Wii U BFSTM (big-endian), Switch BFSTM
    (little-endian, 48 kHz), a BRSTM without a loop flag, a BRSTM with a loop
@@ -39,7 +40,6 @@ import os
 import re
 import shutil
 import sys
-import threading
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TOOL = os.path.dirname(HERE)
@@ -49,7 +49,6 @@ sys.path.insert(0, HERE)
 import port_check as pc  # noqa: E402
 import stream_fixtures as sf  # noqa: E402
 from bgmmaker import audio  # noqa: E402
-from bgmmaker.server import App, serve  # noqa: E402
 
 ROOT = audio.REPO_ROOT
 DATA = os.path.join(ROOT, "build", "port", "data-brstm-test")
@@ -106,36 +105,21 @@ def make_mod(ff, paths) -> str:
     for mod in (MOD_ID, VARIANTS_ID):
         if os.path.isdir(os.path.join(mods, mod)):
             shutil.rmtree(os.path.join(mods, mod))  # the test's own mods in the test data
-    app = App(mods, audio.Decoder(ff))
-    server = serve(app)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    try:
-        api = pc.Client(app)
-        assert api.call("/api/mod/create", {"id": MOD_ID, "name": "BRSTM test", "version": "1.0.0",
-                                            "author": "Dissidia 012 native port"})["ok"]
-        name = "Battle Tones (loop).brstm"
-        with open(paths[name], "rb") as handle:
-            imported = api.call(f"/api/track/import?folder={MOD_ID}&name={name.replace(' ', '%20')}", raw=handle.read())
-        info = api.call("/api/track/info", {"folder": MOD_ID, "file": imported["file"]})
-        assert imported["info"]["loop_tags"] == info["loop_tags"]
-        print(f"imported {imported['file']} as \"{imported['title']}\": {info['stream']['description']}, "
-              f"{info['rate']} Hz, {info['samples']} samples decoded; loop pre-filled {info['loop_tags']}")
-        assert info["loop_tags"] == {"start": LOOP_START, "end": LOOP_END, "source": "the BRSTM header"}
-        key = api.call("/api/key", {"kind": "track", "text": imported["title"], "taken": [], "mod_id": MOD_ID})["key"]
-        model = {"id": MOD_ID, "name": "BRSTM test", "version": "1.0.0", "author": "Dissidia 012 native port",
-                 "description": "", "extra": {}, "series": [{"key": "brstm", "name": "BRSTM TEST", "order": 0,
-                 "extra": {}, "tracks": [{"key": key, "title": imported["title"], "file": imported["file"],
-                                          "extra": {}, "loop": {"mode": "auto"}}]}]}
-        saved = api.call("/api/mod/save", {"folder": MOD_ID, "model": model})
-        assert saved["ok"], saved["problems"]
-        folder = os.path.join(mods, MOD_ID)
-        with open(os.path.join(folder, "mod.json"), encoding="utf-8") as handle:
-            print("mod.json track:", json.load(handle)["music"]["series"][0]["tracks"][0])
-        shutil.copyfile(app.decoder.wav(os.path.join(folder, *imported["file"].split("/"))),
-                        os.path.join(OUT, "tool_decode.wav"))
-    finally:
-        server.shutdown()
-        server.server_close()
+    folder = os.path.join(mods, MOD_ID)
+    name = "Battle Tones (loop).brstm"
+    added = pc.bgm_maker("--import", folder, "brstm", paths[name])
+    key, file = re.search(r"^added (\S+): (.+) \(\"", added, re.M).groups()
+    checked = pc.bgm_maker("--check", folder)
+    _, samples, rate = pc.track_facts(checked, key)
+    header = f"the BRSTM header's loop, samples {LOOP_START} to {LOOP_END} at {RATE} Hz"
+    print(f"imported {file} (key {key}): {rate} Hz, {samples} samples decoded; BgmMaker notes {header}: "
+          f"{header in checked}")
+    assert header in checked and samples == LOOP_END
+    with open(os.path.join(folder, "mod.json"), encoding="utf-8") as handle:
+        track = json.load(handle)["music"]["series"][0]["tracks"][0]
+    print("mod.json track:", track)
+    assert track["loop"] == "auto"
+    pc.tool_decode(os.path.join(folder, *file.split("/")), os.path.join(OUT, "tool_decode.wav"))
 
     # The variants, as a modder might write them by hand.
     folder = os.path.join(mods, VARIANTS_ID, "music")

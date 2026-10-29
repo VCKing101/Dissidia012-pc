@@ -46,26 +46,36 @@ std::optional<std::filesystem::path> checkout_data(std::filesystem::path folder)
 } // namespace
 
 ModsFolder find_mods_folder(const std::optional<std::filesystem::path> &chosen) {
-    if (chosen) return {*chosen, "the command line"};
-    if (auto mods = env_path("D012_MODS_DIR")) return {*mods, "D012_MODS_DIR"};
-    if (auto data = env_path("D012_DATA_DIR")) return {*data / "mods", "D012_DATA_DIR"};
     const std::filesystem::path program = program_folder();
     std::error_code ec;
+    // A build in a checkout (not one with the game beside it) starts the game
+    // as play_d012.ps1 does, whichever mods folder is used.
+    std::filesystem::path checkout;
+#if !defined(D012_INSTALLER_BUILD)
+    const bool game_beside = !program.empty() && std::filesystem::is_regular_file(program / "game" / "EBOOT.ELF", ec);
+    if (!game_beside)
+        if (auto data = checkout_data(program)) checkout = data->parent_path().parent_path().parent_path();
+#endif
+    const auto found = [&](std::filesystem::path path, std::string by, bool tell) {
+        return ModsFolder{std::move(path), std::move(by), tell, checkout};
+    };
+    if (chosen) return found(*chosen, "the command line", true);
+    if (auto mods = env_path("D012_MODS_DIR")) return found(*mods, "D012_MODS_DIR", false);
+    if (auto data = env_path("D012_DATA_DIR")) return found(*data / "mods", "D012_DATA_DIR", false);
 #if defined(D012_INSTALLER_BUILD)
-    if (!program.empty()) return {program / "data" / "mods", "the game's data folder"};
+    if (!program.empty()) return found(program / "data" / "mods", "the game's data folder", false);
 #else
-    if (!program.empty() && std::filesystem::is_regular_file(program / "game" / "EBOOT.ELF", ec))
-        return {program / "data" / "mods", "the game's data folder"};
-    if (auto data = checkout_data(program)) return {*data / "mods", "this checkout's build/port/data"};
+    if (game_beside) return found(program / "data" / "mods", "the game's data folder", false);
+    if (!checkout.empty()) return found(checkout / "build" / "port" / "data" / "mods", "this checkout's build/port/data", false);
 #endif
     // The game's per-user data folder (PortableKit host/install/user_data.cpp,
     // with the profile's names in host/d012_profile.cpp).
     if (char *pref = SDL_GetPrefPath("Decomp-Dissidia", "D012Native")) {
         std::filesystem::path data = manifest::path_from_utf8(pref);
         SDL_free(pref);
-        return {data / "mods", "the game's data folder"};
+        return found(data / "mods", "the game's data folder", false);
     }
-    return {std::filesystem::current_path(ec) / "mods", "the current folder"};
+    return found(std::filesystem::current_path(ec) / "mods", "the current folder", true);
 }
 
 std::vector<ModSummary> list_mods(const std::filesystem::path &mods) {

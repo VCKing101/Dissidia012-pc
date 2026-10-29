@@ -1,14 +1,17 @@
 // The port's own tests, run by tools/port/pk_ctest.cmd <build dir>: the game's
-// manifest rules (host/d012_mod_manifest.cpp), the JSON writer and the
-// Battle BGM Maker's model. No game is needed. The expected texts of the
-// writer and the model are what the Python tool (port/tools/bgm_maker) writes
-// for the same documents. MIT licence; see port/README.md.
+// manifest rules (host/d012_mod_manifest.cpp) and the shared manifest cases
+// (manifest_cases.json), the JSON writer, and the Battle BGM Maker's model,
+// checks, names, saving and loop suggester. No game is needed. The expected
+// texts of the writer and the model are what the Python tool
+// (port/tools/bgm_maker) writes for the same documents. MIT licence; see
+// port/README.md.
 
 #include "checks.hpp"
 #include "d012_json.hpp"
 #include "d012_mod_manifest.hpp"
 #include "model.hpp"
 #include "names.hpp"
+#include "saving.hpp"
 #include "suggest.hpp"
 #include "undo.hpp"
 
@@ -17,6 +20,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <string>
 #include <utility>
 #include <vector>
@@ -249,6 +253,169 @@ void test_manifest() {
     expect(manifest::id_number("a") == 0xE40C292Cu, "FNV-1a");
 }
 
+// The shared manifest cases (tests/manifest_cases.json), which the Python
+// tool's tests run too: each manifest, with empty files where it points (and
+// other mods' ids and track ids), gives the problems listed, by level and
+// path, and by message where both tools say the same. With `print`, the
+// problems found are printed as the file lists them instead.
+void test_shared_cases(bool print) {
+    using d012::json::Value;
+    std::ifstream in(std::filesystem::path(D012_TESTS_DIR) / "manifest_cases.json", std::ios::binary);
+    const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    const Value cases = parse(text);
+    const Value *list = cases.find("cases");
+    expect(list != nullptr && !list->items.empty(), "the shared cases are there");
+    if (list == nullptr) return;
+    Value printed = d012::json::array_value();
+    for (const Value &item : list->items) {
+        const std::string name = item.find("name")->text;
+        const std::filesystem::path folder = std::filesystem::temp_directory_path() / "d012-tests-case";
+        std::filesystem::remove_all(folder);
+        for (const Value &file : item.find("files")->items) {
+            const std::filesystem::path path = folder / manifest::path_from_utf8(file.text);
+            std::filesystem::create_directories(path.parent_path());
+            std::ofstream(path).put('\0');
+        }
+        std::vector<d012::bgm_maker::ModSummary> others;
+        if (const Value *list_of_others = item.find("others")) {
+            for (const Value &other : list_of_others->items) {
+                d012::bgm_maker::ModSummary summary;
+                summary.folder = other.find("folder")->text;
+                summary.id = other.find("id")->text;
+                for (const Value &track : other.find("tracks")->items)
+                    summary.tracks[manifest::id_number(track.text)] = track.text;
+                others.push_back(summary);
+            }
+        }
+        const Value *manifest_value = item.find("manifest");
+        const std::string source = manifest_value != nullptr ? d012::json::write(*manifest_value) : item.find("text")->text;
+        std::string id;
+        if (manifest_value != nullptr && manifest_value->find("id") != nullptr && manifest_value->find("id")->is(Value::Kind::String))
+            id = manifest_value->find("id")->text;
+        std::vector<Problem> got = d012::bgm_maker::check_text(source, id, folder, others);
+        std::erase_if(got, [](const Problem &p) { return p.level == Problem::Level::Note; });
+        std::filesystem::remove_all(folder);
+        if (print) {
+            Value entry = d012::json::object_value();
+            entry.members.emplace_back("name", d012::json::string_value(name));
+            Value problems = d012::json::array_value();
+            for (const Problem &p : got) {
+                Value one = d012::json::object_value();
+                one.members.emplace_back("level", d012::json::string_value(p.level == Problem::Level::Error ? "error" : "warning"));
+                one.members.emplace_back("path", d012::json::string_value(p.path));
+                one.members.emplace_back("message", d012::json::string_value(p.message));
+                problems.items.push_back(std::move(one));
+            }
+            entry.members.emplace_back("problems", std::move(problems));
+            printed.items.push_back(std::move(entry));
+            continue;
+        }
+        std::string want_text, got_text;
+        const Value &want = *item.find("problems");
+        for (std::size_t i = 0; i < std::max(want.items.size(), got.size()); ++i) {
+            if (i < want.items.size()) {
+                const Value &w = want.items[i];
+                const Value *message = w.find("message");
+                want_text += w.find("level")->text + " " + w.find("path")->text + (message ? ": " + message->text : "") + "\n";
+                if (i < got.size())
+                    got_text += std::string(got[i].level == Problem::Level::Error ? "error" : "warning") + " " + got[i].path +
+                                (message ? ": " + got[i].message : "") + "\n";
+            } else {
+                got_text += std::string(got[i].level == Problem::Level::Error ? "error" : "warning") + " " + got[i].path +
+                            ": " + got[i].message + "\n";
+            }
+        }
+        expect_text(got_text, want_text, "shared case: " + name);
+    }
+    if (print) std::cout << d012::json::write(printed) << "\n";
+}
+
+// Saving: refused with an error left, the old mod.json kept in .backups (the
+// last 20), nothing written when nothing changed, a new mod's waiting files
+// moved into its folder, copied files no track uses deleted.
+void test_saving() {
+    namespace bm = d012::bgm_maker;
+    const std::filesystem::path root = std::filesystem::temp_directory_path() / "d012-tests-saving";
+    std::filesystem::remove_all(root);
+    const std::filesystem::path mods = root / "mods";
+    const std::filesystem::path staging = root / "staging";
+    std::filesystem::create_directories(staging / "music");
+    for (const char *name : {"a.mp3", "b.mp3"}) std::ofstream(staging / "music" / name).put('\0');
+    std::filesystem::create_directories(mods);
+
+    bm::SaveRequest request;
+    request.mods = mods;
+    request.folder = "new-one";
+    request.is_new = true;
+    request.staging = staging;
+    request.model.id = "new-one";
+    request.model.name = "New";
+    request.model.version = "1.0.0";
+    bm::SeriesModel series;
+    series.key = "s";
+    series.name = "S";
+    bm::TrackModel track;
+    track.key = "a";
+    track.title = "A";
+    track.file = "music/a.mp3";
+    track.loop.mode = bm::LoopModel::Mode::Custom;
+    track.loop.start = 100;
+    track.loop.end = 5000;
+    series.tracks.push_back(track);
+    request.model.series.push_back(series);
+    request.added = {staging / "music" / "a.mp3", staging / "music" / "b.mp3"};
+    // The file is 5,000 samples long: a loop to its end leaves "end" out.
+    request.facts = [](const std::string &) -> std::optional<bm::FileFacts> {
+        bm::FileFacts facts;
+        facts.rate = 44'100;
+        facts.samples = 5000;
+        return facts;
+    };
+    bm::SaveRequest refused = request;
+    refused.model.series[0].tracks[0].loop.end = 5001;
+    bm::SaveResult result = bm::save_mod(refused);
+    expect(!result.saved && bm::has_errors(result.problems) && !std::filesystem::exists(mods / "new-one"),
+           "a loop past the end of the file is not saved");
+
+    result = bm::save_mod(request);
+    const std::filesystem::path folder = mods / "new-one";
+    expect(result.saved && result.error.empty() && result.backup.empty(), "a new mod saved: " + result.error);
+    expect(std::filesystem::is_regular_file(folder / "music" / "a.mp3") && !std::filesystem::exists(folder / "music" / "b.mp3") &&
+               !std::filesystem::exists(staging),
+           "its files moved in, the unused copy deleted");
+    std::ifstream in(folder / "mod.json", std::ios::binary);
+    const std::string saved((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    in.close();
+    expect(saved == result.text && saved.find("\"start\": 100") != std::string::npos &&
+               saved.find("\"end\"") == std::string::npos,
+           "mod.json written, \"end\" left out at the file's end");
+
+    bm::SaveRequest again = request;
+    again.is_new = false;
+    again.staging.clear();
+    again.added.clear();
+    result = bm::save_mod(again);
+    expect(result.saved && result.unchanged && !std::filesystem::exists(folder / ".backups"), "no change, nothing written");
+
+    for (int i = 0; i < 22; ++i) {
+        again.model.version = "1.0." + std::to_string(i + 1);
+        result = bm::save_mod(again);
+        expect(result.saved && !result.unchanged && result.backup.starts_with(".backups/mod-"), "a change kept a backup");
+    }
+    std::size_t backups = 0;
+    for ([[maybe_unused]] const auto &entry : std::filesystem::directory_iterator(folder / ".backups")) ++backups;
+    expect(backups == bm::kKeptBackups, "the last 20 backups kept, not " + std::to_string(backups));
+
+    bm::SaveRequest taken = request;
+    taken.staging.clear();
+    taken.added.clear();
+    taken.model.series.clear();
+    result = bm::save_mod(taken);
+    expect(!result.saved && !bm::problems_at(result.problems, "mod.folder").empty(), "a new mod's folder already there");
+    std::error_code ec;
+    std::filesystem::remove_all(root, ec);
+}
+
 void test_checks() {
     Folder folder;
     d012::bgm_maker::ModModel model;
@@ -386,11 +553,17 @@ void test_undo() {
 
 } // namespace
 
-int main() {
+int main(int argc, char **argv) {
+    if (argc == 2 && std::string(argv[1]) == "--print-cases") {
+        test_shared_cases(true);
+        return 0;
+    }
     test_writer();
     test_model();
     test_manifest();
     test_checks();
+    test_saving();
+    test_shared_cases(false);
     test_names();
     test_suggest();
     test_undo();

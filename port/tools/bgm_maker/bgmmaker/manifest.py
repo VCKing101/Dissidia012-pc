@@ -434,8 +434,8 @@ def validate(document: Any, folder: Optional[str] = None,
 
     music = _member(root, "music", (dict,), "an object", False, report, "mod", "the mod")
     if music is None:
-        if "music" not in root:
-            report.warning("mod", "the mod adds nothing this build knows (no \"music\")")
+        # As the port: also when "music" is there but of the wrong kind.
+        report.warning("mod", "the mod adds nothing this build knows (no \"music\")")
         return report.items
     _unknown(music, MUSIC_MEMBERS, report, "music", "\"music\"")
     series_list = _member(music, "series", (list,), "a list", True, report, "music", "\"music\"")
@@ -510,7 +510,8 @@ def validate(document: Any, folder: Optional[str] = None,
                 elif not inside(folder, full):
                     report.error(f"{t_path}.file", f"{t_context} \"file\" {file_text} leads outside the mod's folder")
                     ok = False
-            loop = _loop_check(item.get("loop"), report, f"{t_path}.loop", t_context)
+            # As the port: a track whose file is refused has its loop not read.
+            loop = _loop_check(item.get("loop"), report, f"{t_path}.loop", t_context) if ok else None
             if loop is None:
                 ok = False
             if not ok:

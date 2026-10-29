@@ -335,6 +335,7 @@ void App::loop_editor(int s, int t) {
     if (auto found = infos_.find(track.file); found != infos_.end() && !found->second.samples) {
         found->second.samples = audio->audio.frames;
         found->second.decoded_rate = audio->audio.rate;
+        ++infos_changed_;
     }
     const int rate = audio->audio.rate;
     std::string line = track.file;

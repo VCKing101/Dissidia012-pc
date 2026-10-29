@@ -1,0 +1,2716 @@
+{
+  "about": "Manifest cases both Battle BGM Makers run: port/tests/d012_tests.cpp (the game's rules, port/host/d012_mod_manifest.cpp, and the C++ tool's checks) and port/tools/bgm_maker/tests/test_manifest.py (the Python tool's validate). Each case is a manifest (or its text), the files to make (empty) in its folder, and other mods (their ids and track ids). Its problems are in order, notes left out; a message is given where both tools say the same.",
+  "cases": [
+    {
+      "name": "a valid mod",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "name": "Test",
+        "version": "1.0.0",
+        "music": {
+          "series": [
+            {
+              "key": "tones",
+              "name": "TEST TONES",
+              "order": 0,
+              "tracks": [
+                {
+                  "key": "intro-loop",
+                  "title": "Intro, then a loop",
+                  "file": "music/a.wav",
+                  "loop": {
+                    "start": 10,
+                    "end": 20
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "problems": []
+    },
+    {
+      "name": "loops of every form",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "name": "Test",
+        "version": "1.0.0",
+        "music": {
+          "series": [
+            {
+              "key": "tones",
+              "name": "TEST TONES",
+              "order": 0,
+              "tracks": [
+                {
+                  "key": "intro-loop",
+                  "title": "Intro, then a loop",
+                  "file": "music/a.wav",
+                  "loop": {
+                    "start": 10,
+                    "end": 20
+                  }
+                },
+                {
+                  "key": "a",
+                  "title": "A",
+                  "file": "music/a.wav",
+                  "loop": "auto"
+                },
+                {
+                  "key": "b",
+                  "title": "B",
+                  "file": "music/a.wav",
+                  "loop": "whole"
+                },
+                {
+                  "key": "c",
+                  "title": "C",
+                  "file": "music/a.wav",
+                  "loop": "none"
+                },
+                {
+                  "key": "d",
+                  "title": "D",
+                  "file": "music/a.wav"
+                },
+                {
+                  "key": "e",
+                  "title": "E",
+                  "file": "music/a.wav",
+                  "loop": {
+                    "start": 0
+                  }
+                },
+                {
+                  "key": "f",
+                  "title": "F",
+                  "file": "music/b.wav",
+                  "loop": {
+                    "start_seconds": 1.5,
+                    "end_seconds": 2.25
+                  }
+                },
+                {
+                  "key": "g",
+                  "title": "G",
+                  "file": "music/b.wav",
+                  "loop": {
+                    "start_seconds": 0
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "problems": []
+    },
+    {
+      "name": "not JSON",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "text": "{\"id\": ",
+      "problems": [
+        {
+          "level": "error",
+          "path": "mod"
+        }
+      ]
+    },
+    {
+      "name": "a member given twice",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "text": "{\"format\": 1, \"id\": \"a\", \"id\": \"b\", \"name\": \"x\", \"version\": \"1\"}",
+      "problems": [
+        {
+          "level": "error",
+          "path": "mod"
+        }
+      ]
+    },
+    {
+      "name": "not an object",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "text": "[1, 2]",
+      "problems": [
+        {
+          "level": "error",
+          "path": "mod",
+          "message": "the manifest must be an object"
+        }
+      ]
+    },
+    {
+      "name": "another format",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "manifest": {
+        "format": 2,
+        "id": "test-mod",
+        "name": "Test",
+        "version": "1.0.0",
+        "music": {
+          "series": [
+            {
+              "key": "tones",
+              "name": "TEST TONES",
+              "order": 0,
+              "tracks": [
+                {
+                  "key": "intro-loop",
+                  "title": "Intro, then a loop",
+                  "file": "music/a.wav",
+                  "loop": {
+                    "start": 10,
+                    "end": 20
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "problems": [
+        {
+          "level": "error",
+          "path": "mod.format"
+        }
+      ]
+    },
+    {
+      "name": "an id that is not a key",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "Test Mod",
+        "name": "Test",
+        "version": "1.0.0",
+        "music": {
+          "series": [
+            {
+              "key": "tones",
+              "name": "TEST TONES",
+              "order": 0,
+              "tracks": [
+                {
+                  "key": "intro-loop",
+                  "title": "Intro, then a loop",
+                  "file": "music/a.wav",
+                  "loop": {
+                    "start": 10,
+                    "end": 20
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "problems": [
+        {
+          "level": "error",
+          "path": "mod.id",
+          "message": "\"id\" must be lower-case letters, digits, '.', '_' or '-', starting with a letter or digit"
+        }
+      ]
+    },
+    {
+      "name": "no name",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "version": "1.0.0",
+        "music": {
+          "series": [
+            {
+              "key": "tones",
+              "name": "TEST TONES",
+              "order": 0,
+              "tracks": [
+                {
+                  "key": "intro-loop",
+                  "title": "Intro, then a loop",
+                  "file": "music/a.wav",
+                  "loop": {
+                    "start": 10,
+                    "end": 20
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "problems": [
+        {
+          "level": "error",
+          "path": "mod",
+          "message": "the mod needs \"name\""
+        }
+      ]
+    },
+    {
+      "name": "an empty version",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "name": "Test",
+        "version": "",
+        "music": {
+          "series": [
+            {
+              "key": "tones",
+              "name": "TEST TONES",
+              "order": 0,
+              "tracks": [
+                {
+                  "key": "intro-loop",
+                  "title": "Intro, then a loop",
+                  "file": "music/a.wav",
+                  "loop": {
+                    "start": 10,
+                    "end": 20
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "problems": [
+        {
+          "level": "error",
+          "path": "mod.version",
+          "message": "the mod \"version\" must be 1 to 32 bytes long"
+        }
+      ]
+    },
+    {
+      "name": "a version too long",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "name": "Test",
+        "version": "111111111111111111111111111111111",
+        "music": {
+          "series": [
+            {
+              "key": "tones",
+              "name": "TEST TONES",
+              "order": 0,
+              "tracks": [
+                {
+                  "key": "intro-loop",
+                  "title": "Intro, then a loop",
+                  "file": "music/a.wav",
+                  "loop": {
+                    "start": 10,
+                    "end": 20
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "problems": [
+        {
+          "level": "error",
+          "path": "mod.version",
+          "message": "the mod \"version\" must be 1 to 32 bytes long"
+        }
+      ]
+    },
+    {
+      "name": "a name that is not text",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "name": 5,
+        "version": "1.0.0",
+        "music": {
+          "series": [
+            {
+              "key": "tones",
+              "name": "TEST TONES",
+              "order": 0,
+              "tracks": [
+                {
+                  "key": "intro-loop",
+                  "title": "Intro, then a loop",
+                  "file": "music/a.wav",
+                  "loop": {
+                    "start": 10,
+                    "end": 20
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "problems": [
+        {
+          "level": "error",
+          "path": "mod.name",
+          "message": "the mod \"name\" must be a string, not a number"
+        }
+      ]
+    },
+    {
+      "name": "a description too long",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "name": "Test",
+        "version": "1.0.0",
+        "music": {
+          "series": [
+            {
+              "key": "tones",
+              "name": "TEST TONES",
+              "order": 0,
+              "tracks": [
+                {
+                  "key": "intro-loop",
+                  "title": "Intro, then a loop",
+                  "file": "music/a.wav",
+                  "loop": {
+                    "start": 10,
+                    "end": 20
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "description": "ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "problems": [
+        {
+          "level": "error",
+          "path": "mod.description",
+          "message": "the mod \"description\" must be 1 to 1024 bytes long"
+        }
+      ]
+    },
+    {
+      "name": "an author that is not text",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "name": "Test",
+        "version": "1.0.0",
+        "music": {
+          "series": [
+            {
+              "key": "tones",
+              "name": "TEST TONES",
+              "order": 0,
+              "tracks": [
+                {
+                  "key": "intro-loop",
+                  "title": "Intro, then a loop",
+                  "file": "music/a.wav",
+                  "loop": {
+                    "start": 10,
+                    "end": 20
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "author": [
+          "me"
+        ]
+      },
+      "problems": [
+        {
+          "level": "error",
+          "path": "mod.author",
+          "message": "the mod \"author\" must be a string, not a list"
+        }
+      ]
+    },
+    {
+      "name": "an unknown member",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "name": "Test",
+        "version": "1.0.0",
+        "music": {
+          "series": [
+            {
+              "key": "tones",
+              "name": "TEST TONES",
+              "order": 0,
+              "tracks": [
+                {
+                  "key": "intro-loop",
+                  "title": "Intro, then a loop",
+                  "file": "music/a.wav",
+                  "loop": {
+                    "start": 10,
+                    "end": 20
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "colour": "blue"
+      },
+      "problems": [
+        {
+          "level": "warning",
+          "path": "mod.colour",
+          "message": "the mod has an unknown member \"colour\", which is ignored"
+        }
+      ]
+    },
+    {
+      "name": "no music",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "name": "Test",
+        "version": "1.0.0"
+      },
+      "problems": [
+        {
+          "level": "warning",
+          "path": "mod",
+          "message": "the mod adds nothing this build knows (no \"music\")"
+        }
+      ]
+    },
+    {
+      "name": "music that is not an object",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "name": "Test",
+        "version": "1.0.0",
+        "music": []
+      },
+      "problems": [
+        {
+          "level": "error",
+          "path": "mod.music",
+          "message": "the mod \"music\" must be an object, not a list"
+        },
+        {
+          "level": "warning",
+          "path": "mod",
+          "message": "the mod adds nothing this build knows (no \"music\")"
+        }
+      ]
+    },
+    {
+      "name": "music without series",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "name": "Test",
+        "version": "1.0.0",
+        "music": {}
+      },
+      "problems": [
+        {
+          "level": "error",
+          "path": "music",
+          "message": "\"music\" needs \"series\""
+        }
+      ]
+    },
+    {
+      "name": "music with an unknown member",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "name": "Test",
+        "version": "1.0.0",
+        "music": {
+          "series": [
+            {
+              "key": "tones",
+              "name": "TEST TONES",
+              "order": 0,
+              "tracks": [
+                {
+                  "key": "intro-loop",
+                  "title": "Intro, then a loop",
+                  "file": "music/a.wav",
+                  "loop": {
+                    "start": 10,
+                    "end": 20
+                  }
+                }
+              ]
+            }
+          ],
+          "videos": []
+        }
+      },
+      "problems": [
+        {
+          "level": "warning",
+          "path": "music.videos",
+          "message": "\"music\" has an unknown member \"videos\", which is ignored"
+        }
+      ]
+    },
+    {
+      "name": "series that is not a list",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "name": "Test",
+        "version": "1.0.0",
+        "music": {
+          "series": {}
+        }
+      },
+      "problems": [
+        {
+          "level": "error",
+          "path": "music.series",
+          "message": "\"music\" \"series\" must be a list, not an object"
+        }
+      ]
+    },
+    {
+      "name": "a series that is not an object",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "name": "Test",
+        "version": "1.0.0",
+        "music": {
+          "series": [
+            {
+              "key": "tones",
+              "name": "TEST TONES",
+              "order": 0,
+              "tracks": [
+                {
+                  "key": "intro-loop",
+                  "title": "Intro, then a loop",
+                  "file": "music/a.wav",
+                  "loop": {
+                    "start": 10,
+                    "end": 20
+                  }
+                }
+              ]
+            },
+            "tones"
+          ]
+        }
+      },
+      "problems": [
+        {
+          "level": "error",
+          "path": "series.1",
+          "message": "each series must be an object"
+        }
+      ]
+    },
+    {
+      "name": "a series without a name",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "name": "Test",
+        "version": "1.0.0",
+        "music": {
+          "series": [
+            {
+              "key": "tones",
+              "order": 0,
+              "tracks": [
+                {
+                  "key": "intro-loop",
+                  "title": "Intro, then a loop",
+                  "file": "music/a.wav",
+                  "loop": {
+                    "start": 10,
+                    "end": 20
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "problems": [
+        {
+          "level": "error",
+          "path": "series.0",
+          "message": "series \"tones\" needs \"name\""
+        },
+        {
+          "level": "error",
+          "path": "series.0",
+          "message": "series \"tones\" is left out"
+        }
+      ]
+    },
+    {
+      "name": "a series key that is not a key",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "name": "Test",
+        "version": "1.0.0",
+        "music": {
+          "series": [
+            {
+              "key": "Tones",
+              "name": "TEST TONES",
+              "order": 0,
+              "tracks": [
+                {
+                  "key": "intro-loop",
+                  "title": "Intro, then a loop",
+                  "file": "music/a.wav",
+                  "loop": {
+                    "start": 10,
+                    "end": 20
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "problems": [
+        {
+          "level": "error",
+          "path": "series.0.key",
+          "message": "series \"Tones\": \"key\" must be lower-case letters, digits, '.', '_' or '-'"
+        }
+      ]
+    },
+    {
+      "name": "a series name too long",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "name": "Test",
+        "version": "1.0.0",
+        "music": {
+          "series": [
+            {
+              "key": "tones",
+              "name": "NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN",
+              "order": 0,
+              "tracks": [
+                {
+                  "key": "intro-loop",
+                  "title": "Intro, then a loop",
+                  "file": "music/a.wav",
+                  "loop": {
+                    "start": 10,
+                    "end": 20
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "problems": [
+        {
+          "level": "error",
+          "path": "series.0.name",
+          "message": "series \"tones\" \"name\" must be 1 to 48 bytes long"
+        },
+        {
+          "level": "error",
+          "path": "series.0",
+          "message": "series \"tones\" is left out"
+        }
+      ]
+    },
+    {
+      "name": "an order that is not whole",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "name": "Test",
+        "version": "1.0.0",
+        "music": {
+          "series": [
+            {
+              "key": "tones",
+              "name": "TEST TONES",
+              "order": 1.5,
+              "tracks": [
+                {
+                  "key": "intro-loop",
+                  "title": "Intro, then a loop",
+                  "file": "music/a.wav",
+                  "loop": {
+                    "start": 10,
+                    "end": 20
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "problems": [
+        {
+          "level": "error",
+          "path": "series.0.order"
+        }
+      ]
+    },
+    {
+      "name": "an order too large",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "name": "Test",
+        "version": "1.0.0",
+        "music": {
+          "series": [
+            {
+              "key": "tones",
+              "name": "TEST TONES",
+              "order": 2000000,
+              "tracks": [
+                {
+                  "key": "intro-loop",
+                  "title": "Intro, then a loop",
+                  "file": "music/a.wav",
+                  "loop": {
+                    "start": 10,
+                    "end": 20
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "problems": [
+        {
+          "level": "error",
+          "path": "series.0.order"
+        }
+      ]
+    },
+    {
+      "name": "an order that is not a number",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "name": "Test",
+        "version": "1.0.0",
+        "music": {
+          "series": [
+            {
+              "key": "tones",
+              "name": "TEST TONES",
+              "order": "first",
+              "tracks": [
+                {
+                  "key": "intro-loop",
+                  "title": "Intro, then a loop",
+                  "file": "music/a.wav",
+                  "loop": {
+                    "start": 10,
+                    "end": 20
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "problems": [
+        {
+          "level": "error",
+          "path": "series.0.order",
+          "message": "series \"tones\" \"order\" must be a number, not a string"
+        }
+      ]
+    },
+    {
+      "name": "a series with an unknown member",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "name": "Test",
+        "version": "1.0.0",
+        "music": {
+          "series": [
+            {
+              "key": "tones",
+              "name": "TEST TONES",
+              "order": 0,
+              "tracks": [
+                {
+                  "key": "intro-loop",
+                  "title": "Intro, then a loop",
+                  "file": "music/a.wav",
+                  "loop": {
+                    "start": 10,
+                    "end": 20
+                  }
+                }
+              ],
+              "colour": "red"
+            }
+          ]
+        }
+      },
+      "problems": [
+        {
+          "level": "warning",
+          "path": "series.0.colour",
+          "message": "series \"tones\" has an unknown member \"colour\", which is ignored"
+        }
+      ]
+    },
+    {
+      "name": "series tracks that are not a list",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "name": "Test",
+        "version": "1.0.0",
+        "music": {
+          "series": [
+            {
+              "key": "tones",
+              "name": "TEST TONES",
+              "order": 0,
+              "tracks": {}
+            }
+          ]
+        }
+      },
+      "problems": [
+        {
+          "level": "error",
+          "path": "series.0.tracks",
+          "message": "series \"tones\" \"tracks\" must be a list, not an object"
+        }
+      ]
+    },
+    {
+      "name": "a series twice",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "name": "Test",
+        "version": "1.0.0",
+        "music": {
+          "series": [
+            {
+              "key": "tones",
+              "name": "TEST TONES",
+              "order": 0,
+              "tracks": [
+                {
+                  "key": "intro-loop",
+                  "title": "Intro, then a loop",
+                  "file": "music/a.wav",
+                  "loop": {
+                    "start": 10,
+                    "end": 20
+                  }
+                }
+              ]
+            },
+            {
+              "key": "tones",
+              "name": "TEST TONES",
+              "order": 0,
+              "tracks": [
+                {
+                  "key": "intro-loop",
+                  "title": "Intro, then a loop",
+                  "file": "music/a.wav",
+                  "loop": {
+                    "start": 10,
+                    "end": 20
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "problems": [
+        {
+          "level": "error",
+          "path": "series.1.key",
+          "message": "series \"tones\" appears twice; the second is left out"
+        }
+      ]
+    },
+    {
+      "name": "a track that is not an object",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "name": "Test",
+        "version": "1.0.0",
+        "music": {
+          "series": [
+            {
+              "key": "tones",
+              "name": "TEST TONES",
+              "order": 0,
+              "tracks": [
+                "a"
+              ]
+            }
+          ]
+        }
+      },
+      "problems": [
+        {
+          "level": "error",
+          "path": "series.0.tracks.0",
+          "message": "series \"tones\": each track must be an object"
+        },
+        {
+          "level": "error",
+          "path": "series.0",
+          "message": "series \"tones\" has no track that can be played; it is left out"
+        }
+      ]
+    },
+    {
+      "name": "a track without a title",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "name": "Test",
+        "version": "1.0.0",
+        "music": {
+          "series": [
+            {
+              "key": "tones",
+              "name": "TEST TONES",
+              "order": 0,
+              "tracks": [
+                {
+                  "key": "intro-loop",
+                  "file": "music/a.wav",
+                  "loop": {
+                    "start": 10,
+                    "end": 20
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "problems": [
+        {
+          "level": "error",
+          "path": "series.0.tracks.0",
+          "message": "track \"intro-loop\" needs \"title\""
+        },
+        {
+          "level": "error",
+          "path": "series.0.tracks.0",
+          "message": "track \"intro-loop\" is left out"
+        },
+        {
+          "level": "error",
+          "path": "series.0",
+          "message": "series \"tones\" has no track that can be played; it is left out"
+        }
+      ]
+    },
+    {
+      "name": "a title too long",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "name": "Test",
+        "version": "1.0.0",
+        "music": {
+          "series": [
+            {
+              "key": "tones",
+              "name": "TEST TONES",
+              "order": 0,
+              "tracks": [
+                {
+                  "key": "intro-loop",
+                  "title": "TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT",
+                  "file": "music/a.wav",
+                  "loop": {
+                    "start": 10,
+                    "end": 20
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "problems": [
+        {
+          "level": "error",
+          "path": "series.0.tracks.0.title",
+          "message": "track \"intro-loop\" \"title\" must be 1 to 64 bytes long"
+        },
+        {
+          "level": "error",
+          "path": "series.0.tracks.0",
+          "message": "track \"intro-loop\" is left out"
+        },
+        {
+          "level": "error",
+          "path": "series.0",
+          "message": "series \"tones\" has no track that can be played; it is left out"
+        }
+      ]
+    },
+    {
+      "name": "a title outside ASCII",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "name": "Test",
+        "version": "1.0.0",
+        "music": {
+          "series": [
+            {
+              "key": "tones",
+              "name": "TEST TONES",
+              "order": 0,
+              "tracks": [
+                {
+                  "key": "intro-loop",
+                  "title": "Café",
+                  "file": "music/a.wav",
+                  "loop": {
+                    "start": 10,
+                    "end": 20
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "problems": [
+        {
+          "level": "warning",
+          "path": "series.0.tracks.0.title",
+          "message": "track \"intro-loop\": the game's band shows a character outside ASCII as ?"
+        }
+      ]
+    },
+    {
+      "name": "a track key that is not a key",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "name": "Test",
+        "version": "1.0.0",
+        "music": {
+          "series": [
+            {
+              "key": "tones",
+              "name": "TEST TONES",
+              "order": 0,
+              "tracks": [
+                {
+                  "key": "Intro",
+                  "title": "Intro, then a loop",
+                  "file": "music/a.wav",
+                  "loop": {
+                    "start": 10,
+                    "end": 20
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "problems": [
+        {
+          "level": "error",
+          "path": "series.0.tracks.0.key",
+          "message": "track \"Intro\": \"key\" must be lower-case letters, digits, '.', '_' or '-'"
+        },
+        {
+          "level": "error",
+          "path": "series.0",
+          "message": "series \"tones\" has no track that can be played; it is left out"
+        }
+      ]
+    },
+    {
+      "name": "a track without a file",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "name": "Test",
+        "version": "1.0.0",
+        "music": {
+          "series": [
+            {
+              "key": "tones",
+              "name": "TEST TONES",
+              "order": 0,
+              "tracks": [
+                {
+                  "key": "intro-loop",
+                  "title": "Intro, then a loop",
+                  "loop": {
+                    "start": 10,
+                    "end": 20
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "problems": [
+        {
+          "level": "error",
+          "path": "series.0.tracks.0",
+          "message": "track \"intro-loop\" needs \"file\""
+        },
+        {
+          "level": "error",
+          "path": "series.0.tracks.0",
+          "message": "track \"intro-loop\" is left out"
+        },
+        {
+          "level": "error",
+          "path": "series.0",
+          "message": "series \"tones\" has no track that can be played; it is left out"
+        }
+      ]
+    },
+    {
+      "name": "a file that is not text",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "name": "Test",
+        "version": "1.0.0",
+        "music": {
+          "series": [
+            {
+              "key": "tones",
+              "name": "TEST TONES",
+              "order": 0,
+              "tracks": [
+                {
+                  "key": "intro-loop",
+                  "title": "Intro, then a loop",
+                  "file": 3,
+                  "loop": {
+                    "start": 10,
+                    "end": 20
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "problems": [
+        {
+          "level": "error",
+          "path": "series.0.tracks.0.file",
+          "message": "track \"intro-loop\" \"file\" must be a string, not a number"
+        },
+        {
+          "level": "error",
+          "path": "series.0.tracks.0",
+          "message": "track \"intro-loop\" is left out"
+        },
+        {
+          "level": "error",
+          "path": "series.0",
+          "message": "series \"tones\" has no track that can be played; it is left out"
+        }
+      ]
+    },
+    {
+      "name": "a track with an unknown member",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "name": "Test",
+        "version": "1.0.0",
+        "music": {
+          "series": [
+            {
+              "key": "tones",
+              "name": "TEST TONES",
+              "order": 0,
+              "tracks": [
+                {
+                  "key": "intro-loop",
+                  "title": "Intro, then a loop",
+                  "file": "music/a.wav",
+                  "loop": {
+                    "start": 10,
+                    "end": 20
+                  },
+                  "volume": 2
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "problems": [
+        {
+          "level": "warning",
+          "path": "series.0.tracks.0.volume",
+          "message": "track \"intro-loop\" has an unknown member \"volume\", which is ignored"
+        }
+      ]
+    },
+    {
+      "name": "a track key twice",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "name": "Test",
+        "version": "1.0.0",
+        "music": {
+          "series": [
+            {
+              "key": "tones",
+              "name": "TEST TONES",
+              "order": 0,
+              "tracks": [
+                {
+                  "key": "intro-loop",
+                  "title": "Intro, then a loop",
+                  "file": "music/a.wav",
+                  "loop": {
+                    "start": 10,
+                    "end": 20
+                  }
+                }
+              ]
+            },
+            {
+              "key": "more",
+              "name": "MORE",
+              "tracks": [
+                {
+                  "key": "intro-loop",
+                  "title": "Again",
+                  "file": "music/b.wav"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "problems": [
+        {
+          "level": "error",
+          "path": "series.1.tracks.0.key",
+          "message": "track \"intro-loop\" appears twice in the mod; the second is left out"
+        },
+        {
+          "level": "error",
+          "path": "series.1",
+          "message": "series \"more\" has no track that can be played; it is left out"
+        }
+      ]
+    },
+    {
+      "name": "a file that is not there",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "name": "Test",
+        "version": "1.0.0",
+        "music": {
+          "series": [
+            {
+              "key": "tones",
+              "name": "TEST TONES",
+              "order": 0,
+              "tracks": [
+                {
+                  "key": "intro-loop",
+                  "title": "Intro, then a loop",
+                  "file": "music/missing.wav",
+                  "loop": {
+                    "start": 10,
+                    "end": 20
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "problems": [
+        {
+          "level": "error",
+          "path": "series.0.tracks.0.file",
+          "message": "track \"intro-loop\" \"file\" music/missing.wav is not in the mod's folder"
+        },
+        {
+          "level": "error",
+          "path": "series.0.tracks.0",
+          "message": "track \"intro-loop\" is left out"
+        },
+        {
+          "level": "error",
+          "path": "series.0",
+          "message": "series \"tones\" has no track that can be played; it is left out"
+        }
+      ]
+    },
+    {
+      "name": "a file leaving the folder",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "name": "Test",
+        "version": "1.0.0",
+        "music": {
+          "series": [
+            {
+              "key": "tones",
+              "name": "TEST TONES",
+              "order": 0,
+              "tracks": [
+                {
+                  "key": "intro-loop",
+                  "title": "Intro, then a loop",
+                  "file": "../a.wav",
+                  "loop": {
+                    "start": 10,
+                    "end": 20
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "problems": [
+        {
+          "level": "error",
+          "path": "series.0.tracks.0.file",
+          "message": "track \"intro-loop\" \"file\" must not leave the mod's folder (\"..\")"
+        },
+        {
+          "level": "error",
+          "path": "series.0.tracks.0",
+          "message": "track \"intro-loop\" is left out"
+        },
+        {
+          "level": "error",
+          "path": "series.0",
+          "message": "series \"tones\" has no track that can be played; it is left out"
+        }
+      ]
+    },
+    {
+      "name": "a file from the root",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "name": "Test",
+        "version": "1.0.0",
+        "music": {
+          "series": [
+            {
+              "key": "tones",
+              "name": "TEST TONES",
+              "order": 0,
+              "tracks": [
+                {
+                  "key": "intro-loop",
+                  "title": "Intro, then a loop",
+                  "file": "/music/a.wav",
+                  "loop": {
+                    "start": 10,
+                    "end": 20
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "problems": [
+        {
+          "level": "error",
+          "path": "series.0.tracks.0.file",
+          "message": "track \"intro-loop\" \"file\" must be a path inside the mod's folder"
+        },
+        {
+          "level": "error",
+          "path": "series.0.tracks.0",
+          "message": "track \"intro-loop\" is left out"
+        },
+        {
+          "level": "error",
+          "path": "series.0",
+          "message": "series \"tones\" has no track that can be played; it is left out"
+        }
+      ]
+    },
+    {
+      "name": "a file on a drive",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "name": "Test",
+        "version": "1.0.0",
+        "music": {
+          "series": [
+            {
+              "key": "tones",
+              "name": "TEST TONES",
+              "order": 0,
+              "tracks": [
+                {
+                  "key": "intro-loop",
+                  "title": "Intro, then a loop",
+                  "file": "C:/music/a.wav",
+                  "loop": {
+                    "start": 10,
+                    "end": 20
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "problems": [
+        {
+          "level": "error",
+          "path": "series.0.tracks.0.file",
+          "message": "track \"intro-loop\" \"file\" must be a path inside the mod's folder"
+        },
+        {
+          "level": "error",
+          "path": "series.0.tracks.0",
+          "message": "track \"intro-loop\" is left out"
+        },
+        {
+          "level": "error",
+          "path": "series.0",
+          "message": "series \"tones\" has no track that can be played; it is left out"
+        }
+      ]
+    },
+    {
+      "name": "an empty file name",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "name": "Test",
+        "version": "1.0.0",
+        "music": {
+          "series": [
+            {
+              "key": "tones",
+              "name": "TEST TONES",
+              "order": 0,
+              "tracks": [
+                {
+                  "key": "intro-loop",
+                  "title": "Intro, then a loop",
+                  "file": "",
+                  "loop": {
+                    "start": 10,
+                    "end": 20
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "problems": [
+        {
+          "level": "error",
+          "path": "series.0.tracks.0.file",
+          "message": "track \"intro-loop\" \"file\" must be a path inside the mod's folder"
+        },
+        {
+          "level": "error",
+          "path": "series.0.tracks.0",
+          "message": "track \"intro-loop\" is left out"
+        },
+        {
+          "level": "error",
+          "path": "series.0",
+          "message": "series \"tones\" has no track that can be played; it is left out"
+        }
+      ]
+    },
+    {
+      "name": "a file with a backslash",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "name": "Test",
+        "version": "1.0.0",
+        "music": {
+          "series": [
+            {
+              "key": "tones",
+              "name": "TEST TONES",
+              "order": 0,
+              "tracks": [
+                {
+                  "key": "intro-loop",
+                  "title": "Intro, then a loop",
+                  "file": "music\\a.wav",
+                  "loop": {
+                    "start": 10,
+                    "end": 20
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "problems": [
+        {
+          "level": "error",
+          "path": "series.0.tracks.0.file",
+          "message": "track \"intro-loop\" \"file\" must use / between folders (a \\ only works on Windows)"
+        },
+        {
+          "level": "error",
+          "path": "series.0.tracks.0",
+          "message": "track \"intro-loop\" is left out"
+        },
+        {
+          "level": "error",
+          "path": "series.0",
+          "message": "series \"tones\" has no track that can be played; it is left out"
+        }
+      ]
+    },
+    {
+      "name": "a BWAV",
+      "files": [
+        "music/a.wav",
+        "music/a.bwav"
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "name": "Test",
+        "version": "1.0.0",
+        "music": {
+          "series": [
+            {
+              "key": "tones",
+              "name": "TEST TONES",
+              "order": 0,
+              "tracks": [
+                {
+                  "key": "intro-loop",
+                  "title": "Intro, then a loop",
+                  "file": "music/a.bwav",
+                  "loop": {
+                    "start": 10,
+                    "end": 20
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "problems": [
+        {
+          "level": "error",
+          "path": "series.0.tracks.0.file",
+          "message": "track \"intro-loop\" \"file\" is a bwav file, which is not supported (FFmpeg cannot decode it); use the BRSTM version of the track"
+        },
+        {
+          "level": "error",
+          "path": "series.0.tracks.0",
+          "message": "track \"intro-loop\" is left out"
+        },
+        {
+          "level": "error",
+          "path": "series.0",
+          "message": "series \"tones\" has no track that can be played; it is left out"
+        }
+      ]
+    },
+    {
+      "name": "not audio",
+      "files": [
+        "music/a.wav",
+        "music/a.txt"
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "name": "Test",
+        "version": "1.0.0",
+        "music": {
+          "series": [
+            {
+              "key": "tones",
+              "name": "TEST TONES",
+              "order": 0,
+              "tracks": [
+                {
+                  "key": "intro-loop",
+                  "title": "Intro, then a loop",
+                  "file": "music/a.txt",
+                  "loop": {
+                    "start": 10,
+                    "end": 20
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "problems": [
+        {
+          "level": "error",
+          "path": "series.0.tracks.0.file",
+          "message": "track \"intro-loop\" \"file\" must be .mp3, .ogg, .opus, .flac, .wav, .brstm, .bcstm or .bfstm, not \".txt\""
+        },
+        {
+          "level": "error",
+          "path": "series.0.tracks.0",
+          "message": "track \"intro-loop\" is left out"
+        },
+        {
+          "level": "error",
+          "path": "series.0",
+          "message": "series \"tones\" has no track that can be played; it is left out"
+        }
+      ]
+    },
+    {
+      "name": "a loop word that is not one",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "name": "Test",
+        "version": "1.0.0",
+        "music": {
+          "series": [
+            {
+              "key": "tones",
+              "name": "TEST TONES",
+              "order": 0,
+              "tracks": [
+                {
+                  "key": "intro-loop",
+                  "title": "Intro, then a loop",
+                  "file": "music/a.wav",
+                  "loop": "forever"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "problems": [
+        {
+          "level": "error",
+          "path": "series.0.tracks.0.loop",
+          "message": "track \"intro-loop\" \"loop\" must be \"auto\", \"whole\", \"none\" or an object"
+        },
+        {
+          "level": "error",
+          "path": "series.0.tracks.0",
+          "message": "track \"intro-loop\" is left out"
+        },
+        {
+          "level": "error",
+          "path": "series.0",
+          "message": "series \"tones\" has no track that can be played; it is left out"
+        }
+      ]
+    },
+    {
+      "name": "a loop that is a number",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "name": "Test",
+        "version": "1.0.0",
+        "music": {
+          "series": [
+            {
+              "key": "tones",
+              "name": "TEST TONES",
+              "order": 0,
+              "tracks": [
+                {
+                  "key": "intro-loop",
+                  "title": "Intro, then a loop",
+                  "file": "music/a.wav",
+                  "loop": 5
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "problems": [
+        {
+          "level": "error",
+          "path": "series.0.tracks.0.loop",
+          "message": "track \"intro-loop\" \"loop\" must be \"auto\", \"whole\", \"none\" or an object"
+        },
+        {
+          "level": "error",
+          "path": "series.0.tracks.0",
+          "message": "track \"intro-loop\" is left out"
+        },
+        {
+          "level": "error",
+          "path": "series.0",
+          "message": "series \"tones\" has no track that can be played; it is left out"
+        }
+      ]
+    },
+    {
+      "name": "a loop in samples and seconds",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "name": "Test",
+        "version": "1.0.0",
+        "music": {
+          "series": [
+            {
+              "key": "tones",
+              "name": "TEST TONES",
+              "order": 0,
+              "tracks": [
+                {
+                  "key": "intro-loop",
+                  "title": "Intro, then a loop",
+                  "file": "music/a.wav",
+                  "loop": {
+                    "start": 1,
+                    "end_seconds": 2
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "problems": [
+        {
+          "level": "error",
+          "path": "series.0.tracks.0.loop",
+          "message": "track \"intro-loop\" \"loop\" gives samples and seconds; use one or the other"
+        },
+        {
+          "level": "error",
+          "path": "series.0.tracks.0",
+          "message": "track \"intro-loop\" is left out"
+        },
+        {
+          "level": "error",
+          "path": "series.0",
+          "message": "series \"tones\" has no track that can be played; it is left out"
+        }
+      ]
+    },
+    {
+      "name": "a loop without a start",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "name": "Test",
+        "version": "1.0.0",
+        "music": {
+          "series": [
+            {
+              "key": "tones",
+              "name": "TEST TONES",
+              "order": 0,
+              "tracks": [
+                {
+                  "key": "intro-loop",
+                  "title": "Intro, then a loop",
+                  "file": "music/a.wav",
+                  "loop": {
+                    "end": 20
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "problems": [
+        {
+          "level": "error",
+          "path": "series.0.tracks.0.loop",
+          "message": "track \"intro-loop\" \"loop\" needs \"start\" (a sample of the file) or \"start_seconds\""
+        },
+        {
+          "level": "error",
+          "path": "series.0.tracks.0",
+          "message": "track \"intro-loop\" is left out"
+        },
+        {
+          "level": "error",
+          "path": "series.0",
+          "message": "series \"tones\" has no track that can be played; it is left out"
+        }
+      ]
+    },
+    {
+      "name": "a loop in seconds without a start",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "name": "Test",
+        "version": "1.0.0",
+        "music": {
+          "series": [
+            {
+              "key": "tones",
+              "name": "TEST TONES",
+              "order": 0,
+              "tracks": [
+                {
+                  "key": "intro-loop",
+                  "title": "Intro, then a loop",
+                  "file": "music/a.wav",
+                  "loop": {
+                    "end_seconds": 2
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "problems": [
+        {
+          "level": "error",
+          "path": "series.0.tracks.0.loop",
+          "message": "track \"intro-loop\" \"loop\" needs \"start_seconds\""
+        },
+        {
+          "level": "error",
+          "path": "series.0.tracks.0",
+          "message": "track \"intro-loop\" is left out"
+        },
+        {
+          "level": "error",
+          "path": "series.0",
+          "message": "series \"tones\" has no track that can be played; it is left out"
+        }
+      ]
+    },
+    {
+      "name": "a negative start",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "name": "Test",
+        "version": "1.0.0",
+        "music": {
+          "series": [
+            {
+              "key": "tones",
+              "name": "TEST TONES",
+              "order": 0,
+              "tracks": [
+                {
+                  "key": "intro-loop",
+                  "title": "Intro, then a loop",
+                  "file": "music/a.wav",
+                  "loop": {
+                    "start": -1
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "problems": [
+        {
+          "level": "error",
+          "path": "series.0.tracks.0.loop.start",
+          "message": "track \"intro-loop\" \"loop\" \"start\" must be a whole number of samples, 0 or more"
+        },
+        {
+          "level": "error",
+          "path": "series.0.tracks.0",
+          "message": "track \"intro-loop\" is left out"
+        },
+        {
+          "level": "error",
+          "path": "series.0",
+          "message": "series \"tones\" has no track that can be played; it is left out"
+        }
+      ]
+    },
+    {
+      "name": "a start that is not whole",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "name": "Test",
+        "version": "1.0.0",
+        "music": {
+          "series": [
+            {
+              "key": "tones",
+              "name": "TEST TONES",
+              "order": 0,
+              "tracks": [
+                {
+                  "key": "intro-loop",
+                  "title": "Intro, then a loop",
+                  "file": "music/a.wav",
+                  "loop": {
+                    "start": 1.5
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "problems": [
+        {
+          "level": "error",
+          "path": "series.0.tracks.0.loop.start",
+          "message": "track \"intro-loop\" \"loop\" \"start\" must be a whole number of samples, 0 or more"
+        },
+        {
+          "level": "error",
+          "path": "series.0.tracks.0",
+          "message": "track \"intro-loop\" is left out"
+        },
+        {
+          "level": "error",
+          "path": "series.0",
+          "message": "series \"tones\" has no track that can be played; it is left out"
+        }
+      ]
+    },
+    {
+      "name": "an end before the start",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "name": "Test",
+        "version": "1.0.0",
+        "music": {
+          "series": [
+            {
+              "key": "tones",
+              "name": "TEST TONES",
+              "order": 0,
+              "tracks": [
+                {
+                  "key": "intro-loop",
+                  "title": "Intro, then a loop",
+                  "file": "music/a.wav",
+                  "loop": {
+                    "start": 20,
+                    "end": 20
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "problems": [
+        {
+          "level": "error",
+          "path": "series.0.tracks.0.loop.end",
+          "message": "track \"intro-loop\" \"loop\" \"end\" must be a whole number of samples after \"start\""
+        },
+        {
+          "level": "error",
+          "path": "series.0.tracks.0",
+          "message": "track \"intro-loop\" is left out"
+        },
+        {
+          "level": "error",
+          "path": "series.0",
+          "message": "series \"tones\" has no track that can be played; it is left out"
+        }
+      ]
+    },
+    {
+      "name": "an end that is not whole",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "name": "Test",
+        "version": "1.0.0",
+        "music": {
+          "series": [
+            {
+              "key": "tones",
+              "name": "TEST TONES",
+              "order": 0,
+              "tracks": [
+                {
+                  "key": "intro-loop",
+                  "title": "Intro, then a loop",
+                  "file": "music/a.wav",
+                  "loop": {
+                    "start": 1,
+                    "end": "x"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "problems": [
+        {
+          "level": "error",
+          "path": "series.0.tracks.0.loop.end",
+          "message": "track \"intro-loop\" \"loop\" \"end\" must be a whole number of samples after \"start\""
+        },
+        {
+          "level": "error",
+          "path": "series.0.tracks.0",
+          "message": "track \"intro-loop\" is left out"
+        },
+        {
+          "level": "error",
+          "path": "series.0",
+          "message": "series \"tones\" has no track that can be played; it is left out"
+        }
+      ]
+    },
+    {
+      "name": "seconds past an hour",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "name": "Test",
+        "version": "1.0.0",
+        "music": {
+          "series": [
+            {
+              "key": "tones",
+              "name": "TEST TONES",
+              "order": 0,
+              "tracks": [
+                {
+                  "key": "intro-loop",
+                  "title": "Intro, then a loop",
+                  "file": "music/a.wav",
+                  "loop": {
+                    "start_seconds": 3600.5
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "problems": [
+        {
+          "level": "error",
+          "path": "series.0.tracks.0.loop.start_seconds",
+          "message": "track \"intro-loop\" \"loop\" \"start_seconds\" must be a number of seconds from 0 to 3600"
+        },
+        {
+          "level": "error",
+          "path": "series.0.tracks.0",
+          "message": "track \"intro-loop\" is left out"
+        },
+        {
+          "level": "error",
+          "path": "series.0",
+          "message": "series \"tones\" has no track that can be played; it is left out"
+        }
+      ]
+    },
+    {
+      "name": "negative seconds",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "name": "Test",
+        "version": "1.0.0",
+        "music": {
+          "series": [
+            {
+              "key": "tones",
+              "name": "TEST TONES",
+              "order": 0,
+              "tracks": [
+                {
+                  "key": "intro-loop",
+                  "title": "Intro, then a loop",
+                  "file": "music/a.wav",
+                  "loop": {
+                    "start_seconds": -1
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "problems": [
+        {
+          "level": "error",
+          "path": "series.0.tracks.0.loop.start_seconds",
+          "message": "track \"intro-loop\" \"loop\" \"start_seconds\" must be a number of seconds from 0 to 3600"
+        },
+        {
+          "level": "error",
+          "path": "series.0.tracks.0",
+          "message": "track \"intro-loop\" is left out"
+        },
+        {
+          "level": "error",
+          "path": "series.0",
+          "message": "series \"tones\" has no track that can be played; it is left out"
+        }
+      ]
+    },
+    {
+      "name": "an end in seconds before the start",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "name": "Test",
+        "version": "1.0.0",
+        "music": {
+          "series": [
+            {
+              "key": "tones",
+              "name": "TEST TONES",
+              "order": 0,
+              "tracks": [
+                {
+                  "key": "intro-loop",
+                  "title": "Intro, then a loop",
+                  "file": "music/a.wav",
+                  "loop": {
+                    "start_seconds": 2,
+                    "end_seconds": 1
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "problems": [
+        {
+          "level": "error",
+          "path": "series.0.tracks.0.loop.end_seconds",
+          "message": "track \"intro-loop\" \"loop\" ends before it starts"
+        },
+        {
+          "level": "error",
+          "path": "series.0.tracks.0",
+          "message": "track \"intro-loop\" is left out"
+        },
+        {
+          "level": "error",
+          "path": "series.0",
+          "message": "series \"tones\" has no track that can be played; it is left out"
+        }
+      ]
+    },
+    {
+      "name": "a loop with an unknown member",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "name": "Test",
+        "version": "1.0.0",
+        "music": {
+          "series": [
+            {
+              "key": "tones",
+              "name": "TEST TONES",
+              "order": 0,
+              "tracks": [
+                {
+                  "key": "intro-loop",
+                  "title": "Intro, then a loop",
+                  "file": "music/a.wav",
+                  "loop": {
+                    "start": 1,
+                    "fade": 2
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "problems": [
+        {
+          "level": "warning",
+          "path": "series.0.tracks.0.loop.fade",
+          "message": "track \"intro-loop\" \"loop\" has an unknown member \"fade\", which is ignored"
+        }
+      ]
+    },
+    {
+      "name": "a bad file and a bad loop",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "name": "Test",
+        "version": "1.0.0",
+        "music": {
+          "series": [
+            {
+              "key": "tones",
+              "name": "TEST TONES",
+              "order": 0,
+              "tracks": [
+                {
+                  "key": "intro-loop",
+                  "title": "Intro, then a loop",
+                  "file": "music/missing.wav",
+                  "loop": "forever"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "problems": [
+        {
+          "level": "error",
+          "path": "series.0.tracks.0.file",
+          "message": "track \"intro-loop\" \"file\" music/missing.wav is not in the mod's folder"
+        },
+        {
+          "level": "error",
+          "path": "series.0.tracks.0",
+          "message": "track \"intro-loop\" is left out"
+        },
+        {
+          "level": "error",
+          "path": "series.0",
+          "message": "series \"tones\" has no track that can be played; it is left out"
+        }
+      ]
+    },
+    {
+      "name": "the only track left out",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "name": "Test",
+        "version": "1.0.0",
+        "music": {
+          "series": [
+            {
+              "key": "tones",
+              "name": "TEST TONES",
+              "order": 0,
+              "tracks": [
+                {
+                  "key": "intro-loop",
+                  "title": "Intro, then a loop",
+                  "file": "music/missing.wav",
+                  "loop": {
+                    "start": 10,
+                    "end": 20
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "problems": [
+        {
+          "level": "error",
+          "path": "series.0.tracks.0.file",
+          "message": "track \"intro-loop\" \"file\" music/missing.wav is not in the mod's folder"
+        },
+        {
+          "level": "error",
+          "path": "series.0.tracks.0",
+          "message": "track \"intro-loop\" is left out"
+        },
+        {
+          "level": "error",
+          "path": "series.0",
+          "message": "series \"tones\" has no track that can be played; it is left out"
+        }
+      ]
+    },
+    {
+      "name": "the id of another mod",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "others": [
+        {
+          "folder": "other",
+          "id": "test-mod",
+          "tracks": []
+        }
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "name": "Test",
+        "version": "1.0.0",
+        "music": {
+          "series": [
+            {
+              "key": "tones",
+              "name": "TEST TONES",
+              "order": 0,
+              "tracks": [
+                {
+                  "key": "intro-loop",
+                  "title": "Intro, then a loop",
+                  "file": "music/a.wav",
+                  "loop": {
+                    "start": 10,
+                    "end": 20
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "problems": [
+        {
+          "level": "error",
+          "path": "mod.id",
+          "message": "the folder \"other\" already has the id \"test-mod\"; the port would leave one of them out"
+        }
+      ]
+    },
+    {
+      "name": "a track number of another mod",
+      "files": [
+        "music/a.wav",
+        "music/b.wav"
+      ],
+      "others": [
+        {
+          "folder": "other",
+          "id": "test-mod-2",
+          "tracks": [
+            "test-mod:intro-loop"
+          ]
+        }
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "name": "Test",
+        "version": "1.0.0",
+        "music": {
+          "series": [
+            {
+              "key": "tones",
+              "name": "TEST TONES",
+              "order": 0,
+              "tracks": [
+                {
+                  "key": "intro-loop",
+                  "title": "Intro, then a loop",
+                  "file": "music/a.wav",
+                  "loop": {
+                    "start": 10,
+                    "end": 20
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "problems": [
+        {
+          "level": "error",
+          "path": "series.0.tracks.0.key",
+          "message": "track \"intro-loop\" has the same number as test-mod:intro-loop of another mod; change the key"
+        },
+        {
+          "level": "error",
+          "path": "series.0",
+          "message": "series \"tones\" has no track that can be played; it is left out"
+        }
+      ]
+    }
+  ]
+}

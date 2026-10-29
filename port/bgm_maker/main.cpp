@@ -3,6 +3,7 @@
 // D012Native; it never runs the game's code. MIT licence; see port/README.md.
 //
 //   BgmMaker [mods folder]
+//   BgmMaker --check | --import | --set-loop ...   without the window (cli.hpp)
 //
 // Test switches, for the tool's own checks (screenshots of its window):
 //   D012_BGM_MAKER_THEME=light|dark   instead of the system's
@@ -13,6 +14,7 @@
 
 #include "app.hpp"
 #include "audio_file.hpp"
+#include "cli.hpp"
 #include "input_script.hpp"
 #include "suggest.hpp"
 #include "mods_folder.hpp"
@@ -35,7 +37,11 @@ namespace {
 constexpr const char *kUsage =
     "BgmMaker [mods folder]\n\n"
     "Makes and changes battle music mods for the Dissidia 012 PC port. Without a folder it works on the game's own "
-    "mods folder.";
+    "mods folder.\n\n"
+    "Without the window:\n"
+    "BgmMaker --check <mod folder>\n"
+    "BgmMaker --import <mod folder> <series key> <file>...\n"
+    "BgmMaker --set-loop <mod folder> <track key> auto|whole|none|<start> [<end>]";
 
 void message(const char *title, const std::string &text, bool error) {
     std::cerr << text << "\n";
@@ -46,6 +52,7 @@ void message(const char *title, const std::string &text, bool error) {
 
 int main(int argc, char **argv) {
     using namespace d012::bgm_maker;
+    if (const int status = run_command_line(argc, argv); status >= 0) return status;
     // For the tool's own checks: the samples a loop point counts in, as raw
     // 16-bit little-endian, to compare with another decoder's.
     if (argc == 4 && std::strcmp(argv[1], "--decode") == 0) {
