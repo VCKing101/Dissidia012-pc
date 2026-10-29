@@ -32,8 +32,18 @@ public:
     [[nodiscard]] bool close_requested() const noexcept { return close_requested_; }
     void clear_close_request() noexcept { close_requested_ = false; }
 
-    // Files dropped on the window since the last call.
-    std::vector<std::filesystem::path> take_dropped_files();
+    // Files dropped on the window since the last call, and where (window
+    // coordinates, as ImGui's).
+    struct Drop {
+        std::vector<std::filesystem::path> files;
+        float x{};
+        float y{};
+    };
+    std::vector<Drop> take_drops();
+    // Files being dragged over the window now, and where.
+    [[nodiscard]] bool dragging_files() const noexcept { return dragging_; }
+    [[nodiscard]] float drag_x() const noexcept { return drag_x_; }
+    [[nodiscard]] float drag_y() const noexcept { return drag_y_; }
 
     // Keep drawing every frame (playback, a progress bar) rather than only on input.
     void set_animating(bool animating) noexcept { animating_ = animating; }
@@ -79,7 +89,11 @@ private:
     bool animating_{};
     bool dark_{};
     float scale_{1.0f};
-    std::vector<std::filesystem::path> dropped_;
+    std::vector<Drop> drops_;
+    Drop dropping_;  // the drop being received (one event per file)
+    bool dragging_{};
+    float drag_x_{};
+    float drag_y_{};
 };
 
 } // namespace d012::bgm_maker

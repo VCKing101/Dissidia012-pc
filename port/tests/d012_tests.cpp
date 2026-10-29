@@ -8,12 +8,14 @@
 #include "d012_json.hpp"
 #include "d012_mod_manifest.hpp"
 #include "model.hpp"
+#include "names.hpp"
 #include "undo.hpp"
 
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -262,6 +264,67 @@ void test_checks() {
            "new folder names");
 }
 
+// The Python tool's names for the same texts (manifest.py key_from_text,
+// unique_key, clip_bytes; server.py safe_file_name, title_from_file).
+void test_names() {
+    namespace names = d012::bgm_maker::names;
+    const std::pair<const char *, const char *> keys[] = {
+        {"Blinded by Light!", "blinded-by-light"},
+        {"Caf\xC3\xA9 Ol\xC3\xA9", "cafe-ole"},
+        {"FINAL FANTASY XV", "final-fantasy-xv"},
+        {"  --Hello__World..  ", "hello-world"},
+        {"\xE6\x9B\xB2\xE3\x81\xAE\xE3\x82\xBF\xE3\x82\xA4\xE3\x83\x88\xE3\x83\xAB", "track"},
+        {"\xEF\xBC\xA6\xEF\xBD\x95\xEF\xBD\x8C\xEF\xBD\x8C \xEF\xBD\x97\xEF\xBD\x89\xEF\xBD\x84\xEF\xBD\x94\xEF\xBD\x88",
+         "full-width"},
+        {"Stra\xC3\x9F" "e \xC2\xBD", "strae-12"},
+        {"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+         "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+        {"-.-", "track"},
+        {"\xC3\x86r\xC3\xB8sk\xC3\xB8" "bing", "rskbing"},
+        {"\xC4\xB2ssel \xC4\x90uro", "ijssel-uro"},
+    };
+    for (const auto &[text, key] : keys) expect_text(names::key_from_text(text), key, std::string("key of ") + text);
+
+    expect_text(names::unique_key("battle", {"battle"}), "battle-2", "unique key");
+    expect_text(names::unique_key("battle", {"battle", "battle-2"}), "battle-3", "unique key, twice taken");
+    const std::string long_key(64, 'a');
+    expect_text(names::unique_key(long_key, {long_key}), std::string(62, 'a') + "-2", "unique key at the length limit");
+    expect_text(names::unique_key("theme", {}, {manifest::id_number("my-mod:theme")}, "my-mod"), "theme-2",
+                "unique key, its number taken by another mod");
+
+    struct File {
+        const char *name;
+        const char *safe;
+        const char *title;
+    };
+    const File files[] = {
+        {"03_Blinded_by_Light.brstm", "03_Blinded_by_Light.brstm", "Blinded by Light"},
+        {"C:\\Music\\Caf\xC3\xA9 Ol\xC3\xA9 (Remix).MP3", "Cafe Ole (Remix).mp3", "Caf\xC3\xA9 Ol\xC3\xA9 (Remix)"},
+        {"\xE6\x9B\xB2.flac", "track.flac", "\xE6\x9B\xB2"},
+        {"..hidden.ogg", "hidden.ogg", "..hidden"},
+        {"song.bwav",
+         "ERROR \"song.bwav\": BWAV files are not supported (FFmpeg cannot decode them); use the BRSTM version of the track",
+         "song"},
+        {"notes.txt", "ERROR \"notes.txt\" is not .mp3, .ogg, .oga, .opus, .flac, .wav, .brstm, .bcstm or .bfstm", "notes"},
+        {"x/y/Track 01 - Battle.wav", "Track 01 - Battle.wav", "Track 01 - Battle"},
+        {"1234 Song.mp3", "1234 Song.mp3", "1234 Song"},
+        {"12-Song.opus", "12-Song.opus", "Song"},
+        {"___.mp3", "track.mp3", "Track"},
+    };
+    for (const File &file : files) {
+        std::string error;
+        const std::string safe = names::safe_file_name(file.name, error);
+        expect_text(safe.empty() ? "ERROR " + error : safe, file.safe, std::string("file name of ") + file.name);
+        expect_text(names::title_from_file(file.name), file.title, std::string("title of ") + file.name);
+    }
+    expect_text(names::clip_bytes("Caf\xC3\xA9", 4), "Caf", "clip inside a character");
+    expect_text(names::clip_bytes("Caf\xC3\xA9", 3), "Caf", "clip before a character");
+    expect_text(names::clip_bytes("ab  ", 4), "ab", "clip trailing space");
+    expect_text(names::clip_bytes("\xE6\x9B\xB2\xE6\x9B\xB2", 4), "\xE6\x9B\xB2", "clip a CJK title");
+    expect_text(names::upper_case("Final Fantasy \xC3\xA9t\xC3\xA9 \xC3\xB7"), "FINAL FANTASY \xC3\x89T\xC3\x89 \xC3\xB7",
+                "upper case");
+}
+
 void test_undo() {
     d012::bgm_maker::UndoStack<int> undo;
     undo.reset(1);
@@ -279,6 +342,7 @@ int main() {
     test_model();
     test_manifest();
     test_checks();
+    test_names();
     test_undo();
     if (g_failures == 0) std::cout << "all passed\n";
     return g_failures == 0 ? 0 : 1;

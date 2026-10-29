@@ -346,8 +346,9 @@ void Window::run(const std::function<bool()> &frame) {
         // Idle: wait for input (or half a second, for anything time-based on
         // screen). Busy: take what is there and draw at the display's rate.
         const bool scripted = script_ != nullptr && script_->active();
-        bool got = settle > 0 || animating_ || capture_frames_ >= 0 || scripted ? SDL_PollEvent(&event)
-                                                                                : SDL_WaitEventTimeout(&event, 500);
+        bool got = settle > 0 || animating_ || capture_frames_ >= 0 || scripted || dragging_
+                       ? SDL_PollEvent(&event)
+                       : SDL_WaitEventTimeout(&event, 500);
         while (got) {
             ImGui_ImplSDL3_ProcessEvent(&event);
             switch (event.type) {
@@ -355,11 +356,29 @@ void Window::run(const std::function<bool()> &frame) {
             case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
                 if (event.window.windowID == SDL_GetWindowID(window_)) close_requested_ = true;
                 break;
+            // A drop is DROP_BEGIN, DROP_POSITION while the pointer moves, one
+            // DROP_FILE per file, then DROP_COMPLETE.
+            case SDL_EVENT_DROP_BEGIN:
+                dragging_ = true;
+                dropping_ = {};
+                break;
+            case SDL_EVENT_DROP_POSITION:
+                dragging_ = true;
+                drag_x_ = event.drop.x;
+                drag_y_ = event.drop.y;
+                break;
             case SDL_EVENT_DROP_FILE:
                 if (event.drop.data != nullptr) {
                     const std::string_view text(event.drop.data);
-                    dropped_.emplace_back(std::u8string(text.begin(), text.end()));
+                    dropping_.files.emplace_back(std::u8string(text.begin(), text.end()));
+                    dropping_.x = event.drop.x;
+                    dropping_.y = event.drop.y;
                 }
+                break;
+            case SDL_EVENT_DROP_COMPLETE:
+                dragging_ = false;
+                if (!dropping_.files.empty()) drops_.push_back(std::move(dropping_));
+                dropping_ = {};
                 break;
             case SDL_EVENT_SYSTEM_THEME_CHANGED:
                 dark_ = look_dark();
@@ -396,6 +415,7 @@ void Window::run(const std::function<bool()> &frame) {
             script_->before_frame();
             if (script_->close_requested()) close_requested_ = true;
             script_capture = script_->take_capture();
+            if (auto drop = script_->take_drop()) drops_.push_back({{drop->file}, drop->x, drop->y});
         }
         ImGui::NewFrame();
         const bool keep_going = frame();
@@ -410,10 +430,10 @@ void Window::run(const std::function<bool()> &frame) {
     }
 }
 
-std::vector<std::filesystem::path> Window::take_dropped_files() {
-    std::vector<std::filesystem::path> files;
-    files.swap(dropped_);
-    return files;
+std::vector<Window::Drop> Window::take_drops() {
+    std::vector<Drop> drops;
+    drops.swap(drops_);
+    return drops;
 }
 
 void Window::set_title(const std::string &title) {

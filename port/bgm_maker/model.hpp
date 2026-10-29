@@ -39,6 +39,10 @@ struct TrackModel {
     std::string file;  // relative to the mod's folder, with /
     LoopModel loop;
     Extra extra;
+    // Not in the manifest: the key still follows the title (a track added
+    // since the last save whose key was not typed). Once saved, players'
+    // choices refer to the key, so it stays.
+    bool auto_key{};
     bool operator==(const TrackModel &) const = default;
 };
 
@@ -48,6 +52,7 @@ struct SeriesModel {
     std::int64_t order{};
     std::vector<TrackModel> tracks;
     Extra extra;
+    bool auto_key{};  // as TrackModel's, following the name
     bool operator==(const SeriesModel &) const = default;
 };
 

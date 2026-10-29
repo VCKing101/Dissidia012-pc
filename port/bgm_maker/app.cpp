@@ -43,6 +43,8 @@ App::App(Window &window, ModsFolder mods) : window_(window), mods_(std::move(mod
     update_title();
 }
 
+App::~App() { leave_mod(); }
+
 void App::refresh_list() { list_ = list_mods(mods_.path); }
 
 void App::test_open(const std::string &folder) {
@@ -64,6 +66,49 @@ std::filesystem::path App::mod_folder() const {
 
 bool App::dirty() const { return open_ && (open_->is_new || open_->model != open_->saved); }
 
+std::filesystem::path App::files_folder() {
+    if (!open_) return {};
+    if (!open_->is_new) return mod_folder();
+    if (staging_.empty()) {
+        // A new mod's files wait here until it is saved, so the mods folder
+        // has no half-made mod in it that the game would try to read.
+        std::error_code ec;
+        const auto stamp = std::chrono::system_clock::now().time_since_epoch().count();
+        staging_ = std::filesystem::temp_directory_path(ec) / "d012-bgm-maker" / ("new-mod-" + std::to_string(stamp));
+        std::filesystem::create_directories(staging_, ec);
+    }
+    return staging_;
+}
+
+void App::leave_mod() {
+    ++import_generation_;
+    std::error_code ec;
+    if (open_ && !open_->is_new) {
+        std::vector<std::string> kept;
+        for (const SeriesModel &series : open_->saved.series)
+            for (const TrackModel &track : series.tracks) kept.push_back(track.file);
+        for (const auto &file : added_files_) {
+            const std::u8string generic = file.lexically_relative(mod_folder()).generic_u8string();
+            const std::string relative(generic.begin(), generic.end());
+            if (std::find(kept.begin(), kept.end(), relative) == kept.end()) std::filesystem::remove(file, ec);
+        }
+    }
+    if (!staging_.empty()) std::filesystem::remove_all(staging_, ec);
+    staging_.clear();
+    added_files_.clear();
+    infos_.clear();
+    open_.reset();
+    checked_.reset();
+    problems_.clear();
+    selected_ = {};
+}
+
+void App::say(std::string text, bool error) {
+    status_ = std::move(text);
+    status_error_ = error;
+    status_until_ = std::chrono::steady_clock::now() + std::chrono::seconds(error ? 8 : 4);
+}
+
 void App::open_mod(const ModSummary &summary) {
     Open open;
     open.folder = summary.folder;
@@ -83,12 +128,19 @@ void App::open_mod(const ModSummary &summary) {
         else open.open_problem = "mod.json could not be read (" + error + "); saving replaces it, keeping a backup";
         open.saved_text = text;
     }
+    // In the game's order (by order, then key), as the Python tool shows them;
+    // saving writes them so.
+    std::stable_sort(open.model.series.begin(), open.model.series.end(), [](const SeriesModel &a, const SeriesModel &b) {
+        return a.order != b.order ? a.order < b.order : a.key < b.key;
+    });
     open.saved = open.model;
     open_ = std::move(open);
     undo_.reset(open_->model);
     checked_.reset();
     touched_.clear();
     show_all_problems_ = false;
+    selected_ = {};
+    if (!open_->model.series.empty()) selected_.series = 0;
     update_title();
 }
 
@@ -108,15 +160,13 @@ void App::new_mod() {
 
 void App::set_mods_folder(const std::filesystem::path &folder) {
     mods_ = {folder, "chosen in this window"};
-    open_.reset();
-    checked_.reset();
-    problems_.clear();
     refresh_list();
     update_title();
 }
 
 void App::after_unsaved_check(std::function<void()> action) {
     if (!dirty()) {
+        leave_mod();
         action();
         return;
     }
@@ -138,8 +188,9 @@ void App::update_checks() {
     // (a loop in samples and seconds, a series that is not an object) cannot
     // be in the editor's model, and saving would quietly change them.
     const bool as_on_disc = !open_->is_new && open_->model == open_->saved && !open_->saved_text.empty();
-    problems_ = as_on_disc ? check_text(open_->saved_text, open_->model.id, mod_folder(), others)
-                           : check_mod(open_->model, mod_folder(), others);
+    const std::filesystem::path files = open_->is_new ? staging_ : mod_folder();
+    problems_ = as_on_disc ? check_text(open_->saved_text, open_->model.id, files, others)
+                           : check_mod(open_->model, files, others);
     if (open_->is_new) {
         if (const std::string why = folder_name_problem(open_->folder, mods_.path); !why.empty())
             problems_.push_back({Problem::Level::Error, "mod.folder", why, 0});
@@ -151,11 +202,20 @@ void App::update_checks() {
 void App::undo() {
     if (!open_) return;
     if (auto state = undo_.undo()) open_->model = *state;
+    clamp_selection();
 }
 
 void App::redo() {
     if (!open_) return;
     if (auto state = undo_.redo()) open_->model = *state;
+    clamp_selection();
+}
+
+bool App::has_errors_below(const std::string &path) const {
+    return std::any_of(problems_.begin(), problems_.end(), [&](const Problem &p) {
+        return p.level == Problem::Level::Error &&
+               (p.path == path || (p.path.size() > path.size() && p.path.starts_with(path) && p.path[path.size()] == '.'));
+    });
 }
 
 App::Tab App::tab_of(const Problem &problem) {
@@ -211,7 +271,22 @@ bool App::frame() {
         window_.clear_close_request();
         after_unsaved_check([this] { quit_ = true; });
     }
-    window_.take_dropped_files();  // files are added on the Music tab (next stage)
+    {
+        std::vector<std::filesystem::path> files;
+        int series = -1;
+        {
+            const std::lock_guard lock(chosen_mutex_);
+            if (chosen_files_ready_) {
+                files.swap(chosen_files_);
+                series = chosen_files_series_;
+                chosen_files_ready_ = false;
+            }
+        }
+        if (!files.empty()) add_files(files, series);
+    }
+    handle_drops();
+    take_imports();
+    window_.set_animating(importer_.busy() || std::chrono::steady_clock::now() < status_until_);
 
     const ImGuiIO &io = ImGui::GetIO();
     if (!io.WantTextInput && !prompt_) {
@@ -233,6 +308,17 @@ bool App::frame() {
     draw_unsaved_prompt();
     ImGui::End();
 
+    if (pending_move_) {
+        const PendingMove move = *pending_move_;
+        pending_move_.reset();
+        move_track(move.series, move.track, move.to_series, move.to_index);
+    }
+    if (pending_remove_ && open_) {
+        const PendingRemove remove = *pending_remove_;
+        if (remove.track < 0) remove_series(remove.series);
+        else remove_track(remove.series, remove.track);
+    }
+    pending_remove_.reset();
     // An edit is over when no field is being typed in or dragged: one undo step.
     if (open_ && !ImGui::IsAnyItemActive()) undo_.commit(open_->model);
     update_title();
@@ -326,7 +412,13 @@ void App::draw_navigation() {
     };
     ImGui::SameLine();
     ImGui::AlignTextToFramePadding();
-    widgets::muted(kHints[index]);
+    if (std::chrono::steady_clock::now() < status_until_) {
+        ImGui::PushStyleColor(ImGuiCol_Text, status_error_ ? theme::palette().error : theme::palette().good);
+        ImGui::TextUnformatted(status_.c_str());
+        ImGui::PopStyleColor();
+    } else {
+        widgets::muted(kHints[index]);
+    }
     if (index + 1 < kTabs) {
         const char *next = "Next \xE2\x86\x92";
         ImGui::SameLine(ImGui::GetContentRegionMax().x - ImGui::CalcTextSize(next).x - ImGui::GetStyle().FramePadding.x * 2.0f);
@@ -358,8 +450,7 @@ void App::draw_unsaved_prompt() {
         auto action = std::move(pending_);
         pending_ = nullptr;
         ImGui::CloseCurrentPopup();
-        open_.reset();  // the changes go, whatever the action is
-        checked_.reset();
+        leave_mod();  // the changes go, whatever the action is
         if (action) action();
     }
     ImGui::SameLine();
@@ -521,16 +612,7 @@ void App::mod_form() {
     ImGui::PopItemWidth();
 }
 
-// --- 2. Music, 3. Loops: the next stages ------------------------------------
-
-void App::tab_music() {
-    if (!open_) {
-        widgets::centred_note("Pick or make a mod on the Mod step first.");
-        return;
-    }
-    widgets::centred_note("Series and their tracks are set up here. (This step comes in the next stage of the "
-                          "C++ tool.)");
-}
+// --- 3. Loops: a later stage ------------------------------------------------
 
 void App::tab_loops() {
     if (!open_) {

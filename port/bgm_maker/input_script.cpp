@@ -37,6 +37,7 @@ bool InputScript::load(const std::filesystem::path &file, std::string &error) {
     int number = 0;
     while (std::getline(in, line)) {
         ++number;
+        if (number == 1 && line.starts_with("\xEF\xBB\xBF")) line.erase(0, 3);  // a UTF-8 byte order mark
         if (!line.empty() && line.back() == '\r') line.pop_back();
         const auto first = line.find_first_not_of(" \t");
         if (first == std::string::npos || line[first] == '#') continue;
@@ -45,8 +46,12 @@ bool InputScript::load(const std::filesystem::path &file, std::string &error) {
         words >> step.verb;
         if (step.verb == "frames") {
             words >> step.count;
-        } else if (step.verb == "move" || step.verb == "click") {
+        } else if (step.verb == "move" || step.verb == "click" || step.verb == "down" || step.verb == "up") {
             words >> step.x >> step.y;
+        } else if (step.verb == "drop") {
+            words >> step.x >> step.y;
+            std::getline(words, step.text);
+            if (!step.text.empty() && step.text.front() == ' ') step.text.erase(0, 1);
         } else if (step.verb == "type" || step.verb == "key" || step.verb == "capture") {
             std::getline(words, step.text);
             if (!step.text.empty() && step.text.front() == ' ') step.text.erase(0, 1);
@@ -70,6 +75,19 @@ bool InputScript::load(const std::filesystem::path &file, std::string &error) {
 
 void InputScript::before_frame() {
     ImGuiIO &io = ImGui::GetIO();
+    // The SDL back end gives ImGui the real pointer every frame; the script's
+    // stays where the script put it, or a drag would jump.
+    if (has_pointer_) io.AddMousePosEvent(pointer_x_, pointer_y_);
+    // A real pointer is over an item a frame before it presses it, and ImGui
+    // counts on that (an item that allows overlap is not hovered on the frame
+    // the pointer arrives): the press comes the frame after the move.
+    if (press_ >= 0) {
+        io.AddMouseButtonEvent(0, press_ == 1);
+        release_ = click_;
+        press_ = -1;
+        click_ = false;
+        return;
+    }
     if (release_) {
         io.AddMouseButtonEvent(0, false);
         release_ = false;
@@ -82,6 +100,11 @@ void InputScript::before_frame() {
     // Steps up to the next one that needs a frame of its own.
     while (next_ < steps_.size()) {
         const Step &step = steps_[next_++];
+        if (step.verb == "move" || step.verb == "click" || step.verb == "down" || step.verb == "up") {
+            pointer_x_ = step.x;
+            pointer_y_ = step.y;
+            has_pointer_ = true;
+        }
         if (step.verb == "frames") {
             wait_ = step.count;
             return;
@@ -90,10 +113,10 @@ void InputScript::before_frame() {
             io.AddMousePosEvent(step.x, step.y);
             return;
         }
-        if (step.verb == "click") {
+        if (step.verb == "click" || step.verb == "down" || step.verb == "up") {
             io.AddMousePosEvent(step.x, step.y);
-            io.AddMouseButtonEvent(0, true);
-            release_ = true;
+            press_ = step.verb == "up" ? 0 : 1;
+            click_ = step.verb == "click";
             return;
         }
         if (step.verb == "type") {
@@ -121,6 +144,10 @@ void InputScript::before_frame() {
             close_ = true;
             return;
         }
+        if (step.verb == "drop") {
+            drop_ = Dropped{std::filesystem::path(std::u8string(step.text.begin(), step.text.end())), step.x, step.y};
+            return;
+        }
         if (step.verb == "capture") {
             capture_ = std::filesystem::path(std::u8string(step.text.begin(), step.text.end()));
             return;
@@ -134,6 +161,12 @@ std::optional<std::filesystem::path> InputScript::take_capture() {
     auto file = std::move(capture_);
     capture_.reset();
     return file;
+}
+
+std::optional<InputScript::Dropped> InputScript::take_drop() {
+    auto drop = std::move(drop_);
+    drop_.reset();
+    return drop;
 }
 
 bool InputScript::close_requested() {

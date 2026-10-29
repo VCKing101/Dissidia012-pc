@@ -5,13 +5,19 @@
 // any time, each showing whether its step is done. MIT licence; see
 // port/README.md.
 
+#include "audio_file.hpp"
 #include "checks.hpp"
+#include "importer.hpp"
 #include "model.hpp"
 #include "mods_folder.hpp"
 #include "undo.hpp"
 #include "window.hpp"
 
+#include <imgui.h>
+
+#include <chrono>
 #include <functional>
+#include <map>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -22,6 +28,7 @@ namespace d012::bgm_maker {
 class App {
 public:
     App(Window &window, ModsFolder mods);
+    ~App();
 
     // Builds one frame; false once the window should close.
     bool frame();
@@ -46,17 +53,31 @@ private:
         std::string open_problem;  // why mod.json could not be read, when it could not
     };
 
+    // What the Music step has selected: a series, or a track in it.
+    struct Selection {
+        int series{-1};
+        int track{-1};
+    };
+
     void refresh_list();
     void open_mod(const ModSummary &summary);
     void new_mod();
     void set_mods_folder(const std::filesystem::path &folder);
-    // Runs `action` now, or once the player has said what to do with unsaved changes.
+    // Runs `action` now, or once the player has said what to do with unsaved
+    // changes; either way the mod open now is left first.
     void after_unsaved_check(std::function<void()> action);
+    // Leaves the open mod: files copied in for it that its saved manifest
+    // does not use are deleted again (a new mod's, all of them).
+    void leave_mod();
     [[nodiscard]] bool dirty() const;
     [[nodiscard]] std::filesystem::path mod_folder() const;
+    // Where the open mod's files are: its folder, or for a new mod, until it
+    // is saved, a folder of its own in the temporary folder.
+    [[nodiscard]] std::filesystem::path files_folder();
     void update_checks();
     void undo();
     void redo();
+    void say(std::string text, bool error = false);
 
     void draw_top_bar();
     void draw_tabs();
@@ -70,9 +91,29 @@ private:
     void mod_form();
     void choose_mods_folder();
 
+    // The Music step (tab_music.cpp).
+    void music_tree();
+    void series_form(int series);
+    void track_form(int series, int track);
+    void handle_drops();
+    void take_imports();
+    void add_files(const std::vector<std::filesystem::path> &files, int series);
+    void choose_files(int series);
+    int add_series();
+    void move_series(int from, int to);
+    void move_track(int series, int track, int to_series, int to_index);
+    void remove_series(int series);
+    void remove_track(int series, int track);
+    void sort_series();
+    void clamp_selection();
+    [[nodiscard]] std::string track_key_for(const std::string &title, int series, int track) const;
+    [[nodiscard]] std::string series_key_for(const std::string &name, int series) const;
+    const AudioInfo *info_for(const std::string &file);
+
     [[nodiscard]] int tab_problems(Tab tab) const;
     [[nodiscard]] bool tab_done(Tab tab) const;
     [[nodiscard]] static Tab tab_of(const Problem &problem);
+    [[nodiscard]] bool has_errors_below(const std::string &path) const;
     void update_title();
 
     Window &window_;
@@ -96,9 +137,39 @@ private:
     bool show_all_problems_{};
     std::string title_;
 
-    // The folder dialog answers on its own thread.
+    // The Music step.
+    Selection selected_;
+    Importer importer_;
+    int import_generation_{};  // results of an earlier mod's imports are dropped
+    std::map<std::string, AudioInfo> infos_;  // by the file's text in the manifest
+    std::vector<std::filesystem::path> added_files_;  // copied in since the mod was opened
+    std::filesystem::path staging_;
+    struct SeriesArea {
+        int series{};
+        ImVec2 min;
+        ImVec2 max;
+    };
+    std::vector<SeriesArea> series_areas_;  // where each series is in the tree, for drops
+    struct PendingMove {
+        int series{}, track{}, to_series{}, to_index{};
+    };
+    std::optional<PendingMove> pending_move_;  // moves and removals wait for the frame's end
+    struct PendingRemove {
+        int series{}, track{-1};  // track -1: the series
+    };
+    std::optional<PendingRemove> pending_remove_;
+    bool focus_series_name_{};
+
+    std::string status_;
+    bool status_error_{};
+    std::chrono::steady_clock::time_point status_until_{};
+
+    // The file dialogs answer on their own thread.
     std::mutex chosen_mutex_;
     std::optional<std::filesystem::path> chosen_folder_;
+    std::vector<std::filesystem::path> chosen_files_;
+    int chosen_files_series_{-1};
+    bool chosen_files_ready_{};
 };
 
 } // namespace d012::bgm_maker

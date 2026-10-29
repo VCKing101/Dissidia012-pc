@@ -127,6 +127,7 @@ add_library(d012_manifest STATIC "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_json.cpp
                                  "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_mod_manifest.cpp"
                                  "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_nintendo_stream.cpp"
                                  "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/model.cpp"
+                                 "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/names.cpp"
                                  "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/checks.cpp")
 target_compile_features(d012_manifest PUBLIC cxx_std_20)
 target_include_directories(d012_manifest PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/host" "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker")
@@ -135,8 +136,11 @@ set(d012_imgui "${D012_PORTABLEKIT_DIR}/third_party/imgui")
 add_executable(BgmMaker WIN32
     "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/main.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/app.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/audio_file.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/importer.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/input_script.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/mods_folder.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/tab_music.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/theme.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/widgets.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/window.cpp"
@@ -148,7 +152,14 @@ add_executable(BgmMaker WIN32
     "${d012_imgui}/backends/imgui_impl_vulkan.cpp")
 target_include_directories(BgmMaker PRIVATE "${d012_imgui}" "${d012_imgui}/backends"
                                             "${D012_PORTABLEKIT_DIR}/third_party")
-target_link_libraries(BgmMaker PRIVATE d012_manifest SDL3::SDL3 Vulkan::Vulkan)
+target_link_libraries(BgmMaker PRIVATE d012_manifest SDL3::SDL3 Vulkan::Vulkan Threads::Threads)
+# The game's FFmpeg, so a file reads the same in the tool and the game. Its
+# target is PortableKit's (portablekit_use_ffmpeg() reads variables set in
+# PortableKit's own directory, so the target is linked here as it is).
+if(NOT TARGET portablekit_ffmpeg)
+    message(FATAL_ERROR "BgmMaker needs PortableKit's FFmpeg (PORTABLEKIT_FFMPEG=bundled or system)")
+endif()
+target_link_libraries(BgmMaker PRIVATE portablekit_ffmpeg)
 set_target_properties(BgmMaker PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 if(D012_INSTALLER_BUILD)
     # Beside the installed game, whose data/ is always there.

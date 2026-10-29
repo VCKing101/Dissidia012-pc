@@ -7,8 +7,10 @@
 //   frames N          wait N frames
 //   move X Y          the pointer to X, Y (window pixels)
 //   click X Y         a left click there (pressed one frame, released the next)
+//   down X Y, up X Y  the left button pressed or released there (a drag between them)
 //   type TEXT         TEXT typed, as characters
 //   key CHORD         a key, with modifiers: "ctrl+z", "shift+tab", "enter", "escape", "backspace"
+//   drop X Y FILE     FILE dropped on the window at X, Y (one file per step)
 //   close             the window's close button
 //   capture FILE.png  the window as it is after this frame
 //   quit              ends the run
@@ -32,6 +34,12 @@ public:
 
     // After the frame: a file to capture it to, if the script asks.
     std::optional<std::filesystem::path> take_capture();
+    struct Dropped {
+        std::filesystem::path file;
+        float x{};
+        float y{};
+    };
+    std::optional<Dropped> take_drop();
     [[nodiscard]] bool close_requested();
     [[nodiscard]] bool finished() const noexcept { return finished_; }
     [[nodiscard]] bool active() const noexcept { return !steps_.empty() && !finished_; }
@@ -48,9 +56,15 @@ private:
     std::size_t next_{};
     int wait_{};
     bool release_{};
+    int press_{-1};  // next frame: 1 press, 0 release
+    bool click_{};
+    bool has_pointer_{};
+    float pointer_x_{};
+    float pointer_y_{};
     bool close_{};
     bool finished_{};
     std::optional<std::filesystem::path> capture_;
+    std::optional<Dropped> drop_;
 };
 
 } // namespace d012::bgm_maker
