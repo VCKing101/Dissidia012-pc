@@ -12,9 +12,12 @@
 #include <cstdlib>
 
 extern "C" {
+#include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
+#include <libavutil/channel_layout.h>
 #include <libavutil/dict.h>
 #include <libavutil/mem.h>
+#include <libswresample/swresample.h>
 }
 
 namespace d012::bgm_maker {
@@ -195,6 +198,103 @@ AudioInfo probe_audio(const std::filesystem::path &file) {
         }
     }
     return info;
+}
+
+DecodedAudio decode_audio(const std::filesystem::path &file) {
+    DecodedAudio out;
+    Input input;
+    if (!input.open(file, out.error)) return out;
+    AVStream *stream = input.stream();
+    const AVCodec *codec = avcodec_find_decoder(stream->codecpar->codec_id);
+    AVCodecContext *decoder = codec != nullptr ? avcodec_alloc_context3(codec) : nullptr;
+    if (decoder == nullptr || avcodec_parameters_to_context(decoder, stream->codecpar) < 0) {
+        avcodec_free_context(&decoder);
+        out.error = "cannot set up the decoder";
+        return out;
+    }
+    // As the game's host_audio.cpp: the decoder accounts for the samples it
+    // drops (encoder delay and padding) in the packets' times.
+    decoder->pkt_timebase = stream->time_base;
+    if (const int result = avcodec_open2(decoder, codec, nullptr); result < 0) {
+        avcodec_free_context(&decoder);
+        out.error = "the decoder refused the stream (" + av_error(result) + ")";
+        return out;
+    }
+    AVChannelLayout in_layout{};
+    if (decoder->ch_layout.order == AV_CHANNEL_ORDER_UNSPEC || av_channel_layout_check(&decoder->ch_layout) == 0)
+        av_channel_layout_default(&in_layout, std::max(decoder->ch_layout.nb_channels, 1));
+    else
+        av_channel_layout_copy(&in_layout, &decoder->ch_layout);
+    out.source_channels = in_layout.nb_channels;
+    out.channels = std::min(in_layout.nb_channels, 2);
+    out.rate = decoder->sample_rate;
+    AVChannelLayout out_layout{};
+    av_channel_layout_default(&out_layout, out.channels);
+    // The same rate in and out: only the sample format (and a mix of more
+    // than two channels) changes, so no sample moves.
+    SwrContext *converter = nullptr;
+    int result = swr_alloc_set_opts2(&converter, &out_layout, AV_SAMPLE_FMT_S16, decoder->sample_rate, &in_layout,
+                                     decoder->sample_fmt, decoder->sample_rate, 0, nullptr);
+    if (result >= 0) result = swr_init(converter);
+    av_channel_layout_uninit(&in_layout);
+    av_channel_layout_uninit(&out_layout);
+    if (result < 0) {
+        swr_free(&converter);
+        avcodec_free_context(&decoder);
+        out.error = "cannot convert its samples (" + av_error(result) + ")";
+        return out;
+    }
+    // The port's limit on a track (PortableKit host_audio.cpp kMaxFrames).
+    const std::int64_t max_frames = static_cast<std::int64_t>(decoder->sample_rate) * 30 * 60;
+    bool too_long = false;
+    std::vector<std::int16_t> chunk;
+    const auto convert = [&](const AVFrame *frame) {
+        const int in_count = frame != nullptr ? frame->nb_samples : 0;
+        const int out_count = swr_get_out_samples(converter, in_count);
+        if (out_count <= 0) return;
+        chunk.resize(static_cast<std::size_t>(out_count) * static_cast<std::size_t>(out.channels));
+        auto *data = reinterpret_cast<std::uint8_t *>(chunk.data());
+        const int made = swr_convert(converter, &data, out_count,
+                                     frame != nullptr ? reinterpret_cast<const std::uint8_t *const *>(frame->extended_data)
+                                                      : nullptr,
+                                     in_count);
+        if (made <= 0) return;
+        if (out.frames + made > max_frames) {
+            too_long = true;
+            return;
+        }
+        out.samples.insert(out.samples.end(), chunk.begin(), chunk.begin() + static_cast<std::ptrdiff_t>(made) * out.channels);
+        out.frames += made;
+    };
+    AVPacket *packet = av_packet_alloc();
+    AVFrame *frame = av_frame_alloc();
+    const auto receive = [&] {
+        while (!too_long && avcodec_receive_frame(decoder, frame) == 0) {
+            convert(frame);
+            av_frame_unref(frame);
+        }
+    };
+    while (!too_long && av_read_frame(input.format(), packet) >= 0) {
+        if (packet->stream_index == stream->index && avcodec_send_packet(decoder, packet) >= 0) receive();
+        av_packet_unref(packet);
+    }
+    if (!too_long) {
+        avcodec_send_packet(decoder, nullptr);
+        receive();
+        convert(nullptr);
+    }
+    av_frame_free(&frame);
+    av_packet_free(&packet);
+    swr_free(&converter);
+    avcodec_free_context(&decoder);
+    if (too_long) {
+        out = {};
+        out.error = "longer than 30 minutes, the port's limit";
+    } else if (out.frames == 0) {
+        out.error = "no audio decoded";
+    }
+    out.samples.shrink_to_fit();
+    return out;
 }
 
 std::string describe(const AudioInfo &info) {

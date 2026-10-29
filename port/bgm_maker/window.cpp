@@ -82,7 +82,8 @@ bool Window::open(const std::string &title, std::string &error) {
     ImGuiIO &io = ImGui::GetIO();
     io.IniFilename = nullptr;
     io.LogFilename = nullptr;
-    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    // No keyboard navigation: the Loops step's keys (Space, the arrows) must
+    // not also press the button clicked last. Tab still goes from field to field.
     imgui_sdl_ = ImGui_ImplSDL3_InitForVulkan(window_);
     if (!imgui_sdl_) {
         error = "ImGui's SDL3 back end cannot start";

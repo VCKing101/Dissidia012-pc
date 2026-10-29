@@ -12,6 +12,7 @@
 //   D012_BGM_MAKER_SCRIPT=<file>      scripted input and captures (input_script.hpp)
 
 #include "app.hpp"
+#include "audio_file.hpp"
 #include "input_script.hpp"
 #include "mods_folder.hpp"
 #include "window.hpp"
@@ -21,6 +22,7 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
@@ -43,6 +45,21 @@ void message(const char *title, const std::string &text, bool error) {
 
 int main(int argc, char **argv) {
     using namespace d012::bgm_maker;
+    // For the tool's own checks: the samples a loop point counts in, as raw
+    // 16-bit little-endian, to compare with another decoder's.
+    if (argc == 4 && std::strcmp(argv[1], "--decode") == 0) {
+        const DecodedAudio audio = decode_audio(d012::mod_manifest::path_from_utf8(argv[2]));
+        if (!audio.error.empty()) {
+            std::cerr << audio.error << "\n";
+            return 1;
+        }
+        std::FILE *out = std::fopen(argv[3], "wb");
+        if (out == nullptr) return 1;
+        std::fwrite(audio.samples.data(), 2u, audio.samples.size(), out);
+        std::fclose(out);
+        std::cout << audio.frames << " frames at " << audio.rate << " Hz, " << audio.channels << " channel(s)\n";
+        return 0;
+    }
     std::optional<std::filesystem::path> chosen;
     for (int i = 1; i < argc; ++i) {
         const std::string argument = argv[i];

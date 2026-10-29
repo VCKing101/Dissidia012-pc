@@ -82,6 +82,9 @@ std::filesystem::path App::files_folder() {
 
 void App::leave_mod() {
     ++import_generation_;
+    player_.stop();
+    decoder_.clear();
+    wave_file_.clear();
     std::error_code ec;
     if (open_ && !open_->is_new) {
         std::vector<std::string> kept;
@@ -286,7 +289,8 @@ bool App::frame() {
     }
     handle_drops();
     take_imports();
-    window_.set_animating(importer_.busy() || std::chrono::steady_clock::now() < status_until_);
+    window_.set_animating(importer_.busy() || decoder_.busy() || player_.playing() ||
+                          std::chrono::steady_clock::now() < status_until_);
 
     const ImGuiIO &io = ImGui::GetIO();
     if (!io.WantTextInput && !prompt_) {
@@ -610,16 +614,6 @@ void App::mod_form() {
     ImGui::PopID();
     ImGui::EndGroup();
     ImGui::PopItemWidth();
-}
-
-// --- 3. Loops: a later stage ------------------------------------------------
-
-void App::tab_loops() {
-    if (!open_) {
-        widgets::centred_note("Pick or make a mod on the Mod step first.");
-        return;
-    }
-    widgets::centred_note("Each track's loop is set here. (This step comes in a later stage of the C++ tool.)");
 }
 
 // --- 4. Check & save ---------------------------------------------------------

@@ -7,7 +7,10 @@
 
 #include "audio_file.hpp"
 #include "checks.hpp"
+#include "decoder.hpp"
 #include "importer.hpp"
+#include "player.hpp"
+#include "waveform.hpp"
 #include "model.hpp"
 #include "mods_folder.hpp"
 #include "undo.hpp"
@@ -110,6 +113,27 @@ private:
     [[nodiscard]] std::string series_key_for(const std::string &name, int series) const;
     const AudioInfo *info_for(const std::string &file);
 
+    // The Loops step (tab_loops.cpp).
+    void loops_list();
+    void loop_editor(int series, int track);
+    void loop_mode_row(TrackModel &track, const DecodedTrack &audio, const AudioInfo *info);
+    void loop_transport(TrackModel &track, const DecodedTrack &audio);
+    void loop_markers(TrackModel &track, const DecodedTrack &audio);
+    void loop_seam(const TrackModel &track, const DecodedTrack &audio);
+    void loop_keys(TrackModel &track, const DecodedTrack &audio);
+    [[nodiscard]] LoopShown shown_loop(const TrackModel &track, const DecodedTrack &audio);
+    void set_loop(TrackModel &track, std::int64_t start, std::int64_t end, std::int64_t frames);
+    void set_marker(TrackModel &track, const DecodedTrack &audio, Marker which, std::int64_t sample);
+    void ensure_custom(TrackModel &track, const DecodedTrack &audio);
+    void nudge(TrackModel &track, const DecodedTrack &audio, Marker which, int direction, int times);
+    void snap_zero(TrackModel &track, const DecodedTrack &audio, Marker which);
+    void toggle_play(const TrackModel &track, std::shared_ptr<const DecodedTrack> audio);
+    void play_from(const TrackModel &track, std::shared_ptr<const DecodedTrack> audio, std::int64_t from);
+    void audition(const TrackModel &track, std::shared_ptr<const DecodedTrack> audio);
+    [[nodiscard]] std::int64_t here();
+    [[nodiscard]] std::int64_t step_samples(int rate) const;
+    [[nodiscard]] std::filesystem::path track_path_on_disk(const TrackModel &track);
+
     [[nodiscard]] int tab_problems(Tab tab) const;
     [[nodiscard]] bool tab_done(Tab tab) const;
     [[nodiscard]] static Tab tab_of(const Problem &problem);
@@ -159,6 +183,20 @@ private:
     };
     std::optional<PendingRemove> pending_remove_;
     bool focus_series_name_{};
+
+    // The Loops step.
+    Decoder decoder_;
+    Player player_;
+    WaveView wave_;
+    std::filesystem::path wave_file_;  // the track the view was last reset for
+    Marker active_marker_{Marker::Start};
+    int step_choice_{2};     // 1 ms
+    double bpm_{120.0};
+    int pre_choice_{2};      // 3 s
+    int post_choice_{1};     // 4 s
+    bool repeat_{};
+    int seam_choice_{1};     // 10 ms
+    std::string start_samples_, start_time_, end_samples_, end_time_;
 
     std::string status_;
     bool status_error_{};

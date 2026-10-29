@@ -5,6 +5,7 @@
 // captures of the window between them. One step per line, # for comments:
 //
 //   frames N          wait N frames
+//   ms N              wait N milliseconds
 //   move X Y          the pointer to X, Y (window pixels)
 //   click X Y         a left click there (pressed one frame, released the next)
 //   down X Y, up X Y  the left button pressed or released there (a drag between them)
@@ -55,6 +56,7 @@ private:
     std::vector<Step> steps_;
     std::size_t next_{};
     int wait_{};
+    unsigned long long wait_until_{};  // SDL ticks
     bool release_{};
     int press_{-1};  // next frame: 1 press, 0 release
     bool click_{};

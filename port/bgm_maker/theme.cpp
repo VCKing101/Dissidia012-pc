@@ -86,6 +86,21 @@ void dark_colours(ImGuiStyle &style) {
     c[ImGuiCol_TextDisabled] = rgb(130, 134, 142);
     g_palette = {rgb(150, 155, 164), rgb(240, 113, 103), rgb(230, 180, 80), rgb(110, 200, 130), rgb(110, 170, 245),
                  rgb(37, 38, 42)};
+    // The Python tool's waveform colours.
+    g_palette.wave_bg = rgb(13, 15, 18);
+    g_palette.ruler_bg = rgb(20, 23, 28);
+    g_palette.ruler_text = rgb(125, 133, 148);
+    g_palette.grid = rgb(28, 32, 40);
+    g_palette.wave = rgb(95, 168, 211);
+    g_palette.wave_second = rgb(211, 154, 95);
+    g_palette.wave_dim = rgb(47, 80, 104);
+    g_palette.ghost = rgb(220, 220, 220, 0.28f);
+    g_palette.region = rgb(76, 208, 125, 0.07f);
+    g_palette.outside = rgb(0, 0, 0, 0.35f);
+    g_palette.start = rgb(76, 208, 125);
+    g_palette.end = rgb(255, 107, 107);
+    g_palette.cursor = rgb(224, 168, 79);
+    g_palette.playhead = rgb(255, 255, 255);
 }
 
 void light_colours(ImGuiStyle &style) {
@@ -117,6 +132,20 @@ void light_colours(ImGuiStyle &style) {
     c[ImGuiCol_TextDisabled] = rgb(140, 144, 152);
     g_palette = {rgb(100, 106, 116), rgb(196, 43, 28), rgb(160, 104, 0), rgb(30, 130, 60), rgb(30, 110, 210),
                  rgb(238, 239, 243)};
+    g_palette.wave_bg = rgb(255, 255, 255);
+    g_palette.ruler_bg = rgb(236, 238, 242);
+    g_palette.ruler_text = rgb(96, 102, 114);
+    g_palette.grid = rgb(226, 229, 235);
+    g_palette.wave = rgb(30, 110, 180);
+    g_palette.wave_second = rgb(190, 110, 30);
+    g_palette.wave_dim = rgb(150, 180, 210);
+    g_palette.ghost = rgb(60, 60, 60, 0.25f);
+    g_palette.region = rgb(30, 160, 80, 0.07f);
+    g_palette.outside = rgb(0, 0, 0, 0.08f);
+    g_palette.start = rgb(20, 150, 70);
+    g_palette.end = rgb(210, 50, 50);
+    g_palette.cursor = rgb(200, 120, 0);
+    g_palette.playhead = rgb(20, 20, 24);
 }
 
 } // namespace

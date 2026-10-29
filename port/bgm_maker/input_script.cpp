@@ -3,8 +3,10 @@
 
 #include "input_script.hpp"
 
+#include <SDL3/SDL.h>
 #include <imgui.h>
 
+#include <algorithm>
 #include <fstream>
 #include <map>
 #include <sstream>
@@ -18,6 +20,8 @@ std::optional<ImGuiKey> key_named(const std::string &name) {
         {"backspace", ImGuiKey_Backspace}, {"delete", ImGuiKey_Delete}, {"space", ImGuiKey_Space},
         {"left", ImGuiKey_LeftArrow}, {"right", ImGuiKey_RightArrow}, {"up", ImGuiKey_UpArrow},
         {"down", ImGuiKey_DownArrow}, {"home", ImGuiKey_Home},     {"end", ImGuiKey_End},
+        {"equal", ImGuiKey_Equal},   {"minus", ImGuiKey_Minus},   {"leftbracket", ImGuiKey_LeftBracket},
+        {"rightbracket", ImGuiKey_RightBracket},
     };
     if (const auto found = keys.find(name); found != keys.end()) return found->second;
     if (name.size() == 1 && name[0] >= 'a' && name[0] <= 'z') return static_cast<ImGuiKey>(ImGuiKey_A + (name[0] - 'a'));
@@ -44,7 +48,7 @@ bool InputScript::load(const std::filesystem::path &file, std::string &error) {
         std::istringstream words(line.substr(first));
         Step step;
         words >> step.verb;
-        if (step.verb == "frames") {
+        if (step.verb == "frames" || step.verb == "ms") {
             words >> step.count;
         } else if (step.verb == "move" || step.verb == "click" || step.verb == "down" || step.verb == "up") {
             words >> step.x >> step.y;
@@ -97,6 +101,10 @@ void InputScript::before_frame() {
         --wait_;
         return;
     }
+    if (wait_until_ > 0) {
+        if (SDL_GetTicks() < wait_until_) return;
+        wait_until_ = 0;
+    }
     // Steps up to the next one that needs a frame of its own.
     while (next_ < steps_.size()) {
         const Step &step = steps_[next_++];
@@ -107,6 +115,10 @@ void InputScript::before_frame() {
         }
         if (step.verb == "frames") {
             wait_ = step.count;
+            return;
+        }
+        if (step.verb == "ms") {
+            wait_until_ = SDL_GetTicks() + static_cast<Uint64>(std::max(step.count, 1));
             return;
         }
         if (step.verb == "move") {

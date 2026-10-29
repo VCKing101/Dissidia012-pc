@@ -17,6 +17,21 @@ struct Palette {
     ImVec4 good;
     ImVec4 accent;
     ImVec4 panel;  // a slightly set-off background
+    // The waveform views.
+    ImVec4 wave_bg;
+    ImVec4 ruler_bg;
+    ImVec4 ruler_text;
+    ImVec4 grid;
+    ImVec4 wave;
+    ImVec4 wave_second;  // the second channel in the seam view
+    ImVec4 wave_dim;     // the overview
+    ImVec4 ghost;        // what lies beyond each side of a seam
+    ImVec4 region;       // the loop, lightly tinted
+    ImVec4 outside;      // outside the loop, darkened
+    ImVec4 start;        // the loop start marker
+    ImVec4 end;          // the loop end marker
+    ImVec4 cursor;
+    ImVec4 playhead;
 };
 
 // Loads the fonts once, after ImGui's context exists.
