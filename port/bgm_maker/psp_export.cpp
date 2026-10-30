@@ -335,10 +335,36 @@ std::filesystem::path encoder_program(const ModsFolder &mods) {
     return {};
 }
 
+// The disc image a set-up game plays from: settings.ini's disc_image in its
+// data folder (PortableKit's host/install/user_data.cpp), a relative path
+// being inside that folder: data/disc.iso when setup copied it, else the
+// player's own file where it is.
+static std::filesystem::path settings_iso(const std::filesystem::path &data) {
+    std::ifstream in(data / "settings.ini", std::ios::binary);
+    std::string line;
+    while (std::getline(in, line)) {
+        const auto trim = [](std::string_view text) {
+            const auto first = text.find_first_not_of(" \t\r");
+            if (first == std::string_view::npos) return std::string_view();
+            return text.substr(first, text.find_last_not_of(" \t\r") - first + 1);
+        };
+        const std::string_view text = trim(line);
+        const auto equals = text.find('=');
+        if (text.empty() || text[0] == '#' || equals == std::string_view::npos || trim(text.substr(0, equals)) != "disc_image")
+            continue;
+        const std::string_view value = trim(text.substr(equals + 1));
+        if (value.empty()) return {};
+        const std::filesystem::path path(std::u8string(value.begin(), value.end()));
+        return path.is_absolute() ? path : data / path;
+    }
+    return {};
+}
+
 std::filesystem::path game_iso(const ModsFolder &mods) {
     std::error_code ec;
     for (const std::filesystem::path &file :
-         {program_folder() / "game" / "disc.iso",
+         {mods.path.empty() ? std::filesystem::path() : settings_iso(mods.path.parent_path()),
+          program_folder() / "game" / "disc.iso",
           mods.checkout.empty() ? std::filesystem::path() : mods.checkout / "build" / "port" / "game" / "disc.iso"})
         if (!file.empty() && std::filesystem::is_regular_file(file, ec)) return file;
     return {};

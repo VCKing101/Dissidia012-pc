@@ -3,11 +3,12 @@
     python tools/port/package_installer.py --version 0.3.0 [--portablekit DIR] [--no-build]
 
 1. Builds the installer build (port/README.md, "Installer build") in tools/local/port/build-d012-installer with
-   llvm-mingw (tools/port/pk_cmake_mingw.cmd): the program without the game's code, the recompiler and sdk/.
-2. Stages build/port/installer/stage: the program, its DLLs, psp_recomp.exe, sdk/, llvm-mingw trimmed to what
-   compiling the game's code needs (as PortableKit's scripts/package_desktop_windows.ps1 trims it), README.txt,
-   LICENSE.txt and licenses/; and the optional Battle BGM Maker: bgm-maker/ (the tool and Python's embeddable
-   package, unpacked in tools/local/python-embed-3.14.8) and FFmpeg's ffmpeg.exe and ffprobe.exe.
+   llvm-mingw (tools/port/pk_cmake_mingw.cmd): the program without the game's code, the Battle BGM Maker
+   (BgmMaker.exe), the recompiler and sdk/; and, when it is not built yet, atracdenc, the ATRAC3 encoder the BGM
+   Maker's "Make a PSP / PPSSPP ISO" runs (tools/port/build_atracdenc.cmd).
+2. Stages build/port/installer/stage: the programs, their DLLs, psp_recomp.exe, sdk/, llvm-mingw trimmed to what
+   compiling the game's code needs (as PortableKit's scripts/package_desktop_windows.ps1 trims it), atracdenc.exe,
+   README.txt, LICENSE.txt and licenses/ (with atracdenc's source, as its LGPL asks).
 3. Checks the staged folder and refuses to package when it finds:
    - a file named like the game's (an executable, disc image, overlay, PRX, PARAM.SFO, save, generated code);
    - a file that is one by its contents (a PSP ELF, a PBP, an encrypted ~PSP executable, a PSF, an ISO 9660
@@ -22,11 +23,13 @@ Nothing of the game is ever needed or read: the setup is made from the build and
 
 import argparse
 import hashlib
+import io
 import os
 import re
 import shutil
 import subprocess
 import sys
+import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -39,15 +42,15 @@ OUT = ROOT / "build" / "port" / "installer"
 STAGE = OUT / "stage"
 DIST = OUT / "dist"
 SDL3_LICENSE = ROOT / "tools" / "local" / "port-deps" / "sdl3" / "SDL3-3.4.18" / "LICENSE.txt"
-# The Battle BGM Maker, an optional part of the setup: the tool (port/tools/bgm_maker), Python's embeddable package
-# to run it (3.14.8, python.org, unpacked) and the FFmpeg programs it decodes with, from the same LGPL build as the
-# program's DLLs, with the three DLLs they need besides those.
-BGM_MAKER = ROOT / "port" / "tools" / "bgm_maker"
-PYTHON = ROOT / "tools" / "local" / "python-embed-3.14.8"
-FFMPEG_TOOLS = ["ffmpeg.exe", "ffprobe.exe", "avdevice-61.dll", "avfilter-10.dll", "swscale-8.dll"]
+# atracdenc (LGPL-2.1, with libgha: BSD-2, and KISS FFT: BSD-3), built from its source at the commit
+# build_atracdenc.cmd names; shipped unmodified beside BgmMaker.exe, which runs it as a program of its own.
+ATRACDENC_SCRIPT = ROOT / "tools" / "port" / "build_atracdenc.cmd"
+ATRACDENC_SRC = ROOT / "build" / "external" / "atracdenc-src" / "atracdenc"
+ATRACDENC_EXE = ROOT / "tools" / "local" / "port" / "build-atracdenc" / "src" / "atracdenc.exe"
+ATRACDENC_URL = "https://github.com/dcherednik/atracdenc"
 
-PROGRAM_FILES = ["D012Native.exe", "psp_recomp.exe", "SDL3.dll", "avcodec-61.dll", "avformat-61.dll",
-                 "avutil-59.dll", "swresample-5.dll", "libc++.dll", "libunwind.dll"]
+PROGRAM_FILES = ["D012Native.exe", "BgmMaker.exe", "psp_recomp.exe", "SDL3.dll", "avcodec-61.dll",
+                 "avformat-61.dll", "avutil-59.dll", "swresample-5.dll", "libc++.dll", "libunwind.dll"]
 TOOLCHAIN_BIN = ["clang.exe", "clang++.exe", "clang-target-wrapper.exe", "ld.lld.exe", "x86_64-w64-mingw32-clang.exe",
                  "x86_64-w64-mingw32-clang++.exe", "libc++.dll", "libunwind.dll", "libwinpthread-1.dll",
                  "libclang-cpp.dll", "mingw32-common.cfg", "x86_64-w64-windows-gnu.cfg"]
@@ -77,6 +80,52 @@ def build(portablekit):
         run(["cmd", "/c", WRAPPER, "-S", ROOT / "port", "-B", BUILD, "-DD012_INSTALLER_BUILD=ON",
              "-DPORTABLEKIT_RELEASE=ON", f"-DD012_PORTABLEKIT_DIR={portablekit.as_posix()}"])
     run(["cmd", "/c", WRAPPER, "--build", BUILD, "-j", str(max(2, (os.cpu_count() or 4) // 2))])
+    build_atracdenc()
+
+
+def atracdenc_commit():
+    return re.search(r'^set "COMMIT=([0-9a-f]{40})"', ATRACDENC_SCRIPT.read_text(), re.M).group(1)
+
+
+def git(folder, *args):
+    result = subprocess.run(["git", "-C", str(folder), *args], capture_output=True)
+    if result.returncode != 0:
+        raise PackagingError(f"git {' '.join(args)} in {folder} failed: {result.stderr.decode(errors='replace')}")
+    return result.stdout
+
+
+def build_atracdenc():
+    if not ATRACDENC_EXE.is_file():
+        run(["cmd", "/c", ATRACDENC_SCRIPT])
+
+
+def check_atracdenc():
+    """The encoder is built, from the source checkout at the pinned commit, unmodified. Returns the commits of
+    atracdenc and of its libgha submodule."""
+    commit = atracdenc_commit()
+    if not ATRACDENC_EXE.is_file():
+        raise PackagingError(f"{ATRACDENC_EXE} is missing; run tools/port/build_atracdenc.cmd")
+    head = git(ATRACDENC_SRC, "rev-parse", "HEAD").decode().strip()
+    if head != commit:
+        raise PackagingError(f"{ATRACDENC_SRC} is at {head}, not {commit}; run tools/port/build_atracdenc.cmd")
+    if git(ATRACDENC_SRC, "status", "--porcelain", "--ignore-submodules=none").strip():
+        raise PackagingError(f"{ATRACDENC_SRC} has local changes: the shipped encoder must be built from the "
+                             "unmodified source")
+    libgha = git(ATRACDENC_SRC / "src" / "lib" / "libgha", "rev-parse", "HEAD").decode().strip()
+    return commit, libgha
+
+
+def atracdenc_source(target, commit, libgha):
+    """atracdenc's source as built, with its libgha submodule, in one zip (git archive of each)."""
+    with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as out:
+        for prefix, folder, revision in (("atracdenc/", ATRACDENC_SRC, commit),
+                                         ("atracdenc/src/lib/libgha/", ATRACDENC_SRC / "src" / "lib" / "libgha",
+                                          libgha)):
+            data = git(folder, "archive", "--format=zip", f"--prefix={prefix}", revision)
+            with zipfile.ZipFile(io.BytesIO(data)) as part:
+                for entry in part.infolist():
+                    if not entry.is_dir():
+                        out.writestr(entry, part.read(entry))
 
 
 def check_build():
@@ -98,7 +147,7 @@ def copy(source, target):
     shutil.copy2(source, target)
 
 
-def stage(portablekit):
+def stage(portablekit, atracdenc):
     if STAGE.exists():
         shutil.rmtree(STAGE)
     STAGE.mkdir(parents=True)
@@ -139,21 +188,8 @@ def stage(portablekit):
         raise PackagingError("the trimmed toolchain lost clang's x86_64 runtime")
     shutil.copytree(LLVM / "x86_64-w64-mingw32", tool / "x86_64-w64-mingw32")
 
-    # The Battle BGM Maker (the setup installs it only when the player ticks it): bgm-maker\ and, beside the
-    # program, the FFmpeg programs it runs.
-    if not (PYTHON / "python.exe").is_file():
-        raise PackagingError(f"Python's embeddable package is not unpacked in {PYTHON}")
-    shutil.copytree(PYTHON, STAGE / "bgm-maker" / "python")
-    copy(BGM_MAKER / "bgm_maker.py", STAGE / "bgm-maker" / "bgm_maker.py")
-    for path in sorted((BGM_MAKER / "bgmmaker").glob("*.py")):
-        copy(path, STAGE / "bgm-maker" / "bgmmaker" / path.name)
-    for path in sorted((BGM_MAKER / "web").iterdir()):
-        copy(path, STAGE / "bgm-maker" / "web" / path.name)
-    ffmpeg_bins = list((BUILD / "_deps" / "ffmpeg").glob("*/bin"))
-    if len(ffmpeg_bins) != 1:
-        raise PackagingError(f"expected one FFmpeg build in {BUILD / '_deps' / 'ffmpeg'}, found {len(ffmpeg_bins)}")
-    for name in FFMPEG_TOOLS:
-        copy(ffmpeg_bins[0] / name, STAGE / name)
+    # The Battle BGM Maker's encoder, beside it.
+    copy(ATRACDENC_EXE, STAGE / "atracdenc.exe")
 
     copy(INSTALLER / "README.txt", STAGE / "README.txt")
     copy(ROOT / "LICENSE", STAGE / "LICENSE.txt")
@@ -167,7 +203,24 @@ def stage(portablekit):
     copy(portablekit / "third_party" / "tiny_aes" / "UNLICENSE", licenses / "tiny-AES-c-UNLICENSE.txt")
     copy(portablekit / "third_party" / "xxhash" / "LICENSE", licenses / "xxHash-LICENSE.txt")
     copy(LLVM / "LICENSE.TXT", licenses / "llvm-mingw-LICENSE.txt")
-    copy(PYTHON / "LICENSE.txt", licenses / "Python-LICENSE.txt")
+    commit, libgha = atracdenc
+    copy(ATRACDENC_SRC / "LICENSE", licenses / "atracdenc-LICENSE.txt")
+    copy(ATRACDENC_SRC / "src" / "lib" / "libgha" / "LICENSE", licenses / "libgha-LICENSE.txt")
+    copy(ATRACDENC_SRC / "src" / "lib" / "libgha" / "src" / "3rd" / "kissfft" / "LICENSES" / "BSD-3-Clause",
+         licenses / "KISS-FFT-LICENSE.txt")
+    atracdenc_source(licenses / "atracdenc-source.zip", commit, libgha)
+    (licenses / "atracdenc-SOURCE.txt").write_text(
+        "atracdenc.exe is atracdenc, an ATRAC encoder by Daniil Cherednik, licensed under the\n"
+        "GNU LGPL version 2.1 (atracdenc-LICENSE.txt), unmodified. Its libgha (BSD 2-Clause,\n"
+        "libgha-LICENSE.txt) and the KISS FFT code in both (copyright Mark Borgerding, BSD 3-Clause,\n"
+        "KISS-FFT-LICENSE.txt) are compiled into it. The Battle BGM Maker runs it as a program of its\n"
+        "own for \"Make a PSP / PPSSPP ISO\"; you may replace it with your own build.\n\n"
+        f"Source:  {ATRACDENC_URL}, commit {commit}\n"
+        f"         (its libgha submodule at commit {libgha}),\n"
+        "         and the same source in atracdenc-source.zip beside this file.\n"
+        "Built:   with MSVC and the CMake options -DATRACDENC_PCM_IO_BACKEND=mediafoundation\n"
+        "         -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded (tools/port/build_atracdenc.cmd in\n"
+        "         https://github.com/VCKing101/Dissidia012-pc).\n", encoding="ascii", newline="\r\n")
     notices = LLVM / "x86_64-w64-mingw32" / "share" / "mingw32"
     if notices.is_dir():
         for path in notices.glob("COPYING*"):
@@ -256,8 +309,9 @@ def main():
         if not options.no_build:
             build(options.portablekit)
         portablekit = check_build()
+        atracdenc = check_atracdenc()
         print("2. staging")
-        stage(portablekit)
+        stage(portablekit, atracdenc)
         print("3. checking")
         check_stage(portablekit)
         print("4. compiling the setup")

@@ -19,7 +19,8 @@ The recompiler (`psp_recomp.exe`), the runtime and the PSP system around the gam
 
 ### Dear ImGui 1.92.9b
 
-The port's menus. Copyright (c) 2014-2026 Omar Cornut. MIT License: `DearImGui-LICENSE.txt`.
+The port's menus and the Battle BGM Maker's window (`BgmMaker.exe`). Copyright (c) 2014-2026 Omar Cornut. MIT
+License: `DearImGui-LICENSE.txt`.
 <https://github.com/ocornut/imgui>
 
 ### tiny-AES-c
@@ -49,19 +50,20 @@ Window, input and audio output. Copyright (C) 1997-2026 Sam Lantinga. zlib Licen
 
 ### FFmpeg 7.1.5
 
-Decodes the game's ATRAC3plus audio and movies, and the music files of battle music mods. `avcodec-61.dll`,
-`avformat-61.dll`, `avutil-59.dll` and `swresample-5.dll` are an unmodified LGPL shared build from
-BtbN/FFmpeg-Builds, licensed under the GNU Lesser General Public License, version 3 or later:
-`FFmpeg-LICENSE.txt`. Where the build and its source are: `FFmpeg-SOURCE.txt`. <https://ffmpeg.org/>
+Decodes the game's ATRAC3plus audio and movies, and the music files of battle music mods (in the game and in the
+Battle BGM Maker). `avcodec-61.dll`, `avformat-61.dll`, `avutil-59.dll` and `swresample-5.dll` are an unmodified
+LGPL shared build from BtbN/FFmpeg-Builds, licensed under the GNU Lesser General Public License, version 3 or
+later: `FFmpeg-LICENSE.txt`. Where the build and its source are: `FFmpeg-SOURCE.txt`. <https://ffmpeg.org/>
 
-With the optional Battle BGM Maker, also FFmpeg's programs `ffmpeg.exe` and `ffprobe.exe` and the libraries
-`avdevice-61.dll`, `avfilter-10.dll` and `swscale-8.dll` they need, from the same unmodified LGPL build.
+### atracdenc
 
-### Python 3.14.8 (with the optional Battle BGM Maker only)
-
-Runs the Battle BGM Maker, in `bgm-maker\python\`: the unmodified Windows embeddable package from python.org
-(<https://www.python.org/downloads/release/python-3148/>). Copyright (c) 2001 Python Software Foundation, under the
-PSF License Agreement, with the licenses of the components it includes: `Python-LICENSE.txt`.
+The ATRAC3 encoder the Battle BGM Maker runs for "Make a PSP / PPSSPP ISO", as a program of its own
+(`atracdenc.exe`). Copyright (c) Daniil Cherednik. GNU Lesser General Public License, version 2.1:
+`atracdenc-LICENSE.txt`. It is built unmodified from its source at a fixed commit, which is in
+`atracdenc-source.zip`; the commit and how it was built: `atracdenc-SOURCE.txt`.
+<https://github.com/dcherednik/atracdenc>. Compiled into it: libgha, copyright (c) 2018 Daniil Cherednik, BSD
+2-Clause License (`libgha-LICENSE.txt`), and KISS FFT, copyright (c) 2003-2010 Mark Borgerding, BSD 3-Clause
+License (`KISS-FFT-LICENSE.txt`).
 
 ### llvm-mingw 20260922
 

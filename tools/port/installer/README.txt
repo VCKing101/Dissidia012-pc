@@ -17,9 +17,10 @@ Playing
 
 Battle music mods
   Mods add music to the battle music selector; they never replace the game's own. Put a mod's folder in
-  data\mods (the Start menu has a "Mods folder" shortcut). To make your own, tick "Battle BGM Maker" in Setup:
-  it opens in your browser, lets you add tracks (MP3, OGG, FLAC, WAV, BRSTM) and set where each one loops, and
-  writes the mod for you. Close its window to stop it.
+  data\mods (the Start menu has a "Mods folder" shortcut). To make your own, start "Battle BGM Maker" from the
+  Start menu: add tracks (MP3, OGG, FLAC, WAV, BRSTM and others), set where each one loops, and it writes the mod
+  for you and can start the game on a track to try it. It can also make a copy of your .iso with your mods'
+  tracks added, for PPSSPP or a PSP with custom firmware (Check & save, "Make a PSP / PPSSPP ISO").
 
 Your files, in the install folder
   data\ms0\PSP\SAVEDATA   your saves (back this folder up)

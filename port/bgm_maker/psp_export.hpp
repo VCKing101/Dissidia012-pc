@@ -51,9 +51,10 @@ inline constexpr std::size_t kLongestDiscName = 37u;
 // tools/port/build_atracdenc.cmd builds); empty when there is none.
 [[nodiscard]] std::filesystem::path encoder_program(const ModsFolder &mods);
 
-// The ISO the game was set up with (game/disc.iso beside the program, or
-// build/port/game/disc.iso of a checkout), as the default original; empty
-// when there is none.
+// The ISO the game was set up with (settings.ini's disc_image in the data
+// folder the mods are in, as the installed game has it; game/disc.iso beside
+// the program; or build/port/game/disc.iso of a checkout), as the default
+// original; empty when there is none.
 [[nodiscard]] std::filesystem::path game_iso(const ModsFolder &mods);
 
 class PspExport {

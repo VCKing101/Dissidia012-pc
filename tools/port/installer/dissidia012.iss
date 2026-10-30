@@ -1,5 +1,6 @@
 ; The Windows installer: a wizard that asks for the install folder and the player's ISO, installs the program
-; (built without the game's code, with the compiler beside it), and sets the game up from the ISO:
+; (built without the game's code, with the compiler beside it) and the Battle BGM Maker, and sets the game up from
+; the ISO:
 ;
 ;   D012Native --install <iso> [--in-place]   decrypts the executable into data\ (PortableKit's installer)
 ;   D012Native --compile-game                 makes the game's code into game-code\ (host/d012_compile_game.cpp)
@@ -52,26 +53,26 @@ ExtraDiskSpaceRequired=1500000000
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Shortcuts:"
-Name: "bgmmaker"; Description: "Battle BGM Maker: a tool for making your own battle music mods, with loop points (about 45 MB). Playing mods made by others does not need it."; GroupDescription: "Tools:"; Flags: unchecked
 
 [Files]
-; The Battle BGM Maker (port/tools/bgm_maker) with Python's embeddable package, and the FFmpeg programs it decodes
-; with, only when the player chose it.
-#define BgmMakerFiles "\bgm-maker,\ffmpeg.exe,\ffprobe.exe,\avdevice-61.dll,\avfilter-10.dll,\swscale-8.dll"
-Source: "{#Stage}\*"; Excludes: "{#BgmMakerFiles}"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
-Source: "{#Stage}\bgm-maker\*"; DestDir: "{app}\bgm-maker"; Tasks: bgmmaker; Flags: recursesubdirs createallsubdirs ignoreversion
-Source: "{#Stage}\ffmpeg.exe"; DestDir: "{app}"; Tasks: bgmmaker; Flags: ignoreversion
-Source: "{#Stage}\ffprobe.exe"; DestDir: "{app}"; Tasks: bgmmaker; Flags: ignoreversion
-Source: "{#Stage}\avdevice-61.dll"; DestDir: "{app}"; Tasks: bgmmaker; Flags: ignoreversion
-Source: "{#Stage}\avfilter-10.dll"; DestDir: "{app}"; Tasks: bgmmaker; Flags: ignoreversion
-Source: "{#Stage}\swscale-8.dll"; DestDir: "{app}"; Tasks: bgmmaker; Flags: ignoreversion
+Source: "{#Stage}\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
+
+[InstallDelete]
+; The Python Battle BGM Maker of 0.3.0 and the FFmpeg programs it ran: BgmMaker.exe replaces them.
+Type: filesandordirs; Name: "{app}\bgm-maker"
+Type: files; Name: "{app}\ffmpeg.exe"
+Type: files; Name: "{app}\ffprobe.exe"
+Type: files; Name: "{app}\avdevice-61.dll"
+Type: files; Name: "{app}\avfilter-10.dll"
+Type: files; Name: "{app}\swscale-8.dll"
+Type: files; Name: "{app}\licenses\Python-LICENSE.txt"
 
 [Dirs]
 Name: "{app}\data\mods"; Flags: uninsneveruninstall
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExe}"; WorkingDir: "{app}"
-Name: "{group}\Battle BGM Maker"; Filename: "{app}\bgm-maker\python\python.exe"; Parameters: """{app}\bgm-maker\bgm_maker.py"" ""{app}\data\mods"" --ffmpeg ""{app}"""; WorkingDir: "{app}\bgm-maker"; Comment: "Make battle music mods: opens in your browser; close this window to stop it"; Tasks: bgmmaker
+Name: "{group}\Battle BGM Maker"; Filename: "{app}\BgmMaker.exe"; WorkingDir: "{app}"; Comment: "Make your own battle music mods, with their loop points"
 Name: "{group}\Mods folder"; Filename: "{app}\data\mods"
 Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; WorkingDir: "{app}"; Tasks: desktopicon
@@ -87,7 +88,6 @@ Type: filesandordirs; Name: "{app}\game-code.old"
 Type: files; Name: "{app}\game-code-status.txt"
 Type: files; Name: "{app}\game-code-build.log"
 Type: files; Name: "{app}\setup-install.log"
-Type: filesandordirs; Name: "{app}\bgm-maker"
 Type: files; Name: "{app}\data\EBOOT.ELF"
 Type: files; Name: "{app}\data\disc.iso"
 Type: dirifempty; Name: "{app}"

@@ -34,8 +34,9 @@ game's executable and overlays.
   Ogg Vorbis, Opus, FLAC, WAV, or BRSTM/BCSTM/BFSTM with their own loops ([format](docs/port/mod-folder.md)).
 - **A BGM playlist selector** on the loading screen: choose music by series and track, mod tracks included
   ([design](docs/port/bgm-playlist-design.md)).
-- **A Battle BGM Maker**: a local browser tool for writing a mod's `mod.json` and setting its loop points
-  ([README](port/tools/bgm_maker/README.md)).
+- **A Battle BGM Maker**: a program for making music mods, with a loop editor, loop suggestions and a button to try
+  a track in the game; optionally it also makes a copy of your ISO with the mods' tracks added, for PPSSPP or a PSP
+  ([guide](docs/port/mod-folder.md#8-making-a-mod-with-the-battle-bgm-maker)).
 - **Local split-screen versus**: two players on one PC, each with their own controller and camera
   ([notes](docs/port/local-versus.md)).
 
@@ -97,11 +98,11 @@ without the row; set it back to `1` to bring it back. `D012_LOCAL_VERSUS=0` does
 then **Run anyway**. The wizard asks where to install (no administrator rights needed) and for your ISO, then sets the
 game up from it: it decrypts the game's program and compiles the game's code for your PC with the compiler that comes
 with it. That takes a few minutes (about 4 on a recent 8-core PC). Nothing is downloaded, and nothing made from your
-disc leaves your PC. Tick **Battle BGM Maker** if you want to make your own music mods.
+disc leaves your PC.
 
 **4. Play** with the "Dissidia 012 (PC port)" shortcut in the Start menu (and on the desktop, if you chose it). Esc,
 or L3 + R3 on a controller, opens the port's menu. Your saves are in `data\ms0` in the install folder, and mods go in
-`data\mods` (the Start menu has a shortcut to it).
+`data\mods` (the Start menu has a shortcut to it); to make your own, start **Battle BGM Maker** from the Start menu.
 
 **To update:** run the new release's setup and install into the same folder. Your saves, settings and mods stay, and
 the game's code is compiled again only when the new version needs it.
@@ -146,7 +147,7 @@ spimdisasm and Ghidra with the Allegrex extension); see [getting started](docs/d
 
 | Path | What it is |
 | --- | --- |
-| `port/` | The port: PortableKit profile and host code, decompiled C used as native overrides, PortableKit patches, example mod, Battle BGM Maker |
+| `port/` | The port: PortableKit profile and host code, decompiled C used as native overrides, PortableKit patches, example mod, the Battle BGM Maker (`bgm_maker/`, and the earlier Python tool in `tools/bgm_maker/`) |
 | `docs/port/` | Port research, bring-up log, recompiled build, mod folder and BGM playlist design |
 | `tools/port/` | Port scripts: build wrapper, game-directory preparation, bounded runs, overlay metadata, surveys |
 | `src/`, `include/` | Matching decompiled C/C++ for main and the menu, battle and extra overlays |
@@ -163,6 +164,7 @@ Ignored and never committed: the game image, everything extracted or built from 
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -s tools -p "test_*.py"
 python -m unittest discover -s port/tools/bgm_maker/tests
+tools\port\pk_ctest.cmd tools\local\port\build-d012-recomp     # the port's own C++ tests (no game needed)
 ```
 
 Many tool tests need the locally extracted game files and skip or fail without them.

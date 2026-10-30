@@ -3,7 +3,7 @@
 // D012Native; it never runs the game's code. MIT licence; see port/README.md.
 //
 //   BgmMaker [mods folder]
-//   BgmMaker --check | --import | --set-loop ...   without the window (cli.hpp)
+//   BgmMaker --check | --import | --set-loop | --psp-iso ...   without the window (cli.hpp)
 //
 // Test switches, for the tool's own checks (screenshots of its window):
 //   D012_BGM_MAKER_THEME=light|dark   instead of the system's
@@ -41,7 +41,8 @@ constexpr const char *kUsage =
     "Without the window:\n"
     "BgmMaker --check <mod folder>\n"
     "BgmMaker --import <mod folder> <series key> <file>...\n"
-    "BgmMaker --set-loop <mod folder> <track key> auto|whole|none|<start> [<end>]";
+    "BgmMaker --set-loop <mod folder> <track key> auto|whole|none|<start> [<end>]\n"
+    "BgmMaker --psp-iso <original ISO> <new ISO> [<mods folder>]";
 
 void message(const char *title, const std::string &text, bool error) {
     std::cerr << text << "\n";

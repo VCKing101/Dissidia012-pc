@@ -30,6 +30,10 @@ the menus to Quick Battles, with the HUD's HP bars, billboarded particles and si
 | `host/d012_decomp_harness.cpp`, `.hpp`, `host/d012_decomp_bgm.cpp` | Decompiled functions as native overrides, and the differential test against the recompiled originals |
 | `decomp/` | The decompiled BGM functions (C) |
 | `examples/mods/example-tones/` | An example mod: a manifest and a script that writes its generated test tones (no audio files are kept) |
+| `host/d012_mod_manifest.cpp`, `.hpp` | The manifest rules: reads and checks a `mod.json` into a manifest and its problems, for the game (`d012_mods.cpp` logs them) and the Battle BGM Maker alike |
+| `bgm_maker/` | The Battle BGM Maker, `BgmMaker.exe`: a program of its own (SDL3, Vulkan, PortableKit's Dear ImGui, the game's FFmpeg) for making music mods, with none of the game's code ([guide](../docs/port/mod-folder.md#8-making-a-mod-with-the-battle-bgm-maker)). `psp_iso.cpp` and `psp_export.cpp` make its optional PSP / PPSSPP ISO, running atracdenc as a separate program |
+| `tests/` | The port's C++ tests, `d012_tests` (`tools/port/pk_ctest.cmd <build dir>`): manifest rules with `manifest_cases.json`, which the Python tool's tests run too, the JSON writer, the BGM Maker's model, saving, suggester and ISO writer, on synthetic data |
+| `tools/bgm_maker/` | The earlier Battle BGM Maker in Python (a local page in the browser), kept for developers, frozen; its `tests/` hold the end-to-end checks, which run `BgmMaker.exe`'s command line |
 | `config/nids.csv` | NIDs the game imports that PortableKit's table does not name |
 
 Outside this directory:
@@ -309,16 +313,20 @@ program, so no console opens behind the game; started without one, it writes its
 `data/logs/D012Native.log`.
 
 **The Windows setup**: `tools/port/package_installer.py --version X.Y.Z` builds the installer build
-(`tools/port/pk_cmake_mingw.cmd`), stages the folder (program, DLLs, `psp_recomp.exe`, `sdk/`, llvm-mingw trimmed as
-PortableKit's own packaging trims it, `README.txt`, licences and `tools/port/installer/THIRD_PARTY_NOTICES.md`),
+(`tools/port/pk_cmake_mingw.cmd`), stages the folder (program, `BgmMaker.exe`, DLLs, `psp_recomp.exe`, `sdk/`,
+llvm-mingw trimmed as PortableKit's own packaging trims it, `atracdenc.exe` with its LGPL licence and source zip,
+`README.txt`, licences and `tools/port/installer/THIRD_PARTY_NOTICES.md`),
 refuses it if it finds a file of the game by name or content, a program with the game's code linked in, or a path of
 this machine, and compiles `tools/port/installer/dissidia012.iss` with Inno Setup 7 (`tools/local/innosetup`) into
-`build/port/installer/dist/Dissidia012-PC-Setup-X.Y.Z.exe` (75 MB). The wizard asks for the folder (no
+`build/port/installer/dist/Dissidia012-PC-Setup-X.Y.Z.exe` (76 MB). The wizard asks for the folder (no
 administrator rights) and the ISO, installs, runs `--install` and `--compile-game` with a progress bar from the
 latter's output, and makes the shortcuts; running it again over an installation is the update, and uninstalling keeps
 `data/` unless the player says otherwise. Checked on 28 October 2026 with a silent install (`/VERYSILENT /ISO=...`):
 3 min 25 s from the setup to a playable game, an update over it in 18 s (no compile), an uninstall that leaves only
-`data/`. The checks refuse a planted file of each kind they look for.
+`data/`. The checks refuse a planted file of each kind they look for. Checked again for 0.4.0 on 30 October 2026: a
+fresh install in 196 s with the "Battle BGM Maker" shortcut on `BgmMaker.exe`, which found `data/mods`, the player's
+ISO (from `settings.ini`) and `atracdenc.exe`, and made a PSP / PPSSPP ISO from the command line in 13 s; 0.3.0 with
+its Python tool, then 0.4.0 over it in 19 s, removed `bgm-maker/` and FFmpeg's programs and kept the mods.
 
 ```powershell
 cmake -S port -B tools/local/port/build-d012-installer -G Ninja -DCMAKE_BUILD_TYPE=Release `
