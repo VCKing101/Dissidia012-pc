@@ -246,6 +246,7 @@ fresh clone of `33800c4`, apply them with `git checkout -b dissidia 33800c4` and
 | 0062 | `ui::add_menu_rows`: a port's own settings rows at the end of the menu's Video page | The split-screen field of view slider (local-versus.md, 7.14) |
 | 0063 | MinGW: a port's program links with `--export-all-symbols` (MSVC's `WINDOWS_EXPORT_ALL_SYMBOLS` does nothing there, so it had no import library for its overlay libraries) and with dbghelp, and llvm-mingw's libc++ and libunwind are copied next to it | The installer build with llvm-mingw (below) |
 | 0064 | psp_recomp's lowering passes try each pattern only where its fixed text starts, anchored, instead of `std::regex_replace` over the whole unit; the output is the same | libc++'s regex took the llvm-mingw recompiler 11 minutes for the main executable (now 21 s); MSVC's 10 s became 3 s |
+| 0065 | Frame interpolation: the camera is the motion most meshes drawn once agree on, and copies of one mesh pair with the copy nearest where that camera carries them instead of in drawing order; `<prefix>_INTERPOLATION_ORDER_PAIRS`. `<prefix>_CHECK_REPLAY` also counts halfway pixels far from both frames, and `=N` sets its interval | World of Darkness pillars flickered at 60 and 90 fps on the Steam Deck: once a copy left the view, the next paired with its neighbour and was drawn halfway between them ([graphics-triage.md](../docs/port/graphics-triage.md)) |
 
 Patches 0012 and 0013 were made on a separate worktree branch during the recompiled-build work and merged onto
 `dissidia` on 18 October 2026; patches 0014 and 0015 followed the same day (bring-up log, section "Stencil"), and
@@ -258,7 +259,7 @@ unmerged branch `depth-clip`: no visible change here); 0044 the same day for a r
 and PPSSPP (`portablekit_savedata_tests` and both directions checked against PPSSPP 1.20.4). Patches 0055 to 0061
 came from 25 to 26 October for local split-screen versus, made on the worktree branch `local-versus` and moved onto
 `dissidia` when that branch was merged. Patch 0062 came on 28 October for the split halves' field of view, on
-`local-versus` again (the branch `versus-fov` here), and moved onto `dissidia` when that was merged the same day. Patches 0063 and 0064 came on 28 October for the installer build.
+`local-versus` again (the branch `versus-fov` here), and moved onto `dissidia` when that was merged the same day. Patches 0063 and 0064 came on 28 October for the installer build, and 0065 on 31 October for a report from the Steam Deck (made on the worktree branch `interp-pairing`).
 PortableKit's 21 framework tests pass on the branch and `portablekit_host_check` builds.
 
 ## Recompiled build

@@ -1,0 +1,512 @@
+From 357fe4781a7d417cfc4c9ae93c35f188953086a0 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Fri, 30 Oct 2026 23:51:31 +1030
+Subject: [PATCH] Frame interpolation: instances of one mesh pair by where they
+ are
+
+Instances of one mesh (same vertices, indices, texture and count) paired
+up in drawing order. When a copy at the front of the list leaves the view,
+every copy after it paired with its neighbour. A neighbour farther than
+the own-motion guard followed the camera, but one closer was kept and
+blended halfway towards its neighbour, so the in-between frames drew it
+where neither frame had it: flicker. Dissidia 012's World of Darkness is
+a hall of copies (about 2,600 draws a frame); the owner saw its pillars
+flicker at 60 and 90 fps and not at 30.
+
+The camera estimate suffered too. Every copy paired with a neighbour turns
+exactly as the camera does and slides by the distance between the two, so
+the median turn could pick such a pair: in World of Darkness a 33-unit
+"camera move" in one frame, cut as a camera jump (19 times in a minute of
+battle).
+
+Now the camera is the motion the most pairs of meshes drawn once agree on
+(everything that stands still moves by the same matrix; rounding aside),
+falling back to any pairs and then to the median turn. Then a copy whose
+drawing-order partner is where that camera carries it keeps it, and the
+rest of each mesh pair up nearest first, globally, so a copy that left the
+view does not take its neighbour's place. Off switch:
+<prefix>_INTERPOLATION_ORDER_PAIRS (drawing order and the median turn, as
+before). The trace and the per-second guard line count the pairs taken out
+of drawing order.
+
+<prefix>_CHECK_REPLAY now also counts the halfway frame's pixels far from
+both frames (a colour channel more than 40 off each), and =N sets its
+interval in flips.
+
+Verified on Windows with Dissidia 012 (clang release build, 60 fps,
+internal scale 4, scripted Quick Battles): on a timeline that repeats run
+after run, halfway pixels far from both frames went from 15.93/2.07/3.92/
+0.73% to 11.96/1.37/3.13/0.64% at four checks, and the distant pillar that
+drew halfway between two copies no longer does; camera cuts in a minute of
+World of Darkness 19 -> 1. Old Chaos Shrine, same timeline: 1.401 vs
+1.399% (no change). Story Mode world map (orb pickup): identical. Render
+time within noise (5.20-5.46 ms before, 5.37-5.49 after). The framework's
+21 tests pass, three of them new (swapped instances, a row that loses its
+first copy, a hall of copies' camera). Not tested: the Steam Deck, macOS
+and Linux builds, other games (their thresholds differ; the rule scales
+with max_own_motion).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/gpu/frame_interpolation.cpp | 145 ++++++++++++++++++++++++++++---
+ host/gpu/frame_interpolation.hpp |  27 ++++++
+ host/gpu/vulkan_renderer.cpp     |  59 ++++++++++---
+ tests/interpolation_tests.cpp    |  51 ++++++++++-
+ 4 files changed, 254 insertions(+), 28 deletions(-)
+
+diff --git a/host/gpu/frame_interpolation.cpp b/host/gpu/frame_interpolation.cpp
+index f009760..24f163b 100644
+--- a/host/gpu/frame_interpolation.cpp
++++ b/host/gpu/frame_interpolation.cpp
+@@ -2,6 +2,7 @@
+ 
+ #include <algorithm>
+ #include <cmath>
++#include <optional>
+ 
+ namespace portablekit::gpu::interpolation {
+ namespace {
+@@ -123,9 +124,10 @@ const Matching &Matcher::match(const std::vector<DrawSummary> &older, const std:
+         if (!older[i].eligible) continue;
+         ++out.eligible_older;
+         Slot &slot = slot_for(key_of(older[i]), older[i]);
+-        if (slot.first < 0 || slot.cursor < 0) continue;
+-        out.newer_of[i] = slot.cursor;
++        if (slot.first < 0) continue;
+         shared_[i] = slot.first != slot.last ? 1u : 0u;
++        if (slot.cursor < 0) continue;
++        out.newer_of[i] = slot.cursor;
+         slot.cursor = next_[static_cast<std::size_t>(slot.cursor)];
+         ++out.matched;
+     }
+@@ -141,32 +143,81 @@ const Matching &Matcher::match(const std::vector<DrawSummary> &older, const std:
+         float turn;
+         Matrix motion;
+     };
++    // With nearest_instances a second sample of the pairs of meshes drawn
++    // once, which cannot be another instance (see below).
+     std::array<std::vector<Sample>, kViews> samples;
+-    const std::size_t stride = std::max<std::size_t>(1u, out.matched / 256u);
+-    std::size_t seen = 0u;
+-    for (std::size_t i = 0; i < older.size(); ++i) {
+-        const std::int32_t partner = out.newer_of[i];
+-        if (partner < 0 || seen++ % stride != 0u) continue;
++    std::array<std::vector<Sample>, kViews> unique_samples;
++    std::size_t unique_matched = 0u;
++    if (thresholds.nearest_instances)
++        for (std::size_t i = 0; i < older.size(); ++i) unique_matched += out.newer_of[i] >= 0 && shared_[i] == 0u;
++    const auto sample = [&](std::size_t i) {
+         const DrawSummary &from = older[i];
+-        const DrawSummary &to = newer[static_cast<std::size_t>(partner)];
++        const DrawSummary &to = newer[static_cast<std::size_t>(out.newer_of[i])];
+         Matrix before_inverse{};
+-        if (!affine_inverse(multiply(from.view, from.world), before_inverse)) continue;
++        if (!affine_inverse(multiply(from.view, from.world), before_inverse)) return std::optional<Sample>{};
+         const Matrix motion = multiply(multiply(to.view, to.world), before_inverse);
+         Matrix identity{};
+         identity[0] = identity[5] = identity[10] = identity[15] = 1.0f;
+-        samples[std::min<std::size_t>(from.split_view, kViews - 1u)].push_back(
+-            {rotation_angle_degrees(identity, motion), motion});
++        return std::optional<Sample>{Sample{rotation_angle_degrees(identity, motion), motion}};
++    };
++    const std::size_t stride = std::max<std::size_t>(1u, out.matched / 256u);
++    const std::size_t unique_stride = std::max<std::size_t>(1u, unique_matched / 256u);
++    std::size_t seen = 0u;
++    std::size_t unique_seen = 0u;
++    for (std::size_t i = 0; i < older.size(); ++i) {
++        if (out.newer_of[i] < 0) continue;
++        const std::size_t view = std::min<std::size_t>(older[i].split_view, kViews - 1u);
++        if (seen++ % stride == 0u)
++            if (const std::optional<Sample> taken = sample(i)) samples[view].push_back(*taken);
++        if (unique_matched != 0u && shared_[i] == 0u && unique_seen++ % unique_stride == 0u)
++            if (const std::optional<Sample> taken = sample(i)) unique_samples[view].push_back(*taken);
+     }
++    // Everything that stands still moved by the very same matrix, while a
++    // pair of two different instances of one mesh turned with the camera but
++    // slid by the distance between the two: the turn alone cannot tell them
++    // apart, and a row of copies paired with their neighbours slides as one.
++    // With nearest_instances the camera is the motion the most pairs of
++    // meshes drawn once agree on (rounding aside), then the most of any
++    // pairs, and the median turn only when no motion is shared by a few.
++    const auto agree = [](const Matrix &a, const Matrix &b) {
++        for (std::size_t column = 0; column < 3u; ++column)
++            for (std::size_t row = 0; row < 3u; ++row)
++                if (std::fabs(a[column * 4u + row] - b[column * 4u + row]) > 1e-3f) return false;
++        for (std::size_t row = 0; row < 3u; ++row) {
++            const float size = std::max(std::fabs(a[12u + row]), std::fabs(b[12u + row]));
++            if (std::fabs(a[12u + row] - b[12u + row]) > 0.01f + 1e-3f * size) return false;
++        }
++        return true;
++    };
+     for (std::size_t view = 0; view < kViews; ++view) {
+         std::vector<Sample> &taken = samples[view];
+         if (taken.empty()) continue;
+         const auto middle = taken.begin() + static_cast<std::ptrdiff_t>(taken.size() / 2u);
+         std::nth_element(taken.begin(), middle, taken.end(),
+                          [](const Sample &a, const Sample &b) { return a.turn < b.turn; });
++        const Sample *chosen = &*middle;
++        const auto consensus = [&](const std::vector<Sample> &among) -> const Sample * {
++            const Sample *best = nullptr;
++            std::size_t most = 0u;
++            for (const Sample &candidate : among) {
++                std::size_t agreeing = 0u;
++                for (const Sample &other : among) agreeing += agree(candidate.motion, other.motion) ? 1u : 0u;
++                if (agreeing > most) {
++                    most = agreeing;
++                    best = &candidate;
++                }
++                if (most * 2u > among.size()) break;  // no other motion can be shared by more
++            }
++            return most >= 3u ? best : nullptr;
++        };
++        if (thresholds.nearest_instances) {
++            if (const Sample *found = consensus(unique_samples[view])) chosen = found;
++            else if (const Sample *any = consensus(taken)) chosen = any;
++        }
+         Matching::ViewCamera &camera = out.views[view];
+         camera.found = true;
+-        camera.angle_degrees = middle->turn;
+-        camera.camera = middle->motion;
++        camera.angle_degrees = chosen->turn;
++        camera.camera = chosen->motion;
+         camera.distance = std::sqrt(camera.camera[12] * camera.camera[12] + camera.camera[13] * camera.camera[13] +
+                                     camera.camera[14] * camera.camera[14]);
+         if (!out.camera_found) out.camera = camera.camera;
+@@ -175,6 +226,74 @@ const Matching &Matcher::match(const std::vector<DrawSummary> &older, const std:
+         out.camera_distance = std::max(out.camera_distance, camera.distance);
+     }
+ 
++    // Instances of one mesh again, now that the camera is known. Drawing
++    // order pairs a copy with its neighbour once copies enter or leave the
++    // view, and a neighbour a short way off passes the own-motion guard below
++    // and is blended halfway towards. A copy whose drawing-order partner is
++    // where the camera's motion carries it keeps it; the others of each mesh
++    // pair up nearest first (the copy that needs the least motion of its
++    // own), so that a copy that left the view does not take its neighbour's
++    // place. In a stream of sparks the nearest to where one was is the one
++    // behind it only when the stream moves more than half its spacing a
++    // frame, where neither pairing reads as motion.
++    const auto predicted_of = [&](const DrawSummary &from) {
++        const Matrix &c = out.views[std::min<std::size_t>(from.split_view, kViews - 1u)].camera;
++        const std::array<float, 3> before = from.prepared ? from.eye_translation : eye_translation_of(from);
++        std::array<float, 3> predicted{};
++        for (std::size_t row = 0; row < 3u; ++row)
++            predicted[row] = c[row] * before[0] + c[4u + row] * before[1] + c[8u + row] * before[2] + c[12u + row];
++        return predicted;
++    };
++    const auto squared_distance = [&](const std::array<float, 3> &at, std::int32_t to) {
++        const DrawSummary &other = newer[static_cast<std::size_t>(to)];
++        const std::array<float, 3> b = other.prepared ? other.eye_translation : eye_translation_of(other);
++        const float x = at[0] - b[0], y = at[1] - b[1], z = at[2] - b[2];
++        return x * x + y * y + z * z;
++    };
++    if (out.camera_found && thresholds.nearest_instances && thresholds.max_own_motion > 0.0f) {
++        const float close = 0.05f * thresholds.max_own_motion;
++        taken_.assign(newer.size(), 0u);
++        for (std::size_t i = 0; i < older.size(); ++i)
++            if (out.newer_of[i] >= 0 && shared_[i] == 0u) taken_[static_cast<std::size_t>(out.newer_of[i])] = 1u;
++        const auto repairable = [&](std::size_t i) {
++            return older[i].eligible && shared_[i] != 0u &&
++                   out.views[std::min<std::size_t>(older[i].split_view, kViews - 1u)].found;
++        };
++        // The copies left to pair, each with its drawing-order partner.
++        unsettled_.clear();
++        for (std::size_t i = 0; i < older.size(); ++i) {
++            if (!repairable(i)) continue;
++            const std::int32_t in_order = out.newer_of[i];
++            if (in_order >= 0 && squared_distance(predicted_of(older[i]), in_order) <= close * close) {
++                taken_[static_cast<std::size_t>(in_order)] = 1u;
++                continue;
++            }
++            unsettled_.push_back({static_cast<std::int32_t>(i), in_order});
++            if (in_order >= 0) --out.matched;
++            out.newer_of[i] = Matching::kNoPartner;
++        }
++        candidates_.clear();
++        for (const auto &[i, in_order] : unsettled_) {
++            const DrawSummary &from = older[static_cast<std::size_t>(i)];
++            const std::array<float, 3> predicted = predicted_of(from);
++            for (std::int32_t at = slot_for(key_of(from), from).first; at >= 0; at = next_[static_cast<std::size_t>(at)])
++                if (taken_[static_cast<std::size_t>(at)] == 0u)
++                    candidates_.push_back({squared_distance(predicted, at), i, at});
++        }
++        std::sort(candidates_.begin(), candidates_.end(), [](const Candidate &a, const Candidate &b) {
++            return a.distance < b.distance || (a.distance == b.distance && a.older < b.older);
++        });
++        for (const Candidate &candidate : candidates_) {
++            std::int32_t &partner = out.newer_of[static_cast<std::size_t>(candidate.older)];
++            if (partner >= 0 || taken_[static_cast<std::size_t>(candidate.newer)] != 0u) continue;
++            partner = candidate.newer;
++            taken_[static_cast<std::size_t>(candidate.newer)] = 1u;
++            ++out.matched;
++        }
++        for (const auto &[i, in_order] : unsettled_)
++            if (out.newer_of[static_cast<std::size_t>(i)] != in_order) ++out.reordered;
++    }
++
+     // Each pair's own motion: where its view's camera motion would have
+     // taken the older draw against where the newer one is, in eye space.
+     if (out.camera_found && thresholds.max_own_motion > 0.0f) {
+diff --git a/host/gpu/frame_interpolation.hpp b/host/gpu/frame_interpolation.hpp
+index 6f51ed6..9aa9060 100644
+--- a/host/gpu/frame_interpolation.hpp
++++ b/host/gpu/frame_interpolation.hpp
+@@ -4,6 +4,7 @@
+ 
+ #include <array>
+ #include <cstdint>
++#include <utility>
+ #include <vector>
+ 
+ // Frame interpolation: the game simulates at 30 frames per second, and the
+@@ -83,6 +84,9 @@ struct Matching {
+     // same mesh drawn more than once) it may have been mistaken for.
+     std::uint32_t rejected{};
+     std::uint32_t rejected_shared{};
++    // Older draws whose partner is not their drawing-order one
++    // (CutThresholds::nearest_instances).
++    std::uint32_t reordered{};
+     float max_own_motion{};  // the largest own motion among the pairs kept
+     float max_rejected_motion{};  // the largest among those given up
+     std::uint32_t eligible_older{};
+@@ -140,6 +144,18 @@ struct CutThresholds {
+     // pair up in drawing order, and that order can change. 0 turns the
+     // guard off (<prefix>_INTERPOLATION_NO_MOTION_GUARD).
+     float max_own_motion{120.0f};
++    // Instances of one mesh pair up by where they are, not only in drawing
++    // order: the camera is the motion most pairs agree on, and an older
++    // instance whose drawing-order partner is not where that motion carries
++    // it takes the newer one nearest to that place.
++    // Scenery drawn as many copies of one mesh (a hall of columns)
++    // changes its drawing order as copies enter and leave the view; in
++    // drawing order every copy after the change paired with a neighbour, the
++    // camera could be read off such a pair, and a neighbour closer than
++    // `max_own_motion` was blended halfway towards. Needs the own-motion
++    // guard; off (<prefix>_INTERPOLATION_ORDER_PAIRS), drawing order and the
++    // median turn alone.
++    bool nearest_instances{true};
+     // Blend draws with an orthographic projection too. A 2D game drawn with
+     // transformed vertices (Purun) has nothing else to blend; off, only
+     // perspective draws are, which keeps a 3D game's 2D interface as it is.
+@@ -188,6 +204,17 @@ private:
+ 
+     std::vector<Slot> slots_;
+     std::vector<std::int32_t> next_;  // for each newer draw, the next with its key
++    std::vector<std::uint8_t> taken_;  // for each newer draw: an older draw has it
++    // Pairing instances again (CutThresholds::nearest_instances): the older
++    // draws to pair with their drawing-order partners, and every pair of one
++    // of them with a free newer instance of its mesh, by distance.
++    struct Candidate {
++        float distance;
++        std::int32_t older;
++        std::int32_t newer;
++    };
++    std::vector<std::pair<std::int32_t, std::int32_t>> unsettled_;
++    std::vector<Candidate> candidates_;
+     std::vector<std::uint8_t> shared_;  // for each older draw: its key had several newer draws
+     Matching result_;
+     // The previous pair's camera motion in each view, when that pair was
+diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
+index e45570c..e4d7e11 100644
+--- a/host/gpu/vulkan_renderer.cpp
++++ b/host/gpu/vulkan_renderer.cpp
+@@ -1932,6 +1932,7 @@ struct VulkanRenderer::Impl {
+         std::uint64_t followed{};        // draw calls without a partner moved with the camera only
+         std::uint32_t rejected{};        // pairs given up: moved too far on their own
+         std::uint32_t rejected_shared{}; // of those, with other draws of the same mesh
++        std::uint32_t reordered{};       // pairs taken out of drawing order: the nearest instance
+         float max_own_motion{};
+         std::chrono::steady_clock::duration blend_time{};  // CPU time of blended presents
+         std::chrono::steady_clock::duration plain_time{};  // CPU time of the other presents
+@@ -2837,6 +2838,7 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
+     impl.present_clock = pacing::PresentClock{};
+     impl.governor = pacing::RateGovernor{};
+     if (portablekit::env("INTERPOLATION_NO_MOTION_GUARD") != nullptr) impl.cut_thresholds.max_own_motion = 0.0f;
++    if (portablekit::env("INTERPOLATION_ORDER_PAIRS") != nullptr) impl.cut_thresholds.nearest_instances = false;
+     impl.frame_rate = player.frame_rate;
+     impl.governor.set_automatic(player.frame_rate_auto);
+     const std::uint32_t window_scale = std::clamp<std::uint32_t>(player.window_scale, 1u, settings::kMaxWindowScale);
+@@ -9637,6 +9639,7 @@ void VulkanRenderer::Impl::finish_interpolated_frame(VkImage source, std::uint32
+     if (matching.continued) ++stats.continued;
+     stats.rejected += matching.rejected;
+     stats.rejected_shared += matching.rejected_shared;
++    stats.reordered += matching.reordered;
+     stats.max_own_motion = std::max(stats.max_own_motion, matching.max_own_motion);
+     if (matching.camera_found) {
+         stats.max_camera_angle = std::max(stats.max_camera_angle, matching.camera_angle_degrees);
+@@ -9656,12 +9659,12 @@ void VulkanRenderer::Impl::finish_interpolated_frame(VkImage source, std::uint32
+     if (trace_frames || (trace_interpolation && matching.cut != nullptr && matching.eligible_newer != 0u) ||
+         (trace_interpolation && matching.rejected >= 50u)) {
+         std::printf("[interp] frame %llu: eligible %u/%u matched %u camera %.2f deg %.2f units, rejected %u (%u "
+-                    "shared, up to %.0f units, kept up to %.0f)%s%s%s\n",
++                    "shared, up to %.0f units, kept up to %.0f), %u out of drawing order%s%s%s\n",
+                     static_cast<unsigned long long>(frames), matching.eligible_older, matching.eligible_newer,
+                     matching.matched, static_cast<double>(matching.camera_angle_degrees),
+                     static_cast<double>(matching.camera_distance), matching.rejected, matching.rejected_shared,
+                     static_cast<double>(matching.max_rejected_motion), static_cast<double>(matching.max_own_motion),
+-                    matching.continued ? " (continued)" : "",
++                    matching.reordered, matching.continued ? " (continued)" : "",
+                     matching.cut != nullptr ? " cut: " : "", matching.cut != nullptr ? matching.cut : "");
+         std::fflush(stdout);
+     }
+@@ -10216,9 +10219,9 @@ void VulkanRenderer::Impl::report_interpolation() {
+                     stats.plain_newest, stats.plain_oldest, stats.plain_cut, stats.plain_textures,
+                     plain > reasons_known ? plain - reasons_known : 0u, stats.blocked, stats.over_budget);
+         std::printf("[interp] guards: %u pairs moved too far on their own (%u with the same mesh drawn more than "
+-                    "once), own motion kept up to %.1f units; %.0f draw calls a blend followed the camera only; "
++                    "once), %u paired out of drawing order, own motion kept up to %.1f units; %.0f draw calls a blend followed the camera only; "
+                     "%.0f texture offsets a blend held (flipbook steps)\n",
+-                    stats.rejected, stats.rejected_shared, static_cast<double>(stats.max_own_motion),
++                    stats.rejected, stats.rejected_shared, stats.reordered, static_cast<double>(stats.max_own_motion),
+                     stats.blended != 0u ? static_cast<double>(stats.followed) / stats.blended : 0.0,
+                     stats.blended != 0u ? static_cast<double>(stats.flipbook_steps) / stats.blended : 0.0);
+         std::fflush(stdout);
+@@ -10299,10 +10302,12 @@ std::vector<std::uint32_t> VulkanRenderer::Impl::read_image(VkImage image) {
+     return pixels;
+ }
+ 
+-// <prefix>_CHECK_REPLAY: every 150 flips, draws the older frame again from its
+-// recording without blending and compares it with the older frame's own
+-// picture, pixel for pixel; with <prefix>_SCREENSHOT_DIR it also writes both,
+-// the frame halfway to the newer one and the newer frame as BMPs.
++// <prefix>_CHECK_REPLAY: every 150 flips (=N: every N), draws the older frame
++// again from its recording without blending and compares it with the older
++// frame's own picture, pixel for pixel, and counts the pixels of the frame
++// halfway to the newer one that are far from both; with
++// <prefix>_SCREENSHOT_DIR it also writes both, the halfway frame and the
++// newer frame as BMPs.
+ void VulkanRenderer::Impl::check_replay() {
+     if (!older_frame.valid || !older_frame.recorded || !newer_frame.recorded || !older_picture_valid ||
+         matching.cut != nullptr || destroyed_texture_clock > older_frame.texture_clock)
+@@ -10322,6 +10327,30 @@ void VulkanRenderer::Impl::check_replay() {
+     std::printf("[interp] replay check at frame %llu: %zu of %zu pixels differ from the frame drawn again "
+                 "(%zu draw calls)\n",
+                 static_cast<unsigned long long>(frames), differ, older_pixels.size(), older_frame.groups.size());
++    // The frame halfway to the newer one stays close to one of the two
++    // almost everywhere; a pixel far from both (a colour channel more than 40
++    // off each) is something drawn where neither frame has it, or the edge
++    // of a fast motion. The alpha bits are the stencil and are left out.
++    const std::vector<std::uint32_t> half = draw(0.5f);
++    const std::vector<std::uint32_t> newer_pixels = read_image(pictures[newer_picture].color);
++    const auto far = [](std::uint32_t a, std::uint32_t b) {
++        for (std::uint32_t shift = 0u; shift < 24u; shift += 8u) {
++            const int x = static_cast<int>((a >> shift) & 0xFFu), y = static_cast<int>((b >> shift) & 0xFFu);
++            if (x - y > 40 || y - x > 40) return true;
++        }
++        return false;
++    };
++    std::size_t far_from_both = 0u;
++    std::size_t moved = 0u;
++    const std::size_t count = std::min({older_pixels.size(), half.size(), newer_pixels.size()});
++    for (std::size_t i = 0; i < count; ++i) {
++        const bool from_older = far(half[i], older_pixels[i]);
++        if (from_older && far(half[i], newer_pixels[i])) ++far_from_both;
++        if (far(older_pixels[i], newer_pixels[i])) ++moved;
++    }
++    std::printf("[interp] halfway check at frame %llu: %zu pixels far from both frames, %zu differ between them "
++                "(of %zu)\n",
++                static_cast<unsigned long long>(frames), far_from_both, moved, count);
+     std::fflush(stdout);
+     static const char *directory = portablekit::env("SCREENSHOT_DIR");
+     if (directory == nullptr) return;
+@@ -10333,8 +10362,8 @@ void VulkanRenderer::Impl::check_replay() {
+     };
+     write("_older.bmp", older_pixels);
+     write("_again.bmp", replayed);
+-    write("_half.bmp", draw(0.5f));
+-    write("_newer.bmp", read_image(pictures[newer_picture].color));
++    write("_half.bmp", half);
++    write("_newer.bmp", newer_pixels);
+ }
+ 
+ void VulkanRenderer::Impl::reset_interpolation() {
+@@ -10835,8 +10864,14 @@ bool VulkanRenderer::present(std::uint32_t display_address,
+         // makes the presents only without the present thread.
+         if (!impl.threaded)
+             perf::note_present_due(impl.cycle_active ? impl.present_clock.next_due().value_or(0) : 0);
+-        static const bool check = portablekit::env("CHECK_REPLAY") != nullptr;
+-        if (check && impl.frames % 150u == 0u) impl.check_replay();
++        // A number of 2 or more is the interval in flips.
++        static const std::uint64_t check_every = [] {
++            const char *text = portablekit::env("CHECK_REPLAY");
++            if (text == nullptr) return std::uint64_t{0};
++            const std::uint64_t every = std::strtoull(text, nullptr, 10);
++            return every >= 2u ? every : std::uint64_t{150};
++        }();
++        if (check_every != 0u && impl.frames % check_every == 0u) impl.check_replay();
+         impl.report_interpolation();
+         impl.follow_window();
+         if (impl.threaded) {
+diff --git a/tests/interpolation_tests.cpp b/tests/interpolation_tests.cpp
+index 7e5fede..4654f64 100644
+--- a/tests/interpolation_tests.cpp
++++ b/tests/interpolation_tests.cpp
+@@ -182,10 +182,18 @@ void guards() {
+     mark_eligible(older, kShown);
+     mark_eligible(newer, kShown);
+     const Matching &swapped = matcher.match(older, newer, thresholds);
+-    check(swapped.rejected == 2u && swapped.rejected_shared == 2u &&
+-              swapped.newer_of[40] == Matching::kFollowCamera && swapped.newer_of[41] == Matching::kFollowCamera,
+-          "swapped instances 600 units apart are not blended into each other");
++    check(swapped.rejected == 0u && swapped.newer_of[40] == 41 && swapped.newer_of[41] == 40 &&
++              swapped.reordered == 2u,
++          "swapped instances pair with themselves, out of drawing order");
+     check(swapped.cut == nullptr, "the rest of the frame still blends");
++    CutThresholds in_order = thresholds;
++    in_order.nearest_instances = false;
++    Matcher ordered;
++    const Matching &swapped_in_order = ordered.match(older, newer, in_order);
++    check(swapped_in_order.rejected == 2u && swapped_in_order.rejected_shared == 2u &&
++              swapped_in_order.newer_of[40] == Matching::kFollowCamera &&
++              swapped_in_order.newer_of[41] == Matching::kFollowCamera,
++          "in drawing order alone, swapped instances 600 units apart are not blended into each other");
+ 
+     // A character walking 20 units a frame while the camera turns keeps its pair.
+     std::vector<DrawSummary> before = scene(40u, 0.0f), after = scene(40u, 5.0f);
+@@ -255,6 +263,43 @@ void matching() {
+               eligible.newer_of[2] == -1,
+           "draws into other framebuffers and 2D draws are never matched");
+ 
++    CutThresholds in_order = thresholds;
++    in_order.nearest_instances = false;
++    // A row of copies of one mesh, 30 units apart, while the camera turns:
++    // the first copy leaves the view, so in drawing order every other copy
++    // pairs with the one after it (Dissidia 012's World of Darkness, whose
++    // copies stand closer than its own-motion guard). Each pairs with itself.
++    const auto row = [](std::size_t first, float degrees) {
++        std::vector<DrawSummary> frame = scene(40u, degrees);
++        for (std::size_t k = first; k < 10u; ++k) frame.push_back(draw(95u, 30.0f * static_cast<float>(k), degrees));
++        mark_eligible(frame, kShown);
++        return frame;
++    };
++    const std::vector<DrawSummary> row_before = row(0u, 0.0f), row_after = row(1u, 1.0f);
++    Matcher rows;
++    const Matching &shifted = rows.match(row_before, row_after, thresholds);
++    bool own = shifted.newer_of[40] < 0;
++    for (std::size_t k = 1; k < 10u; ++k) own = own && shifted.newer_of[40u + k] == static_cast<std::int32_t>(39u + k);
++    check(own && shifted.cut == nullptr, "a row of copies that loses its first pairs each copy with itself");
++    Matcher rows_in_order;
++    const Matching &shifted_in_order = rows_in_order.match(row_before, row_after, in_order);
++    check(shifted_in_order.newer_of[41] == 41, "in drawing order alone, each paired with the copy after it");
++
++    // Most of a frame is such copies: the camera is still read off the
++    // scenery drawn once, not off a copy paired with its neighbour.
++    const auto hall = [](std::size_t first, float degrees) {
++        std::vector<DrawSummary> frame = scene(10u, degrees);
++        for (std::size_t k = first; k < 100u; ++k) frame.push_back(draw(96u, 30.0f * static_cast<float>(k), degrees));
++        mark_eligible(frame, kShown);
++        return frame;
++    };
++    Matcher halls;
++    const Matching &truth = halls.match(scene(10u, 0.0f), scene(10u, 1.0f), thresholds);
++    Matcher shifted_hall;
++    const Matching &hall_camera = shifted_hall.match(hall(0u, 0.0f), hall(1u, 1.0f), thresholds);
++    check(near(hall_camera.camera_distance, truth.camera_distance, 0.05f) && hall_camera.cut == nullptr,
++          "the camera of a hall of copies is the scenery's");
++
+     std::vector<DrawSummary> flat{draw(1u, 0.0f)};
+     flat[0].perspective = false;
+     mark_eligible(flat, kShown);
+-- 
+2.53.0.windows.1
+
