@@ -98,11 +98,11 @@ without the row; set it back to `1` to bring it back. `D012_LOCAL_VERSUS=0` does
 then **Run anyway**. The wizard asks where to install (no administrator rights needed) and for your ISO, then sets the
 game up from it: it decrypts the game's program and compiles the game's code for your PC with the compiler that comes
 with it. That takes a few minutes (about 4 on a recent 8-core PC). Nothing is downloaded, and nothing made from your
-disc leaves your PC.
+disc leaves your PC. Tick **Battle BGM Maker** if you want to make your own music mods.
 
 **4. Play** with the "Dissidia 012 (PC port)" shortcut in the Start menu (and on the desktop, if you chose it). Esc,
 or L3 + R3 on a controller, opens the port's menu. Your saves are in `data\ms0` in the install folder, and mods go in
-`data\mods` (the Start menu has a shortcut to it); to make your own, start **Battle BGM Maker** from the Start menu.
+`data\mods` (the Start menu has a shortcut to it).
 
 **To update:** run the new release's setup and install into the same folder. Your saves, settings and mods stay, and
 the game's code is compiled again only when the new version needs it.

@@ -324,7 +324,7 @@ latter's output, and makes the shortcuts; running it again over an installation 
 `data/` unless the player says otherwise. Checked on 28 October 2026 with a silent install (`/VERYSILENT /ISO=...`):
 3 min 25 s from the setup to a playable game, an update over it in 18 s (no compile), an uninstall that leaves only
 `data/`. The checks refuse a planted file of each kind they look for. Checked again for 0.4.0 on 30 October 2026: a
-fresh install in 196 s with the "Battle BGM Maker" shortcut on `BgmMaker.exe`, which found `data/mods`, the player's
+fresh install in 196 s with the optional "Battle BGM Maker" ticked: the shortcut on `BgmMaker.exe`, which found `data/mods`, the player's
 ISO (from `settings.ini`) and `atracdenc.exe`, and made a PSP / PPSSPP ISO from the command line in 13 s; 0.3.0 with
 its Python tool, then 0.4.0 over it in 19 s, removed `bgm-maker/` and FFmpeg's programs and kept the mods.
 

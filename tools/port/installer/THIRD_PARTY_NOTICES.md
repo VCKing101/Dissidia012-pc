@@ -55,7 +55,7 @@ Battle BGM Maker). `avcodec-61.dll`, `avformat-61.dll`, `avutil-59.dll` and `swr
 LGPL shared build from BtbN/FFmpeg-Builds, licensed under the GNU Lesser General Public License, version 3 or
 later: `FFmpeg-LICENSE.txt`. Where the build and its source are: `FFmpeg-SOURCE.txt`. <https://ffmpeg.org/>
 
-### atracdenc
+### atracdenc (with the optional Battle BGM Maker only)
 
 The ATRAC3 encoder the Battle BGM Maker runs for "Make a PSP / PPSSPP ISO", as a program of its own
 (`atracdenc.exe`). Copyright (c) Daniil Cherednik. GNU Lesser General Public License, version 2.1:
