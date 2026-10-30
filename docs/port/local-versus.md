@@ -1022,6 +1022,59 @@ The owner and players found the split halves cut off the fighters too easily, th
   the top and bottom edges of a wider view, and the frames still outside (mostly player 1's, which jumps and dashes
   more in the route; the chase and special camera, mode 2, has no framing test).
 
+## 7.15 Player 2's chase prompt (29 October 2026)
+
+A player on Reddit: "the Chase 'X' prompt only appears for 1P". Not the command guide's "× : Chase" line (7.11, which
+player 2 has had since then) but the big × in the middle of the screen when a chase can be started. Reproduced
+(`build/port/versus/bugs/`, the `--chase` route with the cross presses left out so the prompt stays): with player 1
+chasing, the × showed on the line between the halves; with player 2 chasing, none. V:
+
+- **What shows it.** The battle's chase manager (`*0x08AB6738`, battle `0x08AB58A4`, run once a frame through
+  `0x08AB5534`) makes the × (a sprite of layout 7 or 6 from the list at `*0x08ACBBC8`, main `0x088DAA40`, kept at
+  `+0x10`) while one of two checks holds for the player, and lets it go (main `0x088DA060`) when neither does:
+  battle `0x08AB5264` (a chase that can be started) and `0x08AB5330` (the player in the chase's first motion, 800).
+  It plays a sound and an effect (6, `+0x0C`) with it.
+- **Why only player 1.** Both checks take the player from main `0x08842164`: the first fighter whose local flag
+  (`+0x5B0` bit 4) is set, always player 1's in versus. Found by making each way of asking for the local player
+  answer player 2 in turn: main `0x08889E44` answering player 2, no ×; `0x08842164`, the × for player 2's chase.
+  Ruled out on the way: the HUD's action icons (battle `0x089E09C4`, `0x089E0904`, which never ran), the hint picker
+  (`0x08ADC770`), the damage numbers' colour (main `0x08858CB8`), the fighter's local-only updates (battle
+  `0x08B2D3BC`), and the HUD layouts' parts (only the guide's lines came and went).
+- **The port** (`run_chase_local`): an override of main `0x08842164`. When it is asked from either check in versus,
+  the check is run again for player 1 and for player 2 (the override answering each in turn; both checks only read),
+  and when it holds for player 2 and not player 1, player 2 is the answer, so the prompt is player 2's. Only one
+  fighter can be chasing at a time, so the one prompt is enough. Every other caller gets the game's answer.
+- **Its place.** The sprite is laid out at the screen's middle, which in versus is the line between the halves. Its
+  offset (`+0x10`, 0 as made) is set to −120 or +120 every frame it exists, the middle of the chasing player's half.
+- **The chase lines** (reported by the owner after the fix above: the streaks around the × "aren't there for player 2
+  and are instead showing on player 1's screen"). They are effect 6 of the system bank (main `0x088A9DE8`), which the
+  chase manager plays with the sprite and keeps at `+0x0C`. The effect manager's update places it about 1.3 units in
+  front of the on-screen camera, player 1's, every frame: the instance's world matrix (`+0x70`) and two copies of it
+  in its particle system (the instance's list at `+0xCC`, the system at the list's `+0x10`, type byte `0x65`,
+  matrices at `+0x50` and `+0x110`), which the effect library draws from. So in either player's chase they were in
+  player 1's view, and only there. Moving the instance's matrix alone during the second pass changed nothing: the
+  library draws from the system's copies. The port (`chase_lines_view1`, `chase_lines_view2`, `chase_lines_back`):
+  - the view that is not the chaser's draws without them: the system's bit 0 of `+0x0A`, the bit the game's own
+    culling sets through main `0x088A47E4` (main `0x0894D964`), set for that view's draw. Player 1's view is handled
+    from the camera's draw task (priority 59000, before the effect draws from 59400), and only when the last frame was
+    split;
+  - in player 2's chase, view 2 gets all three matrices moved in front of player 2's camera, as far off and turned as
+    they were from player 1's (both cameras' axes from their eye, look-at and up);
+  - all of it is put back after each view, so the game's update sees only what it wrote.
+- `D012_NO_CHASE_PLAYER2=1` leaves player 2 without the prompt (and the × where the game puts it) and the chase lines
+  untouched. Without the prompt fix the game never plays the lines for player 2's chase at all, so the lines in
+  player 1's view came with the prompt fix.
+- **Checked** (MSVC build, `final_*` in `build/port/versus/bugs/`): with player 2 chasing (Bartz's aerial down Brave
+  attack, no cross pressed), the × in the middle of player 2's half in both chases of the run; with player 1
+  chasing, in the middle of player 1's half; with `D012_NO_CHASE_PLAYER2=1`, none for player 2; the `--chase` route
+  with the cross presses (player 2) plays through as before. The chase lines (`lines2_*`, `chase_lines_fix.png`): with
+  player 2 chasing, in player 2's half framing the × and none in player 1's; with player 1 chasing, in player 1's
+  half and none in player 2's; with `D012_NO_CHASE_PLAYER2=1`, no lines in player 2's chase; the `--chase` route with
+  the cross presses plays through. The clang build (llvm-mingw, as the setup builds; `clang_lines_*`) the same: the ×
+  and the lines in player 2's half in player 2's chase, in player 1's half in player 1's, and the `--chase` route
+  plays through. **Not checked:** a chase started from a wall rush or other launchers, both players able to chase at
+  once.
+
 ## 8. For later: two copies over the game's ad hoc versus
 
 The owner wants this route for online play and matchmaking, much later. What was found:

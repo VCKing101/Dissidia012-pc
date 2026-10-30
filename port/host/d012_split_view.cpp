@@ -153,6 +153,15 @@ struct State {
     // Player 2's fighter made the local one for a battle player 2 won
     // (run_winner_decision).
     bool player2_won = false;
+    // Whose chase the chase prompt shows (run_chase_local): 1 or 2.
+    std::uint32_t chase_slot = 1;
+    // The chase lines while a view draws without them or moved
+    // (chase_lines_keep): the effect, its particle system, and their matrices
+    // and the system's flags to put back.
+    gaddr chase_lines = 0;
+    gaddr chase_lines_system = 0;
+    std::array<std::array<std::uint8_t, 0x40>, 3> chase_lines_saved{};
+    std::uint16_t chase_lines_flags = 0;
     // The most each view has used of its display list (view2_list).
     std::uint32_t peak1 = 0;
     std::uint32_t peak2 = 0;
@@ -310,6 +319,207 @@ void guide_for_player2(Guest *g) {
         told = true;
         std::cout << "[versus] player 2's command guide" << std::endl;
     }
+}
+
+// The chase prompt: the big × in the middle of the screen when the player can
+// chase. The battle's chase manager (*0x08AB6738, battle 0x08AB58A4, once a
+// frame) shows it while one of two checks holds for the player: battle
+// 0x08AB5264 (a chase that can be started) and 0x08AB5330 (the player in the
+// chase's first motion, 800). It makes the × (a sprite of layout 7 or 6, kept
+// at +0x10) and lets it go when neither holds. Both checks take the player
+// from main 0x08842164, the first fighter whose local flag is set, so player 2
+// never had one. In versus, when either check asks, it is asked again for each
+// player, and when it holds for player 2 and not for player 1, player 2 is the
+// answer: the prompt is player 2's. Only one fighter can be chasing, so one
+// prompt is enough. D012_NO_CHASE_PLAYER2=1 leaves player 2 without one.
+constexpr std::uint32_t kLocalFighter = 0x08842164u;
+constexpr std::uint32_t kChaseManager = 0x08AB6738u;
+constexpr std::uint32_t kChaseCanStart = 0x08AB5264u;
+constexpr std::uint32_t kChaseCanStartAsks = 0x08AB5280u;  // where its call of kLocalFighter returns
+constexpr std::uint32_t kChaseStarting = 0x08AB5330u;
+constexpr std::uint32_t kChaseStartingAsks = 0x08AB5348u;
+
+// The prompt's sprite is laid out at the screen's middle, on the line between
+// the halves. Its offset (+0x10, 0 as made) moves it to the middle of the
+// chasing player's half, a quarter of the screen (120) either way.
+void place_chase_prompt(Guest *g) {
+    const gaddr manager = g_ld32(g, kChaseManager);
+    const gaddr sprite = manager != 0u ? g_ld32(g, manager + 0x10u) : 0u;
+    if (sprite == 0u) return;
+    const float x = state().chase_slot == 2u ? 120.0f : -120.0f;
+    std::memcpy(g_ptr(g, sprite + 0x10u, 4u), &x, 4u);
+}
+
+// The chase lines, the streaks at the screen's edges with the ×: effect 6 of
+// the system bank (main 0x088A9DE8), which the chase manager plays with the
+// sprite and keeps at +0x0C. The effect manager's update puts the effect just
+// in front of the on-screen camera, player 1's, each frame: the instance's
+// world matrix (+0x70, rows the axes and then the place) and the two copies in
+// its particle system (the instance's list at +0xCC, the system at its +0x10;
+// matrices at +0x50 and +0x110) that the effect library draws from. So they
+// were drawn in player 1's view in either player's chase and never in player
+// 2's. Now the view that is not the chaser's draws without them (the system's
+// bit 0 of +0x0A, which the game's own culling sets through main 0x088A47E4),
+// and in player 2's chase view 2 draws them in front of player 2's camera, as
+// far off and turned as they were from player 1's (the three matrices moved).
+// All is put back after each view. D012_NO_CHASE_PLAYER2=1 leaves them as
+// they were too.
+constexpr std::uint32_t kChaseLinesMatrices[] = {0x70u, 0x50u, 0x110u};  // the instance's, then the system's
+
+gaddr chase_lines(Guest *g) {
+    static const bool off = [] {
+        const char *text = std::getenv("D012_NO_CHASE_PLAYER2");
+        return text != nullptr && *text != '\0' && std::strcmp(text, "0") != 0;
+    }();
+    const gaddr manager = off ? 0u : g_ld32(g, kChaseManager);
+    return manager != 0u ? g_ld32(g, manager + 0x0Cu) : 0u;
+}
+
+// The effect's particle system, when its two matrices are at the instance's
+// place; otherwise 0, and the lines are left alone.
+gaddr chase_lines_system(Guest *g, gaddr effect) {
+    const gaddr list = g_ld32(g, effect + 0xCCu);
+    const gaddr system = list != 0u ? g_ld32(g, list + 0x10u) : 0u;
+    if (system == 0u || g_ld8(g, system) != 0x65u) return 0u;
+    for (std::uint32_t at : {kChaseLinesMatrices[1], kChaseLinesMatrices[2]})
+        if (std::memcmp(g_ptr(g, system + at + 0x30u, 12u), g_ptr(g, effect + 0xA0u, 12u), 12u) != 0) return 0u;
+    return system;
+}
+
+std::array<gaddr, 3> chase_lines_matrices(gaddr effect, gaddr system) {
+    return {effect + kChaseLinesMatrices[0], system + kChaseLinesMatrices[1], system + kChaseLinesMatrices[2]};
+}
+
+void chase_lines_back(Guest *g) {
+    State &s = state();
+    const gaddr effect = chase_lines(g);
+    if (s.chase_lines != 0u && s.chase_lines == effect &&
+        s.chase_lines_system == g_ld32(g, g_ld32(g, effect + 0xCCu) + 0x10u)) {
+        const auto matrices = chase_lines_matrices(effect, s.chase_lines_system);
+        for (std::size_t i = 0; i < matrices.size(); ++i)
+            std::memcpy(g_ptr(g, matrices[i], 0x40u), s.chase_lines_saved[i].data(), 0x40u);
+        g_st16(g, s.chase_lines_system + 0x0Au, s.chase_lines_flags);
+    }
+    s.chase_lines = 0u;
+}
+
+// Keeps what a view changes, to put back after it.
+gaddr chase_lines_keep(Guest *g, gaddr effect) {
+    State &s = state();
+    const gaddr system = chase_lines_system(g, effect);
+    if (system == 0u) return 0u;
+    const auto matrices = chase_lines_matrices(effect, system);
+    for (std::size_t i = 0; i < matrices.size(); ++i)
+        std::memcpy(s.chase_lines_saved[i].data(), g_ptr(g, matrices[i], 0x40u), 0x40u);
+    s.chase_lines_flags = static_cast<std::uint16_t>(g_ld16s(g, system + 0x0Au));
+    s.chase_lines = effect;
+    s.chase_lines_system = system;
+    return system;
+}
+
+void chase_lines_hide(Guest *g, gaddr system) {
+    g_st16(g, system + 0x0Au, static_cast<std::uint16_t>(g_ld16s(g, system + 0x0Au) | 1));
+}
+
+// A camera's axes from a view's eye (+0x40), look-at (+0x50) and up (+0x60):
+// right, up and forward.
+std::array<std::array<float, 3>, 3> camera_axes(const std::uint8_t *view) {
+    float eye[3], at[3], up[3];
+    std::memcpy(eye, view + 0x40u, 12u);
+    std::memcpy(at, view + 0x50u, 12u);
+    std::memcpy(up, view + 0x60u, 12u);
+    const auto unit = [](std::array<float, 3> v) {
+        const float length = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+        if (length > 0.0f)
+            for (float &c : v) c /= length;
+        return v;
+    };
+    const auto cross = [](const std::array<float, 3> &a, const std::array<float, 3> &b) {
+        return std::array<float, 3>{a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]};
+    };
+    const auto forward = unit({at[0] - eye[0], at[1] - eye[1], at[2] - eye[2]});
+    const auto right = unit(cross(forward, {up[0], up[1], up[2]}));
+    return {right, cross(right, forward), forward};
+}
+
+// Before player 1's view: the lines left out of it in player 2's chase. Only
+// when the last frame was split, as a chase's frames are.
+void chase_lines_view1(Guest *g) {
+    const State &s = state();
+    const gaddr effect = chase_lines(g);
+    if (effect == 0u || !s.split_active || s.chase_slot != 2u) return;
+    const gaddr system = chase_lines_keep(g, effect);
+    if (system != 0u) chase_lines_hide(g, system);
+}
+
+// Before player 2's view, with view 1's eye, look-at and up in view1 and the
+// manager holding view 2's.
+void chase_lines_view2(Guest *g, const std::uint8_t *view1, gaddr manager) {
+    const gaddr effect = chase_lines(g);
+    const gaddr system = effect != 0u ? chase_lines_keep(g, effect) : 0u;
+    if (system == 0u) return;
+    if (state().chase_slot != 2u) {
+        chase_lines_hide(g, system);
+        return;
+    }
+    const auto from = camera_axes(view1);
+    const auto to = camera_axes(static_cast<const std::uint8_t *>(g_ptr(g, manager, 0x70u)));
+    const auto turn = [&](const float *v, float *out) {
+        for (int k = 0; k < 3; ++k) out[k] = 0.0f;
+        for (int a = 0; a < 3; ++a) {
+            const float along = v[0] * from[a][0] + v[1] * from[a][1] + v[2] * from[a][2];
+            for (int k = 0; k < 3; ++k) out[k] += along * to[a][k];
+        }
+    };
+    float eye1[3], eye2[3];
+    std::memcpy(eye1, view1 + 0x40u, 12u);
+    std::memcpy(eye2, g_ptr(g, manager + 0x40u, 12u), 12u);
+    const auto matrices = chase_lines_matrices(effect, system);
+    for (std::size_t i = 0; i < matrices.size(); ++i) {
+        float world[16], moved[16];
+        std::memcpy(world, state().chase_lines_saved[i].data(), 0x40u);
+        for (int row = 0; row < 3; ++row) {
+            turn(world + row * 4, moved + row * 4);
+            moved[row * 4 + 3] = world[row * 4 + 3];
+        }
+        const float off[3] = {world[12] - eye1[0], world[13] - eye1[1], world[14] - eye1[2]};
+        turn(off, moved + 12);
+        for (int k = 0; k < 3; ++k) moved[12 + k] += eye2[k];
+        moved[15] = world[15];
+        std::memcpy(g_ptr(g, matrices[i], 0x40u), moved, 0x40u);
+    }
+}
+
+void run_chase_local(Guest *g, const decomp::CallState &in, GuestRegs &out) {
+    // While a check is asked again for one player: that player.
+    static gaddr asking_for = 0u;
+    if (asking_for != 0u) {
+        out.v0 = asking_for;
+        return;
+    }
+    GuestRegs regs{};
+    for (int i = 0; i < 8; ++i) regs.a[i] = in.gpr[4 + i];
+    decomp::call_original(g, kLocalFighter, regs);
+    out.v0 = regs.v0;
+    const std::uint32_t caller = in.gpr[31];
+    if ((caller != kChaseCanStartAsks && caller != kChaseStartingAsks) || !versus::active()) return;
+    static const bool off = [] {
+        const char *text = std::getenv("D012_NO_CHASE_PLAYER2");
+        return text != nullptr && *text != '\0' && std::strcmp(text, "0") != 0;
+    }();
+    const gaddr field = g_ld32(g, kBattleManager);
+    const gaddr p1 = field != 0u ? g_ld32(g, field + 0x38u) : 0u;
+    const gaddr p2 = field != 0u ? g_ld32(g, field + 0x3Cu) : 0u;
+    if (off || p1 == 0u || p2 == 0u || regs.v0 != p1) return;
+    const std::uint32_t check = caller == kChaseCanStartAsks ? kChaseCanStart : kChaseStarting;
+    asking_for = p1;
+    const bool for1 = g_call1(g, check, in.gpr[4]) != 0u;
+    asking_for = p2;
+    const bool for2 = g_call1(g, check, in.gpr[4]) != 0u;
+    asking_for = 0u;
+    if (for1 || for2) state().chase_slot = for2 && !for1 ? 2u : 1u;
+    if (for2 && !for1) out.v0 = p2;
+    place_chase_prompt(g);
 }
 
 // D012_TRACE_GUIDE: both halves of the command guide and their lines, every
@@ -500,7 +710,10 @@ void run_sprite_colour(Guest *g, const decomp::CallState &in, GuestRegs &) {
 
 void run_camera_draw_thunk(Guest *g, const decomp::CallState &, GuestRegs &) {
     g_call1(g, kCameraDraw, g_ld32(g, kCameraManager));
-    if (!state().running && versus::active()) add_task(g);
+    if (!state().running && versus::active()) {
+        chase_lines_view1(g);
+        add_task(g);
+    }
 }
 
 // The opponent's camera slot in the manager, or -1.
@@ -1300,6 +1513,8 @@ void run_split_task(Guest *g, const decomp::CallState &in, GuestRegs &) {
     if (manager != 0u) watch(g, manager, "the frame's start (since the last split task)");
     if (versus::active()) trace_hud_layouts(g);
     if (versus::active()) trace_guide(g);
+    if (versus::active()) place_chase_prompt(g);
+    chase_lines_back(g);
     if (!versus::active() || manager == 0u || graphics == 0u) return;
     // When the frame stays one full view, with player 2's cursor hidden:
     // - an EX Burst, from its start (run_ex_burst_start) until the
@@ -1473,6 +1688,7 @@ void run_split_task(Guest *g, const decomp::CallState &in, GuestRegs &) {
     g_call1(g, kProjectionBuild, manager + 0xC0u);
     const std::uint32_t effects = g_ld32(g, kEffectManager);
     if (effects != 0u) g_call3(g, kEffectCamera, effects, manager, manager + 0xC0u);
+    chase_lines_view2(g, saved_view, manager);
 
     // The graphics manager's camera from view 2, then the frame's starting
     // render state (with the screen cleared and the lights that follow the
@@ -1599,6 +1815,7 @@ void run_split_task(Guest *g, const decomp::CallState &in, GuestRegs &) {
         std::fflush(stdout);
     }
 
+    chase_lines_back(g);
     std::memcpy(g_ptr(g, manager, kManagerView), saved_view, kManagerView);
     std::memcpy(g_ptr(g, graphics + kGraphicsCamera, kGraphicsCameraSize), saved_camera, kGraphicsCameraSize);
     if (effects != 0u) g_call3(g, kEffectCamera, effects, manager, manager + 0xC0u);
@@ -1825,6 +2042,7 @@ struct Install {
              &run_frustum_build},
             {kProjectionSetFov, "versus_projection_set_fov", decomp::Module::Main, decomp::Returns::Nothing,
              &run_projection_set_fov},
+            {kLocalFighter, "versus_chase_local", decomp::Module::Main, decomp::Returns::Integer, &run_chase_local},
         };
         decomp::add_overrides(overrides, sizeof overrides / sizeof overrides[0], true);
         // Overrides that only trace, there only with their switch.
