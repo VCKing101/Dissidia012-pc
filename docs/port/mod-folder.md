@@ -97,6 +97,7 @@ Members the port does not know are reported as warnings and ignored, so a newer 
 | --- | --- | --- |
 | `key` | yes | Unique in the mod, same rules as `id` |
 | `name` | yes | The series' name as the selector shows it, 1 to 48 bytes. Plain ASCII is safest: the game's font may not have every character |
+| `short` | no | 1 to 16 bytes, for the Battle BGM Maker's "Make a PSP / PPSSPP ISO" only: the stock selector has one flat list, so each track is named `<short> - <title>` there ("FFXVI - Titan Lost"). Without it the tool makes one from `name` (`FINAL FANTASY XVI` becomes `FFXVI`). The port ignores it; a bad one is a warning |
 | `order` | no (0) | Where the series sorts. Mod series always come after the game's own, sorted by `order`, then by id |
 | `tracks` | yes | The series' tracks, in the order they are offered |
 

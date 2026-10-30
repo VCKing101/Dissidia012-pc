@@ -316,7 +316,8 @@ bool App::frame() {
     take_imports();
     take_measured();
     window_.set_animating(importer_.busy() || decoder_.busy() || player_.playing() || suggester_.busy() ||
-                          measurer_.busy() || save_wanted_ || std::chrono::steady_clock::now() < status_until_);
+                          measurer_.busy() || save_wanted_ || psp_.busy() ||
+                          std::chrono::steady_clock::now() < status_until_);
 
     const ImGuiIO &io = ImGui::GetIO();
     if (!io.WantTextInput && !prompt_) {

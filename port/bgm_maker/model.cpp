@@ -111,7 +111,12 @@ ModModel model_from_document(const Value &document) {
         series.key = text_of(entry, "key");
         series.name = text_of(entry, "name");
         series.order = whole_number(entry.find("order")).value_or(0);
-        series.extra = extra_of(entry, {"key", "name", "order", "tracks"});
+        // "short" is modelled when it is text; anything else is kept as it is.
+        const Value *short_name = entry.find("short");
+        const bool short_text = short_name != nullptr && short_name->is(Value::Kind::String);
+        if (short_text) series.short_name = short_name->text;
+        series.extra = short_text ? extra_of(entry, {"key", "name", "short", "order", "tracks"})
+                                  : extra_of(entry, {"key", "name", "order", "tracks"});
         const Value *tracks = entry.find("tracks");
         if (tracks != nullptr && tracks->is(Value::Kind::Array)) {
             for (const Value &item : tracks->items) {
@@ -145,6 +150,7 @@ Value document_from_model(const ModModel &model, SamplesOf samples, const void *
         Value entry = json::object_value();
         entry.members.emplace_back("key", json::string_value(series.key));
         entry.members.emplace_back("name", json::string_value(series.name));
+        if (!series.short_name.empty()) entry.members.emplace_back("short", json::string_value(series.short_name));
         entry.members.emplace_back("order", json::number_value(static_cast<double>(series.order)));
         Value tracks = json::array_value();
         for (const TrackModel &track : series.tracks) {
@@ -159,7 +165,8 @@ Value document_from_model(const ModModel &model, SamplesOf samples, const void *
             tracks.items.push_back(std::move(item));
         }
         entry.members.emplace_back("tracks", std::move(tracks));
-        add_extra(entry, series.extra, {"key", "name", "order", "tracks"});
+        if (series.short_name.empty()) add_extra(entry, series.extra, {"key", "name", "order", "tracks"});
+        else add_extra(entry, series.extra, {"key", "name", "short", "order", "tracks"});
         series_list.items.push_back(std::move(entry));
     }
     Value music = json::object_value();

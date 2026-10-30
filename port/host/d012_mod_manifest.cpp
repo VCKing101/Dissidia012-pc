@@ -291,7 +291,7 @@ void check(const Value &root, const std::filesystem::path &folder, Manifest &res
         }
         const auto key = text_member(entry, "key", true, report, s_path, "a series");
         const std::string context = "series \"" + key.value_or("?") + "\"";
-        warn_unknown(entry, {"key", "name", "order", "tracks"}, report, s_path, context);
+        warn_unknown(entry, {"key", "name", "short", "order", "tracks"}, report, s_path, context);
         const auto series_name = text_member(entry, "name", true, report, s_path, context, kMaxSeriesNameLength);
         if (!key || !series_name) {
             report.error(&entry, s_path, context + " is left out");
@@ -309,6 +309,16 @@ void check(const Value &root, const std::filesystem::path &folder, Manifest &res
         Series series;
         series.key = *key;
         series.name = *series_name;
+        // Only the Battle BGM Maker's PSP / PPSSPP export reads it; a bad one is ignored.
+        if (const Value *short_name = entry.find("short")) {
+            if (short_name->is(Value::Kind::String) && !short_name->text.empty() &&
+                short_name->text.size() <= kMaxShortNameLength)
+                series.short_name = short_name->text;
+            else
+                report.warning(short_name, s_path + ".short",
+                               context + ": \"short\" must be text of 1 to " + std::to_string(kMaxShortNameLength) +
+                                   " bytes; it is ignored");
+        }
         if (const Value *order = member(entry, "order", Value::Kind::Number, false, report, s_path, context)) {
             const auto value = whole_number(*order);
             if (!value || *value < -1'000'000 || *value > 1'000'000)

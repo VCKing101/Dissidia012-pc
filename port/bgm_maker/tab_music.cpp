@@ -442,6 +442,13 @@ void App::series_form(int s) {
                             nullptr, widgets::kKeyFlags))
         series.auto_key = false;
 
+    ImGui::TextUnformatted("Short name (PSP)");
+    ImGui::SameLine();
+    widgets::muted("only for Make a PSP / PPSSPP ISO: tracks are named \"<short name> - <title>\"");
+    ImGui::SetNextItemWidth(em() * 12.0f);
+    widgets::input_text("##short", series.short_name, 0, default_short_name(series.name).c_str());
+    widgets::problem_lines(problems_at(problems_, path + ".short"));
+
     ImGui::TextUnformatted("Order");
     ImGui::SameLine();
     widgets::muted("the game lists series by it, after its own");

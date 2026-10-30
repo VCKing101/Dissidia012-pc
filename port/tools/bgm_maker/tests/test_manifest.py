@@ -313,6 +313,17 @@ class SharedCases(unittest.TestCase):
                 self.assertEqual(got, expected)
 
 
+class ShortNames(unittest.TestCase):
+    def test_short_is_kept_after_the_name(self):
+        doc = {"format": 1, "id": "s", "name": "S", "version": "1.0.0", "music": {"series": [
+            {"key": "a", "name": "FINAL FANTASY XVI", "short": "FFXVI", "order": 1, "tracks": []},
+            {"key": "b", "name": "B", "order": 2, "short": 5, "tracks": []}]}}
+        out = mf.build_manifest(mf.model_from_manifest(doc))
+        self.assertEqual(list(out["music"]["series"][0]), ["key", "name", "short", "order", "tracks"])
+        self.assertEqual(out["music"]["series"][0]["short"], "FFXVI")
+        self.assertEqual(out["music"]["series"][1]["short"], 5)
+
+
 class Building(unittest.TestCase):
     MODEL = {
         "id": "my-music", "name": "My music", "version": "1.0.0", "author": " Me ", "description": "",

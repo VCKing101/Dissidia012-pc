@@ -35,7 +35,7 @@ MAX_TRACK_SECONDS = 30 * 60
 
 MOD_MEMBERS = ("format", "id", "name", "version", "author", "description", "music")
 MUSIC_MEMBERS = ("series",)
-SERIES_MEMBERS = ("key", "name", "order", "tracks")
+SERIES_MEMBERS = ("key", "name", "short", "order", "tracks")
 TRACK_MEMBERS = ("key", "title", "file", "loop")
 LOOP_MEMBERS = ("start", "end", "start_seconds", "end_seconds")
 LOOP_MODES = ("auto", "whole", "none", "custom")
@@ -466,6 +466,11 @@ def validate(document: Any, folder: Optional[str] = None,
             report.error(f"{s_path}.key", f"{context} appears twice; the second is left out")
             continue
         series_keys.add(key)
+        # Only the C++ tool's PSP / PPSSPP export reads it; a bad one is ignored.
+        if "short" in entry:
+            short = entry["short"]
+            if not isinstance(short, str) or not short or len(short.encode("utf-8")) > 16:
+                report.warning(f"{s_path}.short", f"{context}: \"short\" must be text of 1 to 16 bytes; it is ignored")
         if "order" in entry:
             order = _member(entry, "order", ("number",), "a number", False, report, s_path, context)
             if order is not None:
@@ -601,7 +606,10 @@ def build_manifest(model: dict, info: Optional[Callable[[str], Optional[dict]]] 
             doc[name] = model[name].strip()
     series_out = []
     for series in model.get("series", []):
-        entry = {"key": series.get("key", ""), "name": series.get("name", ""), "order": int(series.get("order") or 0)}
+        entry = {"key": series.get("key", ""), "name": series.get("name", "")}
+        if series.get("short"):
+            entry["short"] = series["short"]
+        entry["order"] = int(series.get("order") or 0)
         tracks = []
         for track in series.get("tracks", []):
             details = info(track.get("file", "")) if info is not None and track.get("file") else None
@@ -611,7 +619,8 @@ def build_manifest(model: dict, info: Optional[Callable[[str], Optional[dict]]] 
             item.update({k: v for k, v in (track.get("extra") or {}).items() if k not in TRACK_MEMBERS})
             tracks.append(item)
         entry["tracks"] = tracks
-        entry.update({k: v for k, v in (series.get("extra") or {}).items() if k not in SERIES_MEMBERS})
+        entry.update({k: v for k, v in (series.get("extra") or {}).items()
+                      if k not in SERIES_MEMBERS or (k == "short" and "short" not in entry)})
         series_out.append(entry)
     doc["music"] = {"series": series_out}
     doc.update({k: v for k, v in (model.get("extra") or {}).items() if k not in MOD_MEMBERS})
@@ -639,8 +648,12 @@ def model_from_manifest(document: dict, info: Optional[Callable[[str], Optional[
         if not isinstance(entry, dict):
             continue
         order = whole_number(entry.get("order", 0))
-        series = {"key": text(entry, "key"), "name": text(entry, "name"), "order": order or 0,
-                  "extra": {k: v for k, v in entry.items() if k not in SERIES_MEMBERS}, "tracks": []}
+        # "short" (the PSP export's name start) is modelled when it is text; anything else is kept as it is.
+        series = {"key": text(entry, "key"), "name": text(entry, "name"), "short": text(entry, "short"),
+                  "order": order or 0,
+                  "extra": {k: v for k, v in entry.items()
+                            if k not in SERIES_MEMBERS or (k == "short" and not isinstance(v, str))},
+                  "tracks": []}
         for item in entry.get("tracks", []) if isinstance(entry.get("tracks"), list) else []:
             if not isinstance(item, dict):
                 continue

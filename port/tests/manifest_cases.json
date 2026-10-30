@@ -2711,6 +2711,87 @@
           "message": "series \"tones\" has no track that can be played; it is left out"
         }
       ]
+    },
+    {
+      "name": "a series short name for the PSP export",
+      "files": [
+        "music/a.wav"
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "name": "Test",
+        "version": "1.0.0",
+        "music": {
+          "series": [
+            {
+              "key": "ff16",
+              "name": "FINAL FANTASY XVI",
+              "short": "FFXVI",
+              "tracks": [
+                {
+                  "key": "a",
+                  "title": "A",
+                  "file": "music/a.wav"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "problems": []
+    },
+    {
+      "name": "bad series short names are only warned about",
+      "files": [
+        "music/a.wav"
+      ],
+      "manifest": {
+        "format": 1,
+        "id": "test-mod",
+        "name": "Test",
+        "version": "1.0.0",
+        "music": {
+          "series": [
+            {
+              "key": "long",
+              "name": "Long",
+              "short": "FINAL FANTASY XVI",
+              "tracks": [
+                {
+                  "key": "a",
+                  "title": "A",
+                  "file": "music/a.wav"
+                }
+              ]
+            },
+            {
+              "key": "number",
+              "name": "Number",
+              "short": 16,
+              "tracks": [
+                {
+                  "key": "b",
+                  "title": "B",
+                  "file": "music/a.wav"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "problems": [
+        {
+          "level": "warning",
+          "path": "series.0.short",
+          "message": "series \"long\": \"short\" must be text of 1 to 16 bytes; it is ignored"
+        },
+        {
+          "level": "warning",
+          "path": "series.1.short",
+          "message": "series \"number\": \"short\" must be text of 1 to 16 bytes; it is ignored"
+        }
+      ]
     }
   ]
 }

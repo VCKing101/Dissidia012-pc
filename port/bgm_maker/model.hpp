@@ -49,6 +49,7 @@ struct TrackModel {
 struct SeriesModel {
     std::string key;
     std::string name;
+    std::string short_name;  // "short", for the PSP / PPSSPP export; empty: none (made from the name)
     std::int64_t order{};
     std::vector<TrackModel> tracks;
     Extra extra;

@@ -7,6 +7,7 @@
 #include "importer.hpp"
 #include "measurer.hpp"
 #include "names.hpp"
+#include "psp_export.hpp"
 #include "saving.hpp"
 
 #include "d012_json.hpp"
@@ -21,6 +22,7 @@
 #include <iostream>
 #include <iterator>
 #include <map>
+#include <optional>
 #include <set>
 #include <string>
 #include <thread>
@@ -287,20 +289,64 @@ int set_loop(const std::filesystem::path &folder, const std::string &key, int co
     return save(mod, {});
 }
 
+int psp_iso(const std::filesystem::path &original, const std::filesystem::path &out,
+            const std::optional<std::filesystem::path> &mods_dir) {
+    const ModsFolder mods = find_mods_folder(mods_dir);
+    const PspPlan plan = psp_plan(mods.path);
+    std::cout << "mods folder " << manifest::utf8(mods.path) << ": " << plan.tracks.size() << " track(s)\n";
+    for (const std::string &line : plan.left_out) std::cout << "left out: " << line << "\n";
+    for (const PspTrack &track : plan.tracks) std::cout << "track " << track.id << ": \"" << track.name << "\"\n";
+    PspExport job;
+    std::string error;
+    if (!job.start(original, out, mods, error)) {
+        std::cerr << error << "\n";
+        return 1;
+    }
+    using Phase = PspExport::Phase;
+    Phase shown = Phase::Idle;
+    int tenth = -1;
+    while (job.busy()) {
+        const PspExport::Status status = job.status();
+        if (status.phase != shown) {
+            shown = status.phase;
+            tenth = -1;
+            std::cout << (shown == Phase::Checking ? "checking the ISO" : shown == Phase::Encoding ? "encoding" : "writing")
+                      << std::endl;
+        }
+        const int now = status.total == 0 ? 0 : static_cast<int>(status.done * 10u / status.total);
+        if (now != tenth) {
+            tenth = now;
+            std::cout << "  " << now * 10 << "% (" << status.done << " of " << status.total << ")" << std::endl;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    }
+    const PspExport::Status status = job.status();
+    (status.phase == Phase::Done ? std::cout : std::cerr) << status.message << "\n";
+    return status.phase == Phase::Done ? 0 : 1;
+}
+
 } // namespace
 
 int run_command_line(int argc, char **argv) {
     if (argc < 2) return -1;
     const std::string command = argv[1];
-    if (command != "--check" && command != "--import" && command != "--set-loop") return -1;
+    if (command != "--check" && command != "--import" && command != "--set-loop" && command != "--psp-iso") return -1;
     attach_console();
     const auto usage = [] {
         std::cerr << "BgmMaker --check <mod folder>\n"
                      "BgmMaker --import <mod folder> <series key> <file>...\n"
-                     "BgmMaker --set-loop <mod folder> <track key> auto|whole|none|<start> [<end>]\n";
+                     "BgmMaker --set-loop <mod folder> <track key> auto|whole|none|<start> [<end>]\n"
+                     "BgmMaker --psp-iso <original ISO> <new ISO> [<mods folder>]\n";
         return 2;
     };
     if (argc < 3) return usage();
+    if (command == "--psp-iso") {
+        if (argc < 4 || argc > 5) return usage();
+        std::optional<std::filesystem::path> mods;
+        if (argc == 5) mods = std::filesystem::absolute(manifest::path_from_utf8(argv[4]));
+        return psp_iso(std::filesystem::absolute(manifest::path_from_utf8(argv[2])),
+                       std::filesystem::absolute(manifest::path_from_utf8(argv[3])), mods);
+    }
     std::filesystem::path folder = std::filesystem::absolute(manifest::path_from_utf8(argv[2])).lexically_normal();
     if (folder.filename().empty()) folder = folder.parent_path();  // given with a trailing slash
     if (command == "--check") return argc == 3 ? check(folder) : usage();

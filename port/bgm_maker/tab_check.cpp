@@ -5,13 +5,17 @@
 
 #include "app.hpp"
 
+#include "psp_export.hpp"
 #include "saving.hpp"
 #include "theme.hpp"
 #include "widgets.hpp"
 
 #include <imgui.h>
 
+#include <SDL3/SDL.h>
+
 #include <algorithm>
+#include <mutex>
 
 namespace d012::bgm_maker {
 namespace {
@@ -31,6 +35,21 @@ void coloured(const std::string &text, const ImVec4 &colour) {
     ImGui::PopTextWrapPos();
     ImGui::PopStyleColor();
 }
+
+// A path the save or open dialog answers with, on its own thread.
+struct PathSlot {
+    std::mutex *mutex{};
+    std::optional<std::filesystem::path> *target{};
+};
+
+void SDLCALL path_chosen(void *data, const char *const *files, int) {
+    const auto *slot = static_cast<const PathSlot *>(data);
+    if (files == nullptr || files[0] == nullptr) return;  // an error, or cancelled
+    const std::lock_guard lock(*slot->mutex);
+    *slot->target = manifest::path_from_utf8(files[0]);
+}
+
+std::string megabytes(std::uint64_t bytes) { return std::to_string((bytes + (1u << 19u)) >> 20u) + " MB"; }
 
 } // namespace
 
@@ -178,6 +197,9 @@ void App::tab_check() {
     ImGui::Spacing();
     ImGui::Separator();
     try_section();
+    ImGui::Spacing();
+    ImGui::Separator();
+    psp_section();
 }
 
 void App::save_section() {
@@ -276,6 +298,151 @@ void App::try_section() {
     if (program.empty()) widgets::muted("the game is not beside this program");
     else if (game_seen_running_) widgets::muted("the game is running; close it to start it again");
     else if (!on_disc) widgets::muted("save the mod first");
+}
+
+void App::choose_iso(bool original) {
+    static PathSlot slot;
+    slot = {&chosen_mutex_, original ? &chosen_iso_ : &chosen_out_};
+    static const SDL_DialogFileFilter filters[] = {{"ISO images", "iso"}, {"All files", "*"}};
+    const std::filesystem::path &now = original ? psp_original_ : psp_out_;
+    const std::string where = manifest::utf8(original ? now.parent_path() : now);
+    if (original)
+        SDL_ShowOpenFileDialog(path_chosen, &slot, window_.sdl_window(), filters, 2, where.empty() ? nullptr : where.c_str(), false);
+    else
+        SDL_ShowSaveFileDialog(path_chosen, &slot, window_.sdl_window(), filters, 2, where.empty() ? nullptr : where.c_str());
+}
+
+void App::psp_section() {
+    using Phase = PspExport::Phase;
+    if (!ImGui::CollapsingHeader("Make a PSP / PPSSPP ISO (optional)")) return;
+    {
+        const std::lock_guard lock(chosen_mutex_);
+        if (chosen_iso_) psp_original_ = *chosen_iso_, chosen_iso_.reset(), psp_defaults_ = false;
+        if (chosen_out_) psp_out_ = *chosen_out_, chosen_out_.reset();
+    }
+    if (!psp_defaults_) {
+        psp_defaults_ = true;
+        if (psp_original_.empty()) psp_original_ = game_iso(mods_);
+        if (!psp_original_.empty() && psp_out_.empty())
+            psp_out_ = psp_original_.parent_path() /
+                       manifest::path_from_utf8(manifest::utf8(psp_original_.stem()) + " (Battle BGM).iso");
+    }
+    const auto now = std::chrono::steady_clock::now();
+    const bool busy = psp_.busy();
+    if (!busy && (!psp_plan_ || now - psp_plan_at_ > std::chrono::seconds(2))) {
+        psp_plan_ = psp_plan(mods_.path);
+        psp_plan_at_ = now;
+    }
+    if (psp_disc_of_ != psp_original_) {
+        psp_disc_of_ = psp_original_;
+        psp_disc_.reset();
+        psp_disc_error_.clear();
+        std::error_code ec;
+        if (!psp_original_.empty() && std::filesystem::is_regular_file(psp_original_, ec))
+            psp_disc_ = psp_iso::read_disc_music(psp_original_, psp_disc_error_);
+    }
+    const PspPlan &plan = *psp_plan_;
+
+    ImGui::PushTextWrapPos(0.0f);
+    widgets::muted("Makes a copy of your Dissidia 012 ISO (USA) with the battle music of every mod that is on in the mods "
+                   "folder added to the game's own list, for PPSSPP or a PSP with custom firmware. Your ISO is not changed. "
+                   "The game's list has no series, so each track is named \"<short name> - <title>\" (the short name is "
+                   "set on the Music step).");
+    ImGui::PopTextWrapPos();
+    if (open_ && (dirty() || open_->is_new))
+        coloured("It uses the mods as saved: save this one first to include your changes.", theme::palette().warning);
+    ImGui::Spacing();
+
+    const float label = em() * 6.0f;
+    const auto path_row = [&](const char *name, const char *id, const std::filesystem::path &path, bool original) {
+        ImGui::PushID(id);
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted(name);
+        ImGui::SameLine(label);
+        std::string text = manifest::utf8(path);
+        ImGui::SetNextItemWidth(std::max(em() * 10.0f, ImGui::GetContentRegionAvail().x - em() * 7.0f));
+        ImGui::BeginDisabled(busy);
+        if (widgets::input_text("##path", text, 0, original ? "your original ISO" : "where the new ISO goes")) {
+            (original ? psp_original_ : psp_out_) = manifest::path_from_utf8(text);
+            if (original) psp_defaults_ = true;
+        }
+        ImGui::SameLine();
+        if (ImGui::Button((std::string("Choose") + kEllipsis).c_str())) choose_iso(original);
+        ImGui::EndDisabled();
+        ImGui::PopID();
+    };
+    path_row("Your ISO", "original", psp_original_, true);
+    if (!psp_disc_error_.empty()) coloured("This ISO: " + psp_disc_error_ + ".", theme::palette().error);
+    path_row("New ISO", "out", psp_out_, false);
+    std::error_code ec;
+    const bool replaces = !psp_out_.empty() && std::filesystem::exists(psp_out_, ec);
+    const bool same = replaces && !psp_original_.empty() && std::filesystem::equivalent(psp_original_, psp_out_, ec);
+    if (same) coloured("The new ISO cannot replace your original; pick another name.", theme::palette().error);
+    else if (replaces) widgets::muted("A file of that name is there; making the ISO replaces it.");
+    ImGui::Spacing();
+
+    // What goes in.
+    const int room = psp_disc_ ? psp_disc_->room() : psp_iso::kTableRows - 131;
+    const int count = static_cast<int>(plan.tracks.size());
+    std::vector<const PspTrack *> long_names;
+    for (const PspTrack &track : plan.tracks)
+        if (track.name.size() > kLongestDiscName) long_names.push_back(&track);
+    if (count == 0) widgets::muted("No mod in the mods folder has a track to add yet.");
+    else if (count > room)
+        coloured(std::to_string(count) + " tracks, but the game's list has room for " + std::to_string(room) +
+                     " more. Turn some mods off (mods/enabled.json) to make room.",
+                 theme::palette().error);
+    else
+        widgets::muted(std::to_string(count) + " track(s) to add (room for " + std::to_string(room) + "), about " +
+                       megabytes(static_cast<std::uint64_t>(count) * (3u << 20u)) + " more than your ISO.");
+    if (!long_names.empty())
+        coloured(std::to_string(long_names.size()) + " name(s) are longer than the game's longest (" +
+                     std::to_string(kLongestDiscName) + " characters) and may not fit its box; a shorter short name helps.",
+                 theme::palette().warning);
+    if (count > 0 && ImGui::TreeNode("psp-tracks", "The tracks, in the game's order")) {
+        for (const PspTrack &track : plan.tracks) {
+            const bool too_long = track.name.size() > kLongestDiscName;
+            if (too_long) ImGui::PushStyleColor(ImGuiCol_Text, theme::palette().warning);
+            ImGui::BulletText("%s", track.name.c_str());
+            if (too_long) ImGui::PopStyleColor();
+            widgets::tooltip(track.id.c_str());
+        }
+        for (const std::string &line : plan.left_out) widgets::muted("Left out: " + line);
+        ImGui::TreePop();
+    }
+    const std::filesystem::path encoder = encoder_program(mods_);
+    if (encoder.empty()) coloured("The encoder (atracdenc) is not beside the Battle BGM Maker; reinstall it.", theme::palette().error);
+    ImGui::Spacing();
+
+    const bool ready = !busy && count > 0 && count <= room && psp_disc_ && !encoder.empty() && !psp_out_.empty() && !same;
+    ImGui::BeginDisabled(!ready);
+    if (ImGui::Button("Make ISO")) {
+        std::string error;
+        if (!psp_.start(psp_original_, psp_out_, mods_, error)) say("Not started: " + error + ".", true);
+    }
+    ImGui::EndDisabled();
+    widgets::tooltip("Checks your ISO, encodes the tracks (ATRAC3) and writes the new ISO");
+    const PspExport::Status status = psp_.status();
+    if (busy) {
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel")) psp_.cancel();
+        const char *what = status.phase == Phase::Checking   ? "Checking your ISO"
+                           : status.phase == Phase::Encoding ? "Encoding"
+                                                             : "Writing the new ISO";
+        const float fraction = status.total == 0 ? 0.0f : static_cast<float>(static_cast<double>(status.done) / static_cast<double>(status.total));
+        const std::string detail = status.phase == Phase::Encoding
+                                       ? std::to_string(status.done) + " of " + std::to_string(status.total) + " tracks"
+                                       : megabytes(status.done) + " of " + megabytes(status.total);
+        ImGui::ProgressBar(fraction, ImVec2(std::min(ImGui::GetContentRegionAvail().x, em() * 30.0f), 0.0f),
+                           (std::string(what) + kEllipsis + "  " + detail).c_str());
+    } else if (status.phase == Phase::Done) {
+        coloured(std::string(kTick) + " " + status.message + " Load it in PPSSPP, or copy it to the PSP's ISO folder.",
+                 theme::palette().good);
+    } else if (status.phase == Phase::Failed) {
+        coloured(status.message, theme::palette().error);
+    } else if (status.phase == Phase::Cancelled) {
+        widgets::muted(status.message);
+    }
 }
 
 } // namespace d012::bgm_maker

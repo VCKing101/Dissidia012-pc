@@ -240,9 +240,14 @@ def find_onset(marks, hop, size):
     return None
 
 
-def analyse():
-    dump, rate = read_left(os.path.join(OUT, "dump.wav"))
-    tool, _ = read_left(os.path.join(OUT, "tool_decode.wav"))
+def analyse(out=OUT, check_log=True, margin=1.5):
+    """`out` holds dump.wav and tool_decode.wav (and run.log); without `check_log`
+    (psp_port_check.py: the track comes from an ISO, not the port's host audio)
+    the port's log of its decode is not asked for. `margin`: how much worse an
+    MP3 delay's shift must fit than the best, all seams together (an ATRAC3
+    copy's coding noise raises every residual, so psp_port_check.py asks less)."""
+    dump, rate = read_left(os.path.join(out, "dump.wav"))
+    tool, _ = read_left(os.path.join(out, "tool_decode.wav"))
     print(f"dump: {len(dump) / rate:.1f} s at {rate} Hz; tool decode: {len(tool)} samples")
     length = LOOP_END - LOOP_START
 
@@ -364,11 +369,11 @@ def analyse():
               f" +{worse(-1105):.0f} %")
     if exact_seams:
         print(f"seams with the music alone (residual under -40 dB): {[r[0] for r in exact_seams]}")
-    no_delay = bool(joint) and min(joint[1105], joint[-1105]) > 1.5 * joint[joint_best]
+    no_delay = bool(joint) and min(joint[1105], joint[-1105]) > margin * joint[joint_best]
 
     # The port's own account: what it decoded, and where it put the loop.
     decoded = None
-    log_path = os.path.join(OUT, "run.log")
+    log_path = os.path.join(out, "run.log")
     if os.path.isfile(log_path):
         with open(log_path, encoding="utf-8", errors="replace") as handle:
             for line in handle:
@@ -379,7 +384,7 @@ def analyse():
     print(f"the port's log: {decoded[0] if decoded else '?'} frames decoded (the tool: {len(tool)}), loop "
           f"{decoded[1] if decoded else '?'}..{decoded[2] if decoded else '?'} (frames, end included; the tool set "
           f"{LOOP_START} to {LOOP_END})")
-    log_ok = decoded == (len(tool), LOOP_START, LOOP_END - 1)
+    log_ok = decoded == (len(tool), LOOP_START, LOOP_END - 1) or not check_log
     passed = bool(results) and joint_best == 0 and no_delay and stray_total == 0 and log_ok and \
         all(r[0] == 0 for r in exact_seams)
     print(f"\n{'PASS' if passed else 'FAIL'}: the loop jumps from sample {LOOP_END} back to {LOOP_START}, where the "

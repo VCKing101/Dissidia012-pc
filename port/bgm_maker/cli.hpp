@@ -15,6 +15,10 @@
 //       Prints "added <track key>: <file in the mod>" for each.
 //   BgmMaker --set-loop <mod folder> <track key> auto|whole|none|<start> [<end>]
 //       Sets a track's loop (samples of the file) and saves.
+//   BgmMaker --psp-iso <original ISO> <new ISO> [<mods folder>]
+//       Makes a copy of the ISO with the battle music of every mod the game
+//       would load added to its list (psp_export.hpp), for PPSSPP or a PSP.
+//       Prints the tracks ("track <id>: "<name>"") and the progress.
 //
 // Exit status: 0 done (warnings allowed), 1 problems (nothing saved), 2 wrong use.
 

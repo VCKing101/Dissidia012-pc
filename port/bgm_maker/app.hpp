@@ -12,6 +12,8 @@
 #include "launcher.hpp"
 #include "measurer.hpp"
 #include "player.hpp"
+#include "psp_export.hpp"
+#include "psp_iso.hpp"
 #include "suggest.hpp"
 #include "waveform.hpp"
 #include "model.hpp"
@@ -92,6 +94,8 @@ private:
     void save();
     void save_section();
     void try_section();
+    void psp_section();
+    void choose_iso(bool original);
     void undo();
     void redo();
     void say(std::string text, bool error = false);
@@ -231,6 +235,16 @@ private:
     int try_series_{-1}, try_track_{-1};
     bool game_seen_running_{};
     std::chrono::steady_clock::time_point game_checked_{};
+    // Make a PSP / PPSSPP ISO.
+    PspExport psp_;
+    std::filesystem::path psp_original_, psp_out_;
+    bool psp_defaults_{};
+    std::optional<PspPlan> psp_plan_;  // read again every few seconds while shown
+    std::chrono::steady_clock::time_point psp_plan_at_{};
+    std::filesystem::path psp_disc_of_;  // the original psp_disc_ was read from
+    std::optional<psp_iso::DiscMusic> psp_disc_;
+    std::string psp_disc_error_;
+    std::optional<std::filesystem::path> chosen_iso_, chosen_out_;  // from the dialogs' thread
 
     std::string status_;
     bool status_error_{};

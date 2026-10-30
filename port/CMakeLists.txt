@@ -129,7 +129,8 @@ add_library(d012_manifest STATIC "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_json.cpp
                                  "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/model.cpp"
                                  "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/names.cpp"
                                  "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/checks.cpp"
-                                 "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/saving.cpp")
+                                 "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/saving.cpp"
+                                 "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/psp_iso.cpp")
 target_compile_features(d012_manifest PUBLIC cxx_std_20)
 target_include_directories(d012_manifest PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/host" "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker")
 
@@ -146,6 +147,7 @@ add_executable(BgmMaker WIN32
     "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/measurer.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/mods_folder.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/player.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/psp_export.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/suggest.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/tab_check.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/tab_loops.cpp"

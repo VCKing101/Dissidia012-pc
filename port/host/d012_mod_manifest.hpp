@@ -20,6 +20,7 @@ inline constexpr int kFormat = 1;
 inline constexpr std::size_t kMaxManifestBytes = 1u << 20u;
 inline constexpr std::size_t kMaxKeyLength = 64u;
 inline constexpr std::size_t kMaxSeriesNameLength = 48u;
+inline constexpr std::size_t kMaxShortNameLength = 16u;
 inline constexpr std::size_t kMaxVersionLength = 32u;
 inline constexpr std::size_t kMaxDescriptionLength = 1024u;
 
@@ -64,6 +65,7 @@ struct Track {
 struct Series {
     std::string key;
     std::string name;
+    std::string short_name;  // "short": the name's start in the PSP / PPSSPP export ("FFXVI"); may be empty
     std::int64_t order{};
     std::vector<Track> tracks;  // only those the game plays
 };
