@@ -245,7 +245,8 @@ The selector must stop taking input when `+0xF6D` is cleared (confirm), as now.
 ## 4. Ids for added tracks
 
 - The game's ids are 0..130; the field and the selector hold an id as **s16** (`lh`), sign-extended; -1 means none.
-  DLC rows bring their own ids (unknown range; none on the stick).
+  DLC rows bring their own ids: 131 to 209 in the 43 rows of 13 packs seen (31 October 2026, a decrypted copy of
+  the USA DLC; the gaps in those ids suggest packs missing from that copy).
 - **Mod rows take ids in `0x4000..0x7FFE`**: `0x4000 + (number % 0x3FFF)` where `number` is the track's FNV-1a
   number from the catalogue, probing upwards (wrapping in the range) past ids already used, tracks taken in id-text
   order so the result depends only on which tracks are present. Never 0..0x3FFF (game and DLC), never negative.
@@ -368,9 +369,12 @@ The offered rows are exactly the game's: the playlist's list calls the decompile
 non-zero weight, in table order) and then groups them. Each disc row's series comes from its **name, read from the
 game's text at run time** (`0x0889F434`): the part before " - " when it starts with "FF" (or "FINAL FANTASY")
 gives the port's label "FINAL FANTASY" plus the rest ("FFXIII - Saber's Edge" → FINAL FANTASY XIII); any other name
-is **DISSIDIA** ("Cosmos", "DFF - Opening"). Series keep the order the table has them in. Then come DLC rows
-(DOWNLOADED, none on the test stick), the mods' series in the catalogue's order (manifest `order`, then id), and
-last the row with no file, "No BGM", as **NO MUSIC**.
+is **DISSIDIA** ("Cosmos", "DFF - Opening"). Series keep the order the table has them in. A DLC row joins its
+game's series the same way, after that series' disc rows ("FFI - Chaos Shrine" → FINAL FANTASY I); a DLC row
+without an FF prefix goes under **DOWNLOADED**, after the game's series. In the track list a DLC track with the
+title of a disc track of its series gets " (DLC)" ("Battle" and "Battle (DLC)" under FINAL FANTASY I). Then come
+the mods' series in the catalogue's order (manifest `order`, then id), and last the row with no file, "No BGM",
+as **NO MUSIC**.
 
 V (test save, mods off): 38 tracks in 15 series, FINAL FANTASY I to XIII (3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 1, 2, 2),
 DISSIDIA (2), NO MUSIC (1). The log line `the flat list ... is in the game's own order` confirms that with no mods
