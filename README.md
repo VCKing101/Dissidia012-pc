@@ -34,8 +34,9 @@ game's executable and overlays.
   Ogg Vorbis, Opus, FLAC, WAV, or BRSTM/BCSTM/BFSTM with their own loops ([format](docs/port/mod-folder.md)).
 - **A BGM playlist selector** on the loading screen: choose music by series and track, mod tracks included
   ([design](docs/port/bgm-playlist-design.md)).
-- **A Battle BGM Maker**: a local browser tool for writing a mod's `mod.json` and setting its loop points
-  ([README](port/tools/bgm_maker/README.md)).
+- **A Battle BGM Maker**: a program for making music mods, with a loop editor, loop suggestions and a button to try
+  a track in the game; optionally it also makes a copy of your ISO with the mods' tracks added, for PPSSPP or a PSP
+  ([guide](docs/port/mod-folder.md#8-making-a-mod-with-the-battle-bgm-maker)).
 - **Local split-screen versus**: two players on one PC, each with their own controller and camera
   ([notes](docs/port/local-versus.md)).
 
@@ -142,11 +143,40 @@ for developers are in [`port/README.md`](port/README.md). For the Steam Deck, se
 The matching decompilation has its own toolchain (the historical PSP SNC compiler, a WSL build environment, splat,
 spimdisasm and Ghidra with the Allegrex extension); see [getting started](docs/decomp/getting-started.md).
 
+## Downloadable content (DLC)
+
+The game's own DLC, its music packs and costumes, works in the port once you add it yourself. This project does not
+include or link to any. Put the DLC's files in a folder named **`ULUS10566`** (the USA game's id) in your memory
+stick folder:
+
+| Installed with | Put the files in |
+| --- | --- |
+| The Windows setup | `data\ms0\PSP\GAME\ULUS10566\` in the install folder |
+| `setup.ps1` (from source) | `build\port\data\ms0\PSP\GAME\ULUS10566\` |
+| The Steam Deck package | `data/ms0/PSP/GAME/ULUS10566/` in its folder |
+
+Make the `GAME` and `ULUS10566` folders if they are not there. The files go straight in `ULUS10566` (`.edat` files
+with names like `8c0b30f1.edat`, and a `PARAM.PBP`), not in another folder inside it.
+
+- **The folder's name matters.** The game reads DLC from `ULUS10566` only. A copy named after the European release,
+  `ULES01505`, has to be renamed, or the game never sees it.
+- **Music** joins the battle music list under its own game, after that game's tracks from the disc. A DLC track with
+  the same title as one on the disc shows "(DLC)" after it.
+- **Costumes:** at character select, press Square (Look) to step through a character's costumes. The DLC ones are
+  "DLC 1", "DLC 2" and so on.
+- **To check it:** the port's log (`data\logs\D012Native.log` in the Windows install) says at the start
+  `[dlc] 222 files in ...` when the game will find them, or `[dlc] none in ...`, and warns about DLC files in a folder
+  with another name.
+- **Tested** with a decrypted copy of the USA DLC (13 music packs, 43 costumes). DLC still encrypted the way a PSP
+  stores it may not load; the log says how many files are.
+- DLC music takes room in the game's list of 256 tracks, so with all 43 of those tracks, mods can add 82 tracks
+  rather than 125.
+
 ## Repository layout
 
 | Path | What it is |
 | --- | --- |
-| `port/` | The port: PortableKit profile and host code, decompiled C used as native overrides, PortableKit patches, example mod, Battle BGM Maker |
+| `port/` | The port: PortableKit profile and host code, decompiled C used as native overrides, PortableKit patches, example mod, the Battle BGM Maker (`bgm_maker/`, and the earlier Python tool in `tools/bgm_maker/`) |
 | `docs/port/` | Port research, bring-up log, recompiled build, mod folder and BGM playlist design |
 | `tools/port/` | Port scripts: build wrapper, game-directory preparation, bounded runs, overlay metadata, surveys |
 | `src/`, `include/` | Matching decompiled C/C++ for main and the menu, battle and extra overlays |
@@ -163,6 +193,7 @@ Ignored and never committed: the game image, everything extracted or built from 
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -s tools -p "test_*.py"
 python -m unittest discover -s port/tools/bgm_maker/tests
+tools\port\pk_ctest.cmd tools\local\port\build-d012-recomp     # the port's own C++ tests (no game needed)
 ```
 
 Many tool tests need the locally extracted game files and skip or fail without them.

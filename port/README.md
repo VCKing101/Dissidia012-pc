@@ -24,12 +24,17 @@ the menus to Quick Battles, with the HUD's HP bars, billboarded particles and si
 | `host/d012_mods.cpp`, `.hpp` | Mods: reads `<data dir>/mods`, checks each `mod.json`, keeps the catalogue of added music series and tracks, and serves a track to the game as a BGM file ([docs/port/mod-folder.md](../docs/port/mod-folder.md)) |
 | `host/d012_json.cpp`, `.hpp` | A small JSON reader for the manifests |
 | `host/d012_bgm_playlist.cpp`, `.hpp` | The BGM playlist: the loading screen's music choice by series and track, L2/R2 to switch the D-pad between the screen's menu and the music, mod tracks as rows of the game's BGM table, the pad-read wrapper, the series in the BATTLE BGM box and the track wheel under it ([docs/port/bgm-playlist-design.md](../docs/port/bgm-playlist-design.md), sections 10 and 11) |
+| `host/d012_dlc.cpp`, `.hpp` | DLC: one startup log line saying what DLC the game will find in `ms0:/PSP/GAME/ULUS10566`, how many files are still encrypted EDATA, and a warning for `.edat` files in a folder of another name; it only reports ([README](../README.md#downloadable-content-dlc)) |
 | `host/d012_loading_layout.cpp`, `.hpp` | The loading screen's right-half pages moved down and made shorter for the track wheel, by checked edits of the screen's layout data in memory (section 11) |
 | `host/d012_test_switches.cpp`, `.hpp` | Test switches, off by default: `D012_TEST_UNLOCK_FIGHTERS`, `D012_TEST_EX_FULL` ([docs/port/graphics-triage.md](../docs/port/graphics-triage.md)) |
 | `host/d012_crash_report.cpp` | `D012_CRASH_DUMP=<dir>`: a minidump and a symbolised stack on an unhandled exception, for diagnosis ([docs/port/quit-crash.md](../docs/port/quit-crash.md)) |
 | `host/d012_decomp_harness.cpp`, `.hpp`, `host/d012_decomp_bgm.cpp` | Decompiled functions as native overrides, and the differential test against the recompiled originals |
 | `decomp/` | The decompiled BGM functions (C) |
 | `examples/mods/example-tones/` | An example mod: a manifest and a script that writes its generated test tones (no audio files are kept) |
+| `host/d012_mod_manifest.cpp`, `.hpp` | The manifest rules: reads and checks a `mod.json` into a manifest and its problems, for the game (`d012_mods.cpp` logs them) and the Battle BGM Maker alike |
+| `bgm_maker/` | The Battle BGM Maker, `BgmMaker.exe`: a program of its own (SDL3, Vulkan, PortableKit's Dear ImGui, the game's FFmpeg) for making music mods, with none of the game's code ([guide](../docs/port/mod-folder.md#8-making-a-mod-with-the-battle-bgm-maker)). `psp_iso.cpp` and `psp_export.cpp` make its optional PSP / PPSSPP ISO, running atracdenc as a separate program |
+| `tests/` | The port's C++ tests, `d012_tests` (`tools/port/pk_ctest.cmd <build dir>`): manifest rules with `manifest_cases.json`, which the Python tool's tests run too, the JSON writer, the BGM Maker's model, saving, suggester and ISO writer, on synthetic data |
+| `tools/bgm_maker/` | The earlier Battle BGM Maker in Python (a local page in the browser), kept for developers, frozen; its `tests/` hold the end-to-end checks, which run `BgmMaker.exe`'s command line |
 | `config/nids.csv` | NIDs the game imports that PortableKit's table does not name |
 
 Outside this directory:
@@ -242,6 +247,7 @@ fresh clone of `33800c4`, apply them with `git checkout -b dissidia 33800c4` and
 | 0062 | `ui::add_menu_rows`: a port's own settings rows at the end of the menu's Video page | The split-screen field of view slider (local-versus.md, 7.14) |
 | 0063 | MinGW: a port's program links with `--export-all-symbols` (MSVC's `WINDOWS_EXPORT_ALL_SYMBOLS` does nothing there, so it had no import library for its overlay libraries) and with dbghelp, and llvm-mingw's libc++ and libunwind are copied next to it | The installer build with llvm-mingw (below) |
 | 0064 | psp_recomp's lowering passes try each pattern only where its fixed text starts, anchored, instead of `std::regex_replace` over the whole unit; the output is the same | libc++'s regex took the llvm-mingw recompiler 11 minutes for the main executable (now 21 s); MSVC's 10 s became 3 s |
+| 0065 | Frame interpolation: the camera is the motion most meshes drawn once agree on, and copies of one mesh pair with the copy nearest where that camera carries them instead of in drawing order; `<prefix>_INTERPOLATION_ORDER_PAIRS`. `<prefix>_CHECK_REPLAY` also counts halfway pixels far from both frames, and `=N` sets its interval | World of Darkness pillars flickered at 60 and 90 fps on the Steam Deck: once a copy left the view, the next paired with its neighbour and was drawn halfway between them ([graphics-triage.md](../docs/port/graphics-triage.md)) |
 
 Patches 0012 and 0013 were made on a separate worktree branch during the recompiled-build work and merged onto
 `dissidia` on 18 October 2026; patches 0014 and 0015 followed the same day (bring-up log, section "Stencil"), and
@@ -254,7 +260,7 @@ unmerged branch `depth-clip`: no visible change here); 0044 the same day for a r
 and PPSSPP (`portablekit_savedata_tests` and both directions checked against PPSSPP 1.20.4). Patches 0055 to 0061
 came from 25 to 26 October for local split-screen versus, made on the worktree branch `local-versus` and moved onto
 `dissidia` when that branch was merged. Patch 0062 came on 28 October for the split halves' field of view, on
-`local-versus` again (the branch `versus-fov` here), and moved onto `dissidia` when that was merged the same day. Patches 0063 and 0064 came on 28 October for the installer build.
+`local-versus` again (the branch `versus-fov` here), and moved onto `dissidia` when that was merged the same day. Patches 0063 and 0064 came on 28 October for the installer build, and 0065 on 31 October for a report from the Steam Deck (made on the worktree branch `interp-pairing`).
 PortableKit's 21 framework tests pass on the branch and `portablekit_host_check` builds.
 
 ## Recompiled build
@@ -309,16 +315,20 @@ program, so no console opens behind the game; started without one, it writes its
 `data/logs/D012Native.log`.
 
 **The Windows setup**: `tools/port/package_installer.py --version X.Y.Z` builds the installer build
-(`tools/port/pk_cmake_mingw.cmd`), stages the folder (program, DLLs, `psp_recomp.exe`, `sdk/`, llvm-mingw trimmed as
-PortableKit's own packaging trims it, `README.txt`, licences and `tools/port/installer/THIRD_PARTY_NOTICES.md`),
+(`tools/port/pk_cmake_mingw.cmd`), stages the folder (program, `BgmMaker.exe`, DLLs, `psp_recomp.exe`, `sdk/`,
+llvm-mingw trimmed as PortableKit's own packaging trims it, `atracdenc.exe` with its LGPL licence and source zip,
+`README.txt`, licences and `tools/port/installer/THIRD_PARTY_NOTICES.md`),
 refuses it if it finds a file of the game by name or content, a program with the game's code linked in, or a path of
 this machine, and compiles `tools/port/installer/dissidia012.iss` with Inno Setup 7 (`tools/local/innosetup`) into
-`build/port/installer/dist/Dissidia012-PC-Setup-X.Y.Z.exe` (75 MB). The wizard asks for the folder (no
+`build/port/installer/dist/Dissidia012-PC-Setup-X.Y.Z.exe` (76 MB). The wizard asks for the folder (no
 administrator rights) and the ISO, installs, runs `--install` and `--compile-game` with a progress bar from the
 latter's output, and makes the shortcuts; running it again over an installation is the update, and uninstalling keeps
 `data/` unless the player says otherwise. Checked on 28 October 2026 with a silent install (`/VERYSILENT /ISO=...`):
 3 min 25 s from the setup to a playable game, an update over it in 18 s (no compile), an uninstall that leaves only
-`data/`. The checks refuse a planted file of each kind they look for.
+`data/`. The checks refuse a planted file of each kind they look for. Checked again for 0.4.0 on 30 October 2026: a
+fresh install in 196 s with the optional "Battle BGM Maker" ticked: the shortcut on `BgmMaker.exe`, which found `data/mods`, the player's
+ISO (from `settings.ini`) and `atracdenc.exe`, and made a PSP / PPSSPP ISO from the command line in 13 s; 0.3.0 with
+its Python tool, then 0.4.0 over it in 19 s, removed `bgm-maker/` and FFmpeg's programs and kept the mods.
 
 ```powershell
 cmake -S port -B tools/local/port/build-d012-installer -G Ninja -DCMAKE_BUILD_TYPE=Release `

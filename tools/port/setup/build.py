@@ -7,7 +7,9 @@
     2. build psp_recomp;
     3. generate the main corpus (with the main rows of port/config/dispatch-calls.txt) and the overlay
        and PRX corpora (tools/port/overlay_meta.py --recompile, which passes the overlay rows);
-    4. build everything.
+    4. build everything (D012Native and the Battle BGM Maker, BgmMaker.exe);
+    5. build atracdenc, the encoder of the BGM Maker's "Make a PSP / PPSSPP ISO", from its source
+       (tools/port/build_atracdenc.cmd); optional: setup goes on without it.
 
 The corpora are generated into a staging folder and only files whose bytes changed are moved into
 build/port/recomp, so regenerating with the same result recompiles nothing. They are regenerated only
@@ -18,13 +20,14 @@ import ctypes
 import filecmp
 import hashlib
 import os
+import re
 import shutil
 import subprocess
 import sys
 import time
 from pathlib import Path
 
-from ui import PK_CMAKE, ROOT, SetupError, duration, info, run, run_vs
+from ui import PK_CMAKE, ROOT, SetupError, duration, info, run, run_vs, warn
 
 sys.path.insert(0, str(ROOT / "tools" / "port"))
 import overlay_meta  # noqa: E402
@@ -38,6 +41,8 @@ EBOOT = ROOT / "build" / "port" / "game" / "EBOOT.ELF"
 LIBRARIES = [ROOT / "build/port/ovl/OVL_MENU_APP.ELF", ROOT / "build/port/ovl/OVL_BATTLE_APP.ELF",
              ROOT / "build/port/ovl/OVL_EXTRA_APP.ELF", ROOT / "build/port/prx/LIBSUPPREACC.PRX"]
 MAIN_BASE = "0x08804000"
+ATRACDENC_SCRIPT = ROOT / "tools" / "port" / "build_atracdenc.cmd"
+ATRACDENC = ROOT / "tools" / "local" / "port" / "build-atracdenc" / "src" / "atracdenc.exe"
 
 
 class MemoryStatus(ctypes.Structure):
@@ -231,6 +236,23 @@ def ensure(state, force_corpus=False):
              "up to 30 minutes or more on 4 cores and 8 GB. Later runs rebuild only what changed.")
     build(BUILD, ninja_jobs, "build", "setup-build.log")
     return check_outputs(BUILD)
+
+
+def ensure_encoder(state):
+    commit = re.search(r'^set "COMMIT=([0-9a-f]{40})"', ATRACDENC_SCRIPT.read_text(), re.M).group(1)
+    if ATRACDENC.is_file() and state.get("atracdenc") == commit:
+        info("atracdenc (the encoder for the Battle BGM Maker's PSP / PPSSPP ISO): up to date")
+        return
+    info("building atracdenc, the encoder for the Battle BGM Maker's PSP / PPSSPP ISO "
+         "(the first time it clones its source from GitHub)")
+    started = time.monotonic()
+    code, _last = run_vs(ATRACDENC_SCRIPT, [], "setup-build-atracdenc.log", check=False)
+    if code == 0 and ATRACDENC.is_file():
+        state["atracdenc"] = commit
+        info(f"atracdenc: done in {duration(time.monotonic() - started)}")
+    else:
+        warn("atracdenc could not be built (build/port/logs/setup-build-atracdenc.log). The port and the Battle "
+             "BGM Maker work without it; only its \"Make a PSP / PPSSPP ISO\" needs it. Run setup again to retry.")
 
 
 def ensure_release(state):

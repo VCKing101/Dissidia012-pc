@@ -97,6 +97,7 @@ Members the port does not know are reported as warnings and ignored, so a newer 
 | --- | --- | --- |
 | `key` | yes | Unique in the mod, same rules as `id` |
 | `name` | yes | The series' name as the selector shows it, 1 to 48 bytes. Plain ASCII is safest: the game's font may not have every character |
+| `short` | no | 1 to 16 bytes, for the Battle BGM Maker's "Make a PSP / PPSSPP ISO" only: the stock selector has one flat list, so each track is named `<short> - <title>` there ("FFXVI - Titan Lost"). Without it the tool makes one from `name` (`FINAL FANTASY XVI` becomes `FFXVI`). The port ignores it; a bad one is a warning |
 | `order` | no (0) | Where the series sorts. Mod series always come after the game's own, sorted by `order`, then by id |
 | `tracks` | yes | The series' tracks, in the order they are offered |
 
@@ -290,66 +291,115 @@ source-built FFmpeg on macOS and Linux, a real (not synthetic) BRSTM, BCSTM or B
 
 ## 8. Making a mod with the Battle BGM Maker
 
-`port/tools/bgm_maker/` is a small local tool that writes `mod.json` for you, above all the loop points, which an
-MP3 cannot carry in its tags. It needs only Python 3.10 or newer (standard library) and the port's own FFmpeg, and
-it never uses the network.
+The Battle BGM Maker (`BgmMaker.exe`, source in `port/bgm_maker/`) is a program of its own beside `D012Native.exe`
+that writes `mod.json` for you, above all the loop points, which an MP3 cannot carry in its tags. It checks a mod with
+the game's own manifest code (`port/host/d012_mod_manifest.cpp`, which both programs build) and decodes with the
+game's own FFmpeg libraries. It never uses the network and never runs the game's code.
 
-```powershell
-python port/tools/bgm_maker/bgm_maker.py                    # works on build/port/data/mods
-python port/tools/bgm_maker/bgm_maker.py D:\my-data\mods     # or any mods folder
-```
+- **Installed with the setup** when you tick *Battle BGM Maker* there (about 4 MB; run the setup again to add or
+  remove it): *Battle BGM Maker* in the Start menu. It works on the install's `data\mods`.
+- **Built from source:** `setup.ps1` builds it, as `tools\local\port\build-d012-recomp\bin\BgmMaker.exe`; it finds
+  the checkout's `build\port\data\mods` by itself.
+- `BgmMaker.exe D:\my-data\mods` works on any mods folder, and *Open another...* picks one in the window.
 
-It serves a page on `127.0.0.1` only and opens it in the default browser. The address it prints carries a random
-token for this session; the tool answers nothing without it, and it reads and writes nothing outside the mods
-folder. Stop it with Ctrl+C.
+The window follows Windows' light or dark theme. Its four steps are tabs: any can be clicked, *Back* and *Next* walk
+them in order, and each shows when it is done or how many problems it has. **Ctrl+Z** and **Ctrl+Y** undo and redo
+every change until the next save. Nothing is written until *Check & save*; closing the window or switching mod with
+unsaved changes asks first.
 
-1. **A mod.** *New mod* asks for the id (checked as the port checks it), name, version, author and description, and
-   makes the folder with an empty `music/`. Or pick a mod from the list.
-2. **Series.** *+ Series*, then its name as the selector shows it (*ABC* turns it upper case, like the game's own:
-   FINAL FANTASY XV), its key (made from the name) and its order. ▲ and ▼ move a series in the game's list (they
-   renumber `order`, which is what the port sorts by).
-3. **Tracks.** Drag audio files onto a series, or *Add files...* (MP3, Ogg, Opus, FLAC, WAV, BRSTM, BCSTM, BFSTM).
-   Each file is **copied** into the mod's `music/` (the original is never touched) under a plain name; the title
-   comes from the file's tags (or its name, as for BRSTM and its kin, which have no tags) and the key from the
-   title, unique in the mod. Edit either; a key stays as it is once saved, because saved choices refer
-   to it. ▲ ▼ order the tracks in their series; *Series* moves a track to another.
-4. **The loop.** Pick *Custom loop*, *Whole file*, *None* (plays once) or *Auto* (the file's loop tags, if any).
+1. **Mod.** *+ New mod* asks for the id (checked as the port checks it), name, version, author and description. Or
+   pick a mod from the list.
+2. **Music**: the series and their tracks in one tree.
+   - *+ Series*, then its name as the selector shows it (*ABC* turns it upper case, like the game's own: FINAL
+     FANTASY XV), its key (made from the name), its order, and optionally its short name for a PSP / PPSSPP ISO
+     (below). ▲ and ▼ move a series in the game's list (they renumber `order`, which is what the port sorts by).
+   - Drop audio files from Explorer on a series, or *Add files...* (MP3, Ogg, Opus, FLAC, WAV, BRSTM, BCSTM,
+     BFSTM). Each file is **copied** into the mod's `music/` (the original is never touched) under a plain name.
+     The title comes from the file's tags (or its name, as for BRSTM and its kin, which have no tags) and the key
+     from the title, unique in the mod. Edit either; a key stays as it is once saved, because saved choices refer
+     to it.
+   - Drag tracks to reorder them or to move them to another series. A removed track's copied file is deleted only
+     when the mod is saved, so Ctrl+Z can bring it back.
+3. **Loops.** Pick *Custom loop*, *Whole file*, *None* (plays once) or *Auto* (the file's loop tags, if any).
    A BRSTM, BCSTM or BFSTM with a loop comes in as *Auto*, its header's loop shown "from the file" and drawn on the
    waveform; *Custom loop* starts from those points to change them. It is saved as `"auto"` until it is changed, so
    the loop stays in one place, the file, which the port reads with the same rules as the tool: replacing the file
    with a better rip keeps the right loop, and no number in the manifest can drift from the file it belongs to. A
    changed loop is saved in samples like any custom loop.
    For a custom loop:
-   - the waveform: wheel zooms, drag pans, the strip below shows the whole file; click puts the cursor;
-   - **S** and **E** set the loop start and end at the playhead (while playing) or the cursor; Shift+click and
-     right-click do the same with the mouse, and the flags drag; or type samples or `m:ss.mmm`;
+   - the waveform: the wheel zooms (**+** and **-** too, **F** shows all of the file), dragging pans, the strip
+     below shows the whole file; a click puts the cursor;
+   - **S** and **E** set the loop start and end at the playhead (while playing) or the cursor; the flags drag; or
+     type samples or `m:ss.mmm`;
    - **←** and **→** nudge the chosen marker (**[** or **]**) by the step: 1 or 10 samples, 1 or 10 ms, a beat or a
      bar at the BPM given (Shift: ten steps); **Z** moves it to the nearest zero crossing;
-   - **Space** plays from the cursor and follows the loop as the game does; **A**, *Audition seam*, plays the few
-     seconds before the loop end and then the loop start, sample-exact (*repeat* plays it again and again). A seam
-     you can hear is a seam to fix; the seam view below the markers shows both sides of the jump, with what lies
-     beyond each side faintly, and how far apart they are;
+   - **Space** plays from the cursor and follows the loop as the game does (**Home**: from the start); **A**,
+     *Audition seam*, plays the few seconds before the loop end and then the loop start, sample-exact (*repeat*
+     plays it again and again). A seam you can hear is a seam to fix; the seam view below the markers shows both
+     sides of the jump, with what lies beyond each side faintly, and how far apart they are;
    - *Suggest loops* looks for a start and end whose audio repeats: it compares spectral fingerprints of the whole
      file at every loop length, then fixes the length to the sample by cross-correlating the waveform and puts the
      end where the samples on both sides of the seam match best. *Starts for my end* keeps your end and ranks
      starts. They are only suggestions: audition each and choose. They need the file to hold the repeat (most rips
      play the loop twice); a file that stops exactly where the loop would restart has nothing to compare.
-5. **Save** (Ctrl+S) checks the manifest with the port's rules (the same messages as the log's `[mods] error:`
-   lines, plus a loop outside the file, a file FFmpeg cannot read, and an id or track number another mod already
-   has). Problems are listed with the field they belong to, and nothing is written until there are none. The
-   previous `mod.json` is kept in the mod's `.backups/` (the last 20). Loops are written in samples of the file at
-   its own rate; a loop that ends at the end of the file leaves `end` out.
-6. **Check in the port** shows the command to try it (`tools/port/play_d012.ps1` with the mods folder's data
-   directory, and `D012_TEST_BGM_START` on the selected track, so the loading screen's choice starts on it). The
-   tool never starts the game. The port reads mods when it starts.
+4. **Check & save.** The manifest is checked with the port's rules (the same messages as the log's `[mods] error:`
+   lines), plus a loop outside the file, a file FFmpeg cannot read, a track over 30 minutes, and an id or track
+   number another mod already has. Each problem jumps to its step, and nothing is written until there are none.
+   *Save* (Ctrl+S) keeps the previous `mod.json` in the mod's `.backups/` (the last 20). Loops are written in samples
+   of the file at its own rate; a loop that ends at the end of the file leaves `end` out. Then *Try in game* starts
+   the game (when it is not running already) with `D012_TEST_BGM_START` on the selected track, so the loading
+   screen's choice starts on it, and `D012_MODS_DIR` when the mods folder is not the game's own. The game reads mods
+   when it starts.
+
+Without the window, for scripts and the end-to-end checks (`port/bgm_maker/cli.hpp`):
+
+```powershell
+BgmMaker.exe --check <mod folder>
+BgmMaker.exe --import <mod folder> <series key> <file>...
+BgmMaker.exe --set-loop <mod folder> <track key> auto|whole|none|<start> [<end>]
+BgmMaker.exe --psp-iso <original ISO> <new ISO> [<mods folder>]
+```
+
+The Python tool it replaces, `port/tools/bgm_maker/` (a local page in the browser), stays in the repository for
+developers, frozen (bug fixes only); its tests and the C++ ones run the same manifest cases
+(`port/tests/manifest_cases.json`).
+
+### Making a PSP / PPSSPP ISO (optional)
+
+At the end of *Check & save*, *Make a PSP / PPSSPP ISO (optional)* writes a copy of your ISO with your mods' tracks
+added to the game's own battle music list, for PPSSPP or a PSP with custom firmware. The port does not need it.
+
+- **Which tracks:** every track of every mod the game would load, as it loads them: `enabled.json` read the same
+  way, folders in order, a mod with errors or a duplicate id left out, series by `order`, a track number another
+  mod already has left out. The section lists them before you start, and what is left out and why.
+- **Their names:** the stock selector has one flat list, so each track is named `<short> - <title>`
+  ("FFXVI - Titan Lost"). `short` is the series' short name (section 2's series table; *Short name (PSP)* in the
+  Music step); without one the tool makes it from the name (`FINAL FANTASY XVI` becomes `FFXVI`). A name longer
+  than 37 characters, the disc's longest, may not fit the selector's box: the section warns.
+- **The original** must be the clean USA dump the setup accepts (ULUS10566 v1.00, checked by size and SHA-1). It
+  is only read, never written. The installed game's ISO is filled in for you (`settings.ini`'s `disc_image`).
+- **The new ISO** is written as `<name>.part`, then renamed; nothing is left behind if it fails or you cancel.
+  Each track is encoded to ATRAC3 (132 kbps, stereo, 44.1 kHz) by atracdenc (`atracdenc.exe` beside the tool, LGPL
+  2.1; `tools/port/build_atracdenc.cmd` builds it from its source), with its loop points. A loop shorter than 6,144
+  samples (0.14 s) is too short for the PSP's decoder. The disc's two music archives get a row and a name for
+  each track, the music files go in `DATA/BGM` as `MD00000000.AT3` and on; nothing else of the image changes.
+- **Room:** the game's list holds 256 rows and the disc uses 131, so 125 tracks at most. DLC music on the memory
+  stick shares that room (the game refuses rows past 256): with all 43 USA DLC tracks, 82. The same goes for mods in
+  the port ([README](../../README.md#downloadable-content-dlc)).
+- **Windows N editions** need Microsoft's Media Feature Pack: the encoder reads its input through Media Foundation.
+
+Checked on 30 October 2026: an ISO with a 31-track mod (52 s to make, 1,789 MB) in PPSSPP, where the selector offers
+69 tracks, the longest name fits and a real song's custom loop joins within 4 samples, with no drift over several
+loops; and `port/tools/bgm_maker/tests/psp_port_check.py`, which makes an ISO of the end-to-end check's tone mod
+and runs the port on it with its audio dump: the loop lands where the tool set it. **Not verified on a real PSP.**
 
 ### What a sample means in the tool and in the game
 
-The tool decodes every file with the port's own FFmpeg (`ffmpeg.exe` and `ffprobe.exe` beside the DLLs the port
-links, in the build's `_deps/ffmpeg/.../bin`; `--ffmpeg` names another) to a 16-bit WAV at the file's own rate, and
-the page draws and plays exactly that WAV. The port decodes with the same libavformat and libavcodec, with the
-packet time base set (PortableKit `host/audio/host_audio.cpp`), so both drop what an MP3's LAME/Xing header says is
-encoder delay and padding.
+`BgmMaker.exe` decodes every file in the program with the game's own FFmpeg libraries, as the game does (with the
+packet time base set, PortableKit `host/audio/host_audio.cpp`), to 16-bit samples at the file's own rate, and draws
+and plays exactly those; so both drop what an MP3's LAME/Xing header says is encoder delay and padding. Its decode
+is byte for byte the Python tool's (`ffmpeg.exe` to a WAV), which the measurements below were made with; the
+end-to-end check `port_check.py` now runs on `BgmMaker.exe` and finds the same.
 
 - V (19 October 2026, FFmpeg n7.1.5): a 5 s, 220,500-sample tone track encoded to MP3 with libmp3lame (1,105
   samples of encoder delay; the file's stream starts at 0.025 s) decodes in the tool to **220,500 samples**, with
@@ -359,7 +409,7 @@ encoder delay and padding.
 - I: a file at another rate (48 kHz) is resampled by the port to 44,100 Hz, and a loop sample S lands on frame
   `round(S × 44100 / rate)`, within half a frame of the tool's point. Not measured.
 
-### Verification (19 October 2026)
+### Verification of the Python tool (19 October 2026)
 
 - `python -m unittest discover -s port/tools/bgm_maker/tests`: 69 tests (manifest rules against the port's,
   including every case in section 7's validation list; keys and ids; samples and seconds; the API's token, host

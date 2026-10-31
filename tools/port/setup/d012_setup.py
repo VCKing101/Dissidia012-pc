@@ -117,6 +117,8 @@ def main():
     exe = build.ensure(state)
     state["built"] = True
     ui.save_state(state)
+    build.ensure_encoder(state)
+    ui.save_state(state)
 
     number = 6
     if options.deck:
@@ -141,6 +143,7 @@ def main():
     print(f"  Saves:     {data / 'ms0' / 'PSP' / 'SAVEDATA'}  (the game makes them; back this folder up)")
     print(f"  Settings:  {data / 'settings.ini'}")
     print(f"  Mods:      {data / 'mods'}  (docs/port/mod-folder.md)")
+    print(f"  Make mods: {exe.parent / 'BgmMaker.exe'}  (the Battle BGM Maker)")
     print(f"  Program:   {exe}")
     print("  Update:    git pull, then run setup.ps1 again (or setup.ps1 -Update): it rebuilds only what changed.")
     if options.deck:

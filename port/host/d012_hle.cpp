@@ -3,6 +3,7 @@
 
 #include "d012_bgm_playlist.hpp"
 #include "d012_camera.hpp"
+#include "d012_dlc.hpp"
 #include "d012_hle.hpp"
 #include "d012_mods.hpp"
 #include "d012_test_switches.hpp"
@@ -94,6 +95,8 @@ void register_extra_hle(portablekit::HleRegistrar &hle) {
 
     wrap_vblank_waits(hle);
 
+    // What DLC the game will find, in the log (d012_dlc.cpp).
+    dlc::install(hle);
     // Mods: music added to the game (d012_mods.cpp, docs/port/mod-folder.md).
     mods::install(hle);
     // The loading screen's music choice by series (d012_bgm_playlist.cpp).

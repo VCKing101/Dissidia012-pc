@@ -27,6 +27,7 @@ python port/tools/bgm_maker/bgm_maker.py --ffmpeg C:\ffmpeg\bin\ffmpeg.exe --por
 | `bgmmaker/server.py` | The HTTP API and the path checks |
 | `web/` | The page: waveform and seam views (`waveform.js`), the editor (`app.js`), loop suggestions in a worker (`suggest.js`) |
 | `tests/test_*.py` | Unit tests: `python -m unittest discover -s port/tools/bgm_maker/tests` |
-| `tests/port_check.py` | End-to-end: makes a tone mod through the API, runs the port (90 s at most) and checks the loop in its audio dump |
+| `tests/port_check.py` | End-to-end: makes a tone mod with `BgmMaker.exe`'s command line (the C++ tool, `port/bgm_maker/`), runs the port (90 s at most) and checks the loop in its audio dump |
 | `tests/stream_fixtures.py` | Synthetic BRSTM, BCSTM and BFSTM files of test tones (a small DSP-ADPCM encoder), for the tests |
-| `tests/stream_port_check.py` | End-to-end for a BRSTM's header loop in the game, and the other stream variants in the port's log |
+| `tests/stream_port_check.py` | End-to-end for a BRSTM's header loop in the game (the mod made with `BgmMaker.exe` too), and the other stream variants in the port's log |
+| `../../tests/manifest_cases.json` | Manifest cases this tool's tests and the C++ tool's (`port/tests/d012_tests.cpp`) both run, so the two keep the game's rules |

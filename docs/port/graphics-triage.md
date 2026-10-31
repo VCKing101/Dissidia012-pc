@@ -192,3 +192,43 @@ the two choices differ; the census counts `fbtex.target_by_drawn_area` (info), o
 **Not verified.** The sphere on a handheld: the look is the port's frames read from the traced state, not compared
 with a PSP. Most of the other effects that take the new choice (the census found them on every
 stage; only the ones above were compared pixel for pixel). The Proton build on the Deck (not touched; the cause is not platform-specific).
+
+## World of Darkness pillars flicker between frames
+
+> 30 October 2026. Reported by the owner on the Steam Deck (the clang build): the pillars of World of Darkness
+> flicker at 60 and 90 fps and not at 30, so it is frame interpolation. Fixed in patch 0065 (PortableKit branch
+> `interp-pairing`, worktree `tools/local/port/PortableKit-interp`, fast-forwarded into `dissidia` on 31 October).
+> Build `tools/local/port/build-d012-interp-clang` (clang release, `-O1`), framework build
+> `tools/local/port/build-framework-interp`. Captures and logs: `build/port/gfx-wod/` (never committed).
+
+**Cause.** The stage is a hall of copies: about 2,600 draws a frame, most of them a few meshes drawn again and
+again. The matcher paired the copies of one mesh in drawing order. When a copy at the front of the list leaves the
+view, every later copy pairs with its neighbour; a neighbour farther than the own-motion guard (4 units) followed
+the camera, but a closer one was kept and drawn halfway towards it, where neither real frame has anything. The
+camera estimate (the median by turn angle) suffered too: a mispaired copy turns exactly as the camera does and
+slides by the gap between the two, so the median could pick it, which gave 33-unit "camera moves" cut as camera
+jumps, 19 in a minute of battle.
+
+**Fix** (`host/gpu/frame_interpolation.cpp`, game-agnostic). The camera is the motion most pairs of meshes drawn
+once agree on (everything that stands still moves by the same matrix), falling back to all pairs and then to the
+median. A copy whose drawing-order partner is where that camera carries it keeps it; the rest of each mesh pair up
+nearest first over all candidates, so a copy that left the view does not take its neighbour's place. Off switch
+`D012_INTERPOLATION_ORDER_PAIRS` (drawing order and the median, as before); the trace and the per-second guard line
+count the pairs taken out of drawing order. `D012_CHECK_REPLAY` now also draws the halfway frame and counts its
+pixels far from both frames (a colour channel more than 40 off each), and `D012_CHECK_REPLAY=N` checks every N
+flips.
+
+**Verified** (Windows, clang release build, 60 fps, internal scale 4, scripted Quick Battles; the guest clock
+follows the wall clock, but this route repeats its timeline exactly):
+
+- Halfway pixels far from both frames at four checks, before and after: 15.93 / 2.07 / 3.92 / 0.73% became
+  11.96 / 1.37 / 3.13 / 0.64%; the distant pillar drawn halfway between two copies no longer is. Camera cuts in a
+  minute of World of Darkness: 19 became 1.
+- Old Chaos Shrine on the same timeline: 1.401% and 1.399% (no change). Story Mode world map, orb pickup: identical.
+- Render time within noise (5.20-5.46 ms before, 5.37-5.49 after).
+- The 21 framework tests pass, three of them new (swapped copies, a row that loses its first copy, a hall of
+  copies' camera).
+
+**Not verified.** The Steam Deck and the native Linux and macOS builds. The owner's other report from the same
+play, the world map's "Power of the dead" light trails flickering at 60 and 90 fps, is not this cause (the fix
+changes nothing on the world map, and blended stills there look like the 30 fps frames); it is still open.

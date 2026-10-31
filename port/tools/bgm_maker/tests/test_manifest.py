@@ -279,6 +279,51 @@ class Validation(unittest.TestCase):
         self.assertTrue(any("same number" in e for e in errors_of(base(), others=others)))
 
 
+class SharedCases(unittest.TestCase):
+    """port/tests/manifest_cases.json, which the C++ tool's tests run against
+    the game's own rules: the same problems, by level and path (and message
+    where the case gives one)."""
+
+    CASES = os.path.join(REPO, "port", "tests", "manifest_cases.json")
+
+    def test_shared_cases(self):
+        with open(self.CASES, encoding="utf-8") as handle:
+            cases = json.load(handle)["cases"]
+        self.assertTrue(cases)
+        for case in cases:
+            with self.subTest(case["name"]), tempfile.TemporaryDirectory() as folder:
+                for file in case["files"]:
+                    path = os.path.join(folder, *file.split("/"))
+                    os.makedirs(os.path.dirname(path), exist_ok=True)
+                    with open(path, "wb") as handle:
+                        handle.write(b"\0")
+                others = [{"folder": o["folder"], "id": o["id"], "tracks": {mf.id_number(t): t for t in o["tracks"]}}
+                          for o in case.get("others", [])]
+                if "text" in case:
+                    document, problems = mf.parse_manifest_text(case["text"].encode("utf-8"))
+                    if document is not None:
+                        problems = mf.validate(document, folder, None, others)
+                else:
+                    problems = mf.validate(case["manifest"], folder, None, others)
+                got = [(p["level"], p["path"]) + ((p["message"],) if "message" in want else ())
+                       for p, want in zip(problems, case["problems"])]
+                got += [(p["level"], p["path"], p["message"]) for p in problems[len(case["problems"]):]]
+                expected = [(w["level"], w["path"]) + ((w["message"],) if "message" in w else ())
+                            for w in case["problems"]]
+                self.assertEqual(got, expected)
+
+
+class ShortNames(unittest.TestCase):
+    def test_short_is_kept_after_the_name(self):
+        doc = {"format": 1, "id": "s", "name": "S", "version": "1.0.0", "music": {"series": [
+            {"key": "a", "name": "FINAL FANTASY XVI", "short": "FFXVI", "order": 1, "tracks": []},
+            {"key": "b", "name": "B", "order": 2, "short": 5, "tracks": []}]}}
+        out = mf.build_manifest(mf.model_from_manifest(doc))
+        self.assertEqual(list(out["music"]["series"][0]), ["key", "name", "short", "order", "tracks"])
+        self.assertEqual(out["music"]["series"][0]["short"], "FFXVI")
+        self.assertEqual(out["music"]["series"][1]["short"], 5)
+
+
 class Building(unittest.TestCase):
     MODEL = {
         "id": "my-music", "name": "My music", "version": "1.0.0", "author": " Me ", "description": "",

@@ -1,6 +1,7 @@
-"""End-to-end check: a mod made through the Battle BGM Maker's HTTP API plays in the
-port with its loop exactly where the tool set it, with an MP3 (encoder delay
-and padding) as the source. Test tones only.
+"""End-to-end check: a mod made with the Battle BGM Maker (BgmMaker.exe, its
+command line, which runs the window's own code) plays in the port with its loop
+exactly where the tool set it, with an MP3 (encoder delay and padding) as the
+source. Test tones only.
 
     python port/tools/bgm_maker/tests/port_check.py            # make, run the port (90 s at most), analyse
     python port/tools/bgm_maker/tests/port_check.py --analyse  # analyse the last run's dump again
@@ -13,9 +14,10 @@ and padding) as the source. Test tones only.
    tone of each part makes the waveform non-periodic, and the marker gives
    every seam a change of its own to align on, so the sample-level match below
    has one answer.
-3. Through the tool's API: create the mod "modmaker-test", import the MP3
-   (copied into music/), and save a custom loop from sample 88,200 (the 660 Hz
-   part) to 176,400 (the end of the marker). If the port and the tool counted
+3. With BgmMaker (tools/local/port/build-d012-recomp/bin): --import the MP3
+   into a new mod "modmaker-test" (copied into music/), --set-loop from sample
+   88,200 (the 660 Hz part) to 176,400 (the end of the marker), --check it, and
+   --decode it for the analysis. If the port and the tool counted
    samples differently (an MP3's 1,105-sample delay, say), the game would play
    a little 440 Hz after each jump, or a little 1320 Hz before it.
 4. The recompiled port runs (tools/port/run_d012.py, at most 90 s, its own
@@ -33,7 +35,6 @@ MIT licence; see port/README.md.
 from __future__ import annotations
 
 import argparse
-import http.client
 import json
 import math
 import os
@@ -42,20 +43,19 @@ import shutil
 import struct
 import subprocess
 import sys
-import threading
 import wave
 
 TOOL = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, TOOL)
 
 from bgmmaker import audio  # noqa: E402
-from bgmmaker.server import TOKEN_HEADER, App, serve  # noqa: E402
 
 ROOT = audio.REPO_ROOT
 SOURCE_DATA = os.path.join(ROOT, "build", "port", "data")
 DATA = os.path.join(ROOT, "build", "port", "data-modmaker-test")
 OUT = os.path.join(ROOT, "build", "port", "modmaker-test")
 BUILD = os.path.join("tools", "local", "port", "build-d012-recomp")
+BGM_MAKER = os.path.join(ROOT, BUILD, "bin", "BgmMaker.exe" if os.name == "nt" else "BgmMaker")
 RATE = 44100
 MOD_ID = "modmaker-test"
 LOOP_START, LOOP_END = 88200, 176400
@@ -110,56 +110,58 @@ def make_tones(ff) -> str:
     return mp3
 
 
-class Client:
-    def __init__(self, app):
-        self.app = app
-
-    def call(self, path, body=None, raw=None):
-        connection = http.client.HTTPConnection("127.0.0.1", self.app.port, timeout=120)
-        data = raw if raw is not None else json.dumps(body or {}).encode()
-        connection.request("POST", path, body=data, headers={
-            TOKEN_HEADER: self.app.token, "Host": f"127.0.0.1:{self.app.port}", "Content-Length": str(len(data))})
-        response = connection.getresponse()
-        result = json.loads(response.read())
-        connection.close()
-        if response.status != 200:
-            raise RuntimeError(f"{path}: {result}")
-        return result
+def bgm_maker(*args) -> str:
+    """Runs BgmMaker's command line; its output. A failure stops the check."""
+    run = subprocess.run([BGM_MAKER, *args], capture_output=True, timeout=600)
+    output = (run.stdout + run.stderr).decode("utf-8", "replace").replace("\r\n", "\n")
+    for line in output.splitlines():
+        print("  BgmMaker:", line)
+    if run.returncode != 0:
+        raise RuntimeError(f"BgmMaker {args[0]} failed ({run.returncode})")
+    return output
 
 
-def make_mod(ff, mp3) -> tuple:
+def track_facts(output: str, key: str) -> tuple:
+    """(file, samples, rate) of a track in BgmMaker --check's output."""
+    match = re.search(rf"^track {re.escape(key)}: (.+), (\d+) samples at (\d+) Hz", output, re.M)
+    if not match:
+        raise RuntimeError(f"BgmMaker --check says nothing of track {key}")
+    return match.group(1), int(match.group(2)), int(match.group(3))
+
+
+def tool_decode(file: str, wav_path: str):
+    """The file as BgmMaker decodes it (the samples its loop points count in), as a WAV."""
+    raw = wav_path + ".raw"
+    said = bgm_maker("--decode", file, raw)
+    frames, rate, channels = map(int, re.search(r"(\d+) frames at (\d+) Hz, (\d) channel", said).groups())
+    with open(raw, "rb") as handle:
+        data = handle.read()
+    os.remove(raw)
+    with wave.open(wav_path, "wb") as out:
+        out.setnchannels(channels)
+        out.setsampwidth(2)
+        out.setframerate(rate)
+        out.writeframes(data)
+    return frames
+
+
+def make_mod(ff, mp3) -> str:
     mods = os.path.join(DATA, "mods")
     os.makedirs(mods, exist_ok=True)
     folder = os.path.join(mods, MOD_ID)
     if os.path.isdir(folder):
         shutil.rmtree(folder)  # the test's own mod in the test data
-    app = App(mods, audio.Decoder(ff))
-    server = serve(app)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    try:
-        api = Client(app)
-        assert api.call("/api/mod/create", {"id": MOD_ID, "name": "BGM maker test", "version": "1.0.0",
-                                            "author": "Dissidia 012 native port"})["ok"]
-        with open(mp3, "rb") as handle:
-            imported = api.call(f"/api/track/import?folder={MOD_ID}&name=modmaker_tones.mp3", raw=handle.read())
-        key = api.call("/api/key", {"kind": "track", "text": imported["title"], "taken": [], "mod_id": MOD_ID})["key"]
-        info = api.call("/api/track/info", {"folder": MOD_ID, "file": imported["file"]})
-        print(f"imported {imported['file']} as \"{imported['title']}\" (key {key}): {info['codec']} {info['rate']} Hz, "
-              f"{info['samples']} samples after decoding (encoded from {int(sum(p[2] for p in PARTS) * RATE)})")
-        model = {"id": MOD_ID, "name": "BGM maker test", "version": "1.0.0", "author": "Dissidia 012 native port",
-                 "description": "", "extra": {}, "series": [{"key": "tones", "name": "BGM MAKER TEST", "order": 0,
-                 "extra": {}, "tracks": [{"key": key, "title": imported["title"], "file": imported["file"], "extra": {},
-                                          "loop": {"mode": "custom", "start": LOOP_START, "end": LOOP_END}}]}]}
-        saved = api.call("/api/mod/save", {"folder": MOD_ID, "model": model})
-        assert saved["ok"], saved["problems"]
-        wav = app.decoder.wav(os.path.join(folder, *imported["file"].split("/")))
-        with open(os.path.join(folder, "mod.json"), encoding="utf-8") as handle:
-            print("mod.json loop:", json.load(handle)["music"]["series"][0]["tracks"][0]["loop"])
-        shutil.copyfile(wav, os.path.join(OUT, "tool_decode.wav"))
-        return f"{MOD_ID}:{key}"
-    finally:
-        server.shutdown()
-        server.server_close()
+    added = bgm_maker("--import", folder, "tones", mp3)
+    key, file = re.search(r"^added (\S+): (.+) \(\"", added, re.M).groups()
+    bgm_maker("--set-loop", folder, key, str(LOOP_START), str(LOOP_END))
+    checked = bgm_maker("--check", folder)
+    _, samples, rate = track_facts(checked, key)
+    print(f"imported {file} (key {key}): {rate} Hz, {samples} samples after decoding (encoded from "
+          f"{int(sum(p[2] for p in PARTS) * RATE)})")
+    with open(os.path.join(folder, "mod.json"), encoding="utf-8") as handle:
+        print("mod.json loop:", json.load(handle)["music"]["series"][0]["tracks"][0]["loop"])
+    tool_decode(os.path.join(folder, *file.split("/")), os.path.join(OUT, "tool_decode.wav"))
+    return f"{MOD_ID}:{key}"
 
 
 def run_port(track_id):
@@ -238,9 +240,14 @@ def find_onset(marks, hop, size):
     return None
 
 
-def analyse():
-    dump, rate = read_left(os.path.join(OUT, "dump.wav"))
-    tool, _ = read_left(os.path.join(OUT, "tool_decode.wav"))
+def analyse(out=OUT, check_log=True, margin=1.5):
+    """`out` holds dump.wav and tool_decode.wav (and run.log); without `check_log`
+    (psp_port_check.py: the track comes from an ISO, not the port's host audio)
+    the port's log of its decode is not asked for. `margin`: how much worse an
+    MP3 delay's shift must fit than the best, all seams together (an ATRAC3
+    copy's coding noise raises every residual, so psp_port_check.py asks less)."""
+    dump, rate = read_left(os.path.join(out, "dump.wav"))
+    tool, _ = read_left(os.path.join(out, "tool_decode.wav"))
     print(f"dump: {len(dump) / rate:.1f} s at {rate} Hz; tool decode: {len(tool)} samples")
     length = LOOP_END - LOOP_START
 
@@ -362,11 +369,11 @@ def analyse():
               f" +{worse(-1105):.0f} %")
     if exact_seams:
         print(f"seams with the music alone (residual under -40 dB): {[r[0] for r in exact_seams]}")
-    no_delay = bool(joint) and min(joint[1105], joint[-1105]) > 1.5 * joint[joint_best]
+    no_delay = bool(joint) and min(joint[1105], joint[-1105]) > margin * joint[joint_best]
 
     # The port's own account: what it decoded, and where it put the loop.
     decoded = None
-    log_path = os.path.join(OUT, "run.log")
+    log_path = os.path.join(out, "run.log")
     if os.path.isfile(log_path):
         with open(log_path, encoding="utf-8", errors="replace") as handle:
             for line in handle:
@@ -377,7 +384,7 @@ def analyse():
     print(f"the port's log: {decoded[0] if decoded else '?'} frames decoded (the tool: {len(tool)}), loop "
           f"{decoded[1] if decoded else '?'}..{decoded[2] if decoded else '?'} (frames, end included; the tool set "
           f"{LOOP_START} to {LOOP_END})")
-    log_ok = decoded == (len(tool), LOOP_START, LOOP_END - 1)
+    log_ok = decoded == (len(tool), LOOP_START, LOOP_END - 1) or not check_log
     passed = bool(results) and joint_best == 0 and no_delay and stray_total == 0 and log_ok and \
         all(r[0] == 0 for r in exact_seams)
     print(f"\n{'PASS' if passed else 'FAIL'}: the loop jumps from sample {LOOP_END} back to {LOOP_START}, where the "

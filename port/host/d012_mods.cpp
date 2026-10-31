@@ -1,4 +1,5 @@
-// Mods: loading <data dir>/mods, checking the manifests, and serving mod
+// Mods: loading <data dir>/mods, checking the manifests (by the rules in
+// d012_mod_manifest.cpp, which the Battle BGM Maker shares), and serving mod
 // tracks to the game as BGM files. The manifest format is
 // docs/port/mod-folder.md. A broken mod is logged and left out; it never stops
 // the game, and nothing here replaces a file of the game's. MIT licence; see
@@ -7,7 +8,7 @@
 #include "d012_mods.hpp"
 
 #include "d012_json.hpp"
-#include "d012_nintendo_stream.hpp"
+#include "d012_mod_manifest.hpp"
 
 #include "audio/host_audio.hpp"
 #include "hle/hle_common.hpp"
@@ -42,9 +43,6 @@ constexpr std::string_view kBgmFolder = "PSP_GAME/USRDIR/DATA/BGM/";
 // The frame size of the game's 96 kbps BGM (that track's "fmt " chunk), which
 // stand-ins use unless they replace a file whose own size is known.
 constexpr std::uint32_t kGameBgmBlockAlign = 560u;
-constexpr std::size_t kMaxManifestBytes = 1u << 20u;
-constexpr std::size_t kMaxNameLength = 64u;
-constexpr int kFormat = 1;
 
 Catalogue &mutable_catalogue() {
     static Catalogue instance;
@@ -59,224 +57,34 @@ std::string lower(std::string_view text) {
     return out;
 }
 
-// Ids and keys: lower case letters, digits, '.', '_' and '-', starting with a
-// letter or digit, at most 64 characters.
-bool valid_key(std::string_view key) {
-    if (key.empty() || key.size() > kMaxNameLength) return false;
-    if (!std::isalnum(static_cast<unsigned char>(key.front()))) return false;
-    return std::all_of(key.begin(), key.end(), [](char c) {
-        return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-';
-    });
+// One problem of a file the mods are read from, in the log:
+// "[mods] error: <where>, line N: what", warnings the same way, and a note as
+// "[mods] <where>, what" on standard output.
+void log_problem(const mod_manifest::Problem &problem, const std::string &where) {
+    using Level = mod_manifest::Problem::Level;
+    if (problem.level == Level::Note) {
+        std::cout << "[mods] " << where << ", " << problem.message << std::endl;
+        return;
+    }
+    std::cerr << "[mods] " << (problem.level == Level::Error ? "error" : "warning") << ": " << where;
+    if (problem.line > 0) std::cerr << ", line " << problem.line;
+    std::cerr << ": " << problem.message << "\n";
 }
 
-const std::set<std::string> &audio_extensions() {
-    static const std::set<std::string> extensions = {".mp3", ".ogg",   ".oga",   ".opus",  ".flac",
-                                                     ".wav", ".brstm", ".bcstm", ".bfstm"};
-    return extensions;
+audio::HostLoopPoint host_loop_point(const mod_manifest::LoopPoint &point) {
+    return {point.unit == mod_manifest::LoopPoint::Unit::Samples ? audio::HostLoopPoint::Unit::Samples
+                                                                 : audio::HostLoopPoint::Unit::Microseconds,
+            point.value};
 }
 
-// Collects one manifest's problems, each with its line.
-class Report {
-public:
-    explicit Report(std::string where) : where_(std::move(where)) {}
-    void error(const Value *at, const std::string &what) { line(at, "error", what); ++errors_; }
-    void warning(const Value *at, const std::string &what) { line(at, "warning", what); }
-    [[nodiscard]] int errors() const noexcept { return errors_; }
-    [[nodiscard]] const std::string &where() const noexcept { return where_; }
-
-private:
-    void line(const Value *at, const char *kind, const std::string &what) {
-        std::cerr << "[mods] " << kind << ": " << where_;
-        if (at != nullptr && at->line > 0) std::cerr << ", line " << at->line;
-        std::cerr << ": " << what << "\n";
+audio::HostTrack::Loop host_loop_mode(mod_manifest::Loop::Mode mode) {
+    switch (mode) {
+    case mod_manifest::Loop::Mode::Whole: return audio::HostTrack::Loop::Whole;
+    case mod_manifest::Loop::Mode::None: return audio::HostTrack::Loop::None;
+    case mod_manifest::Loop::Mode::Range: return audio::HostTrack::Loop::Range;
+    case mod_manifest::Loop::Mode::Auto: break;
     }
-    std::string where_;
-    int errors_{};
-};
-
-// A member of `object` of the given kind; reports a wrong kind or, when
-// `required`, its absence.
-const Value *member(const Value &object, std::string_view name, Value::Kind kind, bool required, Report &report,
-                    std::string_view context) {
-    const Value *value = object.find(name);
-    if (value == nullptr) {
-        if (required) report.error(&object, std::string(context) + " needs \"" + std::string(name) + "\"");
-        return nullptr;
-    }
-    if (!value->is(kind)) {
-        report.error(value, std::string(context) + " \"" + std::string(name) + "\" must be " + Value::kind_name(kind) +
-                                ", not " + Value::kind_name(value->kind));
-        return nullptr;
-    }
-    return value;
-}
-
-std::optional<std::string> text_member(const Value &object, std::string_view name, bool required, Report &report,
-                                       std::string_view context, std::size_t max_length = kMaxNameLength) {
-    const Value *value = member(object, name, Value::Kind::String, required, report, context);
-    if (value == nullptr) return std::nullopt;
-    if (value->text.empty() || value->text.size() > max_length) {
-        report.error(value, std::string(context) + " \"" + std::string(name) + "\" must be 1 to " +
-                                std::to_string(max_length) + " bytes long");
-        return std::nullopt;
-    }
-    return value->text;
-}
-
-void warn_unknown(const Value &object, std::initializer_list<std::string_view> known, Report &report,
-                  std::string_view context) {
-    for (const auto &[name, value] : object.members) {
-        if (std::find(known.begin(), known.end(), name) == known.end())
-            report.warning(&value, std::string(context) + " has an unknown member \"" + name + "\", which is ignored");
-    }
-}
-
-std::optional<std::int64_t> whole_number(const Value &value) {
-    if (!value.is(Value::Kind::Number) || !std::isfinite(value.number) || value.number != std::floor(value.number) ||
-        std::fabs(value.number) > 9.0e15)
-        return std::nullopt;
-    return static_cast<std::int64_t>(value.number);
-}
-
-// A track's "loop": "auto", "whole", "none", or {"start", "end"} in samples
-// of the file, or {"start_seconds", "end_seconds"}.
-bool read_loop(const Value *loop, audio::HostTrack &track, Report &report, const std::string &context) {
-    if (loop == nullptr) return true;
-    if (loop->is(Value::Kind::String)) {
-        if (loop->text == "auto") track.loop = audio::HostTrack::Loop::Auto;
-        else if (loop->text == "whole") track.loop = audio::HostTrack::Loop::Whole;
-        else if (loop->text == "none") track.loop = audio::HostTrack::Loop::None;
-        else {
-            report.error(loop, context + " \"loop\" must be \"auto\", \"whole\", \"none\" or an object");
-            return false;
-        }
-        return true;
-    }
-    if (!loop->is(Value::Kind::Object)) {
-        report.error(loop, context + " \"loop\" must be \"auto\", \"whole\", \"none\" or an object");
-        return false;
-    }
-    warn_unknown(*loop, {"start", "end", "start_seconds", "end_seconds"}, report, context + " \"loop\"");
-    const Value *start = loop->find("start");
-    const Value *end = loop->find("end");
-    const Value *start_s = loop->find("start_seconds");
-    const Value *end_s = loop->find("end_seconds");
-    if ((start != nullptr || end != nullptr) && (start_s != nullptr || end_s != nullptr)) {
-        report.error(loop, context + " \"loop\" gives samples and seconds; use one or the other");
-        return false;
-    }
-    track.loop = audio::HostTrack::Loop::Range;
-    if (start_s != nullptr || end_s != nullptr) {
-        const auto seconds = [&](const Value *value, const char *name) -> std::optional<std::int64_t> {
-            if (value == nullptr) return std::nullopt;
-            if (!value->is(Value::Kind::Number) || !std::isfinite(value->number) || value->number < 0.0 ||
-                value->number > 3600.0) {
-                report.error(value, context + " \"loop\" \"" + name + "\" must be a number of seconds from 0 to 3600");
-                return std::int64_t{-1};
-            }
-            return static_cast<std::int64_t>(std::llround(value->number * 1e6));
-        };
-        const auto first = seconds(start_s, "start_seconds");
-        const auto last = seconds(end_s, "end_seconds");
-        if (!first) {
-            report.error(loop, context + " \"loop\" needs \"start_seconds\"");
-            return false;
-        }
-        if (*first < 0 || (last && *last < 0)) return false;
-        if (last && *last <= *first) {
-            report.error(end_s, context + " \"loop\" ends before it starts");
-            return false;
-        }
-        track.loop_start = {audio::HostLoopPoint::Unit::Microseconds, *first};
-        if (last) track.loop_end = audio::HostLoopPoint{audio::HostLoopPoint::Unit::Microseconds, *last};
-        return true;
-    }
-    if (start == nullptr) {
-        report.error(loop, context + " \"loop\" needs \"start\" (a sample of the file) or \"start_seconds\"");
-        return false;
-    }
-    const auto first = whole_number(*start);
-    const auto last = end != nullptr ? whole_number(*end) : std::optional<std::int64_t>{};
-    if (!first || *first < 0) {
-        report.error(start, context + " \"loop\" \"start\" must be a whole number of samples, 0 or more");
-        return false;
-    }
-    if (end != nullptr && (!last || *last <= *first)) {
-        report.error(end, context + " \"loop\" \"end\" must be a whole number of samples after \"start\"");
-        return false;
-    }
-    track.loop_start = {audio::HostLoopPoint::Unit::Samples, *first};
-    if (last) track.loop_end = audio::HostLoopPoint{audio::HostLoopPoint::Unit::Samples, *last};
-    return true;
-}
-
-// A track's file: relative to the mod's folder, inside it, there, and of a
-// kind host audio reads.
-std::optional<std::filesystem::path> track_file(const Value &value, const std::filesystem::path &folder,
-                                                Report &report, const std::string &context) {
-    const std::filesystem::path relative = portablekit::install::path_from_utf8(value.text);
-    if (relative.empty() || relative.is_absolute() || relative.has_root_name() || relative.has_root_directory()) {
-        report.error(&value, context + " \"file\" must be a path inside the mod's folder");
-        return std::nullopt;
-    }
-    for (const auto &part : relative) {
-        if (part == "..") {
-            report.error(&value, context + " \"file\" must not leave the mod's folder (\"..\")");
-            return std::nullopt;
-        }
-    }
-    const std::string extension = lower(utf8(relative.extension()));
-    if (extension == ".bwav" || extension == ".nus3audio") {
-        report.error(&value, context + " \"file\" is a " + extension.substr(1u) +
-                                 " file, which is not supported (FFmpeg cannot decode it); use the BRSTM version of "
-                                 "the track");
-        return std::nullopt;
-    }
-    if (!audio_extensions().contains(extension)) {
-        report.error(&value, context + " \"file\" must be .mp3, .ogg, .opus, .flac, .wav, .brstm, .bcstm or .bfstm, "
-                                       "not \"" + extension + "\"");
-        return std::nullopt;
-    }
-    const std::filesystem::path full = folder / relative;
-    std::error_code ec;
-    if (!std::filesystem::is_regular_file(full, ec)) {
-        report.error(&value, context + " \"file\" " + value.text + " is not in the mod's folder");
-        return std::nullopt;
-    }
-    return full;
-}
-
-// A BRSTM, BCSTM or BFSTM track: its header is checked, and "loop": "auto"
-// takes the header's loop (from its loop start to the end of the stream, the
-// format's loop end) or, without a loop flag, the whole file. An explicit
-// loop in the manifest is kept as it is.
-bool read_stream_header(const Value &file, const std::filesystem::path &path, audio::HostTrack &track, Report &report,
-                        const std::string &context) {
-    if (!nintendo_stream::is_stream_extension(lower(utf8(path.extension())))) return true;
-    std::string error;
-    const auto info = nintendo_stream::read_header(path, error);
-    if (!info) {
-        report.error(&file, context + " \"file\" " + file.text + ": " + error);
-        return false;
-    }
-    if (track.loop != audio::HostTrack::Loop::Auto) return true;
-    if (!info->loop_flag) {
-        track.loop = audio::HostTrack::Loop::Whole;
-        return true;
-    }
-    if (info->loop_start >= info->samples) {
-        report.warning(&file, context + ": the " + info->format + " header's loop starts at sample " +
-                                  std::to_string(info->loop_start) + ", at or past the end of its " +
-                                  std::to_string(info->samples) + " samples; the whole file loops");
-        track.loop = audio::HostTrack::Loop::Whole;
-        return true;
-    }
-    track.loop = audio::HostTrack::Loop::Range;
-    track.loop_start = {audio::HostLoopPoint::Unit::Samples, info->loop_start};
-    track.loop_end.reset();  // the end of the stream, which is where the format's loop ends
-    std::cout << "[mods] " << report.where() << ", " << context << ": the " << info->format << " header's loop, samples " << info->loop_start
-              << " to " << info->samples << " at " << info->rate << " Hz" << std::endl;
-    return true;
+    return audio::HostTrack::Loop::Auto;
 }
 
 struct LoadedTrack {
@@ -293,153 +101,48 @@ struct LoadedMod {
     std::vector<LoadedSeries> series;
 };
 
-// Reads and checks one mod folder's manifest. Problems in a series or a
+// Reads and checks one mod folder's manifest by the shared rules
+// (d012_mod_manifest.cpp) and logs its problems. Problems in a series or a
 // track leave that part out; problems with the mod itself leave all of it
 // out (`loaded` false).
 LoadedMod read_mod(const std::filesystem::path &folder) {
     LoadedMod result;
     result.mod.folder = folder;
     const std::string where = utf8(folder.filename()) + "/mod.json";
-    Report report(where);
-    const std::filesystem::path manifest = folder / "mod.json";
-    std::error_code ec;
-    if (!std::filesystem::is_regular_file(manifest, ec)) {
-        report.error(nullptr, "there is no mod.json; the folder is not a mod");
-        return result;
-    }
-    if (std::filesystem::file_size(manifest, ec) > kMaxManifestBytes) {
-        report.error(nullptr, "larger than 1 MiB");
-        return result;
-    }
-    std::ifstream in(manifest, std::ios::binary);
-    const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-    std::string parse_error;
-    const auto document = json::parse(text, parse_error);
-    if (!document) {
-        report.error(nullptr, "not valid JSON: " + parse_error);
-        return result;
-    }
-    if (!document->is(Value::Kind::Object)) {
-        report.error(&*document, "the manifest must be an object");
-        return result;
-    }
-    const Value &root = *document;
-    warn_unknown(root, {"format", "id", "name", "version", "author", "description", "music"}, report, "the mod");
-    if (const Value *format = member(root, "format", Value::Kind::Number, false, report, "the mod")) {
-        if (whole_number(*format) != kFormat) {
-            report.error(format, "\"format\" is " + std::to_string(format->number) + "; this build reads format " +
-                                     std::to_string(kFormat));
-            return result;
-        }
-    }
-    const auto id = text_member(root, "id", true, report, "the mod");
-    if (id && !valid_key(*id)) {
-        report.error(root.find("id"), "\"id\" must be lower-case letters, digits, '.', '_' or '-', starting with a "
-                                      "letter or digit");
-        return result;
-    }
-    const auto name = text_member(root, "name", true, report, "the mod");
-    const auto version = text_member(root, "version", true, report, "the mod", 32u);
-    const auto author = text_member(root, "author", false, report, "the mod");
-    const auto description = text_member(root, "description", false, report, "the mod", 1024u);
-    if (!id || !name || !version) return result;
-    result.mod.id = *id;
-    result.mod.name = *name;
-    result.mod.version = *version;
-    result.mod.author = author.value_or("");
-    result.mod.description = description.value_or("");
+    const mod_manifest::Result read = mod_manifest::read(folder);
+    for (const auto &problem : read.problems) log_problem(problem, where);
+    const mod_manifest::Manifest &manifest = read.manifest;
+    if (!manifest.loaded) return result;
+    result.mod.id = manifest.id;
+    result.mod.name = manifest.name;
+    result.mod.version = manifest.version;
+    result.mod.author = manifest.author;
+    result.mod.description = manifest.description;
     result.mod.loaded = true;
-
-    const Value *music = member(root, "music", Value::Kind::Object, false, report, "the mod");
-    if (music == nullptr) {
-        report.warning(&root, "the mod adds nothing this build knows (no \"music\")");
-        return result;
-    }
-    warn_unknown(*music, {"series"}, report, "\"music\"");
-    const Value *series_list = member(*music, "series", Value::Kind::Array, true, report, "\"music\"");
-    if (series_list == nullptr) return result;
-    std::set<std::string> series_keys;
-    std::set<std::string> track_keys;
-    for (const Value &entry : series_list->items) {
-        if (!entry.is(Value::Kind::Object)) {
-            report.error(&entry, "each series must be an object");
-            continue;
-        }
-        const auto key = text_member(entry, "key", true, report, "a series");
-        const std::string context = "series \"" + key.value_or("?") + "\"";
-        warn_unknown(entry, {"key", "name", "order", "tracks"}, report, context);
-        const auto series_name = text_member(entry, "name", true, report, context, 48u);
-        if (!key || !series_name) {
-            report.error(&entry, context + " is left out");
-            continue;
-        }
-        if (!valid_key(*key)) {
-            report.error(entry.find("key"), context + ": \"key\" must be lower-case letters, digits, '.', '_' or '-'");
-            continue;
-        }
-        if (!series_keys.insert(*key).second) {
-            report.error(&entry, context + " appears twice; the second is left out");
-            continue;
-        }
+    for (const auto &entry : manifest.series) {
         LoadedSeries series;
-        series.series.key = *key;
-        series.series.name = *series_name;
-        series.series.mod_id = *id;
-        series.series.id = *id + ":" + *key;
+        series.series.key = entry.key;
+        series.series.name = entry.name;
+        series.series.order = entry.order;
+        series.series.mod_id = manifest.id;
+        series.series.id = manifest.id + ":" + entry.key;
         series.series.number = id_number(series.series.id);
-        if (const Value *order = member(entry, "order", Value::Kind::Number, false, report, context)) {
-            const auto value = whole_number(*order);
-            if (!value || *value < -1'000'000 || *value > 1'000'000)
-                report.error(order, context + ": \"order\" must be a whole number from -1000000 to 1000000; 0 is used");
-            else
-                series.series.order = *value;
-        }
-        const Value *tracks = member(entry, "tracks", Value::Kind::Array, true, report, context);
-        if (tracks == nullptr) continue;
-        for (const Value &item : tracks->items) {
-            if (!item.is(Value::Kind::Object)) {
-                report.error(&item, context + ": each track must be an object");
-                continue;
-            }
-            const auto track_key = text_member(item, "key", true, report, context + ", a track");
-            const std::string track_context = "track \"" + track_key.value_or("?") + "\"";
-            warn_unknown(item, {"key", "title", "file", "loop"}, report, track_context);
-            const auto title = text_member(item, "title", true, report, track_context);
-            const Value *file = member(item, "file", Value::Kind::String, true, report, track_context);
-            if (!track_key || !title || file == nullptr) {
-                report.error(&item, track_context + " is left out");
-                continue;
-            }
-            if (!valid_key(*track_key)) {
-                report.error(item.find("key"), track_context + ": \"key\" must be lower-case letters, digits, '.', '_' or '-'");
-                continue;
-            }
-            if (!track_keys.insert(*track_key).second) {
-                report.error(&item, track_context + " appears twice in the mod; the second is left out");
-                continue;
-            }
+        for (const auto &item : entry.tracks) {
             LoadedTrack track;
-            const auto path = track_file(*file, folder, report, track_context);
-            if (!path || !read_loop(item.find("loop"), track.audio, report, track_context) ||
-                !read_stream_header(*file, *path, track.audio, report, track_context)) {
-                report.error(&item, track_context + " is left out");
-                continue;
-            }
-            track.track.key = *track_key;
-            track.track.title = *title;
-            track.track.file = *path;
-            track.track.mod_id = *id;
+            track.track.key = item.key;
+            track.track.title = item.title;
+            track.track.file = item.file;
+            track.track.mod_id = manifest.id;
             track.track.series_id = series.series.id;
-            track.track.id = *id + ":" + *track_key;
+            track.track.id = manifest.id + ":" + item.key;
             track.track.number = id_number(track.track.id);
-            track.audio.file = *path;
-            track.file_text = track.track.mod_id + "/" + file->text;
+            track.audio.file = item.file;
+            track.audio.loop = host_loop_mode(item.loop.mode);
+            track.audio.loop_start = host_loop_point(item.loop.start);
+            if (item.loop.end) track.audio.loop_end = host_loop_point(*item.loop.end);
             track.audio.name = track.track.id;
+            track.file_text = track.track.mod_id + "/" + item.file_text;
             series.tracks.push_back(std::move(track));
-        }
-        if (series.tracks.empty()) {
-            report.error(&entry, context + " has no track that can be played; it is left out");
-            continue;
         }
         result.series.push_back(std::move(series));
     }
@@ -449,26 +152,35 @@ LoadedMod read_mod(const std::filesystem::path &folder) {
 // mods/enabled.json: {"mods": {"<mod id>": true or false}}. A mod it does
 // not name is on.
 std::map<std::string, bool> read_enabled(const std::filesystem::path &mods) {
+    using Level = mod_manifest::Problem::Level;
     std::map<std::string, bool> switches;
     const std::filesystem::path file = mods / "enabled.json";
     std::error_code ec;
     if (!std::filesystem::exists(file, ec)) return switches;
-    Report report("enabled.json");
+    const auto log = [](Level level, const Value *at, const std::string &what) {
+        log_problem({level, {}, what, at != nullptr ? at->line : 0}, "enabled.json");
+    };
     std::ifstream in(file, std::ios::binary);
     const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
     std::string error;
     const auto document = json::parse(text, error);
     if (!document || !document->is(Value::Kind::Object)) {
-        report.error(nullptr, document ? "must be an object" : "not valid JSON: " + error);
-        report.warning(nullptr, "every mod is on, as with no enabled.json");
+        log(Level::Error, nullptr, document ? "must be an object" : "not valid JSON: " + error);
+        log(Level::Warning, nullptr, "every mod is on, as with no enabled.json");
         return switches;
     }
-    warn_unknown(*document, {"mods"}, report, "enabled.json");
-    const Value *list = member(*document, "mods", Value::Kind::Object, false, report, "enabled.json");
+    for (const auto &[name, value] : document->members)
+        if (name != "mods") log(Level::Warning, &value, "enabled.json has an unknown member \"" + name + "\", which is ignored");
+    const Value *list = document->find("mods");
     if (list == nullptr) return switches;
+    if (!list->is(Value::Kind::Object)) {
+        log(Level::Error, list, std::string("enabled.json \"mods\" must be ") + Value::kind_name(Value::Kind::Object) +
+                                    ", not " + Value::kind_name(list->kind));
+        return switches;
+    }
     for (const auto &[id, value] : list->members) {
         if (!value.is(Value::Kind::Bool)) {
-            report.error(&value, "\"" + id + "\" must be true or false; the mod stays on");
+            log(Level::Error, &value, "\"" + id + "\" must be true or false; the mod stays on");
             continue;
         }
         switches[id] = value.boolean;
@@ -710,14 +422,7 @@ std::shared_ptr<portablekit::hle_extension::FileFilter> serve_bgm(std::string_vi
 
 } // namespace
 
-std::uint32_t id_number(std::string_view text) {
-    std::uint32_t hash = 0x811C9DC5u;
-    for (const char c : text) {
-        hash ^= static_cast<std::uint8_t>(c);
-        hash *= 0x01000193u;
-    }
-    return hash;
-}
+std::uint32_t id_number(std::string_view text) { return mod_manifest::id_number(text); }
 
 const Catalogue &catalogue() { return mutable_catalogue(); }
 
