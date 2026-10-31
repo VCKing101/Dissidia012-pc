@@ -383,7 +383,9 @@ added to the game's own battle music list, for PPSSPP or a PSP with custom firmw
   2.1; `tools/port/build_atracdenc.cmd` builds it from its source), with its loop points. A loop shorter than 6,144
   samples (0.14 s) is too short for the PSP's decoder. The disc's two music archives get a row and a name for
   each track, the music files go in `DATA/BGM` as `MD00000000.AT3` and on; nothing else of the image changes.
-- **Room:** the game's list holds 256 rows and the disc uses 131, so 125 tracks at most.
+- **Room:** the game's list holds 256 rows and the disc uses 131, so 125 tracks at most. DLC music on the memory
+  stick shares that room (the game refuses rows past 256): with all 43 USA DLC tracks, 82. The same goes for mods in
+  the port ([README](../../README.md#downloadable-content-dlc)).
 - **Windows N editions** need Microsoft's Media Feature Pack: the encoder reads its input through Media Foundation.
 
 Checked on 30 October 2026: an ISO with a 31-track mod (52 s to make, 1,789 MB) in PPSSPP, where the selector offers

@@ -143,6 +143,35 @@ for developers are in [`port/README.md`](port/README.md). For the Steam Deck, se
 The matching decompilation has its own toolchain (the historical PSP SNC compiler, a WSL build environment, splat,
 spimdisasm and Ghidra with the Allegrex extension); see [getting started](docs/decomp/getting-started.md).
 
+## Downloadable content (DLC)
+
+The game's own DLC, its music packs and costumes, works in the port once you add it yourself. This project does not
+include or link to any. Put the DLC's files in a folder named **`ULUS10566`** (the USA game's id) in your memory
+stick folder:
+
+| Installed with | Put the files in |
+| --- | --- |
+| The Windows setup | `data\ms0\PSP\GAME\ULUS10566\` in the install folder |
+| `setup.ps1` (from source) | `build\port\data\ms0\PSP\GAME\ULUS10566\` |
+| The Steam Deck package | `data/ms0/PSP/GAME/ULUS10566/` in its folder |
+
+Make the `GAME` and `ULUS10566` folders if they are not there. The files go straight in `ULUS10566` (`.edat` files
+with names like `8c0b30f1.edat`, and a `PARAM.PBP`), not in another folder inside it.
+
+- **The folder's name matters.** The game reads DLC from `ULUS10566` only. A copy named after the European release,
+  `ULES01505`, has to be renamed, or the game never sees it.
+- **Music** joins the battle music list under its own game, after that game's tracks from the disc. A DLC track with
+  the same title as one on the disc shows "(DLC)" after it.
+- **Costumes:** at character select, press Square (Look) to step through a character's costumes. The DLC ones are
+  "DLC 1", "DLC 2" and so on.
+- **To check it:** the port's log (`data\logs\D012Native.log` in the Windows install) says at the start
+  `[dlc] 222 files in ...` when the game will find them, or `[dlc] none in ...`, and warns about DLC files in a folder
+  with another name.
+- **Tested** with a decrypted copy of the USA DLC (13 music packs, 43 costumes). DLC still encrypted the way a PSP
+  stores it may not load; the log says how many files are.
+- DLC music takes room in the game's list of 256 tracks, so with all 43 of those tracks, mods can add 82 tracks
+  rather than 125.
+
 ## Repository layout
 
 | Path | What it is |

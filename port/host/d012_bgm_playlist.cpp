@@ -245,6 +245,7 @@ void insert_mod_rows(Guest *g) {
 struct Choice {
     gaddr entry{};
     gaddr name{};
+    bool dlc_twin = false;  // a DLC track named as a disc track of its series: "(DLC)" in the list
 };
 
 struct Series {
@@ -270,8 +271,19 @@ std::string game_series(const std::string &name) {
     return "DISSIDIA";
 }
 
+// A game track's name without its series: "FFXIII - Saber's Edge" is
+// "Saber's Edge" under FINAL FANTASY XIII. A name without an FF prefix is
+// kept whole.
+std::string title_in_series(const std::string &name) {
+    const std::size_t dash = name.find(" - ");
+    if (dash != std::string::npos && game_series(name).rfind("FINAL FANTASY", 0) == 0) return trim(name.substr(dash + 3));
+    return name;
+}
+
 // The offered choices (in table order) grouped: the game's series in the
-// order the table has them, then DLC rows, then the mods' series in the
+// order the table has them, DLC rows in their game's series after its disc
+// rows (by name, as the disc's: "FFI - Chaos Shrine" is FINAL FANTASY I's)
+// and under DOWNLOADED without an FF prefix, then the mods' series in the
 // catalogue's order, then "No BGM" (the row with no file) last.
 std::vector<Series> group(Guest *g, const std::vector<Choice> &offered) {
     const gaddr table = g_ld32(g, G_BGM_TABLE);
@@ -286,12 +298,16 @@ std::vector<Series> group(Guest *g, const std::vector<Choice> &offered) {
         added[i].label = catalogue.series[i].name;
         added[i].mod = true;
     }
+    // DLC rows (and the mods' rows) come after the disc's.
+    const auto from_dlc = [&](const Choice &choice) {
+        return static_cast<std::int32_t>((choice.entry - t->entries) / sizeof(BgmEntry)) >= t->disc_count;
+    };
     for (const Choice &choice : offered) {
         const BgmEntry *e = G_STRUCT(g, BgmEntry, choice.entry);
-        const auto row = static_cast<std::int32_t>((choice.entry - t->entries) / sizeof(BgmEntry));
-        if (const ModRow *mod = mod_row_of(e->id); mod != nullptr && row >= t->disc_count) {
+        const bool dlc = from_dlc(choice);
+        if (const ModRow *mod = mod_row_of(e->id); mod != nullptr && dlc) {
             added[mod->series].choices.push_back(choice);
-        } else if (row >= t->disc_count) {
+        } else if (dlc && game_series(text_of(g, choice.name)).rfind("FINAL FANTASY", 0) != 0) {
             downloaded.choices.push_back(choice);
         } else if (e->file[0] == '\0') {
             none.choices.push_back(choice);
@@ -301,6 +317,15 @@ std::vector<Series> group(Guest *g, const std::vector<Choice> &offered) {
             if (inserted) game.push_back(Series{label});
             game[at->second].choices.push_back(choice);
         }
+    }
+    // A DLC track with a disc track's title in its series ("Battle" under
+    // FINAL FANTASY I, on the disc and in a DLC pack) is told apart in the list.
+    for (Series &series : game) {
+        std::set<std::string> disc_titles;
+        for (const Choice &choice : series.choices)
+            if (!from_dlc(choice)) disc_titles.insert(upper(title_in_series(text_of(g, choice.name))));
+        for (Choice &choice : series.choices)
+            choice.dlc_twin = from_dlc(choice) && disc_titles.count(upper(title_in_series(text_of(g, choice.name)))) != 0u;
     }
     std::vector<Series> all = std::move(game);
     if (!downloaded.choices.empty()) all.push_back(std::move(downloaded));
@@ -689,15 +714,13 @@ void test_start(Guest *g, gaddr selector) {
 }
 
 // A track's line in the list: a mod track's own title (any character the
-// font has); a game track's name without its series ("FFXIII - Saber's
-// Edge" is "Saber's Edge" under FINAL FANTASY XIII, which the box shows).
+// font has); a game track's name without its series (which the box shows),
+// with "(DLC)" after a DLC track that has a disc track's title.
 std::string list_title(Guest *g, const Choice &choice) {
     const BgmEntry *e = G_STRUCT(g, BgmEntry, choice.entry);
     if (const ModRow *mod = mod_row_of(e->id)) return mod->track->title;
-    const std::string name = text_of(g, choice.name);
-    const std::size_t dash = name.find(" - ");
-    if (dash != std::string::npos && game_series(name).rfind("FINAL FANTASY", 0) == 0) return trim(name.substr(dash + 3));
-    return name;
+    const std::string title = title_in_series(text_of(g, choice.name));
+    return choice.dlc_twin ? title + " (DLC)" : title;
 }
 
 void note_overlay(Guest *g, gaddr selector, gaddr position, gaddr colour, bool input) {
