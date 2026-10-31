@@ -107,6 +107,7 @@ opens the port's menu: video, controls and audio.
 | Saves | `build/port/data/ms0/PSP/SAVEDATA/` (the game makes them through New Game; back this folder up) |
 | Settings | `build/port/data/settings.ini` (written by the port's menu) |
 | Mods | `build/port/data/mods/` ([mod-folder.md](mod-folder.md)) |
+| DLC you added | `build/port/data/ms0/PSP/GAME/ULUS10566/` (the folder must have that name; [README](../../README.md#downloadable-content-dlc)) |
 | The program | `tools/local/port/build-d012-recomp/bin/D012Native.exe` |
 
 Setup never writes to `build/port/data`, except to create the empty folder.

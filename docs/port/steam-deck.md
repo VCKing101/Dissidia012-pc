@@ -225,3 +225,5 @@ Turn it back on (section 1, step 4) before the next update. To revoke the PC's k
   `Z:/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc` from inside Proton. Unverified on a Deck.
 - **Saves.** The Deck has its own saves in `data/ms0`, separate from the PC's. Updates never touch them; back up that
   folder yourself if you care about it.
+- **DLC.** DLC you add goes in `data/ms0/PSP/GAME/ULUS10566/` on the Deck, the folder named exactly that
+  ([README](../../README.md#downloadable-content-dlc)). Deploys never send it, as with saves. Unverified on a Deck.

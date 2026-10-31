@@ -21,8 +21,16 @@ Battle music mods
   it opens in your browser, lets you add tracks (MP3, OGG, FLAC, WAV, BRSTM) and set where each one loops, and
   writes the mod for you. Close its window to stop it.
 
+Downloadable content (DLC)
+  The game's own DLC (music packs and costumes) works once you add it yourself; none comes with the port. Put
+  its .edat files and PARAM.PBP in data\ms0\PSP\GAME\ULUS10566 (make the folders). The folder must be named
+  ULUS10566: a copy named ULES01505 (the European release) is never read until you rename it. DLC music joins
+  the battle music list under its own game; DLC costumes are "DLC 1", "DLC 2" under Look (Square) at character
+  select. The log in data\logs says at the start how many DLC files the game will find.
+
 Your files, in the install folder
   data\ms0\PSP\SAVEDATA   your saves (back this folder up)
+  data\ms0\PSP\GAME\ULUS10566   DLC you added
   data\settings.ini       your settings
   data\mods\              battle music mods
   data\logs\              the last run's log, for bug reports
