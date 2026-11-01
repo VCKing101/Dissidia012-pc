@@ -67,6 +67,12 @@ portablekit_add_game(D012Native ${d012_corpus}
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_split_view.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_versus.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_versus_menu.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_sync.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_input.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_net.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_comm_battle.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_math_check.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_math.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_loading_layout.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_crash_report.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_test_switches.cpp"
@@ -117,6 +123,9 @@ add_library(d012_decomp STATIC "${CMAKE_CURRENT_SOURCE_DIR}/decomp/bgm_table.c"
                                "${CMAKE_CURRENT_SOURCE_DIR}/decomp/pad.c"
                                "${CMAKE_CURRENT_SOURCE_DIR}/decomp/pad_walk.c")
 target_link_libraries(D012Native PRIVATE d012_decomp)
+if(WIN32)
+    target_link_libraries(D012Native PRIVATE ws2_32)  # online play (host/d012_net.cpp)
+endif()
 
 # The Battle BGM Maker (bgm_maker/): a program of its own beside D012Native,
 # for making battle music mods. It checks a mod with the game's own manifest

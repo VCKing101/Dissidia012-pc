@@ -1,0 +1,91 @@
+From ab3ebc572e51f67cfc269e8c3390c2e6080258d4 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Sun, 1 Nov 2026 14:01:42 +1030
+Subject: [PATCH] HLE extension: the first pad's sample as it is now
+
+hle_extension::first_pad_now() gives a port the first pad's state sampled
+at the moment of asking, rather than the one the game last read, for a port
+that sends this machine's input elsewhere (a network battle) before the
+game reads it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/hle/hle_common.hpp               |  3 +++
+ host/hle/hle_extension_host.cpp       |  6 ++++++
+ host/hle/hle_media.cpp                | 13 +++++++++++++
+ include/portablekit/hle_extension.hpp |  4 ++++
+ 4 files changed, 26 insertions(+)
+
+diff --git a/host/hle/hle_common.hpp b/host/hle/hle_common.hpp
+index d3c82a6..a000d7c 100644
+--- a/host/hle/hle_common.hpp
++++ b/host/hle/hle_common.hpp
+@@ -92,6 +92,9 @@ struct SecondPadSample {
+     std::uint8_t right_y{0x80u};
+ };
+ [[nodiscard]] SecondPadSample second_pad_sample();
++// Player 1's pad sampled now, as the game's own read would get it, without
++// waiting for a vblank (the extension interface's first_pad_now()).
++[[nodiscard]] SecondPadSample first_pad_sample_now();
+ // Player 1 has a gamepad, not only the keyboard.
+ [[nodiscard]] bool first_pad_connected();
+ 
+diff --git a/host/hle/hle_extension_host.cpp b/host/hle/hle_extension_host.cpp
+index 6356f17..2829f65 100644
+--- a/host/hle/hle_extension_host.cpp
++++ b/host/hle/hle_extension_host.cpp
+@@ -125,6 +125,12 @@ SecondPad second_pad() {
+ 
+ bool first_pad_connected() { return ::portablekit::first_pad_connected(); }
+ 
++SecondPad first_pad_now() {
++    const SecondPadSample sample = ::portablekit::first_pad_sample_now();
++    return SecondPad{sample.connected, sample.buttons,  sample.extra,  sample.analog_x,
++                     sample.analog_y,  sample.right_x, sample.right_y};
++}
++
+ } // namespace hle_extension
+ 
+ HleExtensionReport install_linked_hle_extensions(Runtime &runtime, HleRegistrar &hle) {
+diff --git a/host/hle/hle_media.cpp b/host/hle/hle_media.cpp
+index e690158..42eb873 100644
+--- a/host/hle/hle_media.cpp
++++ b/host/hle/hle_media.cpp
+@@ -1178,6 +1178,19 @@ SecondPadSample second_pad_sample() {
+     return sample;
+ }
+ 
++SecondPadSample first_pad_sample_now() {
++    const CtrlSample now = sample_ctrl();
++    SecondPadSample sample;
++    sample.connected = first_pad_connected();
++    sample.buttons = now.buttons;
++    sample.extra = sampled_extra();
++    sample.analog_x = now.analog_x;
++    sample.analog_y = now.analog_y;
++    sample.right_x = now.right_x;
++    sample.right_y = now.right_y;
++    return sample;
++}
++
+ bool first_pad_connected() {
+ #if defined(PORTABLEKIT_HAS_RENDERER)
+     return media().renderer && media().renderer->available() && media().renderer->first_pad_connected();
+diff --git a/include/portablekit/hle_extension.hpp b/include/portablekit/hle_extension.hpp
+index e53b36b..ce8dbd9 100644
+--- a/include/portablekit/hle_extension.hpp
++++ b/include/portablekit/hle_extension.hpp
+@@ -312,6 +312,10 @@ void want_second_pad(bool wanted);
+ // Player 1 has a gamepad (not only the keyboard): for telling player 1 that
+ // it went away, as second_pad().connected tells it for player 2.
+ [[nodiscard]] bool first_pad_connected();
++// Player 1's pad (the game's own) sampled at the call, without waiting for a
++// vblank as sceCtrlReadBufferPositive may: for a port that takes player 1's
++// input from code that cannot wait, such as a native override.
++[[nodiscard]] SecondPad first_pad_now();
+ 
+ } // namespace portablekit::hle_extension
+ 
+-- 
+2.53.0.windows.1
+

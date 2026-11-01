@@ -35,6 +35,8 @@
 
 #include "d012_versus.hpp"
 #include "d012_decomp_harness.hpp"
+#include "d012_input.hpp"
+#include "d012_sync.hpp"
 
 #include "hle/hle_common.hpp"
 #include "install/user_data.hpp"
@@ -812,6 +814,108 @@ bool split_recently() {
     return active() && split_now(s);
 }
 
+// The game's pad read (one a frame): player 2's pad to the game, as the
+// header says.
+void read_pads(const portablekit::HleFunction &previous, psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
+    const std::uint32_t buffer = ctx.gpr[4];
+    const std::uint32_t count = std::clamp<std::uint32_t>(ctx.gpr[5], 1u, 64u);
+    State &s = state();
+    psprecomp::GuestMemory &memory = rt.memory();
+    const bool battle = battle_resident(memory);
+    // Player 2's gamepad is looked for while versus is on, and on the
+    // start menu so that the row knows whether there is one; otherwise a
+    // second gamepad stays a spare for player 1. (The renderer exists by
+    // the game's first pad read.)
+    if (battle && !active()) s.start_menu = false;
+    const bool want = active() || s.start_menu;
+    if (want != s.wanted) {
+        s.wanted = want;
+        ext::want_second_pad(want);
+    }
+    previous(rt, ctx);
+    ++s.reads;
+    if (s.ask_reads != 0u) --s.ask_reads;
+    // Player 2's pad from the frame's input record (d012_input.cpp), which is
+    // the second gamepad unless a replay or netplay supplies it.
+    const input::Pad &p2 = input::current().player2;
+    s.pad = ext::SecondPad{p2.connected, p2.buttons, p2.extra, p2.lx, p2.ly, p2.rx, p2.ry};
+    if (!battle) s.lost = 0u;
+    if (!battle) set_opponent_header(memory);
+    if (enabled()) repair_looks(memory, s, battle);
+    if (!active()) {
+        save_before().clear();
+        s.connected = s.pad.connected;
+        s.picking = false;
+        s.fighting = false;
+        s.split = false;
+        s.fallen = 0u;
+        return;
+    }
+    read_fighting(memory, s, battle);
+    guard_save(memory, battle);
+    if (s.pad.connected != s.connected) {
+        s.connected = s.pad.connected;
+        std::cout << "[versus] player 2's pad " << (s.connected ? "connected" : "disconnected") << std::endl;
+        // Lost in battle: the battle pauses as player 2 paused it, so
+        // the pause menu waits for player 2's pad to come back. Not when
+        // player 1's loss has paused it already: START would resume.
+        if (!s.connected && battle) {
+            if (s.lost == 0u) s.pause_reads = 1u;
+            s.lost |= kLostPlayer2;
+            std::cout << "[versus] the battle pauses until player 2's pad is back" << std::endl;
+        }
+    }
+    if (s.connected) s.lost &= ~kLostPlayer2;
+    const bool first = input::current().player1.connected;
+    if (first != s.first_connected) {
+        s.first_connected = first;
+        if (!first && battle) {
+            if (s.lost == 0u) s.pause1_reads = 1u;
+            s.lost |= kLostPlayer1;
+            std::cout << "[versus] player 1's gamepad disconnected: the battle pauses" << std::endl;
+        }
+    }
+    if (first) s.lost &= ~kLostPlayer1;
+    if (s.pause1_reads != 0u && buffer != 0u) {
+        --s.pause1_reads;
+        for (std::uint32_t i = 0; i < count; ++i)
+            memory.store32(buffer + i * 16u + 4u, memory.load32(buffer + i * 16u + 4u) | kStart);
+    }
+    // D012_TEST_REVENGE=1, a test switch: R + square on player 1's pad
+    // for the read in which player 1's Bravery (status block +0x14)
+    // drops, the moment a hit lands, which is when EX Mode is EX Revenge.
+    static const bool revenge = std::getenv("D012_TEST_REVENGE") != nullptr;
+    if (revenge && battle && buffer != 0u) {
+        static std::uint32_t last = 0;
+        const std::uint32_t field = memory.load32(kBattleManager);
+        const std::uint32_t player = user_ram(field) ? memory.load32(field + 0x38u) : 0u;
+        const std::uint32_t status = user_ram(player) ? memory.load32(player + 0x52Cu) : 0u;
+        const std::uint32_t brave = user_ram(status) ? memory.load16(status + 0x14u) : 0u;
+        if (brave < last)
+            for (std::uint32_t i = 0; i < count; ++i)
+                memory.store32(buffer + i * 16u + 4u, memory.load32(buffer + i * 16u + 4u) | 0x0200u | 0x8000u);
+        last = brave;
+    }
+    feed_raw_pad1(memory, s);
+    trace_fighters(memory, s);
+    const bool picking = picking_opponent(memory);
+    if (picking != s.picking) {
+        s.picking = picking;
+        if (picking) s.picking_time = std::chrono::steady_clock::now();
+        std::cout << "[versus] " << (picking ? "player 2 picks the opponent" : "player 1's pad again")
+                  << std::endl;
+    }
+    if (!picking || buffer == 0u) return;
+    for (std::uint32_t i = 0; i < count; ++i) {
+        const std::uint32_t sample = buffer + i * 16u;
+        memory.store32(sample + 4u, s.pad.connected ? s.pad.buttons : 0u);
+        memory.store8(sample + 8u, s.pad.connected ? s.pad.analog_x : 0x80u);
+        memory.store8(sample + 9u, s.pad.connected ? s.pad.analog_y : 0x80u);
+        memory.store8(sample + 10u, s.pad.connected ? s.pad.right_x : 0x80u);
+        memory.store8(sample + 11u, s.pad.connected ? s.pad.right_y : 0x80u);
+    }
+}
+
 void install(portablekit::HleRegistrar &hle) {
     static bool installed = false;
     if (installed || !enabled()) return;
@@ -850,100 +954,8 @@ void install(portablekit::HleRegistrar &hle) {
         std::cerr << "[versus] sceUtilitySavedataInitStart is not bound; a versus battle's save is not guarded\n";
     }
     hle.bind("sceCtrl", kSceCtrlReadBufferPositive, [previous](psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
-        const std::uint32_t buffer = ctx.gpr[4];
-        const std::uint32_t count = std::clamp<std::uint32_t>(ctx.gpr[5], 1u, 64u);
-        State &s = state();
-        psprecomp::GuestMemory &memory = rt.memory();
-        const bool battle = battle_resident(memory);
-        // Player 2's gamepad is looked for while versus is on, and on the
-        // start menu so that the row knows whether there is one; otherwise a
-        // second gamepad stays a spare for player 1. (The renderer exists by
-        // the game's first pad read.)
-        if (battle && !active()) s.start_menu = false;
-        const bool want = active() || s.start_menu;
-        if (want != s.wanted) {
-            s.wanted = want;
-            ext::want_second_pad(want);
-        }
-        previous(rt, ctx);
-        ++s.reads;
-        if (s.ask_reads != 0u) --s.ask_reads;
-        s.pad = ext::second_pad();
-        if (!battle) s.lost = 0u;
-        if (!battle) set_opponent_header(memory);
-        if (enabled()) repair_looks(memory, s, battle);
-        if (!active()) {
-            save_before().clear();
-            s.connected = s.pad.connected;
-            s.picking = false;
-            s.fighting = false;
-            s.split = false;
-            s.fallen = 0u;
-            return;
-        }
-        read_fighting(memory, s, battle);
-        guard_save(memory, battle);
-        if (s.pad.connected != s.connected) {
-            s.connected = s.pad.connected;
-            std::cout << "[versus] player 2's pad " << (s.connected ? "connected" : "disconnected") << std::endl;
-            // Lost in battle: the battle pauses as player 2 paused it, so
-            // the pause menu waits for player 2's pad to come back. Not when
-            // player 1's loss has paused it already: START would resume.
-            if (!s.connected && battle) {
-                if (s.lost == 0u) s.pause_reads = 1u;
-                s.lost |= kLostPlayer2;
-                std::cout << "[versus] the battle pauses until player 2's pad is back" << std::endl;
-            }
-        }
-        if (s.connected) s.lost &= ~kLostPlayer2;
-        const bool first = ext::first_pad_connected();
-        if (first != s.first_connected) {
-            s.first_connected = first;
-            if (!first && battle) {
-                if (s.lost == 0u) s.pause1_reads = 1u;
-                s.lost |= kLostPlayer1;
-                std::cout << "[versus] player 1's gamepad disconnected: the battle pauses" << std::endl;
-            }
-        }
-        if (first) s.lost &= ~kLostPlayer1;
-        if (s.pause1_reads != 0u && buffer != 0u) {
-            --s.pause1_reads;
-            for (std::uint32_t i = 0; i < count; ++i)
-                memory.store32(buffer + i * 16u + 4u, memory.load32(buffer + i * 16u + 4u) | kStart);
-        }
-        // D012_TEST_REVENGE=1, a test switch: R + square on player 1's pad
-        // for the read in which player 1's Bravery (status block +0x14)
-        // drops, the moment a hit lands, which is when EX Mode is EX Revenge.
-        static const bool revenge = std::getenv("D012_TEST_REVENGE") != nullptr;
-        if (revenge && battle && buffer != 0u) {
-            static std::uint32_t last = 0;
-            const std::uint32_t field = memory.load32(kBattleManager);
-            const std::uint32_t player = user_ram(field) ? memory.load32(field + 0x38u) : 0u;
-            const std::uint32_t status = user_ram(player) ? memory.load32(player + 0x52Cu) : 0u;
-            const std::uint32_t brave = user_ram(status) ? memory.load16(status + 0x14u) : 0u;
-            if (brave < last)
-                for (std::uint32_t i = 0; i < count; ++i)
-                    memory.store32(buffer + i * 16u + 4u, memory.load32(buffer + i * 16u + 4u) | 0x0200u | 0x8000u);
-            last = brave;
-        }
-        feed_raw_pad1(memory, s);
-        trace_fighters(memory, s);
-        const bool picking = picking_opponent(memory);
-        if (picking != s.picking) {
-            s.picking = picking;
-            if (picking) s.picking_time = std::chrono::steady_clock::now();
-            std::cout << "[versus] " << (picking ? "player 2 picks the opponent" : "player 1's pad again")
-                      << std::endl;
-        }
-        if (!picking || buffer == 0u) return;
-        for (std::uint32_t i = 0; i < count; ++i) {
-            const std::uint32_t sample = buffer + i * 16u;
-            memory.store32(sample + 4u, s.pad.connected ? s.pad.buttons : 0u);
-            memory.store8(sample + 8u, s.pad.connected ? s.pad.analog_x : 0x80u);
-            memory.store8(sample + 9u, s.pad.connected ? s.pad.analog_y : 0x80u);
-            memory.store8(sample + 10u, s.pad.connected ? s.pad.right_x : 0x80u);
-            memory.store8(sample + 11u, s.pad.connected ? s.pad.right_y : 0x80u);
-        }
+        read_pads(previous, rt, ctx);
+        sync::after_pad_read(rt.memory(), ctx.gpr[4], battle_resident(rt.memory()), active());
     });
 }
 

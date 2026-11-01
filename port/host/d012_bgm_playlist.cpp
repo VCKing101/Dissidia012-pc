@@ -4,6 +4,7 @@
 // MIT licence; see port/README.md.
 
 #include "d012_bgm_playlist.hpp"
+#include "d012_input.hpp"
 
 #include "d012_loading_layout.hpp"
 #include "d012_mods.hpp"
@@ -806,7 +807,7 @@ void run_list(Guest *g, const CallState &in, GuestRegs &out) {
     sc = Screen{};
     sc.serial = next_serial();
     sc.selector = selector;
-    sc.extra_held = ext::extra_buttons();
+    sc.extra_held = input::current().player1.extra;
     sc.series = group(g, offered);
     const std::int32_t count = write_choices(g, sc, entries, names, max);
     log_choices(g, sc);
@@ -861,7 +862,7 @@ void run_update(Guest *g, const CallState &in, GuestRegs &) {
 
     if (take_input && s->count > 0) {
         sc.update_reads = pad_seen().reads;
-        const std::uint32_t extra = ext::extra_buttons();
+        const std::uint32_t extra = input::current().player1.extra;
         const std::uint32_t pressed = extra & ~sc.extra_held;
         sc.extra_held = extra;
         if ((pressed & kToggleButtons) != 0u) {
@@ -926,7 +927,7 @@ void run_update(Guest *g, const CallState &in, GuestRegs &) {
         // game's again.
         if (sc.bgm_focus) std::cout << "[playlist] focus: menu (the screen stopped taking input)" << std::endl;
         sc.bgm_focus = false;
-        sc.extra_held = ext::extra_buttons();
+        sc.extra_held = input::current().player1.extra;
     }
 
     // Placing, as the game does: the name at anchor 0, the arrows at 1 and 2.

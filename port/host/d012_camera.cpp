@@ -25,8 +25,10 @@
 // MIT licence; see port/README.md.
 
 #include "d012_camera.hpp"
+#include "d012_comm_battle.hpp"
 #include "d012_decomp_harness.hpp"
 #include "d012_decomp_pad.hpp"
+#include "d012_input.hpp"
 #include "d012_versus.hpp"
 
 #include "../decomp/battle_camera.h"
@@ -127,10 +129,13 @@ Pad &pad() {
 
 // -1..1 with the plugin's per-axis dead zone. PortableKit centres the stick
 // on 0x80 and pushes it 127 each way.
-float stick_axis(std::uint8_t raw) {
+// A Communication Mode battle's cameras use the default dead zone: both
+// copies turn both cameras, so a setting of one copy's alone would part them.
+constexpr float kSharedDeadZone = 0.18f;
+
+float stick_axis(std::uint8_t raw, float zone) {
     const float value = std::clamp((static_cast<float>(raw) - 128.0f) / 127.0f, -1.0f, 1.0f);
     float magnitude = std::fabs(value);
-    const float zone = options().dead_zone;
     if (magnitude <= zone) return 0.0f;
     magnitude = std::min((magnitude - zone) / (1.0f - zone), 1.0f);
     return value < 0.0f ? -magnitude : magnitude;
@@ -148,6 +153,13 @@ int local_camera(Guest *g, gaddr camera) {
     if (pads == 0) return -1;
     if ((g_ld32(g, pads + PAD_FLAGS) & (PAD_FLAG_REPLAY | PAD_FLAG_MUTED)) != 0) return -1;
     const gaddr listens = g_ld32(g, camera + CAM_PAD);
+    // In a Communication Mode battle on the port's link, both fighters'
+    // cameras listen: each to its own player's injected pad.
+    if (comm_battle::active(g)) {
+        if (listens == pads + PAD_LOGICAL0) return 0;
+        if (listens == pads + PAD_LOGICAL0 + PAD_LOGICAL_SIZE) return 1;
+        return -1;
+    }
     if (listens == pads + PAD_LOGICAL0) return g_ld32s(g, pads + PAD_RAW0_MODE) != 1 ? 0 : -1;
     if (versus::active() && listens == pads + PAD_LOGICAL0 + PAD_LOGICAL_SIZE) return 1;
     return -1;
@@ -158,6 +170,22 @@ int local_camera(Guest *g, gaddr camera) {
 bool camera_stick(Guest *g, gaddr camera, float &turn, float &closer) {
     const int player = local_camera(g, camera);
     if (player < 0) return false;
+    const auto player_flags = [&]() {
+        return static_cast<std::uint16_t>(g_ld32(g, G_PLAYER_FLAGS + 4u * static_cast<std::uint32_t>(player)) &
+                                          0xFFFFu);
+    };
+    if (comm_battle::active(g)) {
+        // That player's right stick as injected this frame (raw pad i's sample,
+        // bytes 10 and 11), with the game's own options for that player and
+        // none of this copy's camera settings: the same turn on both copies.
+        const gaddr sample = g_ld32(g, G_PAD_MANAGER) + static_cast<std::uint32_t>(player) * 0x60u + 0x40u;
+        turn = stick_axis(g_ld8(g, sample + 10u), kSharedDeadZone);
+        closer = -stick_axis(g_ld8(g, sample + 11u), kSharedDeadZone);
+        if (turn == 0.0f && closer == 0.0f) return false;
+        if ((player_flags() & PLAYER_INVERT_HORIZONTAL) != 0) turn = -turn;
+        if ((player_flags() & PLAYER_INVERT_VERTICAL) != 0) closer = -closer;
+        return true;
+    }
     Pad &p = pad();
     // R3 presses SELECT only for a battle combatant's camera (time step
     // source 0, battle 0x08B0E200): the Story Mode world map runs this
@@ -172,8 +200,8 @@ bool camera_stick(Guest *g, gaddr camera, float &turn, float &closer) {
     } else if (battle) {
         p.live_read = p.reads;
     }
-    turn = stick_axis(x);
-    closer = -stick_axis(y);  // the Y axis grows downward
+    turn = stick_axis(x, options().dead_zone);
+    closer = -stick_axis(y, options().dead_zone);  // the Y axis grows downward
     if (turn == 0.0f && closer == 0.0f) return false;
     const Options &o = options();
     if (o.invert_x) turn = -turn;
@@ -181,8 +209,7 @@ bool camera_stick(Guest *g, gaddr camera, float &turn, float &closer) {
     turn *= o.sensitivity;
     closer *= o.sensitivity;
     // Each player's own direction options (slot 1's are copied from player 1's).
-    const std::uint16_t flags =
-        static_cast<std::uint16_t>(g_ld32(g, G_PLAYER_FLAGS + 4u * static_cast<std::uint32_t>(player)) & 0xFFFFu);
+    const std::uint16_t flags = player_flags();
     if ((flags & PLAYER_INVERT_HORIZONTAL) != 0) turn = -turn;
     if ((flags & PLAYER_INVERT_VERTICAL) != 0) closer = -closer;
     return true;
@@ -421,7 +448,7 @@ void install(portablekit::HleRegistrar &hle) {
         const bool hold = (rt.memory().load32(last + 4u) & kHold) != 0u;
         p.x = hold ? 0x80u : rt.memory().load8(last + 10u);
         p.y = hold ? 0x80u : rt.memory().load8(last + 11u);
-        const bool r3 = (ext::extra_buttons() & ext::kExtraR3) != 0u;
+        const bool r3 = (input::current().player1.extra & ext::kExtraR3) != 0u;
         const bool live = p.reads - p.live_read <= kLiveReads;
         if (r3 && live) {
             for (std::uint32_t i = 0; i < count; ++i) {
