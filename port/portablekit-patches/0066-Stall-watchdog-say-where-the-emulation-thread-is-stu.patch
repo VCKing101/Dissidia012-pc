@@ -1,0 +1,314 @@
+From 9747fa5062189f346b8f1fcb35ccd074cfa45e82 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Sun, 1 Nov 2026 09:55:06 +1030
+Subject: [PATCH] Stall watchdog: say where the emulation thread is stuck
+
+When the game shows no frame for five seconds and the scheduler is not
+idle, the watchdog's own thread said only how long, when the scheduler
+last went idle, and the last pad words. That cannot tell a loop in the
+game's code from an HLE call the host never returned from; a player's
+freeze in Dissidia 012's menus logged nothing more.
+
+The runtime now keeps what a watchdog on another thread can read
+(Runtime::activity()): the HLE function in progress, and running counts
+of HLE calls and of starvation boundaries. The emulation thread is the
+only writer, with relaxed atomics: a few plain stores per HLE call, and
+nothing printed unless the game stalls. Runtime::hle_function_name()
+turns the function back into library::name.
+
+The watchdog compares those counts a second apart and adds two lines:
+the guest thread, the function last dispatched, pc and ra, the HLE call
+it is in; then a verdict: every thread waits (the idle dump has the
+rest), stuck in the host's handling of one call, looping in the game's
+code with no HLE call (it is being preempted), looping through HLE calls,
+or neither (a loop within one recompiled function, or host code it
+called).
+
+Checked with Dissidia 012 on Windows (llvm-mingw build): a test-only
+sleep of 8 s inside sceDisplaySetFrameBuf reported "stuck in the port's
+handling of sceDisplay::sceDisplaySetFrameBuf"; a guest branch-to-self
+run by the interpreter reported pc inside the loop and "looping in the
+game's code". A normal boot printed nothing with the limit at 0.5 s.
+Unthrottled title screen: guest time and speed unchanged (0.100 ms,
+1869% against 1871%). The 21 framework tests pass (ad hoc excluded) and
+portablekit_host_check builds. Not seen in a real stall: the "looping
+through HLE calls", "neither" and idle verdicts.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/kernel/kernel.cpp         |  1 +
+ host/kernel/stall_watchdog.cpp | 44 +++++++++++++++++++++++++++-
+ host/kernel/stall_watchdog.hpp | 16 +++++++++-
+ include/psprecomp/runtime.hpp  | 15 ++++++++++
+ src/runtime.cpp                | 53 ++++++++++++++++++++++++++++++++--
+ 5 files changed, 125 insertions(+), 4 deletions(-)
+
+diff --git a/host/kernel/kernel.cpp b/host/kernel/kernel.cpp
+index a811bbe..c7cbbfa 100644
+--- a/host/kernel/kernel.cpp
++++ b/host/kernel/kernel.cpp
+@@ -105,6 +105,7 @@ void Kernel::install(Runtime &runtime, std::uint32_t gp, std::uint32_t image_end
+     std::uint64_t interval = 20'000u;
+     if (const char *text = portablekit::env("STARVATION_INTERVAL")) interval = std::strtoull(text, nullptr, 0);
+     psprecomp::set_runtime_starvation_hook(&native_starvation, interval);
++    stall_watchdog::set_runtime(runtime);
+ }
+ 
+ // ---------------------------------------------------------------------------
+diff --git a/host/kernel/stall_watchdog.cpp b/host/kernel/stall_watchdog.cpp
+index 7889c69..126ab73 100644
+--- a/host/kernel/stall_watchdog.cpp
++++ b/host/kernel/stall_watchdog.cpp
+@@ -2,6 +2,8 @@
+ 
+ #include "kernel/kernel.hpp"
+ #include "profile.hpp"
++#include "psprecomp/common.hpp"
++#include "psprecomp/runtime.hpp"
+ 
+ #include <array>
+ #include <atomic>
+@@ -11,6 +13,7 @@
+ #include <iostream>
+ #include <sstream>
+ #include <thread>
++#include <utility>
+ 
+ namespace portablekit::stall_watchdog {
+ namespace {
+@@ -49,6 +52,7 @@ struct State {
+     std::array<std::atomic<std::int64_t>, kPadHistory> pad_ms{};
+     std::atomic<std::uint64_t> pads{0};
+     std::atomic<std::uint32_t> last_pad{0xFFFFFFFFu};
++    std::atomic<const psprecomp::Runtime *> runtime{nullptr};
+     // Main thread only.
+     std::function<void()> pump;
+     std::int64_t pumped_ms{0};
+@@ -81,10 +85,45 @@ std::string pad_history(const State &s, std::int64_t now) {
+     return out.str();
+ }
+ 
++// Where the emulation thread is, as this thread can see it, and what its
++// counts over the last second say it is doing. Its context is read while it
++// may be writing it; a report can bear a torn value.
++std::string emulation_thread(const State &s, const psprecomp::Runtime::Activity &before,
++                             const psprecomp::Runtime::Activity &after, std::int64_t now) {
++    const psprecomp::Runtime *runtime = s.runtime.load();
++    const char *name = psprecomp::runtime_thread_name();
++    const std::uint64_t calls = after.hle_calls - before.hle_calls;
++    const std::uint64_t preemptions = after.starvation_boundaries - before.starvation_boundaries;
++    const std::string call = runtime != nullptr ? runtime->hle_function_name(after.hle_function) : std::string();
++    std::ostringstream out;
++    out << "[stall] the emulation thread: guest thread " << psprecomp::runtime_thread_uid() << " '"
++        << name << "', last dispatched " << psprecomp::hex32(psprecomp::runtime_dispatch_pc());
++    if (runtime != nullptr)
++        out << ", pc " << psprecomp::hex32(runtime->cpu().pc) << " ra " << psprecomp::hex32(runtime->cpu().gpr[31]);
++    out << "; " << (call.empty() ? std::string("in no HLE call") : "in " + call) << "; in the last second " << calls
++        << " HLE calls and " << preemptions << " preemptions\n[stall] ";
++    if (s.last_idle_ms.load() != 0 && now - s.last_idle_ms.load() < 1500)
++        out << "every guest thread waits: the scheduler's own [stall] lines say on what";
++    else if (calls == 0u && !call.empty())
++        out << "stuck in the port's handling of " << call << ", which has not returned for at least a second";
++    // A preemption is a guest thread that ran a stretch with no HLE call; the
++    // calls counted meanwhile are the other threads' it let run.
++    else if (preemptions != 0u)
++        out << "looping in the game's code with no HLE call (pc is in the loop or the last function it called)";
++    else if (calls != 0u)
++        out << "looping through HLE calls: the game waits for something that does not come";
++    else
++        out << "no HLE call and no preemption: a loop inside one recompiled function, or in host code it called "
++               "(a port's override)";
++    return out.str();
++}
++
+ void watch() {
+     State &s = state();
++    psprecomp::Runtime::Activity before = psprecomp::Runtime::activity();
+     for (;;) {
+         std::this_thread::sleep_for(std::chrono::seconds(1));
++        const psprecomp::Runtime::Activity previous = std::exchange(before, psprecomp::Runtime::activity());
+         const std::int64_t now = now_ms();
+         const std::int64_t stalled = stalled_ms(s, now);
+         if (stalled < stall_limit_ms()) continue;
+@@ -98,7 +137,8 @@ void watch() {
+                                            : "last went idle " + std::to_string(now - s.last_idle_ms.load()) +
+                                                  " ms ago")
+             << "\n"
+-            << pad_history(s, now) << "\n";
++            << pad_history(s, now) << "\n"
++            << emulation_thread(s, previous, before, now) << "\n";
+         std::cerr << out.str() << std::flush;
+     }
+ }
+@@ -140,6 +180,8 @@ void note_pad(std::uint32_t buttons) {
+ 
+ void set_stalled_pump(std::function<void()> pump) { state().pump = std::move(pump); }
+ 
++void set_runtime(const psprecomp::Runtime &runtime) { state().runtime.store(&runtime); }
++
+ void idle(const Kernel &kernel) {
+     if (!enabled()) return;
+     State &s = state();
+diff --git a/host/kernel/stall_watchdog.hpp b/host/kernel/stall_watchdog.hpp
+index aa7009c..c2a0b9f 100644
+--- a/host/kernel/stall_watchdog.hpp
++++ b/host/kernel/stall_watchdog.hpp
+@@ -3,6 +3,10 @@
+ #include <cstdint>
+ #include <functional>
+ 
++namespace psprecomp {
++class Runtime;
++}
++
+ namespace portablekit {
+ class Kernel;
+ }
+@@ -18,7 +22,13 @@ class Kernel;
+ //   seconds while it lasts.
+ // - From a thread of its own, for a stall anywhere else: how long since the
+ //   last frame, when the scheduler last went idle, and the last pad words
+-//   handed to the game.
++//   handed to the game. Then where the emulation thread is: the guest thread
++//   it runs, the function last dispatched, pc and ra, the HLE call it is
++//   inside if any, and from its counts over the last second (HLE calls,
++//   starvation boundaries) whether it is stuck in the port's handling of a
++//   call, looping through calls, or looping in the game's code without any
++//   (psprecomp::Runtime::activity(); a few relaxed stores per HLE call while
++//   the game runs, nothing written unless it stalls).
+ //
+ // <prefix>_STALL_WATCHDOG=0 turns it off; =N waits N seconds instead of five.
+ namespace portablekit::stall_watchdog {
+@@ -38,4 +48,8 @@ void idle(const Kernel &kernel);
+ // quit event). Set once by whoever owns the window.
+ void set_stalled_pump(std::function<void()> pump);
+ 
++// The runtime whose emulation thread the report describes (its context and
++// HLE names). Set once, by the kernel's install.
++void set_runtime(const psprecomp::Runtime &runtime);
++
+ } // namespace portablekit::stall_watchdog
+diff --git a/include/psprecomp/runtime.hpp b/include/psprecomp/runtime.hpp
+index 67a15ba..e425bd1 100644
+--- a/include/psprecomp/runtime.hpp
++++ b/include/psprecomp/runtime.hpp
+@@ -63,6 +63,21 @@ public:
+     NidRegistry &nids() noexcept;
+     const NidRegistry &nids() const noexcept;
+ 
++    // What the emulation thread is doing, for a watchdog on another thread:
++    // the HLE function it is inside (null when none), and running counts of
++    // HLE calls and of starvation boundaries (a guest thread preempted after a
++    // stretch with no import). Written by the emulation thread only, with
++    // relaxed atomics; read elsewhere they can be a moment old.
++    struct Activity {
++        const HleFunction *hle_function{};
++        std::uint64_t hle_calls{};
++        std::uint64_t starvation_boundaries{};
++    };
++    [[nodiscard]] static Activity activity() noexcept;
++    // "library::name" of a registered HLE function (the NID in hex when its
++    // name is not known); empty when it is none of them.
++    [[nodiscard]] std::string hle_function_name(const HleFunction *function) const;
++
+     void register_function(std::uint32_t address, RecompiledFunction function, std::string name);
+     void register_hle(std::string library, std::uint32_t nid, HleFunction function);
+     // Binds a PSP import stub's address, so a jump to it calls the HLE and
+diff --git a/src/runtime.cpp b/src/runtime.cpp
+index 72c0ad7..3531431 100644
+--- a/src/runtime.cpp
++++ b/src/runtime.cpp
+@@ -5,6 +5,7 @@
+ 
+ #include <algorithm>
+ #include <array>
++#include <atomic>
+ #include <cstdlib>
+ #include <cstring>
+ #include <iostream>
+@@ -28,6 +29,27 @@ RuntimePostImportHook g_post_import_hook = nullptr;
+ std::int32_t g_runtime_thread_uid = -1;
+ std::array<char, 64> g_runtime_thread_name{};
+ std::uint32_t g_runtime_dispatch_pc = 0u;
++// Runtime::activity(). The emulation thread is the only writer, so a count
++// goes up by a relaxed load and store, a plain one on the usual hosts.
++std::atomic<const Runtime::HleFunction *> g_activity_hle_function{nullptr};
++std::atomic<std::uint64_t> g_activity_hle_calls{0u};
++std::atomic<std::uint64_t> g_activity_starvation_boundaries{0u};
++
++void count_activity(std::atomic<std::uint64_t> &count) noexcept {
++    count.store(count.load(std::memory_order_relaxed) + 1u, std::memory_order_relaxed);
++}
++
++// Marks an HLE call in progress for Runtime::activity(), until it returns or
++// throws.
++struct HleActivity {
++    explicit HleActivity(const Runtime::HleFunction *function) noexcept {
++        count_activity(g_activity_hle_calls);
++        g_activity_hle_function.store(function, std::memory_order_relaxed);
++    }
++    ~HleActivity() { g_activity_hle_function.store(nullptr, std::memory_order_relaxed); }
++    HleActivity(const HleActivity &) = delete;
++    HleActivity &operator=(const HleActivity &) = delete;
++};
+ RuntimeHeartbeatHook g_heartbeat_hook = nullptr;
+ std::uint64_t g_heartbeat_interval = 0u;
+ RuntimeStarvationHook g_starvation_hook = nullptr;
+@@ -206,6 +228,7 @@ bool Runtime::run_starvation_boundary(AllegrexContext &ctx) {
+     if (g_starvation_hook == nullptr || interval == 0u) return true;
+     // Preserve excess work if a context switch deferred several boundaries.
+     dispatches_since_import_ -= std::min(dispatches_since_import_, interval);
++    count_activity(g_activity_starvation_boundaries);
+     const RuntimeExecutionContextToken before = capture_runtime_execution_context();
+     g_starvation_hook(*this, ctx);
+     const bool same_context = runtime_execution_context_matches(before);
+@@ -1377,7 +1400,10 @@ void Runtime::invoke_import_cached(std::uint32_t slot, std::string_view library,
+     }
+ 
+     if (hle_first_calls_) note_first_hle_call(library, nid, ctx);
+-    (*bound)(*this, ctx);
++    {
++        const HleActivity activity(bound);
++        (*bound)(*this, ctx);
++    }
+     if (!stopped_ && g_post_import_hook != nullptr) g_post_import_hook(*this, ctx);
+ }
+ 
+@@ -1397,10 +1423,33 @@ void Runtime::invoke_import(std::string_view library, std::uint32_t nid, Allegre
+         return;
+     }
+     if (hle_first_calls_) note_first_hle_call(library, nid, ctx);
+-    function_it->second(*this, ctx);
++    {
++        const HleActivity activity(&function_it->second);
++        function_it->second(*this, ctx);
++    }
+     if (!stopped_ && g_post_import_hook != nullptr) g_post_import_hook(*this, ctx);
+ }
+ 
++Runtime::Activity Runtime::activity() noexcept {
++    return Activity{g_activity_hle_function.load(std::memory_order_relaxed),
++                    g_activity_hle_calls.load(std::memory_order_relaxed),
++                    g_activity_starvation_boundaries.load(std::memory_order_relaxed)};
++}
++
++// Only the emulation thread changes the HLE table (at start, and when a
++// module's imports are bound), so another thread can walk it while that one
++// is stalled.
++std::string Runtime::hle_function_name(const HleFunction *function) const {
++    if (function == nullptr) return {};
++    for (const auto &[library, functions] : hle_) {
++        for (const auto &[nid, registered] : functions) {
++            if (&registered != function) continue;
++            return library + "::" + nids_.resolve(library, nid).value_or(hex32(nid));
++        }
++    }
++    return {};
++}
++
+ AllegrexContext &Runtime::cpu() noexcept { return cpu_; }
+ const AllegrexContext &Runtime::cpu() const noexcept { return cpu_; }
+ 
+-- 
+2.53.0.windows.1
+
