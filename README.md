@@ -39,6 +39,8 @@ game's executable and overlays.
   ([guide](docs/port/mod-folder.md#8-making-a-mod-with-the-battle-bgm-maker)).
 - **Local split-screen versus**: two players on one PC, each with their own controller and camera
   ([notes](docs/port/local-versus.md)).
+- **HD texture packs** in PPSSPP's format, and a menu option that dumps the game's textures to start one
+  ([below](#hd-texture-packs)).
 
 ## BGM playlist selector
 
@@ -171,6 +173,40 @@ with names like `8c0b30f1.edat`, and a `PARAM.PBP`), not in another folder insid
   stores it may not load; the log says how many files are.
 - DLC music takes room in the game's list of 256 tracks, so with all 43 of those tracks, mods can add 82 tracks
   rather than 125.
+
+## HD texture packs
+
+The port draws texture packs made for PPSSPP: a folder with a `textures.ini` and the images it names. Put the pack's
+files in a folder named **`ULUS10566`** in the data folder's `textures` folder, so that `textures.ini` is directly
+inside it:
+
+| Installed with | Put the pack in |
+| --- | --- |
+| The Windows setup | `data\textures\ULUS10566\` in the install folder |
+| `setup.ps1` (from source) | `build\port\data\textures\ULUS10566\` |
+| The Steam Deck package | `data/textures/ULUS10566/` in its folder |
+
+Or open the menu (Esc, or L3 + R3 on a controller), go to **Video**, and choose **Import texture pack…**: it finds the
+pack in a folder you pick, including PPSSPP's `PSP/TEXTURES/...` layout, checks it, and copies it in or uses it where
+it is. The **Texture pack** row turns packs on and off and says how many textures loaded.
+
+- **Images must be PNG.** Packs that ship `.dds`, `.ktx2` or `.zim` images are not read yet. A zipped pack
+  (`textures.zip`) has to be unpacked first, and packs whose `textures.ini` says `hash = quick` do not load.
+- **Packs for another release** of the game load only if their `[games]` section lists `ULUS10566`, and images of
+  text made for that release may not match.
+- **A replaced texture appears a frame late** the first time it is drawn (two or three frames for 2048x2048
+  images), while its image is decoded; after that it is replaced at once.
+- **To check a pack:** start the game with `D012_TRACE_TEXTURE_PACK=1` set; the log lists each texture the game
+  draws, with its key and whether the pack has an image for it.
+
+To **make a pack**, turn on **Dump textures** on the same page and play the scenes you want to change. Each texture
+the game loads is written once, as a PNG named by its key, into `textures\dump\ULUS10566\` in the data folder, and
+that folder is a pack as it is: edit or upscale the images, keeping their names, and put them in a pack folder. The
+option is off again each time the game starts. A 512-pixel-tall texture can get a second key once the game draws
+further down it, and a pack needs an image for each key.
+
+The [texture pack guide](docs/port/texture-packs.md) has the details: what `textures.ini` may contain, how keys work,
+an example pack, how to set the trace variable, memory use, and what was tested.
 
 ## Repository layout
 
