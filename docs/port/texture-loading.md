@@ -162,10 +162,34 @@ What PortableKit would need: a call such as `TexturePack::prefetch(memory, addre
 buffer_width)` that hashes the pixels and queues the matching images, safe to call from the game's loader thread
 while the renderer draws.
 
-## 8. Not verified
+## 8. How long the pop-in is
 
-- How long the pop-in is at normal speed; all traces here ran unthrottled, so the order of events is known but not
-  the time between them.
+Measured on 1 November 2026 at normal speed on a Windows PC (i7-12700K, two pack loader threads), with timing
+added to the pack trace for the measurement only: from the first draw's request, through the PNG decode, to the
+upload that the next draw uses.
+
+| Case | Images | Decode | First draw to replaced draw |
+| --- | --- | --- | --- |
+| Title screen | 256x64, 256x128 (4x) | 0.3 ms | 35-38 ms |
+| Title screen | 2048x2048 (4x of the 512x512 atlas) | 45-49 ms | 68-81 ms |
+| Quick Battle, Chaos Shrine (46 images first drawn at normal speed) | 4x of everything but text lines: 64x64 to 2048x1024 | median 2.0 ms, at most 23 ms (1024x1024) | median 35 ms; 7 at 184-194 ms; 2 at 3.1 and 6.8 s |
+
+- **V** The floor is one game frame (33 ms at the game's 30 Hz; two frames on a 60 Hz display): the renderer asks for
+  the image at the first draw and draws the original in that frame however fast the decode is, and the upload waits
+  for the texture's next draw. A 1024x1024 image decodes within that frame; a 2048x2048 one takes two or three.
+- **I** The slow cases are not long pop-ins: their decodes took under 25 ms, so the image was waiting for the
+  texture to be drawn again (a camera cut in the battle intro, a texture drawn on one frame and then seconds later).
+  The trace cannot tell the two apart.
+- **V** The pack did not slow the battle measurably: the seconds below full speed (75-81%, frames of about 500 ms)
+  are the same without a pack and come from the route's screenshots. One second of the intro ran at 76% with the
+  pack and 86% without; one run each, so not conclusive.
+- **I** So a load-time prefetch removes one game frame of the original for nearly every texture. Waiting a few
+  milliseconds at the first draw for the decode would remove it for small images only (median decode 2 ms), at the
+  cost of a short stall.
+
+## 9. Not verified
+
+- The pop-in on the Steam Deck (a slower CPU; expect decodes about twice as long).
 - The layouts of the image library's object and of a model's texture entry.
 - Fighter textures: no fighter texture was traced; the two RAM textures picked in the battle run turned out to be
   menu textures.

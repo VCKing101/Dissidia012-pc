@@ -103,7 +103,8 @@ disassembler and the new `tools/port/` scripts cover the analysis.
 
 - [Texture loading](texture-loading.md): where the game's textures come from (package GIMs used in place, an image
   library for GIM/TIM2/BMP, model textures copied into VRAM, text drawn at run time), traced with write watches, for
-  decoding texture pack images before a texture's first draw. Hooks proposed; nothing built.
+  decoding texture pack images before a texture's first draw. The pop-in measured: one game frame for most images,
+  two or three for 2048x2048 ones. Hooks proposed; nothing built.
 
 ## Next steps
 
