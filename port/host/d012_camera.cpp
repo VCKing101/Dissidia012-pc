@@ -29,6 +29,7 @@
 #include "d012_decomp_harness.hpp"
 #include "d012_decomp_pad.hpp"
 #include "d012_input.hpp"
+#include "d012_net.hpp"
 #include "d012_versus.hpp"
 
 #include "../decomp/battle_camera.h"
@@ -129,9 +130,6 @@ Pad &pad() {
 
 // -1..1 with the plugin's per-axis dead zone. PortableKit centres the stick
 // on 0x80 and pushes it 127 each way.
-// A Communication Mode battle's cameras use the default dead zone: both
-// copies turn both cameras, so a setting of one copy's alone would part them.
-constexpr float kSharedDeadZone = 0.18f;
 
 float stick_axis(std::uint8_t raw, float zone) {
     const float value = std::clamp((static_cast<float>(raw) - 128.0f) / 127.0f, -1.0f, 1.0f);
@@ -176,12 +174,18 @@ bool camera_stick(Guest *g, gaddr camera, float &turn, float &closer) {
     };
     if (comm_battle::active(g)) {
         // That player's right stick as injected this frame (raw pad i's sample,
-        // bytes 10 and 11), with the game's own options for that player and
-        // none of this copy's camera settings: the same turn on both copies.
+        // bytes 10 and 11), with that player's own camera settings (each copy
+        // sends its player's as the battle links) and the game's own options
+        // for that player: the same turn on both copies.
+        const net::battle::Camera settings = net::battle::camera(player);
         const gaddr sample = g_ld32(g, G_PAD_MANAGER) + static_cast<std::uint32_t>(player) * 0x60u + 0x40u;
-        turn = stick_axis(g_ld8(g, sample + 10u), kSharedDeadZone);
-        closer = -stick_axis(g_ld8(g, sample + 11u), kSharedDeadZone);
+        turn = stick_axis(g_ld8(g, sample + 10u), settings.dead_zone);
+        closer = -stick_axis(g_ld8(g, sample + 11u), settings.dead_zone);
         if (turn == 0.0f && closer == 0.0f) return false;
+        if (settings.invert_x) turn = -turn;
+        if (settings.invert_y) closer = -closer;
+        turn *= settings.sensitivity;
+        closer *= settings.sensitivity;
         if ((player_flags() & PLAYER_INVERT_HORIZONTAL) != 0) turn = -turn;
         if ((player_flags() & PLAYER_INVERT_VERTICAL) != 0) closer = -closer;
         return true;
@@ -433,6 +437,8 @@ void install(portablekit::HleRegistrar &hle) {
         return;
     }
     const Options &o = options();
+    // What an online battle's other copy turns this player's camera with.
+    net::battle::set_camera({o.dead_zone, o.sensitivity, o.invert_x, o.invert_y});
     std::cout << "[camera] right-stick battle camera on (dead zone " << o.dead_zone << ", sensitivity "
               << o.sensitivity << (o.invert_x ? ", X inverted" : "") << (o.invert_y ? ", Y inverted" : "")
               << "); R3 recentres" << std::endl;

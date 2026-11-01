@@ -3,9 +3,14 @@
 // Packets (little endian) start "D0NL", u8 kind, then a 24-bit link tag (0 for
 // the link from start-up; a battle's own for a battle link), so a packet left
 // over from an earlier battle is never taken for this one:
-// - HELLO (1), the joining copy to the listening one: u32 version.
+// - HELLO (1), the joining copy to the listening one: u32 version, then ABOUT.
 // - WELCOME (2), the listening copy's answer: u32 version, u32 input delay,
-//   u64 the PSP clock's epoch, u8 length and the save answers.
+//   u64 the PSP clock's epoch, u8 length and the save answers, then ABOUT.
+// - ABOUT: this copy's camera settings (f32 dead zone, f32 sensitivity, u8
+//   inverts: 1 X, 2 Y), u8 count, then each must-match item's what and value
+//   (u8 length and bytes each; battle::must_match()).
+// - REFUSE (7), the listening copy's answer to a HELLO of another version or
+//   with other must-match values: u8 length and what differs, for the player.
 // - INPUT (3): u64 how many of the other copy's frames this copy holds (all
 //   frames below it), u64 the first frame carried, u16 their count, u16
 //   spare, u64 a checked read and u64 its hash (read ~0 for none), u32 this
@@ -42,6 +47,9 @@
 #include "adhoc/session.hpp"
 
 #include "install/user_data.hpp"
+#if defined(PORTABLEKIT_HAS_RENDERER)
+#include "ui/message_dialog.hpp"
+#endif
 
 #if defined(_WIN32)
 #include <winsock2.h>
@@ -65,9 +73,11 @@
 #include <cstring>
 #include <ctime>
 #include <exception>
+#include <functional>
 #include <iostream>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <random>
 #include <string>
 #include <thread>
@@ -98,7 +108,8 @@ constexpr std::uint8_t kInput = 3u;
 constexpr std::uint8_t kBye = 4u;
 constexpr std::uint8_t kProbe = 5u;
 constexpr std::uint8_t kProbeEcho = 6u;
-constexpr std::uint32_t kVersion = 4u;
+constexpr std::uint8_t kRefuse = 7u;
+constexpr std::uint32_t kVersion = 5u;
 constexpr std::size_t kHead = 8u;
 constexpr std::size_t kInputHead = kHead + 48u;
 constexpr std::size_t kLocalSize = 16u;
@@ -108,7 +119,9 @@ constexpr std::uint32_t kTagMask = 0xFFFFFFu;
 constexpr std::uint32_t kNoTime = ~0u;
 constexpr auto kResend = std::chrono::milliseconds(20);
 constexpr auto kHelloEvery = std::chrono::milliseconds(250);
-constexpr auto kLost = std::chrono::seconds(10);
+constexpr auto kLost = std::chrono::seconds(10);    // nothing heard from the other copy
+constexpr auto kGiveUp = std::chrono::seconds(30);  // a frame of the other copy's that never comes
+constexpr auto kQuietWait = std::chrono::milliseconds(500);  // a wait this long gets a screen
 constexpr auto kLongWait = std::chrono::milliseconds(100);
 constexpr auto kLastFrames = std::chrono::milliseconds(1000);
 constexpr std::uint64_t kReportEvery = 900u;  // frames between reports of the waits
@@ -127,6 +140,10 @@ struct Link {
     bool decided = false;  // the listening copy: the delay is settled, so HELLOs get a WELCOME
     std::vector<std::uint32_t> probe_trips;
     bool lost = false;
+    bool leaving = false;  // this copy's player chose to leave while it waited
+    bool refused = false;  // the other copy differs (REFUSE), or this one refused it
+    std::string refusal;   // what differs, as the player reads it
+    battle::Camera their_camera;
     bool left = false;  // the other copy said BYE
     Clock::time_point left_at{};
     bool apart = false;
@@ -188,6 +205,99 @@ template <typename T> T get(const std::uint8_t *in) {
     T v;
     std::memcpy(&v, in, sizeof v);
     return v;
+}
+
+// What must match (battle::must_match) and this copy's camera settings
+// (battle::set_camera): sent with HELLO and WELCOME.
+std::vector<std::pair<std::string, std::string>> &matched() {
+    static std::vector<std::pair<std::string, std::string>> items;
+    return items;
+}
+
+battle::Camera &my_camera() {
+    static battle::Camera camera;
+    return camera;
+}
+
+// After HELLO's version and WELCOME's answers: f32 dead zone, f32
+// sensitivity, u8 inverts (1 X, 2 Y), u8 count, then each item's what and
+// value, each a u8 length and its bytes.
+void put_about(std::vector<std::uint8_t> &out) {
+    const battle::Camera &camera = my_camera();
+    for (const float value : {camera.dead_zone, camera.sensitivity}) {
+        std::uint32_t bits = 0;
+        std::memcpy(&bits, &value, 4u);
+        out.resize(out.size() + 4u);
+        put32(out, out.size() - 4u, bits);
+    }
+    out.push_back(static_cast<std::uint8_t>((camera.invert_x ? 1u : 0u) | (camera.invert_y ? 2u : 0u)));
+    const auto &items = matched();
+    const std::size_t count = std::min<std::size_t>(items.size(), 255u);
+    out.push_back(static_cast<std::uint8_t>(count));
+    const auto put_text = [&](const std::string &text) {
+        const std::size_t length = std::min<std::size_t>(text.size(), 255u);
+        out.push_back(static_cast<std::uint8_t>(length));
+        out.insert(out.end(), text.begin(), text.begin() + static_cast<std::ptrdiff_t>(length));
+    };
+    for (std::size_t i = 0; i < count; ++i) {
+        put_text(items[i].first);
+        put_text(items[i].second);
+    }
+}
+
+struct About {
+    battle::Camera camera;
+    std::vector<std::pair<std::string, std::string>> items;
+};
+
+std::optional<About> take_about(const std::uint8_t *data, std::size_t size) {
+    if (size < 10u) return std::nullopt;
+    About about;
+    float values[2] = {};
+    for (int i = 0; i < 2; ++i) {
+        const std::uint32_t bits = get<std::uint32_t>(data + 4u * static_cast<std::size_t>(i));
+        std::memcpy(&values[i], &bits, 4u);
+    }
+    // As the camera module bounds its own settings.
+    about.camera.dead_zone = std::isfinite(values[0]) ? std::clamp(values[0], 0.0f, 0.9f) : 0.18f;
+    about.camera.sensitivity = std::isfinite(values[1]) ? std::clamp(values[1], 0.05f, 4.0f) : 1.0f;
+    about.camera.invert_x = (data[8] & 1u) != 0u;
+    about.camera.invert_y = (data[8] & 2u) != 0u;
+    const std::size_t count = data[9];
+    std::size_t at = 10u;
+    const auto take_text = [&](std::string &text) {
+        if (at >= size) return false;
+        const std::size_t length = data[at++];
+        if (at + length > size) return false;
+        text.assign(reinterpret_cast<const char *>(data + at), length);
+        at += length;
+        return true;
+    };
+    for (std::size_t i = 0; i < count; ++i) {
+        std::string what, value;
+        if (!take_text(what) || !take_text(value)) return std::nullopt;
+        about.items.emplace_back(std::move(what), std::move(value));
+    }
+    return about;
+}
+
+// What differs between this copy's list and `theirs`, for the player: "the
+// port's version and mods that change the game".
+std::string differences(const std::vector<std::pair<std::string, std::string>> &theirs) {
+    const auto &mine = matched();
+    std::vector<std::string> names;
+    for (const auto &[what, value] : mine) {
+        const auto found =
+            std::find_if(theirs.begin(), theirs.end(), [&](const auto &item) { return item.first == what; });
+        if (found == theirs.end() || found->second != value) names.push_back(what);
+    }
+    for (const auto &item : theirs)
+        if (std::none_of(mine.begin(), mine.end(), [&](const auto &m) { return m.first == item.first; }))
+            names.push_back(item.first);
+    std::string text;
+    for (std::size_t i = 0; i < names.size(); ++i)
+        text += (i == 0u ? "" : i + 1u == names.size() ? " and " : ", ") + names[i];
+    return text;
 }
 
 std::uint32_t clock_ms() {
@@ -295,7 +405,34 @@ void send_welcome(const Link &l) {
     put64(out, kHead + 8u, l.epoch);
     out[kHead + 16u] = static_cast<std::uint8_t>(l.answers.size());
     std::memcpy(out.data() + kHead + 17u, l.answers.data(), l.answers.size());
+    put_about(out);
     send(l, out);
+}
+
+void send_hello(const Link &l) {
+    std::vector<std::uint8_t> out = packet(l, kHello, kHead + 4u);
+    put32(out, kHead, kVersion);
+    put_about(out);
+    send(l, out);
+}
+
+// The listening copy: the copy at `to` differs in `what`, so this battle does
+// not start. Said to it a few times, since a datagram may be lost.
+void refuse(Link &l, const sockaddr_in &to, const std::string &what) {
+    std::vector<std::uint8_t> out = packet(l, kRefuse, kHead + 1u);
+    const std::size_t length = std::min<std::size_t>(what.size(), 255u);
+    out[kHead] = static_cast<std::uint8_t>(length);
+    out.insert(out.end(), what.begin(), what.begin() + static_cast<std::ptrdiff_t>(length));
+    Simulated &sim = Simulated::get();
+    for (int i = 0; i < 3; ++i) {
+        if (sim.on()) sim.send(l.socket, to, out);
+        else send_now(l.socket, to, out);
+    }
+    if (!l.refused)
+        std::cout << "[" << l.name << "] the other copy differs in " << what << "; this battle does not start"
+                  << std::endl;
+    l.refused = true;
+    l.refusal = what;
 }
 
 void send_input(Link &l) {
@@ -408,21 +545,39 @@ void handle(Link &l, const std::uint8_t *data, std::size_t size, const sockaddr_
     if (size < kHead || std::memcmp(data, kMagic, 4u) != 0 || tag_of(data) != l.tag) return;
     const std::uint8_t kind = data[4];
     if (kind == kHello && l.player1 && size >= kHead + 4u) {
-        if (get<std::uint32_t>(data + kHead) != kVersion) {
-            std::cerr << "[" << l.name << "] a copy with another version of the link asked to join; ignored"
-                      << std::endl;
+        // Another version of the link is another version of the port.
+        const std::optional<About> about = get<std::uint32_t>(data + kHead) == kVersion
+                                               ? take_about(data + kHead + 4u, size - kHead - 4u)
+                                               : std::nullopt;
+        if (!about) {
+            refuse(l, from, "the port's version");
+            return;
+        }
+        if (const std::string differs = differences(about->items); !differs.empty()) {
+            refuse(l, from, differs);
             return;
         }
         if (!l.peer_known) {
             l.peer = from;
             l.peer_known = true;
             l.heard = Clock::now();
+            l.their_camera = about->camera;
         }
         if (same_address(from, l.peer) && l.decided) send_welcome(l);
         return;
     }
     if (!l.peer_known || !same_address(from, l.peer)) return;
     l.heard = Clock::now();
+    if (kind == kRefuse && !l.player1 && size >= kHead + 1u) {
+        const std::size_t length = std::min<std::size_t>(data[kHead], size - kHead - 1u);
+        const std::string what(reinterpret_cast<const char *>(data + kHead + 1u), length);
+        if (!l.refused)
+            std::cout << "[" << l.name << "] the other copy says this one differs in " << what
+                      << "; this battle does not start" << std::endl;
+        l.refused = true;
+        l.refusal = what;
+        return;
+    }
     if (kind == kProbe && !l.player1 && size >= kHead + 4u) {
         std::vector<std::uint8_t> out = packet(l, kProbeEcho, kHead + 4u);
         std::memcpy(out.data() + kHead, data + kHead, 4u);
@@ -440,6 +595,8 @@ void handle(Link &l, const std::uint8_t *data, std::size_t size, const sockaddr_
         l.delay = get<std::uint32_t>(data + kHead + 4u);
         l.epoch = get<std::uint64_t>(data + kHead + 8u);
         l.answers.assign(reinterpret_cast<const char *>(data + kHead + 17u), length);
+        if (const std::optional<About> about = take_about(data + kHead + 17u + length, size - kHead - 17u - length))
+            l.their_camera = about->camera;
         l.welcomed = true;
         return;
     }
@@ -544,20 +701,33 @@ std::uint32_t delay_for(std::uint32_t trip) {
     return std::clamp<std::uint32_t>(static_cast<std::uint32_t>(std::ceil(frames)), 2u, 10u);
 }
 
-// The listening copy, with the delay on auto: times a few round trips to the
-// joining copy and settles the delay from their median.
-void probe_delay(Link &l) {
+// A wait for the other copy: `turn` (one short turn of it, true while the wait
+// goes on) runs as it is for half a second, then on a screen that tells the
+// player and lets them leave by holding back. False when they left (or closed
+// the window).
+bool wait_for(const std::function<bool()> &turn) {
     const auto began = Clock::now();
-    auto last = began - kProbeEvery;
-    while (l.probe_trips.size() < kProbes && Clock::now() - began < kProbeFor) {
-        if (Clock::now() - last >= kProbeEvery) {
-            std::vector<std::uint8_t> out = packet(l, kProbe, kHead + 4u);
-            put32(out, kHead, clock_ms());
-            send(l, out);
-            last = Clock::now();
-        }
-        receive(l, std::chrono::milliseconds(10));
+    while (Clock::now() - began < kQuietWait)
+        if (!turn()) return true;
+#if defined(PORTABLEKIT_HAS_RENDERER)
+    namespace ui = portablekit::ui;
+    const ui::WaitEnd end = ui::wait_over_game([&](ui::WaitView &view) {
+        if (!turn()) return false;
+        const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(Clock::now() - began).count();
+        view.text = "Waiting for the other player\xE2\x80\xA6 " + std::to_string(seconds) + " s";
+        return true;
+    });
+    return end != ui::WaitEnd::Left && end != ui::WaitEnd::WindowClosed;
+#else
+    while (turn()) {
     }
+    return true;
+#endif
+}
+
+// The listening copy, with the delay on auto, once it has timed a few round
+// trips to the joining copy: the delay from their median.
+void settle_delay(Link &l) {
     if (l.probe_trips.empty()) {
         l.delay = 3u;
         std::cout << "[" << l.name << "] no round trip timed; input delay " << l.delay << " frames" << std::endl;
@@ -571,11 +741,13 @@ void probe_delay(Link &l) {
               << " ms (" << trips.size() << " timed, " << trips.front() << " to " << trips.back() << ")" << std::endl;
 }
 
-// Opens `l` and waits up to D012_NET_WAIT seconds for the other copy: as
-// player 1 listening on `address`, else joining it. Player 1's copy sets the
-// input delay (D012_NET_DELAY, a number or "auto"), and its epoch and
-// answers, which the other takes.
-bool connect(Link &l, bool host, const sockaddr_in &address, const std::string &where) {
+// Opens `l` and waits up to D012_NET_WAIT seconds (else `wait_default`) for
+// the other copy: as player 1 listening on `address`, else joining it. Player
+// 1's copy sets the input delay (D012_NET_DELAY, a number or "auto"), and its
+// epoch and answers, which the other takes, and refuses a copy whose
+// must-match list differs. On failure `l.refused` or `l.leaving` says why, or
+// neither: nobody came.
+bool connect(Link &l, bool host, const sockaddr_in &address, const std::string &where, unsigned wait_default) {
     const char *name = l.name;
     const char *unit = l.unit;
     const std::uint32_t tag = l.tag;
@@ -604,37 +776,64 @@ bool connect(Link &l, bool host, const sockaddr_in &address, const std::string &
         std::cerr << "[" << l.name << "] cannot open a UDP socket for " << where << std::endl;
         return false;
     }
-    const auto wait = std::chrono::seconds(env_number("D012_NET_WAIT", 300u, 3600u));
+    const auto wait = std::chrono::seconds(env_number("D012_NET_WAIT", wait_default, 3600u));
     const auto began = Clock::now();
     if (host) {
         const std::string delay = setting("D012_NET_DELAY", "online.input_delay");
-        const bool automatic = delay.empty() || delay == "auto";
-        if (!automatic) {
+        if (!delay.empty() && delay != "auto") {
             l.delay = static_cast<std::uint32_t>(std::min<unsigned long>(std::strtoul(delay.c_str(), nullptr, 10), 30u));
             l.decided = true;
         }
         std::cout << "[" << l.name << "] waiting for the other copy on " << where << std::endl;
-        while (!l.peer_known && Clock::now() - began < wait) receive(l, std::chrono::milliseconds(100));
-        if (l.peer_known && automatic) {
-            probe_delay(l);
-            l.decided = true;
-            send_welcome(l);
-        }
     } else {
         std::cout << "[" << l.name << "] joining the other copy on " << where << std::endl;
-        auto hello = Clock::now() - kHelloEvery;
-        while (!l.welcomed && Clock::now() - began < wait) {
-            if (Clock::now() - hello >= kHelloEvery) {
-                std::vector<std::uint8_t> out = packet(l, kHello, kHead + 4u);
-                put32(out, kHead, kVersion);
-                send(l, out);
-                hello = Clock::now();
-            }
-            receive(l, std::chrono::milliseconds(50));
-        }
     }
-    if (!l.peer_known || (!host && !l.welcomed)) {
-        std::cerr << "[" << l.name << "] the other copy did not come" << std::endl;
+    auto hello = Clock::now() - kHelloEvery;
+    auto probed = Clock::time_point{};
+    std::optional<Clock::time_point> probing;
+    // One turn of the wait: the joining copy says HELLO until it is welcomed;
+    // the listening copy waits for one, then with the delay on auto times
+    // round trips (PROBE) for up to kProbeFor and welcomes it.
+    const auto turn = [&]() -> bool {
+        const auto now = Clock::now();
+        if (l.refused || now - began >= wait) return false;
+        if (!host) {
+            if (now - hello >= kHelloEvery) {
+                send_hello(l);
+                hello = now;
+            }
+            receive(l, std::chrono::milliseconds(10));
+            return !l.welcomed && !l.refused;
+        }
+        if (!l.peer_known) {
+            receive(l, std::chrono::milliseconds(10));
+            return !l.peer_known || !l.decided;
+        }
+        if (l.decided) return false;
+        if (!probing) probing = now;
+        if (now - probed >= kProbeEvery) {
+            std::vector<std::uint8_t> out = packet(l, kProbe, kHead + 4u);
+            put32(out, kHead, clock_ms());
+            send(l, out);
+            probed = now;
+        }
+        receive(l, std::chrono::milliseconds(10));
+        if (l.probe_trips.size() < kProbes && Clock::now() - *probing < kProbeFor) return true;
+        settle_delay(l);
+        l.decided = true;
+        send_welcome(l);
+        return false;
+    };
+    l.leaving = !wait_for(turn);
+    // A refused copy keeps saying HELLO for a while: a moment more of
+    // answering it, in case the first REFUSEs were lost.
+    if (host && l.refused) {
+        const auto until = Clock::now() + std::chrono::seconds(1);
+        while (Clock::now() < until) receive(l, std::chrono::milliseconds(50));
+    }
+    if (l.leaving || l.refused || (host ? !l.peer_known || !l.decided : !l.welcomed)) {
+        if (l.leaving) std::cout << "[" << l.name << "] this copy's player left while waiting" << std::endl;
+        else if (!l.refused) std::cerr << "[" << l.name << "] the other copy did not come" << std::endl;
         close_socket(l.socket);
         l.socket = kNoSocket;
         return false;
@@ -654,17 +853,25 @@ std::pair<Local, Local> trade(Link &l, std::uint64_t frame, const Local &local) 
     send_input(l);
     if (frame >= l.delay && !l.lost && l.their_count <= frame) {
         const auto began = Clock::now();
-        while (l.their_count <= frame) {
+        const auto turn = [&]() -> bool {
             receive(l, std::chrono::milliseconds(2));
             const auto now = Clock::now();
             if (now - l.sent >= kResend) send_input(l);
             // After a BYE, its last frames may still be on their way (packets
             // can pass each other): a moment for them.
-            if ((l.left && now - l.left_at >= kLastFrames) || now - l.heard >= kLost) {
+            if ((l.left && now - l.left_at >= kLastFrames) || now - l.heard >= kLost || now - began >= kGiveUp) {
                 l.lost = true;
                 std::cerr << "[" << l.name << "] lost the other copy at " << l.unit << " " << frame << std::endl;
-                break;
             }
+            return l.their_count <= frame && !l.lost;
+        };
+        if (!wait_for(turn)) {
+            l.lost = true;
+            l.leaving = true;
+            std::cout << "[" << l.name << "] this copy's player left while waiting at " << l.unit << " " << frame
+                      << std::endl;
+            const std::vector<std::uint8_t> out = packet(l, kBye, kHead);
+            for (int i = 0; i < 3; ++i) send(l, out);
         }
         const auto waited = Clock::now() - began;
         ++l.waits;
@@ -763,7 +970,7 @@ bool start() {
         const char *answers = std::getenv("D012_SAVEDATA_ANSWERS");
         l.answers = answers != nullptr && *answers != '\0' ? std::string(answers).substr(0u, 255u) : "first";
     }
-    if (!connect(l, host, address, text.substr(5u))) {
+    if (!connect(l, host, address, text.substr(5u), 300u)) {
         std::cerr << "[net] playing alone" << std::endl;
         return false;
     }
@@ -801,6 +1008,7 @@ namespace battle {
 namespace {
 
 int local_player = 0;  // this copy's fighter in the game: 0 or 1
+std::string failure;   // why the last open() failed, for the player
 
 bool on(const std::string &value) { return value == "1" || value == "true" || value == "on" || value == "yes"; }
 
@@ -844,9 +1052,36 @@ std::uint16_t port() {
     return number > 0 && number <= 65535 ? static_cast<std::uint16_t>(number) : kBattlePort;
 }
 
+void must_match(const std::string &what, const std::string &value) {
+    auto &items = matched();
+    const auto found = std::find_if(items.begin(), items.end(), [&](const auto &item) { return item.first == what; });
+    if (found != items.end()) found->second = value;
+    else items.emplace_back(what, value);
+}
+
+void set_camera(const Camera &mine) { my_camera() = mine; }
+
+Camera camera(int player) { return player == local_player ? my_camera() : battle_link().their_camera; }
+
+std::string why_not() { return failure; }
+
+void notice(const std::string &text) {
+    std::cout << "[battle-net] told the player: " << text << std::endl;
+#if defined(PORTABLEKIT_HAS_RENDERER)
+    namespace ui = portablekit::ui;
+    ui::wait_over_game([&](ui::WaitView &view) {
+        view.text = text;
+        view.ok = true;
+        view.can_leave = false;
+        return true;
+    });
+#endif
+}
+
 bool open(int player, std::uint32_t tag) {
     Link &l = battle_link();
     shut(l);
+    failure.clear();
     local_player = player == 0 ? 0 : 1;
     const std::string text = setting("D012_NET_BATTLE", "online.battle_link");
     sockaddr_in address{};
@@ -863,7 +1098,19 @@ bool open(int player, std::uint32_t tag) {
     l.name = "battle-net";
     l.unit = "frame";
     l.tag = tag & kTagMask;
-    if (!connect(l, listen, address, where)) return false;
+    if (!connect(l, listen, address, where, 30u)) {
+        if (l.refused)
+            failure = "This battle cannot start: the other player's game differs in " + l.refusal +
+                      ". Both players need the same version of the port, the same mods that change the game, and "
+                      "the same settings.";
+        else if (!l.leaving && listen)
+            failure = "The other player's game did not connect for this battle.";
+        else if (!l.leaving)
+            failure = "The other player's game did not answer. If this happens every time, the host's router may "
+                      "not be passing the battle's UDP port " +
+                      std::to_string(ntohs(address.sin_port)) + " (see Playing online in the README).";
+        return false;
+    }
     std::cout << "[battle-net] linked as player " << player << " for battle " << l.tag << " ("
               << (listen ? "listening" : "joined") << "): " << l.delay << " frames of input delay" << std::endl;
     return true;
@@ -880,6 +1127,7 @@ Pads exchange(std::uint64_t frame, const input::Pad &mine) {
     pads.player[local_player] = me.pad;
     pads.player[1 - local_player] = them.pad;
     pads.lost = l.lost;
+    pads.left = l.leaving;
     return pads;
 }
 

@@ -1,11 +1,11 @@
 # Playing online
 
 Two players, each with their own copy of the port, fight a 1-on-1 battle over the internet through the game's
-Communication Mode. **This is not in a release yet:** it works in test builds, between Windows and a Steam Deck, and
-the details may change. How it works and how it was tested: [Communication Mode](communication-mode.md), sections 11
-to 14.
+Communication Mode. **Experimental:** it has been played between Windows and a Steam Deck, and the details may change.
+How it works and how it was tested: [Communication Mode](communication-mode.md), sections 11 to 15.
 
-Both players need the same version of the port. One player hosts; the other joins.
+Both players need the same version of the port, the same mods that change the game (music mods may differ) and the
+same test settings. The game checks as the battle starts and says what differs. Saves and official DLC may differ.
 
 ## Host
 
@@ -25,12 +25,29 @@ The host should be the player on a home connection. Mobile data cannot host (see
 
 ## Then, in the game
 
-Both players go to Communication Mode and into the same online lobby. One challenges the other; after fighter select
-the host enters the battle. The battle finds its own way to the other player, and the input delay is set from the
-connection when the battle starts: 2 frames on a home network, 3 at a round trip of about 75 to 100 ms, more when it
-is longer. A number in `online.input_delay` in `data/settings.ini` fixes it instead.
+Both players go to Communication Mode and into the same Online Lobby. One challenges the other; after fighter select
+the host enters the battle. The battle finds its own way to the other player.
 
-## If the other player cannot join
+**Input delay** (Network page, Online battles): the frames between pressing a button and the fighter acting. The
+host's setting counts. **Auto**, the default, sets it from the connection as the battle starts: 2 frames on a home
+network, 3 at a round trip of about 75 to 100 ms, more when it is longer. A fixed number smooths a poor connection
+(higher) or responds sooner (lower).
+
+**Waiting.** If the other player's game falls silent, a band says "Waiting for the other player" and counts the
+seconds. Hold B (or Esc) to leave the battle. After 30 seconds the game gives up by itself.
+
+**Each player keeps their own camera settings.** The right-stick camera's dead zone, sensitivity and inverted axes
+are sent across, so the other game turns your camera the way you set it.
+
+Only the Online Lobby's 1-on-1 battles are supported. Group Battle and Communications are untested.
+
+## If something goes wrong
+
+**"This battle cannot start: the other player's game differs in ..."** The two games are not the same: update both
+to the same release, and use the same mods that change the game.
+
+**"The other player's game did not answer."** The battle's UDP port does not get through to the host. See the next
+paragraphs.
 
 **The row says the router did not open the ports.** Turn on UPnP or NAT-PMP in the router's settings, or forward
 these ports on the router to the host's local address, which the Network page lists:
@@ -43,21 +60,21 @@ these ports on the router to the host's local address, which the Network page li
 
 Then turn off **Open router ports** on the Network page, so the game stops asking.
 
-**The router opened the ports, but still nobody gets in.** Your provider may share one internet address among many
-customers (carrier-grade NAT, the rule on mobile data and common on some home connections). Then your router itself
-has no address on the internet, and opening its ports does nothing. Signs: the address the game shows starts with
-`100.64` to `100.127`, `10.`, `172.16` to `172.31` or `192.168`, or differs from the one a "what is my IP" website
-shows. The other player hosts instead, or you both use a VPN.
+**The row says your provider shares the address.** Your router has no address of its own on the internet: your
+provider shares one among many customers (carrier-grade NAT, the rule on mobile data and common on some home
+connections), or another router sits in front of yours. Opening ports does nothing then. The other player hosts
+instead, or you both use a VPN.
 
 **A VPN** puts both PCs on one private network, so no router is involved:
 [Tailscale](https://tailscale.com/) or [ZeroTier](https://www.zerotier.com/). Both players install it and join the
 same network. The host hosts as above; the joiner types the host's VPN address, which the host's Network page lists
 too (Tailscale's start with `100.`).
 
-**Something else blocks it.** A firewall program on the host other than Windows' own, or a second router behind the
-first, needs the same three ports allowed or forwarded by hand.
+**Something else blocks it.** A firewall program on the host other than Windows' own needs the same three ports
+allowed.
 
-## Not yet
+## Not tested yet
 
-- Group Battle and the other Communication Mode rows are untested.
-- The joining player types an address; there is no short join code and no server to find each other through.
+- Two Windows PCs on separate machines (Windows against the Steam Deck, and two copies on one PC, were).
+- The Steam Deck hosting: let the PC host.
+- A router that only has UPnP (the one tested answered NAT-PMP first).

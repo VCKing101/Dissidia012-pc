@@ -1,0 +1,488 @@
+From 424d0293ef4abd45ba6f76346eb05f55e164930a Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Sun, 1 Nov 2026 21:36:36 +1030
+Subject: [PATCH] Interface: a waiting screen, Network page rows for ports,
+ shared router addresses
+
+For a port's online play:
+
+- ui::wait_over_game(): a band over the last game frame while the game
+  cannot go on (a network game waiting for the other player). The game
+  stands still behind it as behind the paused menu. Holding back for a
+  second leaves, with a bar that fills; a view with OK is a notice.
+  Layer::escape_held() says whether Esc is down, since Esc never reaches
+  ImGui.
+- ui::add_network_rows(): a port's own rows on the Network page, after
+  Ad hoc play's and before Status, as add_menu_rows() does for Video.
+- RouterStatus::shared and router_wire::shared_address(): a router whose
+  own outside address is private, provider-shared (100.64.0.0/10) or
+  missing sits behind another, so opened ports reach nobody. The log and
+  the Network page say so instead of offering that address.
+- <PREFIX>_EXAMPLE_ADDRESSES=1 shows documentation addresses (RFC 5737)
+  instead of real ones, for pictures of the page.
+- The hosting rows no longer send players to "the Online Guild Hall",
+  one game's name for its lobby.
+
+Tested with Dissidia 012's port on Windows 11 (clang): the waiting band
+and its hold to leave, a notice with OK, the input delay row on the
+Network page and the example addresses, all seen in window captures;
+adhoc_tests --router-messages passes under MSVC, with the address ranges.
+
+Not tested: a router that really reports a shared address; the band on
+macOS or Linux.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/adhoc/port_mapping.cpp |  16 ++++-
+ host/adhoc/port_mapping.hpp |   9 +++
+ host/ui/layer.cpp           |   1 +
+ host/ui/layer.hpp           |   3 +
+ host/ui/menu.cpp            |  50 +++++++++++---
+ host/ui/message_dialog.cpp  | 130 ++++++++++++++++++++++++++++++++++++
+ host/ui/message_dialog.hpp  |  18 +++++
+ host/ui/ui.hpp              |   2 +
+ tests/adhoc_tests.cpp       |   7 ++
+ 9 files changed, 227 insertions(+), 9 deletions(-)
+
+diff --git a/host/adhoc/port_mapping.cpp b/host/adhoc/port_mapping.cpp
+index a1a12da..9a2d941 100644
+--- a/host/adhoc/port_mapping.cpp
++++ b/host/adhoc/port_mapping.cpp
+@@ -17,6 +17,8 @@
+ #if defined(_WIN32)
+ #include <iphlpapi.h>
+ #undef interface
++#else
++#include <arpa/inet.h>
+ #endif
+ 
+ namespace portablekit::adhoc {
+@@ -262,6 +264,15 @@ std::optional<HttpResponse> parse_http_response(const std::string &raw) {
+     return response;
+ }
+ 
++bool shared_address(const std::string &address) {
++    in_addr parsed{};
++    if (inet_pton(AF_INET, address.c_str(), &parsed) != 1) return true;
++    const std::uint32_t a = ntohl(parsed.s_addr);
++    const auto in = [a](std::uint32_t base, int bits) { return (a >> (32 - bits)) == (base >> (32 - bits)); };
++    return a == 0u || in(0x0A000000u, 8) || in(0xAC100000u, 12) || in(0xC0A80000u, 16) || in(0x64400000u, 10) ||
++           in(0xA9FE0000u, 16);
++}
++
+ } // namespace router_wire
+ 
+ namespace {
+@@ -654,7 +665,10 @@ struct PortMapper::Impl {
+         }
+         {
+             std::lock_guard lock(mutex);
+-            log(method + " opened " + describe_ports(held) + " on " + status.external_address);
++            status.shared = router_wire::shared_address(status.external_address);
++            log(method + " opened " + describe_ports(held) + " on " + status.external_address +
++                (status.shared ? ", which is not an internet address: another router or the provider is in front"
++                               : ""));
+         }
+         set(RouterState::Open);
+         std::unique_lock lock(mutex);
+diff --git a/host/adhoc/port_mapping.hpp b/host/adhoc/port_mapping.hpp
+index 3c96efa..d4e4452 100644
+--- a/host/adhoc/port_mapping.hpp
++++ b/host/adhoc/port_mapping.hpp
+@@ -49,6 +49,9 @@ struct RouterStatus {
+     std::string external_address;  // the router's outside address, as it reports it
+     std::string error;
+     std::vector<ForwardedPort> ports;
++    // The outside address is not on the internet (router_wire::shared_address):
++    // the ports are open on this router, but nobody outside reaches it.
++    bool shared{};
+ };
+ 
+ class PortMapper {
+@@ -119,6 +122,12 @@ struct WanService {
+                                     const std::vector<std::pair<std::string, std::string>> &arguments);
+ [[nodiscard]] std::string xml_value(const std::string &xml, const std::string &tag);
+ 
++// Whether a router's outside address (dotted IPv4) cannot be reached from the
++// internet: a private range (RFC 1918), the range providers share among
++// customers (100.64.0.0/10, RFC 6598), link-local, none, or not an address.
++// Then the router sits behind another, the provider's or the owner's own.
++[[nodiscard]] bool shared_address(const std::string &address);
++
+ // An HTTP response's status and body, with a chunked body put back together.
+ struct HttpResponse {
+     int status{};
+diff --git a/host/ui/layer.cpp b/host/ui/layer.cpp
+index cc809d9..5d041de 100644
+--- a/host/ui/layer.cpp
++++ b/host/ui/layer.cpp
+@@ -255,6 +255,7 @@ bool Layer::handle_event(const SDL_Event &event) {
+ #endif
+         ) {
+             if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat) escape_pending_ = now;
++            escape_down_ = event.type == SDL_EVENT_KEY_DOWN;
+             return true;
+         }
+         if (event.type == SDL_EVENT_KEY_DOWN) device_ = InputDevice::Keyboard;
+diff --git a/host/ui/layer.hpp b/host/ui/layer.hpp
+index 30ef180..4ddac36 100644
+--- a/host/ui/layer.hpp
++++ b/host/ui/layer.hpp
+@@ -52,6 +52,8 @@ public:
+     // Requests from the player, each reported once.
+     bool take_menu_toggle();  // L3+R3; Esc while the game runs
+     bool take_back();         // Esc while a screen runs
++    // Whether Esc is held now (it never reaches ImGui), for a hold to leave.
++    [[nodiscard]] bool escape_held() const noexcept { return escape_down_; }
+     std::optional<std::filesystem::path> take_dropped_file();
+     [[nodiscard]] bool window_closed() const noexcept { return window_closed_; }
+ 
+@@ -96,6 +98,7 @@ private:
+ 
+     using Clock = std::chrono::steady_clock;
+     std::optional<Clock::time_point> escape_pending_;
++    bool escape_down_{};
+     Clock::time_point last_pad_button_{};
+     // Gamepad navigation waits until no face button is held, so a button held
+     // while a screen opens does not activate its first row.
+diff --git a/host/ui/menu.cpp b/host/ui/menu.cpp
+index f0cb185..0f4cb55 100644
+--- a/host/ui/menu.cpp
++++ b/host/ui/menu.cpp
+@@ -96,6 +96,12 @@ std::vector<void (*)()> &port_rows() {
+     return list;
+ }
+ 
++// And on the Network page (add_network_rows).
++std::vector<void (*)()> &port_network_rows() {
++    static std::vector<void (*)()> list;
++    return list;
++}
++
+ int cycle(int value, int delta, int count) { return ((value + delta) % count + count) % count; }
+ 
+ // Percent-encodes a path for a file:// URL.
+@@ -1124,10 +1130,21 @@ std::string players_text(std::size_t count) {
+     return std::to_string(count) + (count == 1u ? " player" : " players");
+ }
+ 
++// <PREFIX>_EXAMPLE_ADDRESSES=1, for pictures of the page: every address shown
++// is one of the ranges kept for documentation (RFC 5737) instead.
++bool example_addresses() {
++    static const bool on = [] {
++        const char *text = std::getenv(portablekit::env_name("EXAMPLE_ADDRESSES").c_str());
++        return text != nullptr && *text != '\0' && *text != '0';
++    }();
++    return on;
++}
++
+ // What the router said about forwarding the hosted session's ports: the
+ // address to give players on the internet, or what they cannot do.
+ void router_rows(const std::string &suffix, std::string &copied) {
+-    const adhoc::RouterStatus router = adhoc_router_status();
++    adhoc::RouterStatus router = adhoc_router_status();
++    if (example_addresses() && !router.external_address.empty()) router.external_address = "203.0.113.7";
+     switch (router.state) {
+     case adhoc::RouterState::Off:
+         if (!settings::current().adhoc_router_ports)
+@@ -1139,6 +1156,14 @@ void router_rows(const std::string &suffix, std::string &copied) {
+         return;
+     case adhoc::RouterState::Open: break;
+     }
++    if (router.shared) {
++        info_row("On the internet",
++                 "The router opened the ports, but its own address (" + router.external_address +
++                     ") is not on the internet: your provider shares one address among customers, or another "
++                     "router is in front of it. Players on the internet cannot reach you here: one of them hosts, "
++                     "or you all use a VPN.");
++        return;
++    }
+     const std::string text = router.external_address + suffix;
+     const std::string label = text + "   Internet (" + router.method + ")###internet address";
+     if (button_row(label.c_str(),
+@@ -1162,12 +1187,15 @@ void play_together() {
+         const adhoc::ServerStatus status = adhoc_host_status();
+         const std::string suffix =
+             status.adhocctl_port == adhoc::kAdhocctlPort ? std::string() : ":" + std::to_string(status.adhocctl_port);
+-        info_row("Hosting", players_text(status.players.size()) + " connected. Everyone now enters the Online Guild "
+-                                                                  "Hall and picks the same hall.");
++        info_row("Hosting", players_text(status.players.size()) +
++                                " connected. Everyone now goes on line in the game and picks the same room.");
+         const std::vector<adhoc::LocalAddress> addresses = adhoc::local_addresses();
+         if (addresses.empty()) info_row("Your addresses", "No network is connected");
+-        for (const adhoc::LocalAddress &address : addresses) {
+-            const std::string text = address.address + suffix;
++        for (std::size_t i = 0; i < addresses.size(); ++i) {
++            const adhoc::LocalAddress &address = addresses[i];
++            const std::string shown =
++                example_addresses() ? "192.0.2." + std::to_string(10u + i) : address.address;
++            const std::string text = shown + suffix;
+             const std::string label =
+                 text + "   " + address.network + " (" + address.interface + ")###address " + address.address;
+             if (button_row(label.c_str(),
+@@ -1185,7 +1213,8 @@ void play_together() {
+             const adhoc::ServerPlayer &player = status.players[i];
+             ImGui::PushID(static_cast<int>(i));
+             info_row(player.nickname.c_str(),
+-                     player.address + "   " + (player.group ? group_name(*player.group) : std::string("not in a hall")));
++                     (example_addresses() ? "198.51.100." + std::to_string(20u + i) : player.address) + "   " +
++                         (player.group ? group_name(*player.group) : std::string("not in a room")));
+             ImGui::PopID();
+         }
+         ImGui::PopID();
+@@ -1202,7 +1231,7 @@ void play_together() {
+                        {false, {},
+                         "Runs a server in this game for the others to join: no other program, no port forwarding "
+                         "on a local network or a VPN, and for the internet the game asks your router to open the "
+-                        "ports (Open router ports, below). Then everyone enters the Online Guild Hall."}))
++                        "ports (Open router ports, below). Then everyone goes on line in the game."}))
+             adhoc_host_start();
+         if (const std::string error = adhoc_host_error(); !error.empty()) info_row("Cannot host", error);
+     }
+@@ -1221,7 +1250,7 @@ void play_together() {
+         const std::string label = (joined(address) ? "Joined " : "Join ") + host.info.name + "   " + address + ", " +
+                                   players_text(host.info.players) + "###found " + std::to_string(host.info.session);
+         if (button_row(label.c_str(), {false, {}, "A session hosted on this network. Joining it takes you out of any "
+-                                                  "other; then enter the Online Guild Hall."}))
++                                                  "other; then go on line in the game."}))
+             adhoc_join(address);
+     }
+     if (hosts.empty()) info_row("On this network", "Looking for hosted sessions…");
+@@ -1278,6 +1307,7 @@ void Menu::network() {
+         settings::save();
+         adhoc_apply_settings();
+     }
++    for (void (*rows)() : port_network_rows()) rows();
+ 
+     section("Status");
+     info_row("Connection", connection_text(d));
+@@ -1626,6 +1656,10 @@ void add_menu_rows(void (*rows)()) {
+     if (rows != nullptr) port_rows().push_back(rows);
+ }
+ 
++void add_network_rows(void (*rows)()) {
++    if (rows != nullptr) port_network_rows().push_back(rows);
++}
++
+ void draw_over_game() {
+     Layer &layer = Layer::get();
+     if (!layer.attached()) return;
+diff --git a/host/ui/message_dialog.cpp b/host/ui/message_dialog.cpp
+index 6123b04..36de528 100644
+--- a/host/ui/message_dialog.cpp
++++ b/host/ui/message_dialog.cpp
+@@ -3,14 +3,22 @@
+ #include "ui/layer.hpp"
+ #include "ui/widgets.hpp"
+ 
++#include "audio/audio_sink.hpp"
++#include "kernel/kernel.hpp"
++#include "kernel/stall_watchdog.hpp"
++#include "perf/frame_stats.hpp"
++
+ #include "gpu/vulkan_renderer.hpp"
+ 
+ #include "imgui.h"
+ 
+ #include <algorithm>
++#include <chrono>
+ #include <cmath>
+ #include <initializer_list>
++#include <optional>
+ #include <string>
++#include <thread>
+ #include <utility>
+ #include <vector>
+ 
+@@ -150,8 +158,130 @@ bool choice(const char *label, ImVec2 min, ImVec2 size, bool selected, bool &hov
+     return clicked;
+ }
+ 
++// A frame of wait_over_game()'s band: the text, an OK when asked for, and the
++// hint. `held` is how long back has been held, 0 to 1.
++void wait_frame(const WaitView &view, float held, bool &confirmed) {
++    const ImGuiIO &io = ImGui::GetIO();
++    ImGui::GetBackgroundDrawList()->AddRectFilled({0, 0}, io.DisplaySize, band::kDim);
++    ImGui::SetNextWindowPos({0, 0}, ImGuiCond_Always);
++    ImGui::SetNextWindowSize(io.DisplaySize, ImGuiCond_Always);
++    ImGui::Begin("##wait", nullptr,
++                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
++                     ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoBackground);
++    ImDrawList *draw = ImGui::GetWindowDrawList();
++
++    ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * 1.1f);
++    const float width = std::min(io.DisplaySize.x * 0.8f, font() * 36.0f);
++    const std::vector<std::string> lines = wrap(view.text, width);
++    const float line_height = ImGui::GetTextLineHeightWithSpacing();
++    const float text_height = line_height * static_cast<float>(lines.size());
++    ImGui::PopFont();
++    const ImVec2 choice_size{std::round(font() * 5.5f), std::round(font() * 1.7f)};
++    const float gap = std::round(font() * 1.1f);
++    const float hint_height = std::round(font() * 1.3f);
++    const float margin = std::round(font() * 1.2f);
++    const float block = text_height + (view.ok ? gap + choice_size.y : 0.0f) + gap * 0.6f + hint_height;
++    const float top = std::round((io.DisplaySize.y - block) * 0.5f);
++    const float band_top = top - margin;
++    const float band_bottom = top + block + margin * 0.6f;
++    draw_band(ImGui::GetBackgroundDrawList(), band_top, band_bottom);
++
++    ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * 1.1f);
++    float y = top;
++    for (const std::string &line : lines) {
++        const ImVec2 size = ImGui::CalcTextSize(line.c_str());
++        draw->AddText({std::round((io.DisplaySize.x - size.x) * 0.5f), y}, band::kText, line.c_str());
++        y += line_height;
++    }
++    ImGui::PopFont();
++
++    if (view.ok) {
++        bool hovered = false;
++        const float left = std::round((io.DisplaySize.x - choice_size.x) * 0.5f);
++        if (choice("OK", {left, top + text_height + gap}, choice_size, true, hovered)) confirmed = true;
++    }
++
++    const float hints_y = band_bottom - margin * 0.6f - hint_height + std::round((hint_height - font()) * 0.5f);
++    const float right = std::min(io.DisplaySize.x - margin, (io.DisplaySize.x + width) * 0.5f + font() * 4.0f);
++    if (view.ok) {
++        ImGui::SetCursorScreenPos({right - hints_width({{Control::Confirm, "OK"}}), hints_y});
++        hints({{Control::Confirm, "OK"}}, kBandHints);
++    } else if (view.can_leave) {
++        ImGui::SetCursorScreenPos({right - hints_width({{Control::Back, "Hold to leave"}}), hints_y});
++        hints({{Control::Back, "Hold to leave"}}, kBandHints);
++        // How far the hold has come: a rule growing under the band.
++        if (held > 0.0f) {
++            const float full = width;
++            const float left = std::round((io.DisplaySize.x - full) * 0.5f);
++            draw->AddRectFilled({left, band_bottom - px(3.0f)}, {left + full * held, band_bottom}, band::kRule);
++        }
++    }
++    ImGui::End();
++}
++
+ } // namespace
+ 
++WaitEnd wait_over_game(const std::function<bool(WaitView &)> &step) {
++    WaitView view;
++    Layer &layer = Layer::get();
++    if (!layer.attached()) {
++        while (step(view) && !view.ok) std::this_thread::sleep_for(std::chrono::milliseconds(16));
++        return WaitEnd::Done;
++    }
++    stall_watchdog::note_menu(true);
++    audio::AudioSink::instance().set_paused(true);
++    layer.renderer().set_game_input(false);
++    layer.set_interactive(true);
++    WaitEnd end = WaitEnd::Done;
++    using Clock = std::chrono::steady_clock;
++    std::optional<Clock::time_point> held_since;
++    const bool window_open = layer.run(
++        [&] {
++            if (!step(view)) {
++                end = WaitEnd::Done;
++                return false;
++            }
++            (void)layer.take_menu_toggle();
++            (void)layer.take_back();
++            const bool south = layer.confirm_south();
++            const ImGuiKey confirm = south ? ImGuiKey_GamepadFaceDown : ImGuiKey_GamepadFaceRight;
++            const ImGuiKey back = south ? ImGuiKey_GamepadFaceRight : ImGuiKey_GamepadFaceDown;
++            bool confirmed = false;
++            float held = 0.0f;
++            if (view.ok) {
++                held_since.reset();
++                confirmed = ImGui::IsKeyPressed(ImGuiKey_Enter, false) ||
++                            ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false) ||
++                            (layer.gamepad_armed() && ImGui::IsKeyPressed(confirm, false));
++            } else if (view.can_leave &&
++                       (layer.escape_held() || (layer.gamepad_armed() && ImGui::IsKeyDown(back)))) {
++                if (!held_since) held_since = Clock::now();
++                held = std::min(1.0f, std::chrono::duration<float>(Clock::now() - *held_since).count());
++            } else {
++                held_since.reset();
++            }
++            wait_frame(view, held, confirmed);
++            if (confirmed) {
++                end = WaitEnd::Confirmed;
++                return false;
++            }
++            if (held >= 1.0f) {
++                end = WaitEnd::Left;
++                return false;
++            }
++            return true;
++        },
++        true);
++    layer.set_interactive(false);
++    layer.renderer().set_game_input(true);
++    audio::AudioSink::instance().set_paused(false);
++    stall_watchdog::note_menu(false);
++    // Go on at normal speed rather than racing to make up the wait.
++    kernel().resync_real_time();
++    perf::restart_measurement();
++    return window_open ? end : WaitEnd::WindowClosed;
++}
++
+ bool open_game_message(MessageRequest request, MessageDone on_done) {
+     Layer &layer = Layer::get();
+     if (!layer.attached()) return false;
+diff --git a/host/ui/message_dialog.hpp b/host/ui/message_dialog.hpp
+index c434bc9..591d692 100644
+--- a/host/ui/message_dialog.hpp
++++ b/host/ui/message_dialog.hpp
+@@ -40,4 +40,22 @@ void close_game_message();
+ // interface frame by draw_over_game().
+ void game_message_frame();
+ 
++// A band of the port's own over the last game frame while the game cannot go
++// on, such as a network game waiting for the other player. The game stands
++// still meanwhile, as behind the paused menu: no input reaches it, its sound
++// stops and the stall watchdog is not told.
++struct WaitView {
++    std::string text;      // UTF-8; '\n' breaks lines
++    bool can_leave{true};  // holding back for a second leaves; a hint says so
++    bool ok{};             // an OK under the text; confirm ends the screen
++};
++
++enum class WaitEnd { Done, Left, Confirmed, WindowClosed };
++
++// Called on the game's thread. `step` runs once an interface frame (about 60
++// times a second; it should return quickly), fills `view` and keeps the
++// screen while it returns true. Without an interface `step` still runs, with
++// nothing drawn and no way to leave, and a view with an OK ends at once.
++WaitEnd wait_over_game(const std::function<bool(WaitView &)> &step);
++
+ } // namespace portablekit::ui
+diff --git a/host/ui/ui.hpp b/host/ui/ui.hpp
+index 20ce284..15079a1 100644
+--- a/host/ui/ui.hpp
++++ b/host/ui/ui.hpp
+@@ -45,6 +45,8 @@ void add_game_overlay(bool (*visible)(), void (*draw)());
+ // leaves keys it does not know in settings.ini alone. "Restore video
+ // defaults" does not touch them.
+ void add_menu_rows(void (*rows)());
++// The same on the Network page, after Ad hoc play's rows and before Status.
++void add_network_rows(void (*rows)());
+ // Where the game's 480x272 picture was last drawn, in ImGui's coordinates
+ // (window coordinates): a point (x, y) of the PSP's screen is at
+ // (left + x * width / 480, top + y * height / 272). The whole PSP screen
+diff --git a/tests/adhoc_tests.cpp b/tests/adhoc_tests.cpp
+index 084a441..e712b1f 100644
+--- a/tests/adhoc_tests.cpp
++++ b/tests/adhoc_tests.cpp
+@@ -411,6 +411,13 @@ void router_messages() {
+           "UPnP: the outside address from a reply");
+     check(describe_ports({{false, 27312}, {false, 27313}, {true, 27420}}) == "TCP 27312, 27313 and UDP 27420",
+           "the ports in words");
++    check(!shared_address("198.51.100.4") && !shared_address("100.63.255.255") && !shared_address("172.32.0.1") &&
++              !shared_address("100.128.0.1"),
++          "router: internet addresses are not shared");
++    check(shared_address("100.64.0.1") && shared_address("100.127.255.254") && shared_address("10.1.2.3") &&
++              shared_address("172.16.0.1") && shared_address("192.168.1.1") && shared_address("169.254.3.4") &&
++              shared_address("0.0.0.0") && shared_address("") && shared_address("not an address"),
++          "router: private, provider-shared and missing addresses are");
+ }
+ 
+ int main(int argc, char **argv) {
+-- 
+2.53.0.windows.1
+

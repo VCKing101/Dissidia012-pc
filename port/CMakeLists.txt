@@ -79,6 +79,22 @@ portablekit_add_game(D012Native ${d012_corpus}
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_portable.cpp"
             ${d012_game_code})
 target_include_directories(D012Native PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/host")
+# d012::source_hash(), the port's own source hashed (cmake/source_hash.cmake):
+# online play checks both players run the same program. Remade whenever one of
+# those files changes; only the one generated file is compiled again.
+file(GLOB_RECURSE d012_hashed CONFIGURE_DEPENDS
+     "${CMAKE_CURRENT_SOURCE_DIR}/host/*.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/host/*.hpp"
+     "${CMAKE_CURRENT_SOURCE_DIR}/decomp/*.c" "${CMAKE_CURRENT_SOURCE_DIR}/decomp/*.h"
+     "${CMAKE_CURRENT_SOURCE_DIR}/config/*" "${CMAKE_CURRENT_SOURCE_DIR}/portablekit-patches/*.patch")
+set(d012_source_hash "${CMAKE_CURRENT_BINARY_DIR}/generated/d012_source_hash.cpp")
+add_custom_command(OUTPUT "${d012_source_hash}"
+    COMMAND ${CMAKE_COMMAND} "-DROOT=${CMAKE_CURRENT_SOURCE_DIR}" "-DOUT=${d012_source_hash}"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/source_hash.cmake"
+    DEPENDS ${d012_hashed} "${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt"
+            "${CMAKE_CURRENT_SOURCE_DIR}/cmake/source_hash.cmake"
+    COMMENT "Hashing the port's source for online play"
+    VERBATIM)
+target_sources(D012Native PRIVATE "${d012_source_hash}")
 # A release build (tools/local/port/build-d012-release, for the packaged
 # folder of tools/port/package_deck.py) runs its recompiled code only, with no
 # interpreter fallback unless D012_INTERPRETER is set (host/d012_portable.cpp).

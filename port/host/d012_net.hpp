@@ -70,14 +70,43 @@ namespace battle {
 // 27420 by default. A hosting copy asks the router to forward it.
 [[nodiscard]] std::uint16_t port();
 
+// What must be the same on both copies for their battles to stay in step: the
+// program, mods that change the game, settings that change the fight. `what`
+// is how the player reads it ("the port's version"). The listening copy
+// compares both lists as the battle links and refuses a copy that differs.
+// Registered at start-up.
+void must_match(const std::string &what, const std::string &value);
+
+// A player's right-stick camera settings. Each copy sends its own as the
+// battle links, and both copies turn each fighter's camera with that player's.
+struct Camera {
+    float dead_zone = 0.18f;
+    float sensitivity = 1.0f;
+    bool invert_x = false;
+    bool invert_y = false;
+};
+void set_camera(const Camera &mine);
+// The game's player 0 or 1's, while a battle is linked.
+[[nodiscard]] Camera camera(int player);
+
 // Links this copy, the game's `player` 0 or 1, for the battle `tag` (24 bits;
-// both copies give the same). Waits up to D012_NET_WAIT seconds.
+// both copies give the same). Waits up to D012_NET_WAIT seconds (30 by
+// default); after half a second a screen says so and lets the player leave.
 bool open(int player, std::uint32_t tag);
 [[nodiscard]] bool open_now();
 
+// Why the last open() failed, for the player: the other copy differs, or never
+// answered. Empty when it did not fail, or the player chose to leave.
+[[nodiscard]] std::string why_not();
+
+// Shows `text` over the game with an OK, and waits for it. Nothing without an
+// interface.
+void notice(const std::string &text);
+
 struct Pads {
     input::Pad player[2];
-    bool lost = false;  // the other copy has not been heard from for 10 s
+    bool lost = false;  // the other copy is gone, or no frame of it came for 30 s
+    bool left = false;  // this copy's player chose to leave while it waited
 };
 // As exchange() above, for the battle's frame `frame`.
 Pads exchange(std::uint64_t frame, const input::Pad &mine);

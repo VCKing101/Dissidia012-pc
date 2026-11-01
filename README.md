@@ -41,6 +41,8 @@ game's executable and overlays.
   ([notes](docs/port/local-versus.md)).
 - **HD texture packs** in PPSSPP's format, and a menu option that dumps the game's textures to start one
   ([below](#hd-texture-packs)).
+- **Online versus (experimental)**: 1-on-1 battles over the internet through the game's own Communication Mode, with
+  full analog and each player's right-stick camera ([guide](docs/port/play-online.md)).
 
 ## BGM playlist selector
 
@@ -88,6 +90,26 @@ is kept as `game.versus_fov` in `settings.ini`.
 
 `game.local_versus=0` in `settings.ini` (in the data folder, next to your saves' `ms0`) leaves the game as it was,
 without the row; set it back to `1` to bring it back. `D012_LOCAL_VERSUS=0` does the same for one run.
+
+## Online play (experimental)
+
+Two players fight a 1-on-1 battle over the internet in the game's own **Communication Mode**, each on their own PC
+or Steam Deck. The battle runs on the port's own netcode: full analog, each player's right-stick camera and an input
+delay set from the connection.
+
+1. **Host:** open the menu (Esc, or L3 + R3), go to the **Network** page, turn on **Ad hoc play** and choose
+   **Host a session**. The game asks your router to open its ports and shows your internet address; select it to
+   copy it, and send it to the other player.
+2. **Join:** on the **Network** page, turn on **Ad hoc play** and type the host's address under **Join a session**.
+3. Both go to **Communication Mode**, into the same **Online Lobby**, and one challenges the other.
+
+![The Network page while hosting: the local address, the internet address the router opened its ports on, and Stop hosting](docs/images/online-network-page.png)
+
+Both players need the same release and the same mods that change the game; the game checks and says what differs.
+When the router cannot open its ports, or your provider shares one address among its customers (as on mobile data),
+the [players' guide](docs/port/play-online.md) has the fixes: forwarding three ports by hand, or a VPN such as
+Tailscale. Only the Online Lobby's 1-on-1 battles are supported so far; two Windows PCs on separate machines and the
+Steam Deck hosting are untested.
 
 ## Quick start (Windows)
 

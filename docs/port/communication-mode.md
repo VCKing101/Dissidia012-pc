@@ -501,3 +501,55 @@ The internet battle, 900 frames at a time (30 s at full speed), on the PC:
 
 **Not verified.** UPnP mapping by the game (NAT-PMP answered first here), a carrier-shared address, the Deck hosting
 (its copy has the old delay formula), Windows against Windows on two machines, Linux natively, Group Battle.
+
+## 15. Player-facing pieces (1 November 2026)
+
+Roadmap step 5, as settled with the owner: online 1-on-1 goes into the next release, marked experimental, with the
+pieces a player needs when something goes wrong. Group Battle and Communications stay as the game has them, untested.
+No installer firewall rule, no join code; PC against PC on two machines and the Deck hosting are left untested and
+said so.
+
+**Additions.**
+- **The same program and the same rules on both sides.** As the battle links, each copy sends a list of what must
+  match (`net::battle::must_match`), and the listening copy refuses a copy whose list differs, or whose link has
+  another version (REFUSE, link version 5). Both players then read what differs before the game's own disconnect
+  box. The list holds:
+  - the port's version: `d012::source_hash()`, a SHA-256 of the port's own source, the PortableKit patches and
+    `port/CMakeLists.txt`, line endings aside (130 files), made at build time by `port/cmake/source_hash.cmake` into
+    one generated file, so a change recompiles only that file;
+  - mods that change the game: empty for now, since the mods folder holds music only (which may differ); a kind of
+    mod that changes the game sets it;
+  - the test switches that change how a fighter or a camera moves (`D012_NO_RIGHT_STICK_CAMERA`,
+    `D012_NO_SMOOTH_STICK`, `D012_SMOOTH_STICK_BATTLE`, `D012_CAMERA_FOLLOW_DEADZONE`).
+  Saves and official DLC may differ. The split-screen field of view does not count: it scales only the split view.
+- **Each player's own camera settings.** HELLO and WELCOME carry the sender's right-stick camera settings (dead zone,
+  sensitivity, inverted axes); both copies turn each fighter's camera with that player's. Before, both used the
+  defaults.
+- **The waiting screen** (PortableKit patch 0073, `ui::wait_over_game`). A wait for the other copy longer than half a
+  second, as the battle links or in it, becomes a band over the last frame: "Waiting for the other player... N s",
+  and a hint to hold back (B, or Esc) to leave, with a bar that fills over a second. The game stands still behind it
+  as behind the paused menu: its sound stops and the stall watchdog is not told. A battle link waits 30 s
+  (`D012_NET_WAIT`, was 300); a frame that does not come gives up after 30 s; ten silent seconds still count as the
+  other copy gone. Leaving sends BYE and ends the battle with the game's error.
+- **Notices.** A battle that cannot link says why, with an OK, before the game's own box: the other game differs in
+  what, or did not connect (the host), or did not answer (the joiner, with the battle port to check).
+- **Input delay on the Network page** (Online battles: Auto, or 2 to 10 frames), kept as `online.input_delay`, through
+  PortableKit's new `ui::add_network_rows`.
+- **A shared router address** (patch 0073): when the router's own outside address is private or the range providers
+  share among customers (100.64.0.0/10), the Network page says opened ports cannot help and that the other player
+  should host, instead of offering that address.
+- `D012_EXAMPLE_ADDRESSES=1` shows documentation addresses (RFC 5737) on the Network page, for the README's picture.
+  PortableKit's hosting rows no longer name Monster Hunter's "Online Guild Hall".
+
+**Results (V; two copies on this PC, copy 1 hosting, copy 2 joining its LAN address, both with nothing set).**
+
+| Run | Setup | What happened |
+| --- | --- | --- |
+| `s5a` | Copy 2: camera dead zone 0.3, sensitivity 2, X inverted | Linked with 2 frames; in step to the run's time limit (frame 6,410), the right stick turning cameras on both |
+| `s5b` | Copy 2: `D012_SMOOTH_STICK_BATTLE=1` | Refused at once on both: "This battle cannot start: the other player's game differs in analog walking in battle (D012_SMOOTH_STICK_BATTLE)..." with OK; then the game's own box and back to the Online Lobby |
+| `s5c` | Copy 2 joins the wrong battle port | Both showed the waiting band; after 30 s copy 1 said the other game did not connect, copy 2 that it did not answer, naming the port |
+| `s5d` | As `s5c`; copy 1 holds Esc for 1.5 s | The bar filled and copy 1 left after a second, back to the lobby list |
+| Captures | Hosting with example addresses | The Network page with 192.0.2.10 and 203.0.113.7 (NAT-PMP), and the Online battles row with Input delay Auto |
+
+**Not verified.** A router that reports a shared address, the band and notices on the Deck, PC against PC on two
+machines, the Deck hosting, Group Battle.

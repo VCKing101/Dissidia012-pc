@@ -29,18 +29,29 @@
 
 #include "d012_comm_battle.hpp"
 
+#include "d012_camera.hpp"
 #include "d012_decomp_harness.hpp"
+#include "d012_decomp_pad.hpp"
 #include "d012_net.hpp"
+#include "d012_source_hash.hpp"
 
 #include "adhoc/session.hpp"
 #include "hle/hle_common.hpp"
+#include "install/user_data.hpp"
 #include "portablekit/hle_extension.hpp"
+#if defined(PORTABLEKIT_HAS_RENDERER)
+#include "ui/ui.hpp"
+#include "ui/widgets.hpp"
+#endif
 
 #include "psprecomp/runtime.hpp"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <exception>
+#include <filesystem>
 #include <iostream>
 #include <map>
 #include <string>
@@ -173,6 +184,9 @@ void run_handler(Guest *g, const decomp::CallState &in, GuestRegs &out) {
         s.frame = 0u;
         if (!s.linked) {
             std::cerr << "[comm-battle] no link to the other fighter's copy; the battle ends" << std::endl;
+            // Why, before the game's own error box: the other copy differs, or
+            // never answered.
+            if (const std::string why = net::battle::why_not(); !why.empty()) net::battle::notice(why);
             return quit(g, net, 0u, out);
         }
     }
@@ -196,7 +210,8 @@ void run_handler(Guest *g, const decomp::CallState &in, GuestRegs &out) {
     if ((mine.extra & ext::kExtraR3) != 0u) mine.buttons |= kSelect;
     const net::battle::Pads pads = net::battle::exchange(frame, mine);
     if (pads.lost) {
-        std::cerr << "[comm-battle] the other fighter's copy is gone at frame " << frame << std::endl;
+        if (pads.left) std::cout << "[comm-battle] this copy's player left the battle at frame " << frame << std::endl;
+        else std::cerr << "[comm-battle] the other fighter's copy is gone at frame " << frame << std::endl;
         return quit(g, net, frame, out);
     }
     // The game's check value for this frame, before its input goes in, as the
@@ -301,6 +316,45 @@ void wrap_clock(portablekit::HleRegistrar &hle, const ClockImport &clock) {
              });
 }
 
+#if defined(PORTABLEKIT_HAS_RENDERER)
+constexpr const char *kDelayKey = "online.input_delay";
+
+// The Network page: the input delay of the battles this copy hosts (the
+// listening copy's counts), kept in settings.ini as PortableKit keeps its
+// own; it leaves this key alone. 0 is Auto, else 2 to 10 frames.
+void network_rows() {
+    namespace ui = portablekit::ui;
+    static int frames = [] {
+        const std::string text = net::setting("D012_NET_DELAY", kDelayKey);
+        if (text.empty() || text == "auto") return 0;
+        return std::clamp(std::atoi(text.c_str()), 2, 10);
+    }();
+    ui::section("Online battles");
+    ui::RowOptions options;
+    options.description = "How many frames pass between a button and the fighter acting, in online battles you "
+                          "host. Auto sets it from the connection as the battle starts: 2 on a home network, 3 at "
+                          "about 75 to 100 ms. More smooths a poor connection; fewer responds sooner.";
+    if (const char *text = std::getenv("D012_NET_DELAY"); text != nullptr && *text != '\0') {
+        options.disabled = true;
+        options.note = "Set by D012_NET_DELAY";
+    }
+    const std::string shown = frames == 0 ? "Auto" : std::to_string(frames) + " frames";
+    const int step = ui::choice_row("Input delay", shown, options);
+    if (step == 0) return;
+    // Auto, then 2 to 10: ten choices.
+    const int index = ((frames == 0 ? 0 : frames - 1) + step + 10) % 10;
+    frames = index == 0 ? 0 : index + 1;
+    try {
+        const std::filesystem::path dir = portablekit::install::user_data_directory();
+        portablekit::install::SettingsEntries entries = portablekit::install::read_settings_file(dir);
+        entries[kDelayKey] = frames == 0 ? "auto" : std::to_string(frames);
+        portablekit::install::write_settings_file(dir, entries);
+    } catch (const std::exception &e) {
+        std::cerr << "[comm-battle] settings.ini not written for " << kDelayKey << ": " << e.what() << std::endl;
+    }
+}
+#endif
+
 struct Install {
     Install() {
         static const decomp::Override overrides[] = {
@@ -367,6 +421,25 @@ void install(portablekit::HleRegistrar &hle) {
     // A copy that hosts the session listens for the other fighter's: its
     // router forwards the battle port along with the server's.
     portablekit::adhoc_host_forward_also({true, net::battle::port()});
+    // What both fighters' copies must share, or their battles part: the
+    // program, mods that change the game (none yet: the mods folder holds music
+    // only, which may differ; a kind of mod that changes the game sets this
+    // item), and the test switches that change how a fighter or a camera
+    // moves. The right-stick camera's own settings may differ: each copy sends
+    // its player's (d012_camera.cpp).
+    const auto env = [](const char *name) {
+        const char *value = std::getenv(name);
+        return std::string(value != nullptr ? value : "");
+    };
+    net::battle::must_match("the port's version", source_hash());
+    net::battle::must_match("mods that change the game", "");
+    net::battle::must_match("the right-stick camera (D012_NO_RIGHT_STICK_CAMERA)", camera::enabled() ? "on" : "off");
+    net::battle::must_match("the smooth stick (D012_NO_SMOOTH_STICK)", decomp::smooth_stick_on() ? "on" : "off");
+    net::battle::must_match("analog walking in battle (D012_SMOOTH_STICK_BATTLE)", env("D012_SMOOTH_STICK_BATTLE"));
+    net::battle::must_match("the camera follow (D012_CAMERA_FOLLOW_DEADZONE)", env("D012_CAMERA_FOLLOW_DEADZONE"));
+#if defined(PORTABLEKIT_HAS_RENDERER)
+    portablekit::ui::add_network_rows(&network_rows);
+#endif
 }
 
 bool active(Guest *g) {
