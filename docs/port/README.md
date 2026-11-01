@@ -99,6 +99,12 @@ disassembler and the new `tools/port/` scripts cover the analysis.
   battle's draw tasks run a second time from player 2's camera. Two copies over ad hoc are kept for later online
   play. Not started.
 
+## Texture loading (1 November 2026)
+
+- [Texture loading](texture-loading.md): where the game's textures come from (package GIMs used in place, an image
+  library for GIM/TIM2/BMP, model textures copied into VRAM, text drawn at run time), traced with write watches, for
+  decoding texture pack images before a texture's first draw. Hooks proposed; nothing built.
+
 ## Next steps
 
 1. ~~Read PortableKit's sources.~~ Done; see above.
