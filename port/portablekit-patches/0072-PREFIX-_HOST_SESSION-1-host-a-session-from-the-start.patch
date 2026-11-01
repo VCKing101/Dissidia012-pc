@@ -1,0 +1,35 @@
+From 302b8910f1bf57c52853901232d7f2dd148720a7 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Sun, 1 Nov 2026 20:28:11 +1030
+Subject: [PATCH] <PREFIX>_HOST_SESSION=1: host a session from the start
+
+Does what Network > Host a session does as the game starts, for a machine
+that hosts with nobody at it, such as a test.
+
+Tested: Dissidia 012's port on Windows 11 hosted at start-up and opened
+its router ports.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/main.cpp | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/host/main.cpp b/host/main.cpp
+index d2d6630..5455ce7 100644
+--- a/host/main.cpp
++++ b/host/main.cpp
+@@ -445,6 +445,11 @@ int main(int argc, char **argv) {
+             std::cout << "No recompiled code is linked; running under the interpreter.\n";
+         }
+ 
++        // <PREFIX>_HOST_SESSION=1 hosts a session from the start, as Network >
++        // Host a session does, for a machine that hosts with nobody at it.
++        if (const char *host = std::getenv(portablekit::env_name("HOST_SESSION").c_str());
++            host != nullptr && *host != '\0' && *host != '0')
++            portablekit::adhoc_host_start();
+         runtime.run(elf.runtime_entry(load_base), configured_max_dispatches());
+         std::cout << "Runtime stopped: " << runtime.stop_reason() << "\n";
+         portablekit::stop_presenting();
+-- 
+2.53.0.windows.1
+

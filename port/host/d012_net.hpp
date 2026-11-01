@@ -56,15 +56,22 @@ void check(std::uint64_t read, std::uint64_t hash);
 // linked for that battle alone, its frames counted from the battle's start.
 namespace battle {
 
-// D012_NET_BATTLE=PORT or ADDRESS:PORT (or settings.ini's online.battle_link):
-// where player 0's copy listens for player 1's (127.0.0.1 without an address;
-// 0.0.0.0 listens on every network, which Windows asks the player to allow).
-// Until the game's lobby hands the address over, both copies are given it.
-// The input delay is player 0's D012_NET_DELAY or online.input_delay.
+// On with ad hoc play (network.adhoc), or with D012_NET_BATTLE=PORT or
+// ADDRESS:PORT (settings.ini's online.battle_link), a test switch: where
+// player 0's copy listens for player 1's (127.0.0.1 without an address).
+// Without it, the copy that hosts the game's session listens on every network
+// at port() (which Windows asks the player to allow), and the other joins the
+// session's address there. The listening copy's D012_NET_DELAY or
+// online.input_delay sets the input delay: a number of frames, or by default
+// "auto", from the round trip timed as the two link.
 [[nodiscard]] bool configured();
 
-// Links this copy, `player` 0 (which listens) or 1, for the battle `tag`
-// (24 bits; both copies give the same). Waits up to D012_NET_WAIT seconds.
+// The battle link's UDP port: D012_NET_BATTLE_PORT or online.battle_port,
+// 27420 by default. A hosting copy asks the router to forward it.
+[[nodiscard]] std::uint16_t port();
+
+// Links this copy, the game's `player` 0 or 1, for the battle `tag` (24 bits;
+// both copies give the same). Waits up to D012_NET_WAIT seconds.
 bool open(int player, std::uint32_t tag);
 [[nodiscard]] bool open_now();
 

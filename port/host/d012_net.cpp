@@ -3,9 +3,9 @@
 // Packets (little endian) start "D0NL", u8 kind, then a 24-bit link tag (0 for
 // the link from start-up; a battle's own for a battle link), so a packet left
 // over from an earlier battle is never taken for this one:
-// - HELLO (1), player 2 to player 1: u32 version.
-// - WELCOME (2), player 1's answer: u32 version, u32 input delay, u64 the PSP
-//   clock's epoch, u8 length and the save answers.
+// - HELLO (1), the joining copy to the listening one: u32 version.
+// - WELCOME (2), the listening copy's answer: u32 version, u32 input delay,
+//   u64 the PSP clock's epoch, u8 length and the save answers.
 // - INPUT (3): u64 how many of the other copy's frames this copy holds (all
 //   frames below it), u64 the first frame carried, u16 their count, u16
 //   spare, u64 a checked read and u64 its hash (read ~0 for none), u32 this
@@ -15,13 +15,19 @@
 //   u8 connected, u8 lx, ly, rx, ry, spare, u32 buttons, u32 extra.
 // - BYE (4): this copy has left (a battle link closed by a quit); nothing more
 //   will come.
+// - PROBE (5), the listening copy to the joining one before its WELCOME: u32
+//   its clock in ms; PROBE ECHO (6) sends the same u32 straight back. With
+//   the input delay on auto (online.input_delay empty or "auto"), a few round
+//   trips timed so decide the delay the WELCOME gives.
 // Each INPUT carries every frame the other copy has not confirmed (up to 64),
 // so a lost packet costs only the wait for the next one. The first `delay`
 // frames carry nobody's input on either copy.
 //
 // The battle link's address and the input delay can also come from
 // settings.ini (online.battle_link, online.input_delay), so that a copy needs
-// no launch options.
+// no launch options. Without a battle link address, the copy that hosts the
+// game's session listens, and the other joins the session's address
+// (battle::open()).
 //
 // D012_NET_SIM=DELAY_MS[,JITTER_MS[,LOSS_PERCENT]] is a test switch: every
 // packet this copy sends is held DELAY_MS give or take JITTER_MS (so packets
@@ -33,6 +39,8 @@
 
 #include "d012_net.hpp"
 
+#include "adhoc/session.hpp"
+
 #include "install/user_data.hpp"
 
 #if defined(_WIN32)
@@ -41,6 +49,7 @@
 #else
 #include <arpa/inet.h>
 #include <fcntl.h>
+#include <netdb.h>
 #include <netinet/in.h>
 #include <sys/select.h>
 #include <sys/socket.h>
@@ -49,6 +58,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
@@ -86,7 +96,9 @@ constexpr std::uint8_t kHello = 1u;
 constexpr std::uint8_t kWelcome = 2u;
 constexpr std::uint8_t kInput = 3u;
 constexpr std::uint8_t kBye = 4u;
-constexpr std::uint32_t kVersion = 3u;
+constexpr std::uint8_t kProbe = 5u;
+constexpr std::uint8_t kProbeEcho = 6u;
+constexpr std::uint32_t kVersion = 4u;
 constexpr std::size_t kHead = 8u;
 constexpr std::size_t kInputHead = kHead + 48u;
 constexpr std::size_t kLocalSize = 16u;
@@ -100,6 +112,10 @@ constexpr auto kLost = std::chrono::seconds(10);
 constexpr auto kLongWait = std::chrono::milliseconds(100);
 constexpr auto kLastFrames = std::chrono::milliseconds(1000);
 constexpr std::uint64_t kReportEvery = 900u;  // frames between reports of the waits
+constexpr std::size_t kProbes = 8u;           // round trips timed for an automatic delay
+constexpr auto kProbeEvery = std::chrono::milliseconds(40);
+constexpr auto kProbeFor = std::chrono::seconds(2);
+constexpr std::uint16_t kBattlePort = 27420;  // the battle link's UDP port by default
 
 struct Link {
     const char *name = "net";  // the log's prefix
@@ -108,6 +124,8 @@ struct Link {
     bool player1 = false;
     bool peer_known = false;
     bool welcomed = false;
+    bool decided = false;  // the listening copy: the delay is settled, so HELLOs get a WELCOME
+    std::vector<std::uint32_t> probe_trips;
     bool lost = false;
     bool left = false;  // the other copy said BYE
     Clock::time_point left_at{};
@@ -400,11 +418,22 @@ void handle(Link &l, const std::uint8_t *data, std::size_t size, const sockaddr_
             l.peer_known = true;
             l.heard = Clock::now();
         }
-        if (same_address(from, l.peer)) send_welcome(l);
+        if (same_address(from, l.peer) && l.decided) send_welcome(l);
         return;
     }
     if (!l.peer_known || !same_address(from, l.peer)) return;
     l.heard = Clock::now();
+    if (kind == kProbe && !l.player1 && size >= kHead + 4u) {
+        std::vector<std::uint8_t> out = packet(l, kProbeEcho, kHead + 4u);
+        std::memcpy(out.data() + kHead, data + kHead, 4u);
+        send(l, out);
+        return;
+    }
+    if (kind == kProbeEcho && l.player1 && size >= kHead + 4u) {
+        const std::uint32_t trip = clock_ms() - get<std::uint32_t>(data + kHead);
+        if (trip < 10000u) l.probe_trips.push_back(trip);
+        return;
+    }
     if (kind == kWelcome && !l.player1 && !l.welcomed && size >= kHead + 17u) {
         const std::size_t length = data[kHead + 16u];
         if (get<std::uint32_t>(data + kHead) != kVersion || size < kHead + 17u + length) return;
@@ -462,14 +491,20 @@ bool parse_address(const std::string &text, sockaddr_in &out) {
     return inet_pton(AF_INET, host == "localhost" ? "127.0.0.1" : host.c_str(), &out.sin_addr) == 1;
 }
 
-bool open_socket(Link &l, const sockaddr_in &bound) {
+bool sockets_ready() {
 #if defined(_WIN32)
     static const bool started = [] {
         WSADATA wsa{};
         return WSAStartup(MAKEWORD(2, 2), &wsa) == 0;
     }();
-    if (!started) return false;
+    return started;
+#else
+    return true;
 #endif
+}
+
+bool open_socket(Link &l, const sockaddr_in &bound) {
+    if (!sockets_ready()) return false;
     l.socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (l.socket == kNoSocket) return false;
 #if defined(_WIN32)
@@ -498,10 +533,48 @@ std::uint32_t env_number(const char *name, std::uint32_t fallback, std::uint32_t
     return static_cast<std::uint32_t>(std::min<unsigned long>(std::strtoul(text, nullptr, 10), most));
 }
 
+// The input delay for a round trip of `trip` ms: a frame's input goes out
+// `delay` frames (of 33 ms) before it is needed, so they must cover half the
+// trip, the frame it can wait before it is sent (INPUT goes once a frame) and
+// some jitter (docs/port/communication-mode.md, sections 12 to 14). 2 frames
+// at 75 ms waited on nearly every frame; 3 at 100 ms never did.
+std::uint32_t delay_for(std::uint32_t trip) {
+    constexpr double frame = 1000.0 / 30.0;
+    const double frames = (trip / 2.0 + frame + 15.0) / frame;
+    return std::clamp<std::uint32_t>(static_cast<std::uint32_t>(std::ceil(frames)), 2u, 10u);
+}
+
+// The listening copy, with the delay on auto: times a few round trips to the
+// joining copy and settles the delay from their median.
+void probe_delay(Link &l) {
+    const auto began = Clock::now();
+    auto last = began - kProbeEvery;
+    while (l.probe_trips.size() < kProbes && Clock::now() - began < kProbeFor) {
+        if (Clock::now() - last >= kProbeEvery) {
+            std::vector<std::uint8_t> out = packet(l, kProbe, kHead + 4u);
+            put32(out, kHead, clock_ms());
+            send(l, out);
+            last = Clock::now();
+        }
+        receive(l, std::chrono::milliseconds(10));
+    }
+    if (l.probe_trips.empty()) {
+        l.delay = 3u;
+        std::cout << "[" << l.name << "] no round trip timed; input delay " << l.delay << " frames" << std::endl;
+        return;
+    }
+    std::vector<std::uint32_t> trips = l.probe_trips;
+    std::sort(trips.begin(), trips.end());
+    const std::uint32_t median = trips[trips.size() / 2u];
+    l.delay = delay_for(median);
+    std::cout << "[" << l.name << "] input delay " << l.delay << " frames, for a round trip of " << median
+              << " ms (" << trips.size() << " timed, " << trips.front() << " to " << trips.back() << ")" << std::endl;
+}
+
 // Opens `l` and waits up to D012_NET_WAIT seconds for the other copy: as
 // player 1 listening on `address`, else joining it. Player 1's copy sets the
-// input delay (D012_NET_DELAY), and its epoch and answers, which the other
-// takes.
+// input delay (D012_NET_DELAY, a number or "auto"), and its epoch and
+// answers, which the other takes.
 bool connect(Link &l, bool host, const sockaddr_in &address, const std::string &where) {
     const char *name = l.name;
     const char *unit = l.unit;
@@ -535,11 +608,18 @@ bool connect(Link &l, bool host, const sockaddr_in &address, const std::string &
     const auto began = Clock::now();
     if (host) {
         const std::string delay = setting("D012_NET_DELAY", "online.input_delay");
-        l.delay = delay.empty() ? 3u
-                                : static_cast<std::uint32_t>(
-                                      std::min<unsigned long>(std::strtoul(delay.c_str(), nullptr, 10), 30u));
+        const bool automatic = delay.empty() || delay == "auto";
+        if (!automatic) {
+            l.delay = static_cast<std::uint32_t>(std::min<unsigned long>(std::strtoul(delay.c_str(), nullptr, 10), 30u));
+            l.decided = true;
+        }
         std::cout << "[" << l.name << "] waiting for the other copy on " << where << std::endl;
         while (!l.peer_known && Clock::now() - began < wait) receive(l, std::chrono::milliseconds(100));
+        if (l.peer_known && automatic) {
+            probe_delay(l);
+            l.decided = true;
+            send_welcome(l);
+        }
     } else {
         std::cout << "[" << l.name << "] joining the other copy on " << where << std::endl;
         auto hello = Clock::now() - kHelloEvery;
@@ -718,23 +798,74 @@ void check(std::uint64_t read, std::uint64_t hash) { note_hash(link(), read, has
 
 namespace battle {
 
-bool configured() { return !setting("D012_NET_BATTLE", "online.battle_link").empty(); }
+namespace {
+
+int local_player = 0;  // this copy's fighter in the game: 0 or 1
+
+bool on(const std::string &value) { return value == "1" || value == "true" || value == "on" || value == "yes"; }
+
+// Without online.battle_link: the copy hosting the game's session (or whose
+// session server is on this machine) listens on every network at the battle
+// port; the other joins the session's address there.
+bool from_session(sockaddr_in &address, bool &listen, std::string &where) {
+    const std::string port_text = setting("D012_NET_BATTLE_PORT", "online.battle_port");
+    const long number = port_text.empty() ? kBattlePort : std::strtol(port_text.c_str(), nullptr, 10);
+    if (number <= 0 || number > 65535) return false;
+    const auto port = static_cast<std::uint16_t>(number);
+    std::string host = portablekit::adhoc_server_address();
+    if (const std::size_t colon = host.rfind(':'); colon != std::string::npos && host.find(':') == colon)
+        host.resize(colon);
+    if (host.empty() || !sockets_ready()) return false;
+    addrinfo hints{};
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_DGRAM;
+    addrinfo *found = nullptr;
+    if (getaddrinfo(host.c_str(), nullptr, &hints, &found) != 0 || found == nullptr) return false;
+    const in_addr server = reinterpret_cast<const sockaddr_in *>(found->ai_addr)->sin_addr;
+    freeaddrinfo(found);
+    listen = portablekit::adhoc_hosting() || (ntohl(server.s_addr) >> 24) == 127u;
+    address = sockaddr_in{};
+    address.sin_family = AF_INET;
+    address.sin_port = htons(port);
+    address.sin_addr.s_addr = listen ? htonl(INADDR_ANY) : server.s_addr;
+    where = listen ? "UDP port " + std::to_string(port) + " (hosting)" : host + ":" + std::to_string(port);
+    return true;
+}
+
+} // namespace
+
+bool configured() {
+    return !setting("D012_NET_BATTLE", "online.battle_link").empty() || on(setting("D012_ADHOC", "network.adhoc"));
+}
+
+std::uint16_t port() {
+    const std::string text = setting("D012_NET_BATTLE_PORT", "online.battle_port");
+    const long number = text.empty() ? kBattlePort : std::strtol(text.c_str(), nullptr, 10);
+    return number > 0 && number <= 65535 ? static_cast<std::uint16_t>(number) : kBattlePort;
+}
 
 bool open(int player, std::uint32_t tag) {
     Link &l = battle_link();
     shut(l);
+    local_player = player == 0 ? 0 : 1;
     const std::string text = setting("D012_NET_BATTLE", "online.battle_link");
     sockaddr_in address{};
-    if (!parse_address(text, address)) {
+    bool listen = player == 0;
+    std::string where = text;
+    if (!text.empty() && !parse_address(text, address)) {
         std::cerr << "[battle-net] D012_NET_BATTLE is PORT or ADDRESS:PORT, not \"" << text << "\"" << std::endl;
+        return false;
+    }
+    if (text.empty() && !from_session(address, listen, where)) {
+        std::cerr << "[battle-net] no session address to link the battle through" << std::endl;
         return false;
     }
     l.name = "battle-net";
     l.unit = "frame";
     l.tag = tag & kTagMask;
-    if (!connect(l, player == 0, address, text)) return false;
-    std::cout << "[battle-net] linked as player " << player << " for battle " << l.tag << ": " << l.delay
-              << " frames of input delay" << std::endl;
+    if (!connect(l, listen, address, where)) return false;
+    std::cout << "[battle-net] linked as player " << player << " for battle " << l.tag << " ("
+              << (listen ? "listening" : "joined") << "): " << l.delay << " frames of input delay" << std::endl;
     return true;
 }
 
@@ -746,8 +877,8 @@ Pads exchange(std::uint64_t frame, const input::Pad &mine) {
     local.pad = mine;
     const auto [me, them] = trade(l, frame, local);
     Pads pads;
-    pads.player[l.player1 ? 0 : 1] = me.pad;
-    pads.player[l.player1 ? 1 : 0] = them.pad;
+    pads.player[local_player] = me.pad;
+    pads.player[1 - local_player] = them.pad;
     pads.lost = l.lost;
     return pads;
 }

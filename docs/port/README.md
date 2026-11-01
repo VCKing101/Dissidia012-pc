@@ -123,6 +123,10 @@ disassembler and the new `tools/port/` scripts cover the analysis.
   each player's right-stick camera, in step for a whole fight (section 11). It survives forfeits, rematches, a
   vanished copy and simulated lag (section 12), and this PC against the Steam Deck played a whole battle over the
   internet once the port carried its own `sinf`/`cosf`/`asinf`, since Wine's differ from Microsoft's (section 13).
+  With nothing set up, the hosting copy opens its router's ports (NAT-PMP or UPnP), the battle finds its address from the session and the input delay sets itself: the Deck on mobile data
+  joined the address the PC showed and played a whole battle (section 14).
+- [Playing online](play-online.md): the players' guide (test builds only): host, join, and what to do when the
+  router, a shared provider address or a firewall stops it, including Tailscale and ZeroTier.
 
 ## Texture packs (1 November 2026)
 

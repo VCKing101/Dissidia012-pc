@@ -126,8 +126,9 @@ void run_if_asked() {
     const std::string asked = net::setting("D012_MATH_CHECK", "online.math_check");
     const bool off = asked == "0";
     const bool on = !asked.empty() && !off;
-    // Also whenever this copy is set up for network battles.
-    if (off || (!on && !net::battle::configured())) return;
+    // Also whenever this copy has a battle link address set (a test setup).
+    const bool test_link = !net::setting("D012_NET_BATTLE", "online.battle_link").empty();
+    if (off || (!on && !test_link)) return;
     const bool full = asked == "full";
     const auto began = std::chrono::steady_clock::now();
     const Function ours[5] = {&sinf, &cosf, &asinf, &log2f, &exp2f};

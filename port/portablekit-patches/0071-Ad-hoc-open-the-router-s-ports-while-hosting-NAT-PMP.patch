@@ -1,0 +1,1316 @@
+From c9005352d666d94bbc2863908e5611b7634bfa51 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Sun, 1 Nov 2026 20:28:11 +1030
+Subject: [PATCH] Ad hoc: open the router's ports while hosting (NAT-PMP, then
+ UPnP)
+
+Hosting a session now asks the router to forward the session's ports, so
+that players on the internet can join without port forwarding by hand: TCP
+for matchmaking and the relay, plus any a game adds with
+adhoc_host_forward_also() (a port's own UDP link, say). It tries NAT-PMP
+(RFC 6886) first, then UPnP (SSDP, the gateway's description, then
+AddPortMapping on WANIPConnection or WANPPPConnection). Each port keeps its
+number outside. The lease is an hour, renewed at half time, and given back
+when hosting stops or the program closes.
+
+The Network page shows the internet address the router reported, with a
+button that copies it, or why the router refused. "Open router ports"
+(network.router_ports, <PREFIX>_ADHOC_ROUTER_PORTS) turns it off;
+<PREFIX>_NO_ROUTER_PORTS=1 does for one run.
+
+Tested: the router-message checks (adhoc_tests --router-messages: NAT-PMP
+requests and replies, SSDP, the description, SOAP escaping, a chunked
+fault) pass under MSVC. With Dissidia 012's port on Windows 11 behind a
+home router with no forwarded ports, NAT-PMP opened TCP 27312, 27313 and
+UDP 27420; a Steam Deck on mobile data joined by the address shown, and
+the ports were given back on quit. The Network page rows were captured.
+
+Not tested: UPnP mapping in the game (that router answered NAT-PMP
+first; its UPnP answered a probe from another machine, while Windows'
+firewall kept SSDP replies from an unlisted program on this one),
+macOS, and Linux natively.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ CMakeLists.txt              |   1 +
+ README.md                   |   2 +-
+ cmake/PortableKit.cmake     |   1 +
+ docs/SOURCE_PROVENANCE.md   |   2 +
+ host/adhoc/host.cpp         |  34 ++
+ host/adhoc/port_mapping.cpp | 717 ++++++++++++++++++++++++++++++++++++
+ host/adhoc/port_mapping.hpp | 131 +++++++
+ host/adhoc/session.hpp      |  14 +-
+ host/settings/settings.cpp  |   4 +
+ host/settings/settings.hpp  |   1 +
+ host/ui/menu.cpp            |  44 ++-
+ tests/adhoc_tests.cpp       |  70 +++-
+ 12 files changed, 1014 insertions(+), 7 deletions(-)
+ create mode 100644 host/adhoc/port_mapping.cpp
+ create mode 100644 host/adhoc/port_mapping.hpp
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index fa5fb11..aafbcb2 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -232,6 +232,7 @@ if(PSPRECOMP_BUILD_TESTS)
+         "${PORTABLEKIT_ROOT}/host/adhoc/client.cpp"
+         "${PORTABLEKIT_ROOT}/host/adhoc/discovery.cpp"
+         "${PORTABLEKIT_ROOT}/host/adhoc/matching.cpp"
++        "${PORTABLEKIT_ROOT}/host/adhoc/port_mapping.cpp"
+         "${PORTABLEKIT_ROOT}/host/adhoc/server.cpp")
+     target_include_directories(portablekit_adhoc_tests PRIVATE
+         "${PORTABLEKIT_ROOT}/host" "${PORTABLEKIT_ROOT}/include")
+diff --git a/README.md b/README.md
+index 55cfe29..61db963 100644
+--- a/README.md
++++ b/README.md
+@@ -18,7 +18,7 @@ The game's Allegrex (MIPS) code is translated to C++ ahead of time and compiled
+ | Renderer | Graphics command lists translated to Vulkan, through SDL3 |
+ | Audio | Mixing, ATRAC3 and movie playback |
+ | Save data | The console's own save format, with import, export and backups |
+-| Networking | Ad hoc multiplayer: matchmaking, a built-in host server, and discovery on a LAN |
++| Networking | Ad hoc multiplayer: matchmaking, a built-in host server that asks the router to open its ports (NAT-PMP or UPnP), and discovery on a LAN |
+ | Interface | Settings menu, on-screen keyboard, and the installer that reads the player's own disc image |
+ 
+ A game is a **profile** on top of all of this: its identity, what it needs from the system, and anything specific to it.
+diff --git a/cmake/PortableKit.cmake b/cmake/PortableKit.cmake
+index c0d4035..e041175 100644
+--- a/cmake/PortableKit.cmake
++++ b/cmake/PortableKit.cmake
+@@ -80,6 +80,7 @@ set(PORTABLEKIT_HOST_SOURCES
+     host/adhoc/discovery.cpp
+     host/adhoc/host.cpp
+     host/adhoc/matching.cpp
++    host/adhoc/port_mapping.cpp
+     host/adhoc/server.cpp
+     host/save_data/aes128.cpp
+     host/save_data/param_sfo.cpp
+diff --git a/docs/SOURCE_PROVENANCE.md b/docs/SOURCE_PROVENANCE.md
+index 5e8651a..d6c43da 100644
+--- a/docs/SOURCE_PROVENANCE.md
++++ b/docs/SOURCE_PROVENANCE.md
+@@ -22,6 +22,8 @@ The framework contains no general-purpose EBOOT or PRX decrypter. The installer
+ 
+ The built-in server (`server.cpp`, used by *Host a session* and `--adhoc-server`) was also written for this project from the same protocols' documented and observed behaviour: the packet layouts, opcodes, ports and the order of the messages a server sends, checked against the project's own client. No code, structure or text was copied or adapted from other server implementations. The local network discovery protocol (`discovery.cpp`) is the project's own design.
+ 
++The router port mapping (`port_mapping.cpp`, which asks the router to forward a hosted session's ports) was written for this project from the protocols' public specifications: NAT-PMP from RFC 6886 (its message layouts, result codes and retry timing), and UPnP from the UPnP Forum's Device Architecture (SSDP search, the device description) and its Internet Gateway Device `WANIPConnection` and `WANPPPConnection` service descriptions (the `AddPortMapping`, `DeletePortMapping` and `GetExternalIPAddress` actions and their error codes). No code was copied or adapted from other implementations, such as libnatpmp or miniupnpc.
++
+ ## Texture packs
+ 
+ `host/gpu/texture_pack.cpp` and `replacement_textures.cpp` load HD texture packs made for PPSSPP, in its `textures.ini` format. They were written for this project. The format was learnt from PPSSPP's public documentation and pull requests about texture replacement, from reading PPSSPP's GPL-licensed source to find the format's facts (the layout of a key, the hash seeds, how the palette and the texture's dimensions enter the key, the order in which wildcard keys are tried, the ini sections and options), and from the keys a real community pack for Monster Hunter Portable 3rd HD Ver. uses, which the implementation reproduces. Only those facts and constants were taken; no code was copied, adapted or translated line by line. PPSSPP's `quick` hash is not implemented. Hashing uses xxHash, and PNG files are read and written with stb_image and stb_image_write, all unmodified (table below).
+diff --git a/host/adhoc/host.cpp b/host/adhoc/host.cpp
+index 5edd4b4..d6449f7 100644
+--- a/host/adhoc/host.cpp
++++ b/host/adhoc/host.cpp
+@@ -4,12 +4,15 @@
+ #include "../profile.hpp"
+ #include "adhoc/client.hpp"
+ #include "adhoc/discovery.hpp"
++#include "adhoc/port_mapping.hpp"
+ #include "adhoc/server.hpp"
+ #include "adhoc/session.hpp"
+ #include "settings/settings.hpp"
+ 
+ #include <algorithm>
++#include <cstdlib>
+ #include <mutex>
++#include <vector>
+ 
+ namespace portablekit {
+ namespace {
+@@ -24,6 +27,7 @@ struct HostState {
+     adhoc::Server server;
+     std::string error;
+     std::uint16_t port{};
++    std::vector<adhoc::ForwardedPort> also;  // the game's own ports to forward
+ };
+ 
+ // Never destroyed: the discovery thread asks the server for its player count
+@@ -42,8 +46,27 @@ void remember(const std::string &address) {
+     if (recent.size() > kRecentAddresses) recent.resize(kRecentAddresses);
+ }
+ 
++// The server's two ports and the game's own, asked of the router, unless the
++// setting or <PREFIX>_NO_ROUTER_PORTS turns that off.
++void open_router_ports(std::uint16_t adhocctl_port, const std::vector<adhoc::ForwardedPort> &also) {
++    const char *off = std::getenv(portablekit::env_name("NO_ROUTER_PORTS").c_str());
++    if (!settings::current().adhoc_router_ports || (off != nullptr && *off != '\0' && *off != '0')) return;
++    std::vector<adhoc::ForwardedPort> ports = {{false, adhocctl_port}, {false, adhoc::relay_port_for(adhocctl_port)}};
++    for (const adhoc::ForwardedPort &port : also)
++        if (std::find(ports.begin(), ports.end(), port) == ports.end()) ports.push_back(port);
++    adhoc::PortMapper::get().start(ports);
++}
++
+ } // namespace
+ 
++void adhoc_host_forward_also(adhoc::ForwardedPort port) {
++    HostState &state = host();
++    std::lock_guard lock(state.mutex);
++    if (std::find(state.also.begin(), state.also.end(), port) == state.also.end()) state.also.push_back(port);
++}
++
++adhoc::RouterStatus adhoc_router_status() { return adhoc::PortMapper::get().status(); }
++
+ std::string adhoc_server_address() {
+     if (adhoc_hosting()) {
+         const std::uint16_t port = host().port;
+@@ -54,6 +77,8 @@ std::string adhoc_server_address() {
+ 
+ bool adhoc_host_start() {
+     HostState &state = host();
++    std::vector<adhoc::ForwardedPort> also;
++    std::uint16_t port = 0;
+     {
+         std::lock_guard lock(state.mutex);
+         if (state.server.running()) return true;
+@@ -65,6 +90,8 @@ bool adhoc_host_start() {
+         }
+         state.error.clear();
+         state.port = config.adhocctl_port;
++        port = state.port;
++        also = state.also;
+         adhoc::Server *server = &state.server;
+         adhoc::Discovery::get().start_announcing(config.adhocctl_port, [server] {
+             adhoc::Announcement info;
+@@ -80,6 +107,7 @@ bool adhoc_host_start() {
+         settings::save();
+     }
+     adhoc::Client::log("[adhoc] hosting a session", true);
++    open_router_ports(port, also);
+     adhoc_apply_settings(true);
+     return true;
+ }
+@@ -93,6 +121,7 @@ void adhoc_host_stop() {
+         state.server.stop();
+         state.port = 0u;
+     }
++    adhoc::PortMapper::get().stop();
+     adhoc::Client::log("[adhoc] stopped hosting", true);
+     adhoc_apply_settings(true);
+ }
+@@ -107,6 +136,10 @@ std::string adhoc_host_error() {
+ adhoc::ServerStatus adhoc_host_status() { return host().server.status(); }
+ 
+ void adhoc_shutdown() noexcept {
++    try {
++        adhoc::PortMapper::get().stop();
++    } catch (...) {
++    }
+     try {
+         HostState &state = host();
+         std::lock_guard lock(state.mutex);
+@@ -127,6 +160,7 @@ void adhoc_join(const std::string &address) {
+         adhoc::Discovery::get().stop_announcing();
+         state.server.stop();
+         state.port = 0u;
++        adhoc::PortMapper::get().stop();
+     }
+     settings::Settings &s = settings::current();
+     if (settings::overridden_by("network.server").empty()) s.adhoc_server = address;
+diff --git a/host/adhoc/port_mapping.cpp b/host/adhoc/port_mapping.cpp
+new file mode 100644
+index 0000000..a1a12da
+--- /dev/null
++++ b/host/adhoc/port_mapping.cpp
+@@ -0,0 +1,717 @@
++#include "adhoc/port_mapping.hpp"
++
++#include "../profile.hpp"
++#include "adhoc/client.hpp"
++#include "adhoc/sockets.hpp"
++
++#include <algorithm>
++#include <chrono>
++#include <condition_variable>
++#include <cstdlib>
++#include <cstring>
++#include <fstream>
++#include <mutex>
++#include <sstream>
++#include <thread>
++
++#if defined(_WIN32)
++#include <iphlpapi.h>
++#undef interface
++#endif
++
++namespace portablekit::adhoc {
++
++std::string describe_ports(const std::vector<ForwardedPort> &ports) {
++    std::string text;
++    for (const bool udp : {false, true}) {
++        std::vector<std::uint16_t> numbers;
++        for (const ForwardedPort &p : ports)
++            if (p.udp == udp) numbers.push_back(p.port);
++        if (numbers.empty()) continue;
++        if (!text.empty()) text += " and ";
++        text += udp ? "UDP " : "TCP ";
++        for (std::size_t i = 0; i < numbers.size(); ++i) text += (i != 0u ? ", " : "") + std::to_string(numbers[i]);
++    }
++    return text;
++}
++
++namespace router_wire {
++namespace {
++
++void put16(std::vector<std::uint8_t> &out, std::size_t at, std::uint16_t v) {
++    out[at] = static_cast<std::uint8_t>(v >> 8u);
++    out[at + 1u] = static_cast<std::uint8_t>(v & 0xFFu);
++}
++void put32(std::vector<std::uint8_t> &out, std::size_t at, std::uint32_t v) {
++    put16(out, at, static_cast<std::uint16_t>(v >> 16u));
++    put16(out, at + 2u, static_cast<std::uint16_t>(v & 0xFFFFu));
++}
++std::uint16_t get16(const std::uint8_t *in) { return static_cast<std::uint16_t>((in[0] << 8u) | in[1]); }
++std::uint32_t get32(const std::uint8_t *in) {
++    return (static_cast<std::uint32_t>(get16(in)) << 16u) | get16(in + 2u);
++}
++
++std::string lower(std::string text) {
++    std::transform(text.begin(), text.end(), text.begin(),
++                   [](unsigned char c) { return static_cast<char>(c >= 'A' && c <= 'Z' ? c + 32 : c); });
++    return text;
++}
++
++std::string trim(const std::string &text) {
++    const auto first = text.find_first_not_of(" \t\r\n");
++    if (first == std::string::npos) return {};
++    return text.substr(first, text.find_last_not_of(" \t\r\n") - first + 1u);
++}
++
++// The value of a header line, by its name in any case.
++std::string header(const std::string &message, const std::string &name) {
++    std::istringstream in(message);
++    std::string line;
++    const std::string wanted = lower(name) + ":";
++    while (std::getline(in, line)) {
++        if (lower(line).rfind(wanted, 0) == 0) return trim(line.substr(wanted.size()));
++    }
++    return {};
++}
++
++std::string escape(const std::string &text) {
++    std::string out;
++    for (const char c : text) {
++        if (c == '&') out += "&amp;";
++        else if (c == '<') out += "&lt;";
++        else if (c == '>') out += "&gt;";
++        else out += c;
++    }
++    return out;
++}
++
++} // namespace
++
++std::vector<std::uint8_t> natpmp_address_request() { return {0u, 0u}; }
++
++std::vector<std::uint8_t> natpmp_map_request(bool udp, std::uint16_t internal, std::uint16_t external,
++                                             std::uint32_t lifetime) {
++    std::vector<std::uint8_t> out(12u, 0u);
++    out[1] = udp ? 1u : 2u;
++    put16(out, 4u, internal);
++    put16(out, 6u, external);
++    put32(out, 8u, lifetime);
++    return out;
++}
++
++std::optional<NatPmpReply> natpmp_parse(const std::uint8_t *data, std::size_t size) {
++    if (size < 8u || data[0] != 0u || data[1] < 128u) return std::nullopt;
++    NatPmpReply reply;
++    reply.opcode = data[1];
++    reply.result = get16(data + 2u);
++    if (reply.opcode == 128u) {
++        if (size < 12u) return std::nullopt;
++        std::memcpy(&reply.external_address, data + 8u, 4u);
++    } else if (reply.opcode == 129u || reply.opcode == 130u) {
++        if (size < 16u) return std::nullopt;
++        reply.internal_port = get16(data + 8u);
++        reply.external_port = get16(data + 10u);
++        reply.lifetime = get32(data + 12u);
++    } else {
++        return std::nullopt;
++    }
++    return reply;
++}
++
++std::string natpmp_result_text(std::uint16_t result) {
++    switch (result) {
++    case 0: return "success";
++    case 1: return "unsupported version";
++    case 2: return "refused (port mapping is turned off on the router)";
++    case 3: return "the router has no internet connection";
++    case 4: return "the router is out of mappings";
++    case 5: return "unsupported request";
++    default: return "error " + std::to_string(result);
++    }
++}
++
++std::string ssdp_search(const std::string &search_target) {
++    return "M-SEARCH * HTTP/1.1\r\n"
++           "HOST: 239.255.255.250:1900\r\n"
++           "MAN: \"ssdp:discover\"\r\n"
++           "MX: 2\r\n"
++           "ST: " +
++           search_target + "\r\n\r\n";
++}
++
++std::string ssdp_gateway_location(const std::string &response) {
++    const std::string target = lower(header(response, "ST") + " " + header(response, "NT"));
++    if (target.find("internetgatewaydevice") == std::string::npos &&
++        target.find("wanipconnection") == std::string::npos && target.find("wanpppconnection") == std::string::npos)
++        return {};
++    return header(response, "LOCATION");
++}
++
++std::optional<Url> parse_url(const std::string &url) {
++    const std::string scheme = "http://";
++    if (lower(url.substr(0, scheme.size())) != scheme) return std::nullopt;
++    const std::string rest = url.substr(scheme.size());
++    const std::size_t slash = rest.find('/');
++    const std::string authority = rest.substr(0, slash);
++    Url out;
++    out.path = slash == std::string::npos ? "/" : rest.substr(slash);
++    const std::size_t colon = authority.rfind(':');
++    out.host = authority.substr(0, colon);
++    if (colon != std::string::npos) {
++        const long port = std::strtol(authority.c_str() + colon + 1u, nullptr, 10);
++        if (port <= 0 || port > 65535) return std::nullopt;
++        out.port = static_cast<std::uint16_t>(port);
++    }
++    if (out.host.empty()) return std::nullopt;
++    return out;
++}
++
++std::string xml_value(const std::string &xml, const std::string &tag) {
++    std::size_t at = 0;
++    while ((at = xml.find(tag, at)) != std::string::npos) {
++        const std::size_t end = at + tag.size();
++        // <tag> or <prefix:tag>, with or without attributes.
++        const bool opens = at > 0u && (xml[at - 1u] == '<' || xml[at - 1u] == ':');
++        const bool whole = end < xml.size() && (xml[end] == '>' || xml[end] == ' ');
++        bool element = opens;
++        if (opens && xml[at - 1u] == ':') {
++            const std::size_t lt = xml.rfind('<', at);
++            element = lt != std::string::npos && xml.find_first_of(" >/", lt) >= at && xml[lt + 1u] != '/';
++        }
++        if (element && whole) {
++            const std::size_t gt = xml.find('>', end);
++            if (gt == std::string::npos) return {};
++            const std::size_t close = xml.find('<', gt);
++            return trim(xml.substr(gt + 1u, close == std::string::npos ? std::string::npos : close - gt - 1u));
++        }
++        at = end;
++    }
++    return {};
++}
++
++std::optional<WanService> find_wan_service(const std::string &description, const std::string &location) {
++    const std::optional<Url> where = parse_url(location);
++    if (!where) return std::nullopt;
++    std::string base = xml_value(description, "URLBase");
++    if (base.empty() || !parse_url(base))
++        base = "http://" + where->host + ":" + std::to_string(where->port) + "/";
++    std::optional<WanService> found;
++    std::size_t at = 0;
++    while ((at = description.find("<service>", at)) != std::string::npos) {
++        const std::size_t end = description.find("</service>", at);
++        const std::string block = description.substr(at, end == std::string::npos ? std::string::npos : end - at);
++        at = end == std::string::npos ? description.size() : end;
++        const std::string type = xml_value(block, "serviceType");
++        const bool ip = type.find(":WANIPConnection:") != std::string::npos;
++        const bool ppp = type.find(":WANPPPConnection:") != std::string::npos;
++        if (!ip && !ppp) continue;
++        std::string control = xml_value(block, "controlURL");
++        if (control.empty()) continue;
++        if (!parse_url(control)) {
++            const std::optional<Url> b = parse_url(base);
++            const std::string root = "http://" + b->host + ":" + std::to_string(b->port);
++            if (control.front() == '/') {
++                control = root + control;
++            } else {
++                std::string dir = b->path.substr(0, b->path.rfind('/') + 1u);
++                control = root + dir + control;
++            }
++        }
++        // An IP connection before a PPP one: a router that lists both is
++        // usually connected through the first.
++        if (!found || (ip && found->type.find(":WANPPPConnection:") != std::string::npos))
++            found = WanService{type, control};
++    }
++    return found;
++}
++
++std::string soap_body(const std::string &service, const std::string &action,
++                      const std::vector<std::pair<std::string, std::string>> &arguments) {
++    std::string body = "<?xml version=\"1.0\"?>\r\n"
++                       "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" "
++                       "s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\"><s:Body><u:" +
++                       action + " xmlns:u=\"" + service + "\">";
++    for (const auto &[name, value] : arguments) body += "<" + name + ">" + escape(value) + "</" + name + ">";
++    body += "</u:" + action + "></s:Body></s:Envelope>\r\n";
++    return body;
++}
++
++std::optional<HttpResponse> parse_http_response(const std::string &raw) {
++    const std::size_t split = raw.find("\r\n\r\n");
++    if (split == std::string::npos || raw.rfind("HTTP/", 0) != 0) return std::nullopt;
++    const std::string head = raw.substr(0, split);
++    HttpResponse response;
++    const std::size_t space = head.find(' ');
++    if (space == std::string::npos) return std::nullopt;
++    response.status = std::atoi(head.c_str() + space + 1u);
++    std::string body = raw.substr(split + 4u);
++    if (lower(header(head, "Transfer-Encoding")).find("chunked") != std::string::npos) {
++        std::string joined;
++        std::size_t at = 0;
++        while (at < body.size()) {
++            const std::size_t line = body.find("\r\n", at);
++            if (line == std::string::npos) break;
++            const unsigned long size = std::strtoul(body.substr(at, line - at).c_str(), nullptr, 16);
++            if (size == 0u) break;
++            joined += body.substr(line + 2u, size);
++            at = line + 2u + size + 2u;
++        }
++        body = joined;
++    }
++    response.body = body;
++    return response;
++}
++
++} // namespace router_wire
++
++namespace {
++
++using Clock = std::chrono::steady_clock;
++using namespace net;
++using namespace router_wire;
++
++constexpr std::uint16_t kNatPmpPort = 5351;
++constexpr std::uint32_t kLease = 3600u;  // seconds asked for
++constexpr auto kSsdpWait = std::chrono::milliseconds(2500);
++constexpr int kHttpTimeoutMs = 3000;
++
++void log(const std::string &line) { Client::log("[adhoc] router: " + line, true); }
++
++std::string ipv4_text(std::uint32_t network_order) {
++    return Address::ipv4_address(network_order, 0u).host();
++}
++
++// The default gateway's IPv4 address (network order), 0 when it cannot be
++// found here.
++std::uint32_t default_gateway() {
++#if defined(_WIN32)
++    MIB_IPFORWARDROW row{};
++    if (GetBestRoute(htonl(0x08080808u), 0, &row) == NO_ERROR) return static_cast<std::uint32_t>(row.dwForwardNextHop);
++    return 0u;
++#elif defined(__linux__)
++    std::ifstream routes("/proc/net/route");
++    std::string line;
++    std::getline(routes, line);  // the column names
++    while (std::getline(routes, line)) {
++        std::istringstream in(line);
++        std::string name, destination, gateway;
++        if (!(in >> name >> destination >> gateway)) continue;
++        // Printed as the address's bytes in memory order: the value read back
++        // is the network-order word on a little-endian machine.
++        if (destination == "00000000") return static_cast<std::uint32_t>(std::strtoul(gateway.c_str(), nullptr, 16));
++    }
++    return 0u;
++#else
++    return 0u;
++#endif
++}
++
++bool wait_readable(Socket s, int timeout_ms) {
++    PollEntry entry{};
++    entry.fd = s;
++    entry.events = POLLIN;
++    return poll_sockets(&entry, 1u, timeout_ms) > 0 && (entry.revents & POLLIN) != 0;
++}
++
++// One NAT-PMP exchange: the request sent up to four times, 250 ms apart and
++// doubling, as RFC 6886 asks.
++std::optional<NatPmpReply> natpmp_ask(Socket s, const std::vector<std::uint8_t> &request, std::uint8_t opcode,
++                                      int tries) {
++    int timeout = 250;
++    for (int attempt = 0; attempt < tries; ++attempt, timeout *= 2) {
++        if (::send(s, reinterpret_cast<const char *>(request.data()), static_cast<int>(request.size()), 0) < 0)
++            return std::nullopt;
++        const auto until = Clock::now() + std::chrono::milliseconds(timeout);
++        while (Clock::now() < until) {
++            const int left = static_cast<int>(
++                std::chrono::duration_cast<std::chrono::milliseconds>(until - Clock::now()).count());
++            if (!wait_readable(s, std::max(left, 1))) break;
++            std::uint8_t data[64];
++            const int got = static_cast<int>(::recv(s, reinterpret_cast<char *>(data), sizeof(data), 0));
++            if (got <= 0) break;
++            const auto reply = natpmp_parse(data, static_cast<std::size_t>(got));
++            if (reply && reply->opcode == opcode) return reply;
++        }
++    }
++    return std::nullopt;
++}
++
++// An HTTP exchange with `url`'s host: the request sent, everything read until
++// the router closes. `local` gets this machine's address on that connection.
++std::optional<std::string> http_exchange(const Url &url, const std::string &request, std::string *local = nullptr) {
++    addrinfo hints{};
++    hints.ai_family = AF_INET;
++    hints.ai_socktype = SOCK_STREAM;
++    addrinfo *found = nullptr;
++    if (getaddrinfo(url.host.c_str(), std::to_string(url.port).c_str(), &hints, &found) != 0 || found == nullptr)
++        return std::nullopt;
++    const Socket s = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
++    if (s == kNoSocket) {
++        freeaddrinfo(found);
++        return std::nullopt;
++    }
++    set_nonblocking(s);
++    no_sigpipe(s);
++    const int connected = ::connect(s, found->ai_addr, static_cast<int>(found->ai_addrlen));
++    freeaddrinfo(found);
++    if (connected != 0 && !connect_pending(socket_error())) {
++        close_socket(s);
++        return std::nullopt;
++    }
++    PollEntry entry{};
++    entry.fd = s;
++    entry.events = POLLOUT;
++    if (poll_sockets(&entry, 1u, kHttpTimeoutMs) <= 0 || (entry.revents & POLLOUT) == 0) {
++        close_socket(s);
++        return std::nullopt;
++    }
++    if (local != nullptr) {
++        sockaddr_in mine{};
++        socklen_t size = sizeof(mine);
++        if (getsockname(s, reinterpret_cast<sockaddr *>(&mine), &size) == 0) *local = ipv4_text(mine.sin_addr.s_addr);
++    }
++    std::size_t sent = 0;
++    const auto until = Clock::now() + std::chrono::milliseconds(kHttpTimeoutMs);
++    while (sent < request.size() && Clock::now() < until) {
++        const int n = static_cast<int>(
++            ::send(s, request.data() + sent, static_cast<int>(request.size() - sent), kSendFlags));
++        if (n > 0) sent += static_cast<std::size_t>(n);
++        else if (n < 0 && !would_block(socket_error())) break;
++        else std::this_thread::sleep_for(std::chrono::milliseconds(5));
++    }
++    std::string reply;
++    while (sent == request.size() && Clock::now() < until) {
++        if (!wait_readable(s, 100)) continue;
++        char buffer[4096];
++        const int n = static_cast<int>(::recv(s, buffer, sizeof(buffer), 0));
++        if (n > 0) reply.append(buffer, static_cast<std::size_t>(n));
++        else if (n == 0 || !would_block(socket_error())) break;
++    }
++    close_socket(s);
++    if (sent != request.size() || reply.empty()) return std::nullopt;
++    return reply;
++}
++
++struct SoapResult {
++    bool answered{};  // the router replied at all
++    int status{};
++    std::string body;
++    [[nodiscard]] int upnp_error() const { return std::atoi(xml_value(body, "errorCode").c_str()); }
++};
++
++SoapResult soap(const WanService &service, const std::string &action,
++                const std::vector<std::pair<std::string, std::string>> &arguments, std::string *local = nullptr) {
++    SoapResult result;
++    const std::optional<Url> url = parse_url(service.control_url);
++    if (!url) return result;
++    const std::string body = soap_body(service.type, action, arguments);
++    const std::string request = "POST " + url->path + " HTTP/1.1\r\nHost: " + url->host + ":" +
++                                std::to_string(url->port) +
++                                "\r\nContent-Type: text/xml; charset=\"utf-8\"\r\nSOAPAction: \"" + service.type + "#" +
++                                action + "\"\r\nContent-Length: " + std::to_string(body.size()) +
++                                "\r\nConnection: close\r\n\r\n" + body;
++    const std::optional<std::string> raw = http_exchange(*url, request, local);
++    if (!raw) return result;
++    const std::optional<HttpResponse> response = parse_http_response(*raw);
++    if (!response) return result;
++    result.answered = true;
++    result.status = response->status;
++    result.body = response->body;
++    return result;
++}
++
++// The routers that answer an SSDP search for an internet gateway, the
++// gateway's own first.
++std::vector<std::string> ssdp_locations(std::uint32_t gateway) {
++    std::vector<std::string> locations;
++    const Socket s = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
++    if (s == kNoSocket) return locations;
++    set_nonblocking(s);
++    set_option(s, IPPROTO_IP, IP_MULTICAST_TTL, 2);
++    const Address to = Address::ipv4_address(htonl(0xEFFFFFFAu), 1900u);  // 239.255.255.250
++    for (const char *target : {"urn:schemas-upnp-org:device:InternetGatewayDevice:1",
++                               "urn:schemas-upnp-org:device:InternetGatewayDevice:2",
++                               "urn:schemas-upnp-org:service:WANIPConnection:1"}) {
++        const std::string message = ssdp_search(target);
++        ::sendto(s, message.data(), static_cast<int>(message.size()), 0, reinterpret_cast<const sockaddr *>(&to.storage),
++                 static_cast<int>(to.length));
++    }
++    const auto until = Clock::now() + kSsdpWait;
++    while (Clock::now() < until) {
++        if (!wait_readable(s, 100)) continue;
++        char buffer[2048];
++        sockaddr_in from{};
++        socklen_t size = sizeof(from);
++        const int n = static_cast<int>(
++            ::recvfrom(s, buffer, sizeof(buffer) - 1u, 0, reinterpret_cast<sockaddr *>(&from), &size));
++        if (n <= 0) continue;
++        const std::string location = ssdp_gateway_location(std::string(buffer, static_cast<std::size_t>(n)));
++        if (location.empty() || std::find(locations.begin(), locations.end(), location) != locations.end()) continue;
++        if (from.sin_addr.s_addr == gateway) locations.insert(locations.begin(), location);
++        else locations.push_back(location);
++    }
++    close_socket(s);
++    return locations;
++}
++
++std::string upnp_error_text(const SoapResult &result) {
++    if (!result.answered) return "no answer";
++    switch (result.upnp_error()) {
++    case 0: return "HTTP " + std::to_string(result.status);
++    case 606: return "not authorized (port mapping is turned off on the router)";
++    case 718: return "the port is already forwarded to another device";
++    case 724: return "the router wants the same port outside and inside";
++    case 725: return "the router only takes permanent mappings";
++    default: return "error " + std::to_string(result.upnp_error());
++    }
++}
++
++} // namespace
++
++struct PortMapper::Impl {
++    mutable std::mutex mutex;
++    std::condition_variable wake;
++    std::thread worker;
++    bool stopping{};
++    RouterStatus status;
++    std::vector<ForwardedPort> wanted;
++
++    // What the worker holds, to give back.
++    std::string method;
++    Socket natpmp{kNoSocket};
++    WanService service;
++    std::string local_address;
++    std::vector<ForwardedPort> held;
++
++    void set(RouterState state, const std::string &error = {}) {
++        std::lock_guard lock(mutex);
++        status.state = state;
++        status.error = error;
++        status.method = method;
++        status.ports = held;
++    }
++
++    bool stop_requested() {
++        std::lock_guard lock(mutex);
++        return stopping;
++    }
++
++    // NAT-PMP: true once every port is held. `error` says why not; `spoken`
++    // whether the gateway answered at all.
++    bool natpmp_open(const std::vector<ForwardedPort> &ports, std::string &error, bool &spoken) {
++        spoken = false;
++        const std::uint32_t gateway = default_gateway();
++        if (gateway == 0u) {
++            error = "no default gateway found";
++            return false;
++        }
++        natpmp = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
++        if (natpmp == kNoSocket) return false;
++        const Address to = Address::ipv4_address(gateway, kNatPmpPort);
++        if (::connect(natpmp, reinterpret_cast<const sockaddr *>(&to.storage), static_cast<int>(to.length)) != 0) {
++            error = "cannot reach the gateway";
++            return false;
++        }
++        const auto address = natpmp_ask(natpmp, natpmp_address_request(), 128u, 4);
++        if (!address) {
++            error = "the gateway " + ipv4_text(gateway) + " did not answer NAT-PMP";
++            return false;
++        }
++        spoken = true;
++        if (address->result != 0u) {
++            error = "NAT-PMP: " + natpmp_result_text(address->result);
++            return false;
++        }
++        {
++            std::lock_guard lock(mutex);
++            status.external_address = ipv4_text(address->external_address);
++        }
++        method = "NAT-PMP";
++        for (const ForwardedPort &p : ports) {
++            const auto reply = natpmp_ask(natpmp, natpmp_map_request(p.udp, p.port, p.port, kLease), p.udp ? 129u : 130u, 3);
++            if (!reply) {
++                error = "NAT-PMP: no answer for " + describe_ports({p});
++                return false;
++            }
++            if (reply->result != 0u) {
++                error = "NAT-PMP: " + describe_ports({p}) + ": " + natpmp_result_text(reply->result);
++                return false;
++            }
++            held.push_back(p);
++            if (reply->external_port != p.port) {
++                error = "NAT-PMP: the router offered " + std::to_string(reply->external_port) + " for " +
++                        describe_ports({p}) + ", which is in use outside";
++                return false;
++            }
++        }
++        return true;
++    }
++
++    bool upnp_open(const std::vector<ForwardedPort> &ports, std::string &error) {
++        const std::vector<std::string> locations = ssdp_locations(default_gateway());
++        if (locations.empty()) {
++            error = "no UPnP router answered";
++            return false;
++        }
++        for (const std::string &location : locations) {
++            const std::optional<Url> url = parse_url(location);
++            if (!url) continue;
++            const std::string request = "GET " + url->path + " HTTP/1.1\r\nHost: " + url->host + ":" +
++                                        std::to_string(url->port) + "\r\nConnection: close\r\n\r\n";
++            const std::optional<std::string> raw = http_exchange(*url, request);
++            const std::optional<HttpResponse> description = raw ? parse_http_response(*raw) : std::nullopt;
++            if (!description || description->status != 200) continue;
++            const std::optional<WanService> found = find_wan_service(description->body, location);
++            if (!found) continue;
++            service = *found;
++            const SoapResult address = soap(service, "GetExternalIPAddress", {}, &local_address);
++            if (address.answered && address.status == 200) {
++                std::lock_guard lock(mutex);
++                status.external_address = xml_value(address.body, "NewExternalIPAddress");
++            }
++            if (local_address.empty()) continue;
++            method = "UPnP";
++            for (const ForwardedPort &p : ports) {
++                if (!upnp_add(p, error)) return false;
++                held.push_back(p);
++            }
++            return true;
++        }
++        error = "no UPnP router offered port mapping";
++        return false;
++    }
++
++    bool upnp_add(const ForwardedPort &p, std::string &error) {
++        const auto add = [&](std::uint32_t lease) {
++            return soap(service, "AddPortMapping",
++                        {{"NewRemoteHost", ""},
++                         {"NewExternalPort", std::to_string(p.port)},
++                         {"NewProtocol", p.udp ? "UDP" : "TCP"},
++                         {"NewInternalPort", std::to_string(p.port)},
++                         {"NewInternalClient", local_address},
++                         {"NewEnabled", "1"},
++                         {"NewPortMappingDescription", portablekit::game().app_name},
++                         {"NewLeaseDuration", std::to_string(lease)}});
++        };
++        SoapResult result = add(kLease);
++        if (result.answered && result.upnp_error() == 725) result = add(0u);
++        if (result.answered && result.status == 200) return true;
++        error = "UPnP: " + describe_ports({p}) + ": " + upnp_error_text(result);
++        return false;
++    }
++
++    void give_back() {
++        for (const ForwardedPort &p : held) {
++            if (method == "NAT-PMP" && natpmp != kNoSocket) {
++                natpmp_ask(natpmp, natpmp_map_request(p.udp, p.port, 0u, 0u), p.udp ? 129u : 130u, 2);
++            } else if (method == "UPnP") {
++                soap(service, "DeletePortMapping",
++                     {{"NewRemoteHost", ""}, {"NewExternalPort", std::to_string(p.port)},
++                      {"NewProtocol", p.udp ? "UDP" : "TCP"}});
++            }
++        }
++        if (!held.empty()) log("gave back " + describe_ports(held));
++        held.clear();
++        if (natpmp != kNoSocket) close_socket(natpmp);
++        natpmp = kNoSocket;
++        method.clear();
++    }
++
++    // Renews every lease; false when the router stopped agreeing.
++    bool renew(std::string &error) {
++        for (const ForwardedPort &p : held) {
++            if (method == "NAT-PMP") {
++                const auto reply =
++                    natpmp_ask(natpmp, natpmp_map_request(p.udp, p.port, p.port, kLease), p.udp ? 129u : 130u, 3);
++                if (!reply || reply->result != 0u || reply->external_port != p.port) {
++                    error = "NAT-PMP: the router stopped renewing " + describe_ports({p});
++                    return false;
++                }
++            } else if (!upnp_add(p, error)) {
++                return false;
++            }
++        }
++        return true;
++    }
++
++    void run(std::vector<ForwardedPort> ports) {
++        WinsockSession winsock;
++        set(RouterState::Working);
++        std::string natpmp_error, upnp_error;
++        bool spoken = false;
++        bool open = natpmp_open(ports, natpmp_error, spoken);
++        if (!open) {
++            give_back();
++            open = !stop_requested() && upnp_open(ports, upnp_error);
++            if (!open) give_back();
++        }
++        if (!open) {
++            const std::string error = spoken ? natpmp_error : (upnp_error.empty() ? natpmp_error : upnp_error);
++            log("could not open " + describe_ports(ports) + ": " + error +
++                (spoken || upnp_error.empty() ? "" : " (" + natpmp_error + ")"));
++            set(RouterState::Failed, error);
++            return;
++        }
++        {
++            std::lock_guard lock(mutex);
++            log(method + " opened " + describe_ports(held) + " on " + status.external_address);
++        }
++        set(RouterState::Open);
++        std::unique_lock lock(mutex);
++        while (!stopping) {
++            if (wake.wait_for(lock, std::chrono::seconds(kLease / 2u), [this] { return stopping; })) break;
++            lock.unlock();
++            std::string error;
++            const bool renewed = renew(error);
++            if (!renewed) log(error);
++            set(renewed ? RouterState::Open : RouterState::Failed, error);
++            lock.lock();
++        }
++        lock.unlock();
++        give_back();
++        set(RouterState::Off);
++    }
++};
++
++PortMapper::PortMapper() : impl_(new Impl) {}
++PortMapper::~PortMapper() = default;  // never runs: get() leaks the one instance
++
++PortMapper &PortMapper::get() {
++    static PortMapper *mapper = new PortMapper;
++    return *mapper;
++}
++
++void PortMapper::start(std::vector<ForwardedPort> ports) {
++    {
++        std::lock_guard lock(impl_->mutex);
++        if (impl_->worker.joinable() && !impl_->stopping && impl_->wanted == ports) return;
++    }
++    stop();
++    std::lock_guard lock(impl_->mutex);
++    impl_->stopping = false;
++    impl_->wanted = ports;
++    impl_->status = RouterStatus{};
++    impl_->status.state = RouterState::Working;
++    impl_->worker = std::thread([this, ports] { impl_->run(ports); });
++}
++
++void PortMapper::stop() {
++    std::thread worker;
++    {
++        std::lock_guard lock(impl_->mutex);
++        impl_->stopping = true;
++        impl_->wanted.clear();
++        worker = std::move(impl_->worker);
++    }
++    impl_->wake.notify_all();
++    if (worker.joinable()) worker.join();
++    std::lock_guard lock(impl_->mutex);
++    impl_->status = RouterStatus{};
++}
++
++RouterStatus PortMapper::status() const {
++    std::lock_guard lock(impl_->mutex);
++    return impl_->status;
++}
++
++} // namespace portablekit::adhoc
+diff --git a/host/adhoc/port_mapping.hpp b/host/adhoc/port_mapping.hpp
+new file mode 100644
+index 0000000..3c96efa
+--- /dev/null
++++ b/host/adhoc/port_mapping.hpp
+@@ -0,0 +1,131 @@
++#pragma once
++
++// Asking the home router to forward ports to this machine while it hosts, so
++// that players on the internet can reach a hosted session without anyone
++// setting up port forwarding by hand. Two protocols, tried in turn:
++//
++// - NAT-PMP (RFC 6886): UDP requests to the default gateway's port 5351.
++//   Apple's routers and many ISPs' speak it; a PCP router (RFC 6887) answers
++//   it too.
++// - UPnP IGD: the router found with an SSDP search, its WANIPConnection or
++//   WANPPPConnection service asked over SOAP (AddPortMapping).
++//
++// Every port is asked for at the same number outside as inside: a client
++// finds the relay at the adhocctl port plus one, and a game's own ports are
++// fixed. A router that offers another number counts as a refusal. Leases are
++// an hour, renewed at half time, and given back when hosting stops; a
++// process that dies leaves them to run out.
++//
++// Neither works behind a carrier's NAT (mobile data, some broadband), where
++// the router's outside address is not on the internet; the status says what
++// the router reported, and a player can compare it with what websites see.
++
++#include <cstdint>
++#include <optional>
++#include <string>
++#include <vector>
++
++namespace portablekit::adhoc {
++
++struct ForwardedPort {
++    bool udp{};
++    std::uint16_t port{};
++    bool operator==(const ForwardedPort &other) const { return udp == other.udp && port == other.port; }
++};
++
++// "TCP 27312, 27313 and UDP 27420".
++[[nodiscard]] std::string describe_ports(const std::vector<ForwardedPort> &ports);
++
++enum class RouterState {
++    Off,      // not asked (not hosting, or turned off)
++    Working,  // asking the router
++    Open,     // every port forwarded
++    Failed,   // the router did not answer or refused; `error` says which
++};
++
++struct RouterStatus {
++    RouterState state{RouterState::Off};
++    std::string method;            // "NAT-PMP" or "UPnP"
++    std::string external_address;  // the router's outside address, as it reports it
++    std::string error;
++    std::vector<ForwardedPort> ports;
++};
++
++class PortMapper {
++public:
++    // One for the process, never destroyed (its thread may be renewing a
++    // lease when the process ends).
++    static PortMapper &get();
++
++    // Asks the router for `ports` on a thread of its own and keeps them until
++    // stop(); a second start() with other ports starts over.
++    void start(std::vector<ForwardedPort> ports);
++    // Gives the ports back and waits for that (a few seconds at most).
++    void stop();
++    [[nodiscard]] RouterStatus status() const;
++
++    PortMapper(const PortMapper &) = delete;
++    PortMapper &operator=(const PortMapper &) = delete;
++
++private:
++    PortMapper();
++    ~PortMapper();
++    struct Impl;
++    Impl *impl_;
++};
++
++// The protocols' messages, apart from the sockets, for the tests.
++namespace router_wire {
++
++// NAT-PMP: a request for the outside address, and for a mapping (lifetime 0
++// gives one back).
++[[nodiscard]] std::vector<std::uint8_t> natpmp_address_request();
++[[nodiscard]] std::vector<std::uint8_t> natpmp_map_request(bool udp, std::uint16_t internal, std::uint16_t external,
++                                                           std::uint32_t lifetime);
++struct NatPmpReply {
++    std::uint8_t opcode{};  // the request's opcode plus 128
++    std::uint16_t result{};
++    std::uint32_t external_address{};  // network order, for opcode 128
++    std::uint16_t internal_port{};
++    std::uint16_t external_port{};
++    std::uint32_t lifetime{};
++};
++[[nodiscard]] std::optional<NatPmpReply> natpmp_parse(const std::uint8_t *data, std::size_t size);
++[[nodiscard]] std::string natpmp_result_text(std::uint16_t result);
++
++// SSDP: the search for internet gateways, and the LOCATION of an answer that
++// is one ("" otherwise).
++[[nodiscard]] std::string ssdp_search(const std::string &search_target);
++[[nodiscard]] std::string ssdp_gateway_location(const std::string &response);
++
++struct Url {
++    std::string host;
++    std::uint16_t port{80};
++    std::string path{"/"};
++};
++// http:// URLs only.
++[[nodiscard]] std::optional<Url> parse_url(const std::string &url);
++
++// The device description's WANIPConnection (preferred) or WANPPPConnection
++// service: its type and the full URL of its control point.
++struct WanService {
++    std::string type;
++    std::string control_url;
++};
++[[nodiscard]] std::optional<WanService> find_wan_service(const std::string &description, const std::string &location);
++
++// A SOAP action's request body, and a value (or UPnP errorCode) from a reply.
++[[nodiscard]] std::string soap_body(const std::string &service, const std::string &action,
++                                    const std::vector<std::pair<std::string, std::string>> &arguments);
++[[nodiscard]] std::string xml_value(const std::string &xml, const std::string &tag);
++
++// An HTTP response's status and body, with a chunked body put back together.
++struct HttpResponse {
++    int status{};
++    std::string body;
++};
++[[nodiscard]] std::optional<HttpResponse> parse_http_response(const std::string &raw);
++
++} // namespace router_wire
++
++} // namespace portablekit::adhoc
+diff --git a/host/adhoc/session.hpp b/host/adhoc/session.hpp
+index c41a0b1..0998c47 100644
+--- a/host/adhoc/session.hpp
++++ b/host/adhoc/session.hpp
+@@ -2,6 +2,7 @@
+ 
+ // The game's ad hoc session as the menu sees it: which server the game uses,
+ // hosting one with the built-in server, and joining one.
++#include "adhoc/port_mapping.hpp"
+ #include "adhoc/server.hpp"
+ 
+ #include <string>
+@@ -29,9 +30,18 @@ void adhoc_apply_settings(bool switch_now = false);
+ 
+ // Starts the built-in server on the host port from the settings (27312 and
+ // the relay on 27313), announces it on the local network, turns ad hoc play
+-// on and points this instance's game at it. False when the server cannot
+-// start; adhoc_host_error() says why.
++// on and points this instance's game at it. With the Open router ports
++// setting (network.router_ports) it also asks the router to forward the
++// server's ports and the game's own (adhoc_host_forward_also()), so that
++// players on the internet reach it. False when the server cannot start;
++// adhoc_host_error() says why.
+ bool adhoc_host_start();
++// A port of the game's own that players on the internet must reach while this
++// instance hosts, such as a game's own connection for its battles. Called
++// once at start-up; asked of the router along with the server's.
++void adhoc_host_forward_also(adhoc::ForwardedPort port);
++// What the router said: Off when not hosting or not asked.
++[[nodiscard]] adhoc::RouterStatus adhoc_router_status();
+ // Stops announcing and stops the server, which disconnects everyone; this
+ // instance's game goes back to the Server setting and, if it was on line,
+ // sees a normal disconnect.
+diff --git a/host/settings/settings.cpp b/host/settings/settings.cpp
+index 54078af..d223255 100644
+--- a/host/settings/settings.cpp
++++ b/host/settings/settings.cpp
+@@ -421,6 +421,10 @@ const std::vector<Field> &fields() {
+              std::uint32_t value = s.adhoc_host_port;
+              if (parse_uint(t, 1024u, 65534u, value)) s.adhoc_host_port = value;
+          }},
++        {"network.router_ports", "ADHOC_ROUTER_PORTS",
++         [](Settings &s, const std::string &t) { return parse_bool(t, s.adhoc_router_ports); },
++         [](const Settings &s) { return std::string(s.adhoc_router_ports ? "1" : "0"); },
++         [](Settings &s, const char *t) { s.adhoc_router_ports = variable_flag(t); }},
+         BOOL_FIELD("ui.menu_hint_seen", menu_hint_seen),
+         BOOL_FIELD("saves.backup_timestamp", backup_timestamp),
+         {"ui.last_folder", nullptr,
+diff --git a/host/settings/settings.hpp b/host/settings/settings.hpp
+index 9405fe7..8b1a960 100644
+--- a/host/settings/settings.hpp
++++ b/host/settings/settings.hpp
+@@ -130,6 +130,7 @@ struct Settings {
+     std::string adhoc_mac;             // this player's virtual MAC, made up on first use
+     std::vector<std::string> adhoc_recent;  // sessions joined lately, the latest first
+     std::uint32_t adhoc_host_port{27312};   // the built-in server's adhocctl port; the relay is on the next
++    bool adhoc_router_ports{true};     // hosting asks the router to forward its ports (NAT-PMP, UPnP)
+ 
+     // Interface
+     bool menu_pause{true};             // opening the menu pauses the game
+diff --git a/host/ui/menu.cpp b/host/ui/menu.cpp
+index 1b830d9..f0cb185 100644
+--- a/host/ui/menu.cpp
++++ b/host/ui/menu.cpp
+@@ -1124,6 +1124,34 @@ std::string players_text(std::size_t count) {
+     return std::to_string(count) + (count == 1u ? " player" : " players");
+ }
+ 
++// What the router said about forwarding the hosted session's ports: the
++// address to give players on the internet, or what they cannot do.
++void router_rows(const std::string &suffix, std::string &copied) {
++    const adhoc::RouterStatus router = adhoc_router_status();
++    switch (router.state) {
++    case adhoc::RouterState::Off:
++        if (!settings::current().adhoc_router_ports)
++            info_row("On the internet", "Open router ports is off: forward the ports on the router by hand");
++        return;
++    case adhoc::RouterState::Working: info_row("On the internet", "Asking the router to open the ports…"); return;
++    case adhoc::RouterState::Failed:
++        info_row("On the internet", "The router did not open the ports: " + router.error);
++        return;
++    case adhoc::RouterState::Open: break;
++    }
++    const std::string text = router.external_address + suffix;
++    const std::string label = text + "   Internet (" + router.method + ")###internet address";
++    if (button_row(label.c_str(),
++                   {false, {},
++                    "Copies this address for players on the internet to type under Join. The router forwards " +
++                        adhoc::describe_ports(router.ports) +
++                        " here while you host. If they still cannot connect, your provider may share one "
++                        "address among many customers, as mobile data does: then one of them hosts instead."})) {
++        SDL_SetClipboardText(text.c_str());
++        copied = text;
++    }
++}
++
+ // Hosting and joining a session.
+ void play_together() {
+     settings::Settings &s = settings::current();
+@@ -1150,6 +1178,7 @@ void play_together() {
+                 copied = text;
+             }
+         }
++        router_rows(suffix, copied);
+         if (!copied.empty()) info_row("Copied", copied);
+         ImGui::PushID("hosted players");
+         for (std::size_t i = 0; i < status.players.size(); ++i) {
+@@ -1172,7 +1201,8 @@ void play_together() {
+         if (button_row("Host a session###hosting",
+                        {false, {},
+                         "Runs a server in this game for the others to join: no other program, no port forwarding "
+-                        "on a local network or a VPN. Then everyone enters the Online Guild Hall."}))
++                        "on a local network or a VPN, and for the internet the game asks your router to open the "
++                        "ports (Open router ports, below). Then everyone enters the Online Guild Hall."}))
+             adhoc_host_start();
+         if (const std::string error = adhoc_host_error(); !error.empty()) info_row("Cannot host", error);
+     }
+@@ -1197,8 +1227,8 @@ void play_together() {
+     if (hosts.empty()) info_row("On this network", "Looking for hosted sessions…");
+     if (text_row("join_address", "Address", typed_address, 100u, true, address_character,
+                  {false, {},
+-                  "The host's address, for a VPN without broadcast such as Tailscale: the host's screen lists it. "
+-                  "Confirming it joins."}) &&
++                  "The host's address: their internet address, or their VPN address for a VPN without broadcast "
++                  "such as Tailscale. The host's screen lists both. Confirming it joins."}) &&
+         !typed_address.empty()) {
+         adhoc_join(typed_address);
+         typed_address.clear();
+@@ -1234,6 +1264,14 @@ void Menu::network() {
+         settings::save();
+         adhoc_apply_settings();
+     }
++    if (toggle_row("Open router ports", s.adhoc_router_ports,
++                   options_for("network.router_ports",
++                               "Hosting asks your router to forward the session's ports (NAT-PMP or UPnP), so that "
++                               "players on the internet can join without port forwarding by hand. Applies the next "
++                               "time you host."))) {
++        s.adhoc_router_ports = !s.adhoc_router_ports;
++        settings::save();
++    }
+     if (text_row("nickname", "Nickname", s.adhoc_nickname, 32u, true, printable_ascii,
+                  options_for("network.nickname", "The name other players and the server see. Empty: the player name. "
+                                                  "Applies the next time the game goes on line."))) {
+diff --git a/tests/adhoc_tests.cpp b/tests/adhoc_tests.cpp
+index 88d868e..084a441 100644
+--- a/tests/adhoc_tests.cpp
++++ b/tests/adhoc_tests.cpp
+@@ -1,9 +1,11 @@
+ // The built-in ad hoc server, checked over the loopback address against the
+ // game's own client and against a second player that speaks the protocols
+-// byte by byte, as another emulator would; then local network discovery.
++// byte by byte, as another emulator would; then local network discovery, and
++// the router protocols' messages (no router is asked).
+ // Needs no game data. Every wait is bounded.
+ #include "adhoc/client.hpp"
+ #include "adhoc/discovery.hpp"
++#include "adhoc/port_mapping.hpp"
+ #include "adhoc/protocol.hpp"
+ #include "adhoc/server.hpp"
+ #include "adhoc/sockets.hpp"
+@@ -351,10 +353,75 @@ bool exits_cleanly(const char *self, const char *mode) {
+ 
+ } // namespace
+ 
++// NAT-PMP and UPnP messages, against canned replies of the kind real routers
++// send.
++void router_messages() {
++    using namespace portablekit::adhoc::router_wire;
++    const std::vector<std::uint8_t> map = natpmp_map_request(true, 27420, 27420, 3600);
++    check(map == std::vector<std::uint8_t>{0, 1, 0, 0, 0x6B, 0x1C, 0x6B, 0x1C, 0, 0, 0x0E, 0x10},
++          "NAT-PMP: a UDP mapping request");
++    const std::uint8_t address_reply[] = {0, 128, 0, 0, 0, 0, 0x12, 0x34, 203, 0, 113, 7};
++    const auto address = natpmp_parse(address_reply, sizeof(address_reply));
++    check(address && address->result == 0 && Address::ipv4_address(address->external_address, 0).host() == "203.0.113.7",
++          "NAT-PMP: the outside address from a reply");
++    const std::uint8_t map_reply[] = {0, 130, 0, 0, 0, 0, 0, 9, 0x6A, 0xB0, 0x6A, 0xB1, 0, 0, 0x0E, 0x10};
++    const auto mapped = natpmp_parse(map_reply, sizeof(map_reply));
++    check(mapped && mapped->opcode == 130 && mapped->internal_port == 27312 && mapped->external_port == 27313 &&
++              mapped->lifetime == 3600,
++          "NAT-PMP: a TCP mapping reply, with the port the router chose");
++    check(!natpmp_parse(map_reply, 10), "NAT-PMP: a short reply is refused");
++
++    const std::string ssdp = "HTTP/1.1 200 OK\r\nCACHE-CONTROL: max-age=120\r\n"
++                             "ST: urn:schemas-upnp-org:device:InternetGatewayDevice:1\r\n"
++                             "Location: http://192.168.1.1:5000/rootDesc.xml\r\nSERVER: Router UPnP/1.1\r\n\r\n";
++    check(ssdp_gateway_location(ssdp) == "http://192.168.1.1:5000/rootDesc.xml", "SSDP: a gateway's location");
++    check(ssdp_gateway_location("HTTP/1.1 200 OK\r\nST: urn:schemas-upnp-org:device:MediaServer:1\r\n"
++                                "LOCATION: http://192.168.1.9/d.xml\r\n\r\n")
++              .empty(),
++          "SSDP: a device that is no gateway is passed over");
++
++    const std::string description =
++        "<?xml version=\"1.0\"?><root><device><deviceList><device><serviceList>"
++        "<service><serviceType>urn:schemas-upnp-org:service:WANPPPConnection:1</serviceType>"
++        "<controlURL>/ctl/PPP</controlURL></service>"
++        "<service><serviceType>urn:schemas-upnp-org:service:WANIPConnection:1</serviceType>"
++        "<controlURL>ctl/IPConn</controlURL></service>"
++        "</serviceList></device></deviceList></device></root>";
++    const auto service = find_wan_service(description, "http://192.168.1.1:5000/desc/rootDesc.xml");
++    check(service && service->type == "urn:schemas-upnp-org:service:WANIPConnection:1" &&
++              service->control_url == "http://192.168.1.1:5000/ctl/IPConn",
++          "UPnP: the IP connection service, its control URL made whole");
++
++    const std::string body = soap_body("urn:schemas-upnp-org:service:WANIPConnection:1", "AddPortMapping",
++                                       {{"NewExternalPort", "27312"}, {"NewPortMappingDescription", "A & B"}});
++    check(body.find("<u:AddPortMapping xmlns:u=\"urn:schemas-upnp-org:service:WANIPConnection:1\">") !=
++                  std::string::npos &&
++              body.find("<NewPortMappingDescription>A &amp; B</NewPortMappingDescription>") != std::string::npos,
++          "UPnP: a SOAP request body, its values escaped");
++
++    const auto fault = parse_http_response("HTTP/1.1 500 Internal Server Error\r\nTransfer-Encoding: chunked\r\n\r\n"
++                                           "1c\r\n<s:Envelope><s:Body><UPnPErr\r\n"
++                                           "1f\r\nor><errorCode>718</errorCode></\r\n"
++                                           "13\r\nUPnPError></s:Body>\r\n0\r\n\r\n");
++    check(fault && fault->status == 500 && xml_value(fault->body, "errorCode") == "718",
++          "UPnP: a chunked fault's error code");
++    check(xml_value("<s:Body><u:GetExternalIPAddressResponse><NewExternalIPAddress>198.51.100.4"
++                    "</NewExternalIPAddress></u:GetExternalIPAddressResponse></s:Body>",
++                    "NewExternalIPAddress") == "198.51.100.4",
++          "UPnP: the outside address from a reply");
++    check(describe_ports({{false, 27312}, {false, 27313}, {true, 27420}}) == "TCP 27312, 27313 and UDP 27420",
++          "the ports in words");
++}
++
+ int main(int argc, char **argv) {
+     WinsockSession winsock;
+     if (argc > 1 && std::string(argv[1]) == "--exit-while-hosting") return exit_while_hosting(false);
+     if (argc > 1 && std::string(argv[1]) == "--exit-after-shutdown") return exit_while_hosting(true);
++    // The router messages alone open no socket, so no firewall asks anything.
++    if (argc > 1 && std::string(argv[1]) == "--router-messages") {
++        router_messages();
++        return failures == 0 ? 0 : 1;
++    }
+     check(exits_cleanly(argv[0], "--exit-after-shutdown"), "a hosting process that shuts down exits with 0");
+     // The race this guards against, a thread using what exit() already
+     // destroyed, does not show every time.
+@@ -363,6 +430,7 @@ int main(int argc, char **argv) {
+     check(clean, "a hosting process that just returns exits with 0, five times");
+     server_and_client();
+     discovery(37500);
++    router_messages();
+     std::cout << (failures == 0 ? "all ad hoc tests passed" : std::to_string(failures) + " failed") << std::endl;
+     return failures == 0 ? 0 : 1;
+ }
+-- 
+2.53.0.windows.1
+

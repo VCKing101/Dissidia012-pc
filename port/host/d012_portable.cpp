@@ -135,8 +135,8 @@ void log_to_named_file() {
     print_to(path);
 }
 
-// A portable copy set up for online play (settings.ini's online.battle_link)
-// keeps its own log, <data>/logs/D012Native.log, the previous run's in
+// A portable copy set up for online play (settings.ini's network.adhoc or
+// online.battle_link) keeps its own log, <data>/logs/D012Native.log, the previous run's in
 // D012Native-previous.log: a network battle's report needs both copies' logs,
 // and under Proton a console program prints into a console of Wine's own, not
 // anywhere a launch option's redirection catches.
@@ -145,7 +145,10 @@ void log_online_copy(const std::filesystem::path &data) {
     try {
         const auto entries = portablekit::install::read_settings_file(data);
         const auto link = entries.find("online.battle_link");
-        if (link == entries.end() || link->second.empty()) return;
+        const auto adhoc = entries.find("network.adhoc");
+        const bool online = (link != entries.end() && !link->second.empty()) ||
+                            (adhoc != entries.end() && (adhoc->second == "1" || adhoc->second == "true"));
+        if (!online) return;
     } catch (const std::exception &) {
         return;
     }

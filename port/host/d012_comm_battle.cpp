@@ -32,6 +32,7 @@
 #include "d012_decomp_harness.hpp"
 #include "d012_net.hpp"
 
+#include "adhoc/session.hpp"
 #include "hle/hle_common.hpp"
 #include "portablekit/hle_extension.hpp"
 
@@ -363,6 +364,9 @@ void install(portablekit::HleRegistrar &hle) {
     // a game closed from the system loses what is still buffered: unbuffered
     // whenever this copy is set up for network battles.
     if (net::battle::configured()) std::setvbuf(stdout, nullptr, _IONBF, 0);
+    // A copy that hosts the session listens for the other fighter's: its
+    // router forwards the battle port along with the server's.
+    portablekit::adhoc_host_forward_also({true, net::battle::port()});
 }
 
 bool active(Guest *g) {

@@ -426,3 +426,78 @@ sees. A portable copy set up for online play now keeps its own log in `data/logs
 
 **Not verified.** A player behind a router with no forwarded ports (roadmap step 4), Windows against Windows on two
 machines, Group Battle.
+
+## 14. The internet with nothing set up (1 November 2026)
+
+Roadmap step 4: a player joins over the internet with no port forwarding, no server and no battle-link setting. The
+owner chose to start without a server of the project's own. So the hosting copy opens its own router's ports, its
+player gives the address it shows to the other, and the input delay sets itself.
+
+**Additions.**
+- **Router ports** (PortableKit patch 0071). Hosting a session asks the router to forward the session's ports. It
+  tries NAT-PMP (RFC 6886) first, then UPnP (SSDP search, the gateway's description, `AddPortMapping`). The ports
+  are TCP 27312 and 27313 for the lobby and its relay, and the port's UDP 27420 for the battle link, which
+  `comm_battle::install()` adds with `adhoc_host_forward_also()`. Each keeps its number outside. The lease is an
+  hour, renewed at half time, and given back when hosting stops or the program closes. The log says
+  `[adhoc] router: NAT-PMP opened TCP 27312, 27313 and UDP 27420 on <address>`.
+- **The Network page.** Under Play together, while hosting, a row gives the internet address the router reported,
+  marked with the method, and copies it. If the router refused, the row says why. "Open router ports"
+  (`network.router_ports`, on by default) turns the whole thing off; `D012_NO_ROUTER_PORTS=1` does for one run.
+- **`D012_HOST_SESSION=1`** (patch 0072) hosts a session as the game starts, for test runs.
+- **The battle address from the session.** With `online.battle_link` empty and ad hoc play on, the copy that hosts
+  the session (or whose server is on this machine) listens on UDP 27420 on every network, and the other joins the
+  session server's address at that port (`online.battle_port` changes it). The fighter each copy controls now comes
+  from the game's own player number, not from which copy listens, so the host may be either player.
+- **The input delay sets itself.** With `online.input_delay` empty or `auto` (the default), the listening copy times
+  up to 8 round trips (PROBE and PROBE ECHO, every 40 ms, for up to 2 s) before its WELCOME. It takes the median:
+  delay = ceil((round trip / 2 + 33 ms + 15 ms) / 33 ms), from 2 to 10 frames. The 33 ms is the frame an input can
+  wait before it is sent, since INPUT goes once a frame; the 15 ms is jitter. That gives 2 frames on a home network
+  and 3 at 75 to 100 ms. With no echo it uses 3. A number in `online.input_delay` still fixes it. The link's
+  version is now 4.
+- **A portable copy's log** goes to `data/logs/D012Native.log` whenever ad hoc play is on, not only with a battle
+  link set.
+
+**The owner's router (V).** NAT-PMP answered, with the right internet address. PCP did not (it answered as version
+0). UPnP answered too, a MiniUPnPd, but only the Steam Deck saw its SSDP replies: Windows' firewall drops them for a
+program it has no rule for. The game has a rule once Windows has asked about it, so this matters only for UPnP on
+Windows the first time. The router's own mapping list (read over UPnP) showed the three ports pointed at the PC
+while it hosted.
+
+**Results (V).**
+
+| Run | Setup | What happened |
+| --- | --- | --- |
+| `auto0` | One PC; battle link given; delay auto | Timed 0 to 1 ms, chose 2 frames; in step to the end |
+| `auto1` | One PC; copy 1 hosts in the game (router ports off), copy 2 joins its LAN address; no battle link | Copy 1 listened as player 0; in step to the end, both left on frame 6,020 |
+| `auto2` | As `auto1`, with the game's player 1 hosting | Player 1 listened, player 0 joined; in step to the run's time limit (frame 6,410) |
+| Internet, first try | PC hosting with the router's forwards off; Deck on a phone hotspot | The lobby worked; the battle never linked. The Deck still had the old program: the deploy had gone to a local folder. Without a battle-link setting the old program never opens the port's link, so the PC waited and the Deck ended with the game's "Communications were disconnected". |
+| Internet | As above, the Deck with the new program, nothing set on either | NAT-PMP opened the ports; the Deck joined the address the PC showed, from a mobile-data address; the battle linked with a 2-frame delay (75 ms timed, 74 to 78) and stayed in step to its end at frame 5,056 |
+| `delay3rt` | One PC, both copies holding packets 37 ± 4 ms (`D012_NET_SIM`), the new formula | Timed 74 ms (68 to 81), chose 3 frames; in step to the run's time limit |
+
+The internet battle, 900 frames at a time (30 s at full speed), on the PC:
+
+| Frames | Took | Waited | Round trip |
+| --- | --- | --- | --- |
+| 0 to 899 | 31.6 s | on 892 frames, 6.4 s in all | 154 ms average, 67 to 1,647 |
+| 900 to 1,799 | 30.2 s | on 403, 3.0 s | 92 ms, 66 to 188 |
+| 1,800 to 4,499 | 30.0 s each | none | 91 ms, 65 to 136 |
+
+- **The first minute ran short of delay.** 2 frames (67 ms) did not cover 37 ms each way plus the frame an input
+  waits before it goes out. That cost 1.6 s in the first 900 frames and 0.2 s in the next. The formula above adds
+  that frame. In `delay3rt` it chose 3 at the same round trip, and the first 1,800 frames took 30.0 s each with no
+  waits. Its later windows had one copy waiting most frames, which runs at 0 ms (`auto1`, `auto2`) show too: two
+  copies sharing one PC, one falling a little behind.
+- **No delay hides the phone network's spikes** of 1.6 s in the first half minute.
+- The owner chose the extra frame: one more frame of input lag, always, for fewer slowdowns.
+
+**Limits.**
+- **A provider that shares one address among customers** (carrier-grade NAT, as on most mobile data) leaves the
+  router with an address that is not the internet's. Mapping then succeeds and no one can connect. The other player
+  hosts, or both use a VPN. PortableKit does not detect this yet: the address it shows would be in 100.64.0.0/10 or
+  a private range.
+- **One router.** A second NAT behind the first, a router with NAT-PMP and UPnP off, or a firewall on the host that
+  blocks the program, need the fallbacks in [Playing online](play-online.md).
+- The joining player still types an address: the plain internet address, not an encoded code.
+
+**Not verified.** UPnP mapping by the game (NAT-PMP answered first here), a carrier-shared address, the Deck hosting
+(its copy has the old delay formula), Windows against Windows on two machines, Linux natively, Group Battle.
