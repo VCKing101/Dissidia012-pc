@@ -39,6 +39,8 @@ game's executable and overlays.
   ([guide](docs/port/mod-folder.md#8-making-a-mod-with-the-battle-bgm-maker)).
 - **Local split-screen versus**: two players on one PC, each with their own controller and camera
   ([notes](docs/port/local-versus.md)).
+- **HD texture packs** in PPSSPP's format, and a menu option that dumps the game's textures to start one
+  ([below](#hd-texture-packs)).
 
 ## BGM playlist selector
 
@@ -171,6 +173,37 @@ with names like `8c0b30f1.edat`, and a `PARAM.PBP`), not in another folder insid
   stores it may not load; the log says how many files are.
 - DLC music takes room in the game's list of 256 tracks, so with all 43 of those tracks, mods can add 82 tracks
   rather than 125.
+
+## HD texture packs
+
+The port draws texture packs made for PPSSPP: a folder with a `textures.ini` and the images it names. Put the pack's
+files in a folder named **`ULUS10566`** in the `textures` folder, next to `ms0` in the data folder
+(`data\textures\ULUS10566\` in the Windows install), so that `textures.ini` is directly inside it. Or open the menu
+(Esc, or L3+R3 on a controller), go to Video, and choose **Import texture pack…**: it finds the pack in a folder you
+pick, including PPSSPP's `PSP/TEXTURES/...` layout, checks it and copies it in. The **Texture pack** row says how many
+textures loaded.
+
+- **Images must be PNG.** Packs that ship `.dds`, `.ktx2` or `.zim` images are not read yet. A zipped pack
+  (`textures.zip`) has to be unpacked first, and packs whose `textures.ini` says `hash = quick` do not load.
+- **Packs for another release** of the game load only if their `[games]` section lists `ULUS10566`, and images of
+  text made for that release may not match.
+- **To check it:** start the game with `D012_TRACE_TEXTURE_PACK=1` set, and the log lists each texture the game
+  loads, with its key and whether the pack has an image for it.
+
+To **make a pack**, turn on **Dump textures** on the same page and play the scenes you want to change. Each texture the
+game loads is written once, as a PNG named by its key, into `textures\dump\ULUS10566\` in the data folder, and that
+folder is a pack as it is: edit or upscale the images, keeping their names, and copy the folder to
+`textures\ULUS10566`. The option is off again each time the game starts (`D012_TEXTURE_DUMP=<folder>` turns it on
+from the start, into that folder). Two things to know:
+
+- **A texture can have more than one key.** The key covers only the rows of a 512-pixel-tall texture the game has
+  drawn so far, so when it later draws further down (the title screen's menu text, for example), the same texture
+  gets a second key and the dump writes a second file. A pack needs an image for each key; `textures.ini` can point
+  several keys at one image (`0000000034bb2152a65d22ce = title.png`).
+- In `textures.ini`, a line in `[games]` names the ini file for that game (`ULUS10566 = textures.ini`), not its title.
+
+Tested on Windows with a pack made from a dump of the title screen, with images four times the size. Community packs,
+battles and the Steam Deck have not been tried.
 
 ## Repository layout
 

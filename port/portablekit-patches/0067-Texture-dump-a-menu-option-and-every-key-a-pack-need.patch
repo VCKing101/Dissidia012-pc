@@ -1,0 +1,300 @@
+From 022ef6a9caabddc398e83a3afd4dd7acf55d0c9e Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Sun, 1 Nov 2026 14:17:31 +1030
+Subject: [PATCH] Texture dump: a menu option, and every key a pack needs
+
+Dumping textures to start a pack was only <prefix>_TEXTURE_DUMP, read at
+start. The Video page's texture pack rows now have Dump textures: on, it
+writes into textures/dump/<disc id> in the data directory (or the
+variable's folder) and drops the texture cache so those already loaded
+are written too; off, it waits for the queued images. It is not saved,
+so a dump left on cannot fill the disk unnoticed; the footer says how
+many images it has written.
+
+Two textures a pack needs were never dumped:
+- A 512-tall texture is hashed again over more rows when it is drawn
+  further down, and finds another key; only a pack being loaded did
+  that, and the dump only wrote at upload. With a dump on, it is hashed
+  again too and written under the new key (decoded once more).
+- The dumper marked a texture written before dropping it for a full
+  queue, so it was never written. It now checks the queue first.
+
+Checked with Dissidia 012 on Windows (llvm-mingw build): the title
+screen's 512x512 atlas was dumped under both its keys (it had one); a
+pack made from the dump alone, with those two images four times the
+size, replaced the title screen to its menu; the menu option, turned on
+at the title screen, wrote both keys, showed "2 images written", and
+turned off. The 21 framework tests pass (MSVC, ad hoc excluded) and
+portablekit_host_check builds. Not tried: a whole game's dump, the
+queue-full case, Linux.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/gpu/texture_pack.cpp       |  6 ++-
+ host/gpu/texture_pack.hpp       | 12 +++--
+ host/gpu/vulkan_renderer.cpp    | 90 +++++++++++++++++++++++++--------
+ host/gpu/vulkan_renderer.hpp    |  9 ++++
+ host/ui/texture_pack_screen.cpp |  7 +++
+ 5 files changed, 97 insertions(+), 27 deletions(-)
+
+diff --git a/host/gpu/texture_pack.cpp b/host/gpu/texture_pack.cpp
+index 28628eb..6a62ddd 100644
+--- a/host/gpu/texture_pack.cpp
++++ b/host/gpu/texture_pack.cpp
+@@ -674,10 +674,11 @@ void TextureDumper::dump(const GuestMemory &memory, const TextureState &texture,
+     if (!compute_texture_pack_key(memory, texture, max_seen_v, options, key, covered_width, covered_height)) return;
+     const std::string name = format_texture_pack_key(key);
+     std::lock_guard lock(mutex_);
+-    if (!written_.try_emplace(name, true).second) return;
+     // Hundreds of textures load in the first seconds; drop rather than queue
+-    // without bound.
++    // without bound. A dropped texture is not marked written, so it is
++    // written when it is loaded again.
+     if (jobs_.size() > 256u) return;
++    if (!written_.try_emplace(name, true).second) return;
+     Job job;
+     job.path = directory_ / (name + ".png");
+     job.width = covered_width;
+@@ -710,6 +711,7 @@ void TextureDumper::writer_main() {
+         std::ofstream out(job.path, std::ios::binary);
+         out.write(reinterpret_cast<const char *>(png), length);
+         STBIW_FREE(png);
++        if (out) files_written_.fetch_add(1u);
+     }
+ }
+ 
+diff --git a/host/gpu/texture_pack.hpp b/host/gpu/texture_pack.hpp
+index 4d4c222..fb617ef 100644
+--- a/host/gpu/texture_pack.hpp
++++ b/host/gpu/texture_pack.hpp
+@@ -203,9 +203,10 @@ private:
+     std::size_t decoded_bytes_{};
+ };
+ 
+-// <prefix>_TEXTURE_DUMP=<folder>: writes every texture the game uploads, once,
+-// as <key>.png into the folder, keyed the way a pack with `options` would key
+-// it, so a pack can be started from the dump. Runs on a background thread.
++// The menu's Dump textures, or <prefix>_TEXTURE_DUMP=<folder>: writes every
++// texture the game uploads, once, as <key>.png into the folder, keyed the way
++// a pack with `options` would key it, so a pack can be started from the dump.
++// Runs on a background thread.
+ class TextureDumper {
+ public:
+     explicit TextureDumper(std::filesystem::path directory);
+@@ -216,6 +217,10 @@ public:
+     void dump(const GuestMemory &memory, const TextureState &texture, std::uint16_t max_seen_v,
+               const TexturePackOptions &options, const std::uint32_t *pixels);
+ 
++    [[nodiscard]] const std::filesystem::path &directory() const noexcept { return directory_; }
++    // Images written by this dumper, not counting those already in the folder.
++    [[nodiscard]] std::size_t files_written() const noexcept { return files_written_.load(); }
++
+ private:
+     struct Job {
+         std::filesystem::path path;
+@@ -230,6 +235,7 @@ private:
+     std::condition_variable wake_;
+     std::deque<Job> jobs_;
+     std::unordered_map<std::string, bool> written_;
++    std::atomic<std::size_t> files_written_{0};
+     bool stopping_{};
+     std::thread writer_;
+ };
+diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
+index e4d7e11..621d9ac 100644
+--- a/host/gpu/vulkan_renderer.cpp
++++ b/host/gpu/vulkan_renderer.cpp
+@@ -2194,6 +2194,13 @@ struct VulkanRenderer::Impl {
+     std::string pack_status;
+     std::uint64_t replaced_draws{};  // this second, for <prefix>_TRACE_TEXTURE_PACK
+     void apply_texture_pack();
++    // Dumping textures (set_texture_dump), applied at begin_frame() too.
++    bool dump_wanted{};
++    std::filesystem::path dump_folder;  // empty: textures/dump/<disc id>
++    void apply_texture_dump();
++    // Every cached texture is dropped, so the next draws decode them again.
++    // The GPU must be idle.
++    void drop_cached_textures();
+     [[nodiscard]] VkDescriptorSet texture_descriptor(const GuestMemory &memory, const DrawCall &call);
+     std::uint64_t texture_clock{};
+     // texture_key results for the display list being walked, by the state that
+@@ -3447,7 +3454,9 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
+         std::cout << "[texpack] unavailable: " << replacement_error << "\n";
+     }
+     if (const char *dump = portablekit::env("TEXTURE_DUMP"); dump != nullptr && *dump != '\0') {
+-        impl.dumper = std::make_unique<TextureDumper>(dump);
++        impl.dump_wanted = true;
++        impl.dump_folder = dump;
++        impl.dumper = std::make_unique<TextureDumper>(impl.dump_folder);
+         std::cout << "[texpack] writing new textures to " << dump << "\n";
+     }
+ 
+@@ -5015,16 +5024,25 @@ VulkanRenderer::Impl::Texture &VulkanRenderer::Impl::texture_for(const GuestMemo
+         last_texture_input = input;
+         last_texture = memo;
+     }
++    static const TexturePackOptions kDumpOptions = [] {
++        TexturePackOptions options;
++        options.ignore_address = true;
++        return options;
++    }();
+     // A cached texture drawn again. A 512-tall one drawn further down than
+     // before is hashed again over the rows now in use, and may find another
+-    // image in the texture pack.
++    // image in the texture pack; a dump writes it under that key too, since a
++    // pack needs an image for each.
+     const auto use = [&](Texture &texture) -> Texture & {
+         texture.last_used = ++texture_clock;
+-        if (pack && state.height == 512u && texture.max_seen_v < 512u) {
++        if ((pack || dumper) && state.height == 512u && texture.max_seen_v < 512u) {
+             const std::uint16_t seen = update_max_seen_v(texture.max_seen_v, drawn_max_v(call), call.through);
+             if (seen != texture.max_seen_v) {
+                 texture.max_seen_v = seen;
+-                texture.replacement = pack->find(memory, state, seen);
++                if (pack) texture.replacement = pack->find(memory, state, seen);
++                std::vector<std::uint32_t> again;
++                if (dumper && decode_texture(memory, state, again) && !again.empty())
++                    dumper->dump(memory, state, seen, pack ? pack->options() : kDumpOptions, again.data());
+             }
+         }
+         return texture;
+@@ -5070,14 +5088,7 @@ VulkanRenderer::Impl::Texture &VulkanRenderer::Impl::texture_for(const GuestMemo
+     }
+     const std::uint16_t max_seen_v =
+         state.height == 512u ? update_max_seen_v(0u, drawn_max_v(call), call.through) : 0u;
+-    if (dumper) {
+-        static const TexturePackOptions kDumpOptions = [] {
+-            TexturePackOptions options;
+-            options.ignore_address = true;
+-            return options;
+-        }();
+-        dumper->dump(memory, state, max_seen_v, pack ? pack->options() : kDumpOptions, pixels.data());
+-    }
++    if (dumper) dumper->dump(memory, state, max_seen_v, pack ? pack->options() : kDumpOptions, pixels.data());
+ 
+     // <prefix>_TEXTURE_CACHE_LIMIT keeps fewer textures, to test eviction.
+     static const std::size_t cache_limit = [] {
+@@ -5147,16 +5158,7 @@ void VulkanRenderer::Impl::apply_texture_pack() {
+     // no pack draws.
+     device_wait_idle();
+     replacements.clear();
+-    for (FrameSlot &frame : slots) {
+-        for (Texture &texture : frame.retired_textures) destroy_texture(texture);
+-        frame.retired_textures.clear();
+-    }
+-    for (auto &[key, texture] : textures) destroy_texture(texture);
+-    textures.clear();
+-    destroyed_texture_clock = texture_clock;
+-    ++textures_erased;
+-    list_texture_keys.clear();
+-    last_texture = nullptr;
++    drop_cached_textures();
+     pack.reset();
+     pack_status.clear();
+     if (!wanted) {
+@@ -5183,6 +5185,35 @@ void VulkanRenderer::Impl::apply_texture_pack() {
+     std::cout << "[texpack] " << pack->entry_count() << " textures from " << folder.string() << "\n";
+ }
+ 
++void VulkanRenderer::Impl::drop_cached_textures() {
++    for (FrameSlot &frame : slots) {
++        for (Texture &texture : frame.retired_textures) destroy_texture(texture);
++        frame.retired_textures.clear();
++    }
++    for (auto &[key, texture] : textures) destroy_texture(texture);
++    textures.clear();
++    destroyed_texture_clock = texture_clock;
++    ++textures_erased;
++    list_texture_keys.clear();
++    last_texture = nullptr;
++}
++
++void VulkanRenderer::Impl::apply_texture_dump() {
++    if (dump_wanted == static_cast<bool>(dumper)) return;
++    if (!dump_wanted) {
++        // Waits for the images still queued to be written.
++        dumper.reset();
++        std::cout << "[texpack] stopped writing textures\n";
++        return;
++    }
++    if (dump_folder.empty()) dump_folder = VulkanRenderer::textures_root() / "dump" / portablekit::game().disc_id;
++    dumper = std::make_unique<TextureDumper>(dump_folder);
++    // Textures already loaded are written only when they are decoded again.
++    device_wait_idle();
++    drop_cached_textures();
++    std::cout << "[texpack] writing new textures to " << install::path_to_utf8(dump_folder) << "\n";
++}
++
+ namespace {
+ 
+ std::uint32_t texture_bits_per_pixel(TextureFormat format) {
+@@ -7405,6 +7436,20 @@ bool VulkanRenderer::texture_pack_held() const {
+ 
+ std::filesystem::path VulkanRenderer::textures_root() { return install::user_data_directory() / "textures"; }
+ 
++void VulkanRenderer::set_texture_dump(bool enabled) {
++    // Applied at the next begin_frame(), where no frame is being recorded.
++    if (impl_) impl_->dump_wanted = enabled;
++}
++
++bool VulkanRenderer::texture_dump() const { return impl_ && impl_->dump_wanted; }
++
++std::string VulkanRenderer::texture_dump_status() const {
++    if (!impl_ || !impl_->dump_wanted) return {};
++    if (!impl_->dumper) return "Starting";
++    const std::size_t written = impl_->dumper->files_written();
++    return std::to_string(written) + (written == 1u ? " image written" : " images written");
++}
++
+ std::string VulkanRenderer::texture_pack_folder() const {
+     const std::string in_place = settings::current().texture_pack_folder;
+     return install::path_to_utf8(texture_pack_location(textures_root(), portablekit::game().disc_id, in_place).folder);
+@@ -7651,6 +7696,7 @@ void VulkanRenderer::begin_frame() {
+     impl.collect_writeback(impl.slot, false);
+     impl.report_pipelines(false);
+     impl.apply_texture_pack();
++    impl.apply_texture_dump();
+     impl.replacements.begin_frame(impl.frames);
+     if (texture_pack_trace() && impl.pack && impl.frames % 60u == 0u) {
+         std::cout << "[texpack] frame " << impl.frames << ": " << impl.replaced_draws << " draws replaced in 60 frames, "
+diff --git a/host/gpu/vulkan_renderer.hpp b/host/gpu/vulkan_renderer.hpp
+index 9b08d55..ca07fda 100644
+--- a/host/gpu/vulkan_renderer.hpp
++++ b/host/gpu/vulkan_renderer.hpp
+@@ -253,6 +253,15 @@ public:
+     [[nodiscard]] std::string texture_pack_folder() const;
+     // textures/ in the data directory.
+     [[nodiscard]] static std::filesystem::path textures_root();
++    // Writes every texture the game loads, once, into a folder that is a
++    // texture pack as it is (TextureDumper in texture_pack.hpp): the one
++    // <prefix>_TEXTURE_DUMP names, which also turns it on at start, else
++    // textures/dump/<disc id>. Turning it on loads every texture again, so
++    // those already loaded are written too. Takes effect from the next frame.
++    void set_texture_dump(bool enabled);
++    [[nodiscard]] bool texture_dump() const;
++    // For the menu: how many images the dump has written, or empty when off.
++    [[nodiscard]] std::string texture_dump_status() const;
+     void set_perf_overlay(bool visible);
+ 
+     // The shape the game's 3D view should have, width over height: the
+diff --git a/host/ui/texture_pack_screen.cpp b/host/ui/texture_pack_screen.cpp
+index bdbe823..efa6e59 100644
+--- a/host/ui/texture_pack_screen.cpp
++++ b/host/ui/texture_pack_screen.cpp
+@@ -504,6 +504,13 @@ void texture_pack_rows() {
+     if (button_row("Open the textures folder",
+                    {false, {}, "Show the textures folder in the data folder, where imported packs go."}))
+         open_folder(textures_root());
++    // Not a saved setting: a dump left on would fill the disk unnoticed, so
++    // each start begins with it off.
++    if (toggle_row("Dump textures", renderer().texture_dump(),
++                   {false, renderer().texture_dump_status(),
++                    std::string("Writes each texture the game loads, once, as a PNG into textures/dump/") +
++                        portablekit::game().disc_id + " in the data folder. Off at each start."}))
++        renderer().set_texture_dump(!renderer().texture_dump());
+     if (!settings.texture_pack_folder.empty()) info_row("Pack used from", settings.texture_pack_folder);
+     if (!settings.texture_pack_folder.empty() &&
+         button_row("Stop using the pack folder",
+-- 
+2.53.0.windows.1
+
