@@ -6,6 +6,11 @@ texture can appear a few frames late (the same pop-in PPSSPP has). The port can 
 knows a texture's key when the game *loads* it, the PNG can be decoded during the loading screen. This page maps
 where textures come from, so we know where such a hook would go.
 
+**Status: parked (1 November 2026).** The load-time prefetch is the chosen fix for the pop-in, but it is not being
+built yet. To pick it up: start with the hook on the return of `FUN_088DE0E8` for title and menu textures and a
+`data_hash` index in PortableKit's `TexturePack` (section 7); model textures need `FUN_089BCC84`'s texture entry
+mapped first. The player-facing guide is [texture-packs.md](texture-packs.md).
+
 Marks: **V** verified here (traced in the recompiled build or read in the disassembly), **D** from dissidia-fan's
 repository ([dissidia-fan/dissidia](https://github.com/dissidia-fan/dissidia) at `619189a`, facts only, not
 re-verified), **I** inferred. EU and USA code are identical, so their addresses are ours.

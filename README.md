@@ -177,33 +177,36 @@ with names like `8c0b30f1.edat`, and a `PARAM.PBP`), not in another folder insid
 ## HD texture packs
 
 The port draws texture packs made for PPSSPP: a folder with a `textures.ini` and the images it names. Put the pack's
-files in a folder named **`ULUS10566`** in the `textures` folder, next to `ms0` in the data folder
-(`data\textures\ULUS10566\` in the Windows install), so that `textures.ini` is directly inside it. Or open the menu
-(Esc, or L3+R3 on a controller), go to Video, and choose **Import texture pack…**: it finds the pack in a folder you
-pick, including PPSSPP's `PSP/TEXTURES/...` layout, checks it and copies it in. The **Texture pack** row says how many
-textures loaded.
+files in a folder named **`ULUS10566`** in the data folder's `textures` folder, so that `textures.ini` is directly
+inside it:
+
+| Installed with | Put the pack in |
+| --- | --- |
+| The Windows setup | `data\textures\ULUS10566\` in the install folder |
+| `setup.ps1` (from source) | `build\port\data\textures\ULUS10566\` |
+| The Steam Deck package | `data/textures/ULUS10566/` in its folder |
+
+Or open the menu (Esc, or L3 + R3 on a controller), go to **Video**, and choose **Import texture pack…**: it finds the
+pack in a folder you pick, including PPSSPP's `PSP/TEXTURES/...` layout, checks it, and copies it in or uses it where
+it is. The **Texture pack** row turns packs on and off and says how many textures loaded.
 
 - **Images must be PNG.** Packs that ship `.dds`, `.ktx2` or `.zim` images are not read yet. A zipped pack
   (`textures.zip`) has to be unpacked first, and packs whose `textures.ini` says `hash = quick` do not load.
 - **Packs for another release** of the game load only if their `[games]` section lists `ULUS10566`, and images of
   text made for that release may not match.
-- **To check it:** start the game with `D012_TRACE_TEXTURE_PACK=1` set, and the log lists each texture the game
-  loads, with its key and whether the pack has an image for it.
+- **A replaced texture appears a frame late** the first time it is drawn (two or three frames for 2048x2048
+  images), while its image is decoded; after that it is replaced at once.
+- **To check a pack:** start the game with `D012_TRACE_TEXTURE_PACK=1` set; the log lists each texture the game
+  draws, with its key and whether the pack has an image for it.
 
-To **make a pack**, turn on **Dump textures** on the same page and play the scenes you want to change. Each texture the
-game loads is written once, as a PNG named by its key, into `textures\dump\ULUS10566\` in the data folder, and that
-folder is a pack as it is: edit or upscale the images, keeping their names, and copy the folder to
-`textures\ULUS10566`. The option is off again each time the game starts (`D012_TEXTURE_DUMP=<folder>` turns it on
-from the start, into that folder). Two things to know:
+To **make a pack**, turn on **Dump textures** on the same page and play the scenes you want to change. Each texture
+the game loads is written once, as a PNG named by its key, into `textures\dump\ULUS10566\` in the data folder, and
+that folder is a pack as it is: edit or upscale the images, keeping their names, and put them in a pack folder. The
+option is off again each time the game starts. A 512-pixel-tall texture can get a second key once the game draws
+further down it, and a pack needs an image for each key.
 
-- **A texture can have more than one key.** The key covers only the rows of a 512-pixel-tall texture the game has
-  drawn so far, so when it later draws further down (the title screen's menu text, for example), the same texture
-  gets a second key and the dump writes a second file. A pack needs an image for each key; `textures.ini` can point
-  several keys at one image (`0000000034bb2152a65d22ce = title.png`).
-- In `textures.ini`, a line in `[games]` names the ini file for that game (`ULUS10566 = textures.ini`), not its title.
-
-Tested on Windows with a pack made from a dump of the title screen, with images four times the size. Community packs,
-battles and the Steam Deck have not been tried.
+The [texture pack guide](docs/port/texture-packs.md) has the details: what `textures.ini` may contain, how keys work,
+an example pack, how to set the trace variable, memory use, and what was tested.
 
 ## Repository layout
 
