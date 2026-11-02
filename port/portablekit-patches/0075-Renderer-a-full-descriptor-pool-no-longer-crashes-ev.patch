@@ -1,0 +1,170 @@
+From 8617586901996639d2534ee607a3c1c2317e8415 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Tue, 3 Nov 2026 10:01:08 +1030
+Subject: [PATCH] Renderer: a full descriptor pool no longer crashes; evictions
+ wait for presents
+
+- create_texture_image ignored vkAllocateDescriptorSets's result. With
+  the pool full, the set stayed null and vkUpdateDescriptorSets wrote
+  through it: a player's AMD driver read address 0x18 and the game
+  closed while scrolling a shop. The set is now allocated first and
+  checked; without one the texture is not made (its draws sample
+  white, as for other failures), and the texture cache keeps 32 fewer
+  than it holds, so its evictions give sets back once their frames
+  have finished. A line in the log says so, every 600th time.
+- The pool filled because evicted textures were freed only when no
+  present was pending at the slot's turn. With presents on their own
+  thread one nearly always was on that player's GPU. A slot holding
+  256 or more evicted textures now waits for the pending presents and
+  frees them. <PREFIX>_NO_EVICTION_WAIT never waits, as before.
+- <PREFIX>_TEXTURE_SETS makes the pool smaller, to test a full one.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/gpu/vulkan_renderer.cpp | 85 ++++++++++++++++++++++++++++--------
+ 1 file changed, 67 insertions(+), 18 deletions(-)
+
+diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
+index 621d9ac..3896bea 100644
+--- a/host/gpu/vulkan_renderer.cpp
++++ b/host/gpu/vulkan_renderer.cpp
+@@ -124,6 +124,10 @@ void report_frame_space_full(const char *what) {
+                   << " so far)\n" << std::flush;
+ }
+ constexpr std::size_t kMaxCachedTextures = 1024u;
++// Evicted textures a frame slot holds before it waits for the presents that
++// may still draw them (release_frame_uploads()). The descriptor pool keeps
++// their sets until then and has room for kMaxCachedTextures of them in all.
++constexpr std::size_t kRetiredTexturesBeforeWait = 256u;
+ // Descriptor sets for sampling render targets as textures: two per target
+ // (with its alpha, and with alpha forced to one for 5650 textures).
+ constexpr std::size_t kMaxFramebufferTextureSets = 64u;
+@@ -2227,6 +2231,9 @@ struct VulkanRenderer::Impl {
+     };
+     std::map<TextureKeyInput, ListTexture> list_texture_keys;
+     std::uint64_t textures_erased{};
++    // Lowered below kMaxCachedTextures when the descriptor pool was full
++    // (create_texture_image()), so evictions give sets back to new textures.
++    std::size_t pool_texture_limit{kMaxCachedTextures};
+     TextureKeyInput last_texture_input{};
+     ListTexture *last_texture{};
+ 
+@@ -3173,20 +3180,21 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
+         return false;
+ 
+     // Evicted textures keep their sets until their frame has finished, so
+-    // the pool has room for a second cache's worth.
++    // the pool has room for a second cache's worth. <prefix>_TEXTURE_SETS
++    // makes it smaller, to test a full pool.
++    std::uint32_t sampled_sets = static_cast<std::uint32_t>(2u * kMaxCachedTextures + 1u + kMaxFramebufferTextureSets +
++                                                            2u * kMaxFramebufferSnapshots + kMaxPaletteViews +
++                                                            2u * kMaxPalettes);
++    if (const char *text = portablekit::env("TEXTURE_SETS"); text != nullptr && std::atoi(text) > 0)
++        sampled_sets = std::min(sampled_sets, static_cast<std::uint32_t>(std::atoi(text)));
+     const std::array<VkDescriptorPoolSize, 3> pool_sizes{
+-        VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+-                             static_cast<std::uint32_t>(2u * kMaxCachedTextures + 1u + kMaxFramebufferTextureSets +
+-                                                        2u * kMaxFramebufferSnapshots + kMaxPaletteViews +
+-                                                        2u * kMaxPalettes)},
++        VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, sampled_sets},
+         VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 3u},
+         VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 2u},
+     };
+     VkDescriptorPoolCreateInfo pool_info{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+     pool_info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+-    pool_info.maxSets = static_cast<std::uint32_t>(2u * kMaxCachedTextures + 2u + kMaxFramebufferTextureSets +
+-                                                   2u * kMaxFramebufferSnapshots + kMaxPaletteViews +
+-                                                   2u * kMaxPalettes);
++    pool_info.maxSets = sampled_sets + 1u;
+     pool_info.poolSizeCount = static_cast<std::uint32_t>(pool_sizes.size());
+     pool_info.pPoolSizes = pool_sizes.data();
+     if (!check(vkCreateDescriptorPool(impl.device, &pool_info, nullptr, &impl.descriptor_pool),
+@@ -4734,16 +4742,36 @@ VulkanRenderer::Impl::Texture VulkanRenderer::Impl::create_texture(std::uint32_t
+ 
+ VulkanRenderer::Impl::Texture VulkanRenderer::Impl::create_texture_image(std::uint32_t width, std::uint32_t height) {
+     Texture texture{};
+-    std::string error;
+-    if (!create_image(width, height, VK_FORMAT_R8G8B8A8_UNORM,
+-                      VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, texture.image, texture.memory,
+-                      texture.view, VK_IMAGE_ASPECT_COLOR_BIT, error))
+-        return texture;
+     VkDescriptorSetAllocateInfo descriptor_info{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+     descriptor_info.descriptorPool = descriptor_pool;
+     descriptor_info.descriptorSetCount = 1u;
+     descriptor_info.pSetLayouts = &descriptor_layout;
+-    vkAllocateDescriptorSets(device, &descriptor_info, &texture.descriptor);
++    // With the pool full (out of pool memory, or fragmented) the texture is
++    // not made and its draws sample white (issue 7: a null set crashed the
++    // driver), and the cache keeps fewer textures, so its evictions give sets
++    // back once their frames have finished. Evictions are not freed early
++    // here: a present between flips may still draw the frame before. The set
++    // comes first, so a full pool costs no image.
++    const VkResult result = vkAllocateDescriptorSets(device, &descriptor_info, &texture.descriptor);
++    if (result != VK_SUCCESS) {
++        pool_texture_limit = std::max<std::size_t>(64u, textures.size() - std::min<std::size_t>(textures.size(), 32u));
++        static std::uint64_t failures = 0;
++        if (failures++ % 600u == 0u) {
++            std::size_t retired = 0;
++            for (const FrameSlot &frame : slots) retired += frame.retired_textures.size();
++            std::cout << "[render] descriptor pool full (" << result << "): " << textures.size() << " textures cached, "
++                      << retired << " evicted ones not yet freed; a texture is drawn white (" << failures
++                      << " so far); the cache keeps " << pool_texture_limit << "\n" << std::flush;
++        }
++        return Texture{};
++    }
++    std::string error;
++    if (!create_image(width, height, VK_FORMAT_R8G8B8A8_UNORM,
++                      VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, texture.image, texture.memory,
++                      texture.view, VK_IMAGE_ASPECT_COLOR_BIT, error)) {
++        destroy_texture(texture);
++        return texture;
++    }
+     VkDescriptorImageInfo image_info{texture_sampler(), texture.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+     VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+     write.dstSet = texture.descriptor;
+@@ -4956,9 +4984,30 @@ void VulkanRenderer::Impl::release_frame_uploads(std::uint32_t from) {
+     frame.retired_buffers.clear();
+     if (frame.retired_textures.empty()) return;
+     // A present between flips recorded before the eviction may still draw an
+-    // evicted texture; its fence says when it has finished.
+-    for (VkFence fence : present_fences)
+-        if (fence != VK_NULL_HANDLE && vkGetFenceStatus(device, fence) != VK_SUCCESS) return;
++    // evicted texture; its fence says when it has finished. While one is
++    // pending the textures wait for the slot's next turn, unless so many wait
++    // that the descriptor pool could run out: then the presents are waited
++    // for. (Issue 7: with presents on their own thread, one was pending at
++    // nearly every turn on a player's GPU, and a shop's evictions filled the
++    // pool.) The state lock is held, so a present fence that is not signalled
++    // has been submitted. <prefix>_NO_EVICTION_WAIT never waits, as before.
++    static const bool no_wait = portablekit::env("NO_EVICTION_WAIT") != nullptr;
++    const bool backlog = !no_wait && frame.retired_textures.size() >= kRetiredTexturesBeforeWait;
++    bool waited = false;
++    for (VkFence fence : present_fences) {
++        if (fence == VK_NULL_HANDLE || vkGetFenceStatus(device, fence) == VK_SUCCESS) continue;
++        if (!backlog) return;
++        const perf::Clock::time_point wait_start = perf::Clock::now();
++        wait_fence(fence, "the wait for a present before freeing textures");
++        perf::add_wait_time(perf::Clock::now() - wait_start, perf::Stall::Fence);
++        waited = true;
++    }
++    if (waited) {
++        static std::uint64_t waits = 0;
++        if (waits++ % 600u == 0u)
++            std::cout << "[render] waited for a present to free " << frame.retired_textures.size()
++                      << " evicted textures (" << waits << " so far)\n";
++    }
+     for (Texture &texture : frame.retired_textures) destroy_texture(texture);
+     frame.retired_textures.clear();
+ }
+@@ -5096,7 +5145,7 @@ VulkanRenderer::Impl::Texture &VulkanRenderer::Impl::texture_for(const GuestMemo
+         const std::size_t limit = text != nullptr ? std::strtoull(text, nullptr, 10) : 0u;
+         return limit != 0u ? std::min(limit, kMaxCachedTextures) : kMaxCachedTextures;
+     }();
+-    if (textures.size() >= cache_limit) {
++    if (textures.size() >= std::min(cache_limit, pool_texture_limit)) {
+         auto oldest = textures.begin();
+         for (auto it = textures.begin(); it != textures.end(); ++it) {
+             if (it->second.last_used < oldest->second.last_used) oldest = it;
+-- 
+2.53.0.windows.1
+

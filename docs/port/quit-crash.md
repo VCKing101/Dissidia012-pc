@@ -65,6 +65,11 @@ The earlier all-camera pattern was chance: 5 crashes against 5 clean camera-off 
   `llvm-symbolizer --obj=build\port\installer\symbols\0.4.0\D012Native.exe 0x140264b74` names the function.
   Offsets in `main.dll` (the game's code, compiled on the player's PC) need that release's compile of the same disc.
   `D012_TEST_CRASH=<seconds>[,abort]` checks the report.
+- The first player's report read this way (issue 7, v0.5.0, 3 November): a read of 0x18 in `amdvlk64.dll`, called
+  from `create_texture_image` through `vkUpdateDescriptorSets`. The dump's module list matched the kept exe (timestamp
+  and size); the faulting thread's stack, which the minidump keeps, still held the `VkWriteDescriptorSet` (sType 35)
+  with `dstSet` 0: `vkAllocateDescriptorSets` had failed unchecked. Fixed in PortableKit patch 0075
+  (`port/README.md`); `D012_TEXTURE_SETS=300` fills the pool on purpose.
 - The recompiled build now links with `/DEBUG:FULL` (`CMAKE_EXE_LINKER_FLAGS_RELEASE`), so `D012Native.pdb` sits
   next to the executable.
 
