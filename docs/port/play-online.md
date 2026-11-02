@@ -1,50 +1,120 @@
 # Playing online
 
 Two players, each with their own copy of the port, fight a 1-on-1 battle over the internet through the game's
-Communication Mode. **Experimental:** it has been played between Windows and a Steam Deck, and the details may change.
+Communications Mode. **Experimental:** it has been played between Windows and a Steam Deck, and the details may change.
 How it works and how it was tested: [Communication Mode](communication-mode.md), sections 11 to 15.
 
 Both players need the same version of the port, the same mods that change the game (music mods may differ) and the
 same test settings. The game checks as the battle starts and says what differs. Saves and official DLC may differ.
 
+Only the Online Lobby's 1-on-1 battles are supported. Group Battle and Communications are untested.
+
+One player **hosts** a session and the other **joins** it, both on the port's Network page. Then both go on line in
+the game as they would on a PSP. The host should be the player on a home connection: mobile data cannot host (see
+[If something goes wrong](#if-something-goes-wrong)).
+
+The pictures use example addresses; yours are your own.
+
 ## Host
 
-1. Open the port's menu (Esc, or L3 + R3 on a controller) and go to the **Network** page.
-2. Check that **Ad hoc play** is on, then choose **Host a session**.
-3. The game asks your router to open its ports. After a moment a row under Play together shows your internet address,
-   marked **Internet (NAT-PMP)** or **Internet (UPnP)**. Select it to copy the address, and send it to the other
-   player.
-4. The first time, Windows may ask whether to let the game use the network: allow it on private networks.
+1. Open the port's menu: Esc, or L3 + R3 together on a controller. Press LB or RB (Q or W on a keyboard) until the
+   **Network** page shows. Further down the page, **Ad hoc play** must be on; it is unless you turned it off.
+2. Select **Host a session**, the first row.
 
-The host should be the player on a home connection. Mobile data cannot host (see below).
+   ![The Network page with Host a session highlighted at the top, Join a session below it, and the row's help text at the foot](../images/online-host-start.png)
+
+3. The game asks your router to open its ports. After a moment the rows under Play together show your addresses:
+   - **Local network**: for a player on the same network as you. They need not type it: your session appears in
+     their Join a session list by itself.
+   - **Internet (NAT-PMP)** or **Internet (UPnP)**: for a player anywhere else. Select it and the address is copied
+     (it shows under **Copied**); paste it into a message to the other player.
+
+   ![The Network page while hosting: 2 players connected, a local network address, the internet address 203.0.113.7 highlighted and shown again under Copied, and the connected players below](../images/online-hosting.png)
+
+4. The first time, Windows may ask whether to let the game use the network: allow it on private networks.
+5. Close the menu (B, Esc, or L3 + R3 again). The session runs as long as the game does; **Stop hosting**, further
+   down the same rows, ends it.
+
+Once the other player has joined and gone on line, **Hosting** counts both of you ("2 players connected") and lists
+each player. If the internet row says the router did not open the ports, or that your provider shares the address,
+see [If something goes wrong](#if-something-goes-wrong).
 
 ## Join
 
-1. On the **Network** page, check that **Ad hoc play** is on.
-2. Under Join a session, type the host's address in **Address** and confirm it.
+1. Open the port's menu and go to the **Network** page, as the host did.
+2. **On the same network as the host:** their session is listed under Join a session as **Join** with their name and
+   address. Select it, and skip to step 4.
+3. **Anywhere else:** select **Address**. Type the address the host sent you, with a keyboard or the on-screen keys,
+   and confirm with **OK** (Start on a controller, Enter on a keyboard).
+
+   ![The Address box with 203.0.113.7 typed and the on-screen keyboard below it](../images/online-join-address.png)
+
+4. A row **Joined** with the host's address appears under Address, and **Server** further down shows it too. Next
+   time the same row joins again in one press: the game keeps recent addresses.
+
+   ![The Network page after joining: Joined 203.0.113.7 recent highlighted under Address](../images/online-joined.png)
+
+5. Close the menu.
 
 ## Then, in the game
 
-Both players go to Communication Mode and into the same Online Lobby. One challenges the other; after fighter select
-the host enters the battle. The battle finds its own way to the other player.
+Both players do the same from here.
+
+1. On the main menu, choose **Communications Mode**, then **Online Lobby**. The game goes on line through the
+   session.
+2. Both pick **the same lobby**, for example 1 Cornelia. Lobbies 1 to 8 are for customised characters, 9 to 16 for
+   preset ones.
+
+   <p>
+     <img src="../images/online-game-menu.png" width="49%" alt="The main menu with Communications Mode open and Online Lobby highlighted">
+     <img src="../images/online-game-lobbies.png" width="49%" alt="The Online Lobby's 16 lobbies, Cornelia highlighted">
+   </p>
+
+3. In the lobby the other player's Friend Card appears, marked **Online**. One player selects it and chooses
+   **Battle Request [1-on-1]**. The other is told "You've been challenged to an online match!" and answers **YES**
+   to accept.
+
+   <p>
+     <img src="../images/online-game-challenge.png" width="49%" alt="The lobby with the other player's Friend Card selected and a menu open on Battle Request [1-on-1]">
+     <img src="../images/online-game-challenged.png" width="49%" alt="The other player's lobby: You've been challenged to an online match!">
+   </p>
+
+4. Both pick a fighter. The game gives one player the **HOST** badge (not necessarily the one who hosts the
+   session): that player sets the stage and rules and selects **Enter Battle**.
+
+   <p>
+     <img src="../images/online-game-fighter.png" width="49%" alt="Online Battle 1-on-1 Player Select with Lightning chosen">
+     <img src="../images/online-game-enter.png" width="49%" alt="The battle setup with a HOST and a GUEST badge, Enter Battle highlighted, and Stage, Rules and Judgment below">
+   </p>
+
+The battle then finds its own way to the other player. After it, both are back at the battle setup, where Enter
+Battle starts a rematch.
+
+## During a battle
 
 **Input delay** (Network page, Online battles): the frames between pressing a button and the fighter acting. The
 host's setting counts. **Auto**, the default, sets it from the connection as the battle starts: 2 frames on a home
 network, 3 at a round trip of about 75 to 100 ms, more when it is longer. A fixed number smooths a poor connection
 (higher) or responds sooner (lower).
 
+![The Network page's Ad hoc play and Online battles sections, with Input delay set to Auto and its help text below](../images/online-input-delay.png)
+
 **Waiting.** If the other player's game falls silent, a band says "Waiting for the other player" and counts the
-seconds. Hold B (or Esc) to leave the battle. After 30 seconds the game gives up by itself.
+seconds. Hold B (or Esc) to leave the battle: the bar along the band's foot fills, and the battle ends when it is full.
+After 30 seconds the game gives up by itself.
+
+![The waiting band: Waiting for the other player... 4 s, with Hold to leave and the bar partly filled](../images/online-waiting.png)
 
 **Each player keeps their own camera settings.** The right-stick camera's dead zone, sensitivity and inverted axes
 are sent across, so the other game turns your camera the way you set it.
 
-Only the Online Lobby's 1-on-1 battles are supported. Group Battle and Communications are untested.
-
 ## If something goes wrong
 
 **"This battle cannot start: the other player's game differs in ..."** The two games are not the same: update both
-to the same release, and use the same mods that change the game.
+to the same release, and use the same mods that change the game. The notice names what differs; here, one player had
+turned analog walking in battle on:
+
+![This battle cannot start: the other player's game differs in analog walking in battle (D012_SMOOTH_STICK_BATTLE), with an OK button](../images/online-differs.png)
 
 **"The other player's game did not answer."** The battle's UDP port does not get through to the host. See the next
 paragraphs.

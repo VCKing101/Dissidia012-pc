@@ -539,7 +539,8 @@ said so.
   share among customers (100.64.0.0/10), the Network page says opened ports cannot help and that the other player
   should host, instead of offering that address.
 - `D012_EXAMPLE_ADDRESSES=1` shows documentation addresses (RFC 5737) on the Network page, for the README's picture.
-  PortableKit's hosting rows no longer name Monster Hunter's "Online Guild Hall".
+  PortableKit's Network page no longer uses Monster Hunter's words: no "Online Guild Hall" in the hosting rows, and
+  rooms, not halls, in the Server status and the Ad hoc play help.
 
 **Results (V; two copies on this PC, copy 1 hosting, copy 2 joining its LAN address, both with nothing set).**
 

@@ -1,4 +1,4 @@
-From 424d0293ef4abd45ba6f76346eb05f55e164930a Mon Sep 17 00:00:00 2001
+From e1c5d767b4530d9509d4fa2378d519ace2678311 Mon Sep 17 00:00:00 2001
 From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
 Date: Sun, 1 Nov 2026 21:36:36 +1030
 Subject: [PATCH] Interface: a waiting screen, Network page rows for ports,
@@ -37,12 +37,12 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  host/adhoc/port_mapping.hpp |   9 +++
  host/ui/layer.cpp           |   1 +
  host/ui/layer.hpp           |   3 +
- host/ui/menu.cpp            |  50 +++++++++++---
+ host/ui/menu.cpp            |  54 ++++++++++++---
  host/ui/message_dialog.cpp  | 130 ++++++++++++++++++++++++++++++++++++
  host/ui/message_dialog.hpp  |  18 +++++
  host/ui/ui.hpp              |   2 +
  tests/adhoc_tests.cpp       |   7 ++
- 9 files changed, 227 insertions(+), 9 deletions(-)
+ 9 files changed, 229 insertions(+), 11 deletions(-)
 
 diff --git a/host/adhoc/port_mapping.cpp b/host/adhoc/port_mapping.cpp
 index a1a12da..9a2d941 100644
@@ -146,7 +146,7 @@ index 30ef180..4ddac36 100644
      // Gamepad navigation waits until no face button is held, so a button held
      // while a screen opens does not activate its first row.
 diff --git a/host/ui/menu.cpp b/host/ui/menu.cpp
-index f0cb185..0f4cb55 100644
+index f0cb185..9c973c3 100644
 --- a/host/ui/menu.cpp
 +++ b/host/ui/menu.cpp
 @@ -96,6 +96,12 @@ std::vector<void (*)()> &port_rows() {
@@ -248,6 +248,15 @@ index f0cb185..0f4cb55 100644
              adhoc_join(address);
      }
      if (hosts.empty()) info_row("On this network", "Looking for hosted sessions…");
+@@ -1251,7 +1280,7 @@ void Menu::network() {
+     section("Ad hoc play");
+     if (toggle_row("Ad hoc play", s.adhoc,
+                    options_for("network.adhoc", "Multiplayer with other players. Off, the game says the wireless "
+-                                                "switch is off. Turning it off in a gathering hall leaves it."))) {
++                                                "switch is off. Turning it off while in a room leaves it."))) {
+         s.adhoc = !s.adhoc;
+         settings::save();
+         adhoc_apply_settings();
 @@ -1278,6 +1307,7 @@ void Menu::network() {
          settings::save();
          adhoc_apply_settings();
@@ -256,6 +265,15 @@ index f0cb185..0f4cb55 100644
  
      section("Status");
      info_row("Connection", connection_text(d));
+@@ -1285,7 +1315,7 @@ void Menu::network() {
+         const adhoc::ServerStatus st = adhoc_host_status();
+         info_row("Server", "TCP " + std::to_string(st.adhocctl_port) + " and " + std::to_string(st.relay_port) +
+                                ", up " + format_duration(st.uptime_ms) + ", " + players_text(st.players.size()) +
+-                               ", " + std::to_string(st.groups) + " halls, " + std::to_string(st.relay_sessions) +
++                               ", " + std::to_string(st.groups) + " rooms, " + std::to_string(st.relay_sessions) +
+                                " relay connections, " + std::to_string(st.streams) + " streams");
+         info_row("Relayed", std::to_string(st.relayed_packets) + " packets (" + format_bytes(st.relayed_bytes) +
+                                 "), " + std::to_string(st.dropped) + " datagrams dropped");
 @@ -1626,6 +1656,10 @@ void add_menu_rows(void (*rows)()) {
      if (rows != nullptr) port_rows().push_back(rows);
  }

@@ -93,7 +93,7 @@ without the row; set it back to `1` to bring it back. `D012_LOCAL_VERSUS=0` does
 
 ## Online play (experimental)
 
-Two players fight a 1-on-1 battle over the internet in the game's own **Communication Mode**, each on their own PC
+Two players fight a 1-on-1 battle over the internet in the game's own **Communications Mode**, each on their own PC
 or Steam Deck. The battle runs on the port's own netcode: full analog, each player's right-stick camera and an input
 delay set from the connection.
 
@@ -101,9 +101,11 @@ delay set from the connection.
    **Host a session**. The game asks your router to open its ports and shows your internet address; select it to
    copy it, and send it to the other player.
 2. **Join:** on the **Network** page, turn on **Ad hoc play** and type the host's address under **Join a session**.
-3. Both go to **Communication Mode**, into the same **Online Lobby**, and one challenges the other.
+3. Both go to **Communications Mode**, into the same **Online Lobby**, and one challenges the other.
 
-![The Network page while hosting: the local address, the internet address the router opened its ports on, and Stop hosting](docs/images/online-network-page.png)
+Step by step, with pictures of each screen: the [players' guide](docs/port/play-online.md).
+
+![The Network page while hosting: the local address, and the internet address the router opened its ports on](docs/images/online-network-page.png)
 
 Both players need the same release and the same mods that change the game; the game checks and says what differs.
 When the router cannot open its ports, or your provider shares one address among its customers (as on mobile data),
