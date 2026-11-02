@@ -1,6 +1,7 @@
 """Build dependencies: SDL3, glslang and the Vulkan headers, downloaded and SHA-256 checked into
-tools/local/port-deps in the layout tools/port/pk_cmake.cmd expects, and vulkan-1.lib made from the
-driver's System32\\vulkan-1.dll (so no Vulkan SDK and no administrator rights are needed).
+tools/local/port-deps in the layout tools/port/pk_cmake_mingw.cmd expects, llvm-mingw (the compiler)
+into tools/local, and vulkan-1.lib made from the driver's System32\\vulkan-1.dll (so no Vulkan SDK and
+no administrator rights are needed).
 
     tools/local/port-deps/dl/<sub>/<zip>     the downloads, kept for re-runs
     tools/local/port-deps/sdl3/SDL3-3.4.18/  SDL3's Visual C++ development package
@@ -8,6 +9,7 @@ driver's System32\\vulkan-1.dll (so no Vulkan SDK and no administrator rights ar
     tools/local/port-deps/vkheaders/Vulkan-Headers-vulkan-sdk-1.4.363.0/include
     tools/local/port-deps/vulkan-lib/vulkan-1.lib
     tools/local/port-deps/dl/ffmpeg/         PortableKit's own configure fetches FFmpeg here, checking its pinned hash
+    tools/local/llvm-mingw-20260922-ucrt-x86_64/   clang for Windows, the compiler the Windows setup ships
 """
 
 import hashlib
@@ -54,6 +56,19 @@ DEPENDENCIES = [
         "sha256": "f4be95220ff0ee0b1c620301ff4fe9ae48592d71f4c30f2d5c571351a153ae81",
         "content_sha256": "a32e435c1d3b3155da7bd05c713bd82efacc8c5269fb38213a53aa4918efb163",
         "check": "Vulkan-Headers-vulkan-sdk-1.4.363.0/include/vulkan/vulkan.h",
+    },
+    {
+        # The compiler (docs/port/setup.md, "Why clang"), unpacked into tools/local, where
+        # tools/port/pk_cmake_mingw.cmd and tools/port/package_installer.py look for it.
+        "name": "llvm-mingw 20260922 (clang)",
+        "sub": "llvm-mingw",
+        "file": "llvm-mingw-20260922-ucrt-x86_64.zip",
+        "url": "https://github.com/mstorsjo/llvm-mingw/releases/download/20260922/"
+               "llvm-mingw-20260922-ucrt-x86_64.zip",
+        "sha256": "e3ad77d117a4bea19a7a3b333341824d79a5a371004a10e25b8504e7b3047666",
+        "into": "tools/local",
+        "check": "llvm-mingw-20260922-ucrt-x86_64/bin/clang++.exe",
+        "marker": "llvm-mingw-20260922-ucrt-x86_64/" + MARKER,
     },
 ]
 VULKAN_DLL = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "vulkan-1.dll"
@@ -188,8 +203,8 @@ def extracted_matches(archive_path, dest):
 
 
 def extract(dep, archive_path):
-    dest = DEPS_DIR / dep["sub"]
-    marker = dest / MARKER
+    dest = ROOT / dep["into"] if "into" in dep else DEPS_DIR / dep["sub"]
+    marker = dest / dep.get("marker", MARKER)
     expected = sha256_file(archive_path)
     if (dest / dep["check"]).exists():
         if marker.exists() and marker.read_text().strip() == expected:

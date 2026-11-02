@@ -39,6 +39,7 @@
 // MIT licence; see port/README.md.
 
 #include "app_paths.hpp"
+#include "install/user_data.hpp"
 
 #include <cstdio>
 #include <cstdlib>
@@ -117,8 +118,51 @@ void log_to_file_without_console(const std::filesystem::path &logs) {
 }
 #endif
 
+// What the program prints goes to `log` from here on, unbuffered, so that a
+// closed or crashed copy loses nothing.
+void print_to(const std::string &log) {
+    if (std::freopen(log.c_str(), "a", stdout) != nullptr) std::setvbuf(stdout, nullptr, _IONBF, 0);
+    if (std::freopen(log.c_str(), "a", stderr) != nullptr) std::setvbuf(stderr, nullptr, _IONBF, 0);
+}
+
+// D012_LOG_FILE=<path> sends what the program prints to that file, for a copy
+// whose output nothing else collects. Under Proton the path is a Windows one
+// (Z:/home/deck/...).
+void log_to_named_file() {
+    const char *path = std::getenv("D012_LOG_FILE");
+    if (path == nullptr || *path == '\0') return;
+    std::remove(path);
+    print_to(path);
+}
+
+// A portable copy set up for online play (settings.ini's network.adhoc or
+// online.battle_link) keeps its own log, <data>/logs/D012Native.log, the previous run's in
+// D012Native-previous.log: a network battle's report needs both copies' logs,
+// and under Proton a console program prints into a console of Wine's own, not
+// anywhere a launch option's redirection catches.
+void log_online_copy(const std::filesystem::path &data) {
+    if (is_set("D012_LOG_FILE")) return;
+    try {
+        const auto entries = portablekit::install::read_settings_file(data);
+        const auto link = entries.find("online.battle_link");
+        const auto adhoc = entries.find("network.adhoc");
+        const bool online = (link != entries.end() && !link->second.empty()) ||
+                            (adhoc != entries.end() && (adhoc->second == "1" || adhoc->second == "true"));
+        if (!online) return;
+    } catch (const std::exception &) {
+        return;
+    }
+    std::error_code ec;
+    std::filesystem::create_directories(data / "logs", ec);
+    const std::filesystem::path log = data / "logs" / "D012Native.log";
+    std::filesystem::remove(data / "logs" / "D012Native-previous.log", ec);
+    std::filesystem::rename(log, data / "logs" / "D012Native-previous.log", ec);
+    print_to(log.string());
+}
+
 struct PortableLayout {
     PortableLayout() {
+        log_to_named_file();
         try {
             apply();
         } catch (const std::exception &e) {
@@ -150,6 +194,7 @@ struct PortableLayout {
 #if defined(D012_INSTALLER_BUILD) && defined(_WIN32)
         log_to_file_without_console(std::filesystem::path(std::u8string(data.begin(), data.end())) / "logs");
 #endif
+        log_online_copy(std::filesystem::path(std::u8string(data.begin(), data.end())));
         if (!is_set(kMemoryStickDir))
             set(kMemoryStickDir, utf8(std::filesystem::path(std::u8string(data.begin(), data.end())) / "ms0"));
 #if defined(D012_INSTALLER_BUILD)

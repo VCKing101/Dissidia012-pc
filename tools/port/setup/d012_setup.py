@@ -81,8 +81,8 @@ def main():
 
     if first_run and ui.INTERACTIVE:
         print()
-        info("Setup will now download about 100 MB (PortableKit and its build dependencies), check your")
-        info("game files, and compile the port. Compiling takes 5 to 30 minutes, depending on the PC.")
+        info("Setup will now download about 290 MB (PortableKit, the clang compiler and the build dependencies),")
+        info("check your game files, and compile the port. Compiling takes 5 to 30 minutes, depending on the PC.")
         if not ui.confirm("Continue?"):
             raise SetupError("stopped at your request; nothing was changed")
 
@@ -91,7 +91,7 @@ def main():
     import game
     import build
 
-    step(2, total, "Build dependencies (SDL3, glslang, Vulkan headers)")
+    step(2, total, "Build dependencies (SDL3, glslang, Vulkan headers, the clang compiler)")
     deps.ensure(options.deps_cache)
     ui.save_state(state)
 
@@ -132,6 +132,10 @@ def main():
         info("skipped (-NoShortcuts)")
     else:
         make_shortcuts(game.ICON, options.shortcut_dir)
+
+    for folder, gigabytes in build.old_builds():
+        info(f"{folder.relative_to(ROOT)} ({gigabytes:.1f} GB) is the Visual Studio build from before setup used "
+             "clang; nothing uses it now, and you may delete it")
 
     data = ROOT / "build" / "port" / "data"
     print()

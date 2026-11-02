@@ -1,8 +1,9 @@
-"""The recompiled build, as in port/README.md ("Recompiled build"):
+"""The recompiled build, as in port/README.md ("Recompiled build"), compiled with clang (llvm-mingw,
+through tools/port/pk_cmake_mingw.cmd; docs/port/setup.md, "Why clang"):
 
     0. only when the decrypted EBOOT is not there yet: configure and build D012Native with no game
        code (bootstrap()), which setup runs as `D012Native --install` to decrypt it from the ISO;
-    1. configure tools/local/port/build-d012-recomp (D012_WORK_DIR=build/port/recomp,
+    1. configure tools/local/port/build-d012-clang (D012_WORK_DIR=build/port/recomp,
        PSPRECOMP_GENERATED_JOBS = one per 4 GiB of memory, PortableKit's own rule);
     2. build psp_recomp;
     3. generate the main corpus (with the main rows of port/config/dispatch-calls.txt) and the overlay
@@ -27,21 +28,28 @@ import sys
 import time
 from pathlib import Path
 
-from ui import PK_CMAKE, ROOT, SetupError, duration, info, run, run_vs, warn
+from ui import PK_CMAKE_MINGW, ROOT, SetupError, duration, info, run, run_vs, warn
 
 sys.path.insert(0, str(ROOT / "tools" / "port"))
 import overlay_meta  # noqa: E402
 
 PK_DIR = ROOT / "tools" / "local" / "port" / "PortableKit"
-BUILD = ROOT / "tools" / "local" / "port" / "build-d012-recomp"
-RELEASE = ROOT / "tools" / "local" / "port" / "build-d012-release"
+BUILD = ROOT / "tools" / "local" / "port" / "build-d012-clang"
+RELEASE = ROOT / "tools" / "local" / "port" / "build-d012-release-clang"  # where package_deck.py looks first
+# The Visual Studio (MSVC) builds setup made before it used clang; never used or removed by setup.
+OLD_BUILDS = [ROOT / "tools" / "local" / "port" / "build-d012-recomp",
+              ROOT / "tools" / "local" / "port" / "build-d012-release"]
 WORK = ROOT / "build" / "port" / "recomp"
 STAGING = ROOT / "build" / "port" / "recomp-staging"  # outside WORK, where the build's globs look
 EBOOT = ROOT / "build" / "port" / "game" / "EBOOT.ELF"
 LIBRARIES = [ROOT / "build/port/ovl/OVL_MENU_APP.ELF", ROOT / "build/port/ovl/OVL_BATTLE_APP.ELF",
              ROOT / "build/port/ovl/OVL_EXTRA_APP.ELF", ROOT / "build/port/prx/LIBSUPPREACC.PRX"]
 MAIN_BASE = "0x08804000"
+# The game's code at -O1, as the Windows setup compiles it: -O2 runs barely faster for over three times the
+# compile (docs/port/steam-deck.md).
+OPT_LEVEL = "1"
 ATRACDENC_SCRIPT = ROOT / "tools" / "port" / "build_atracdenc.cmd"
+LLVM_BIN = ROOT / "tools" / "local" / "llvm-mingw-20260922-ucrt-x86_64" / "bin"
 ATRACDENC = ROOT / "tools" / "local" / "port" / "build-atracdenc" / "src" / "atracdenc.exe"
 
 
@@ -84,7 +92,8 @@ def cache_values(build_dir):
 
 def configure(build_dir, generated_jobs, release=False):
     wanted = {"D012_PORTABLEKIT_DIR": posix(PK_DIR), "D012_WORK_DIR": posix(WORK),
-              "PSPRECOMP_GENERATED_JOBS": str(generated_jobs), "CMAKE_GENERATOR": "Ninja"}
+              "PSPRECOMP_GENERATED_JOBS": str(generated_jobs), "CMAKE_GENERATOR": "Ninja",
+              "PSPRECOMP_GENERATED_OPT_LEVEL": OPT_LEVEL}
     if release:
         wanted["PORTABLEKIT_RELEASE"] = "ON"
     values = cache_values(build_dir)
@@ -96,13 +105,14 @@ def configure(build_dir, generated_jobs, release=False):
     info(f"configuring {build_dir.relative_to(ROOT)} (the first time about 1-2 minutes: "
          "PortableKit fetches and unpacks its FFmpeg build)")
     started = time.monotonic()
-    args = ["-S", posix(ROOT / "port"), "-B", posix(build_dir), "-G", "Ninja",
+    # The wrapper adds -G Ninja, the Release build type and the compiler.
+    args = ["-S", posix(ROOT / "port"), "-B", posix(build_dir),
             f"-DD012_PORTABLEKIT_DIR={posix(PK_DIR)}", f"-DD012_WORK_DIR={posix(WORK)}",
-            f"-DPSPRECOMP_GENERATED_JOBS={generated_jobs}"]
+            f"-DPSPRECOMP_GENERATED_JOBS={generated_jobs}", f"-DPSPRECOMP_GENERATED_OPT_LEVEL={OPT_LEVEL}"]
     if release:
         args.append("-DPORTABLEKIT_RELEASE=ON")
     log = "setup-configure-release.log" if release else "setup-configure.log"
-    _code, last = run_vs(PK_CMAKE, args, log)
+    _code, last = run_vs(PK_CMAKE_MINGW, args, log)
     text = (ROOT / "build" / "port" / "logs" / log).read_text(encoding="utf-8", errors="replace")
     if "Vulkan renderer enabled" not in text:
         raise SetupError(f"the configure did not report \"D012Native: Vulkan renderer enabled\" "
@@ -115,7 +125,7 @@ def build(build_dir, ninja_jobs, label, log, target=None):
     if target:
         args += ["--target", target]
     started = time.monotonic()
-    _code, last = run_vs(PK_CMAKE, args, log, progress=label)
+    _code, last = run_vs(PK_CMAKE_MINGW, args, log, progress=label)
     if any("ninja: no work to do" in line for line in last):
         info(f"{label}: nothing to do, already up to date")
     else:
@@ -181,6 +191,10 @@ def generate(state, force=False):
         return
     started = time.monotonic()
     info("generating the C++ corpora from the EBOOT, the three overlays and the disc PRX (about a minute)")
+    # psp_recomp, built with clang, needs llvm-mingw's libc++.dll and libunwind.dll, which only the program's
+    # bin/ has copies of; overlay_meta.py runs it too, and inherits this.
+    if str(LLVM_BIN).lower() not in os.environ.get("PATH", "").lower():
+        os.environ["PATH"] = str(LLVM_BIN) + os.pathsep + os.environ.get("PATH", "")
     if STAGING.exists():
         shutil.rmtree(STAGING)
     STAGING.mkdir(parents=True)
@@ -236,6 +250,16 @@ def ensure(state, force_corpus=False):
              "up to 30 minutes or more on 4 cores and 8 GB. Later runs rebuild only what changed.")
     build(BUILD, ninja_jobs, "build", "setup-build.log")
     return check_outputs(BUILD)
+
+
+def old_builds():
+    """The Visual Studio build folders of a setup from before clang, with their sizes in GB."""
+    found = []
+    for folder in OLD_BUILDS:
+        if (folder / "CMakeCache.txt").is_file():
+            size = sum(p.stat().st_size for p in folder.rglob("*") if p.is_file())
+            found.append((folder, size / 1e9))
+    return found
 
 
 def ensure_encoder(state):

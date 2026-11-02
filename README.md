@@ -41,6 +41,8 @@ game's executable and overlays.
   ([notes](docs/port/local-versus.md)).
 - **HD texture packs** in PPSSPP's format, and a menu option that dumps the game's textures to start one
   ([below](#hd-texture-packs)).
+- **Online versus (experimental)**: 1-on-1 battles over the internet through the game's own Communication Mode, with
+  full analog and each player's right-stick camera ([guide](docs/port/play-online.md)).
 
 ## BGM playlist selector
 
@@ -89,6 +91,28 @@ is kept as `game.versus_fov` in `settings.ini`.
 `game.local_versus=0` in `settings.ini` (in the data folder, next to your saves' `ms0`) leaves the game as it was,
 without the row; set it back to `1` to bring it back. `D012_LOCAL_VERSUS=0` does the same for one run.
 
+## Online play (experimental)
+
+Two players fight a 1-on-1 battle over the internet in the game's own **Communications Mode**, each on their own PC
+or Steam Deck. The battle runs on the port's own netcode: full analog, each player's right-stick camera and an input
+delay set from the connection.
+
+1. **Host:** open the menu (Esc, or L3 + R3), go to the **Network** page and choose **Host a session**. The game
+   asks your router to open its ports and shows your internet address; select it to copy it, and send it to the
+   other player.
+2. **Join:** on the **Network** page, type the host's address under **Join a session**.
+3. Both go to **Communications Mode**, into the same **Online Lobby**, and one challenges the other.
+
+Step by step, with pictures of each screen: the [players' guide](docs/port/play-online.md).
+
+![The Network page while hosting: the local address, and the internet address the router opened its ports on](docs/images/online-network-page.png)
+
+Both players need the same release and the same mods that change the game; the game checks and says what differs.
+When the router cannot open its ports, or your provider shares one address among its customers (as on mobile data),
+the [players' guide](docs/port/play-online.md) has the fixes: forwarding three ports by hand, or a VPN such as
+Tailscale. Only the Online Lobby's 1-on-1 battles are supported so far; two Windows PCs on separate machines and the
+Steam Deck hosting are untested.
+
 ## Quick start (Windows)
 
 **1. Download** `Dissidia012-PC-Setup-<version>.exe` from the
@@ -123,10 +147,11 @@ To build the port yourself, or to follow the latest changes, `setup.ps1` builds 
 **1. Install these** (free; the defaults are fine unless noted):
 
 - [Visual Studio 2022 Community](https://visualstudio.microsoft.com/downloads/) with the workload
-  **Desktop development with C++** (or Build Tools 2022 with the same workload).
+  **Desktop development with C++** (or Build Tools 2022 with the same workload), for its CMake and Ninja. The port
+  itself is compiled with clang, which setup downloads ([why clang](docs/port/setup.md#why-clang)).
 - [Python](https://www.python.org/downloads/windows/) 3.10 or newer. Tick "Add python.exe to PATH".
 - [Git for Windows](https://git-scm.com/download/win).
-- About 5 GB of free disk space.
+- About 6 GB of free disk space.
 
 **2. Run the setup** in PowerShell:
 
@@ -140,7 +165,8 @@ powershell -ExecutionPolicy Bypass -File .\setup.ps1
 ISO, checks it, and builds the port. The first time takes about 10 to 30 minutes, most of it compiling. It makes the
 same "Dissidia 012 (PC port)" shortcut; saves are in `build/port/data/ms0` and mods in `build/port/data/mods`.
 
-**To update:** `git pull`, then run `setup.ps1` again. It rebuilds only what changed.
+**To update:** `git pull`, then run `setup.ps1` again. It rebuilds only what changed. The first update from a setup
+made before 0.5.0 compiles the whole port once with clang ([setup.md](docs/port/setup.md#updating)).
 
 The source build's options, what each step does, and troubleshooting: [docs/port/setup.md](docs/port/setup.md). The manual build steps
 for developers are in [`port/README.md`](port/README.md). For the Steam Deck, see
@@ -233,7 +259,7 @@ Ignored and never committed: the game image, everything extracted or built from 
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -s tools -p "test_*.py"
 python -m unittest discover -s port/tools/bgm_maker/tests
-tools\port\pk_ctest.cmd tools\local\port\build-d012-recomp     # the port's own C++ tests (no game needed)
+tools\port\pk_ctest.cmd tools\local\port\build-d012-clang      # the port's own C++ tests (no game needed)
 ```
 
 Many tool tests need the locally extracted game files and skip or fail without them.

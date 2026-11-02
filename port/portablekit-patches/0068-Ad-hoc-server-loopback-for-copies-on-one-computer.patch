@@ -1,0 +1,144 @@
+From 9d288e487f9664a029280b525590ddd88ee4224e Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Sun, 1 Nov 2026 14:01:42 +1030
+Subject: [PATCH] Ad hoc server: --loopback for copies on one computer
+
+--adhoc-server [port] --loopback listens on 127.0.0.1 alone and announces
+nothing on the local network (ServerConfig::loopback_only), so two copies of
+a game on one computer can play through it without the firewall asking to
+let anything in.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/adhoc/server.cpp | 12 ++++++------
+ host/adhoc/server.hpp |  6 +++++-
+ host/main.cpp         | 25 +++++++++++++++++++++----
+ 3 files changed, 32 insertions(+), 11 deletions(-)
+
+diff --git a/host/adhoc/server.cpp b/host/adhoc/server.cpp
+index d136927..157b622 100644
+--- a/host/adhoc/server.cpp
++++ b/host/adhoc/server.cpp
+@@ -49,8 +49,8 @@ bool address_in_use(int error) {
+ }
+ 
+ // A listening TCP socket on every interface: IPv6 with IPv4 mapped where the
+-// system has IPv6, IPv4 alone otherwise.
+-Socket open_listener(std::uint16_t port, std::string &error) {
++// system has IPv6, IPv4 alone otherwise. Or on IPv4 loopback alone.
++Socket open_listener(std::uint16_t port, bool loopback_only, std::string &error) {
+     const auto finish = [](Socket s) {
+         if (::listen(s, 64) != 0 || !set_nonblocking(s)) {
+             close_socket(s);
+@@ -65,7 +65,7 @@ Socket open_listener(std::uint16_t port, std::string &error) {
+         set_option(s, SOL_SOCKET, SO_REUSEADDR, 1);
+ #endif
+     };
+-    Socket s = ::socket(AF_INET6, SOCK_STREAM, IPPROTO_TCP);
++    Socket s = loopback_only ? kNoSocket : ::socket(AF_INET6, SOCK_STREAM, IPPROTO_TCP);
+     if (s != kNoSocket) {
+         prepare(s);
+         set_option(s, IPPROTO_IPV6, IPV6_V6ONLY, 0);
+@@ -89,7 +89,7 @@ Socket open_listener(std::uint16_t port, std::string &error) {
+     prepare(s);
+     sockaddr_in address{};
+     address.sin_family = AF_INET;
+-    address.sin_addr.s_addr = htonl(INADDR_ANY);
++    address.sin_addr.s_addr = htonl(loopback_only ? INADDR_LOOPBACK : INADDR_ANY);
+     address.sin_port = htons(port);
+     if (::bind(s, reinterpret_cast<const sockaddr *>(&address), sizeof(address)) != 0) {
+         const int failure = socket_error();
+@@ -722,8 +722,8 @@ bool Server::start(const ServerConfig &config) {
+     Impl &s = *impl_;
+     std::string error;
+     const std::uint16_t relay_port = relay_port_for(config.adhocctl_port);
+-    Socket ctl = open_listener(config.adhocctl_port, error);
+-    Socket relay = ctl == kNoSocket ? kNoSocket : open_listener(relay_port, error);
++    Socket ctl = open_listener(config.adhocctl_port, config.loopback_only, error);
++    Socket relay = ctl == kNoSocket ? kNoSocket : open_listener(relay_port, config.loopback_only, error);
+     if (ctl == kNoSocket || relay == kNoSocket) {
+         if (ctl != kNoSocket) close_socket(ctl);
+         log_event("cannot start: " + error, true);
+diff --git a/host/adhoc/server.hpp b/host/adhoc/server.hpp
+index ec12b54..50a1516 100644
+--- a/host/adhoc/server.hpp
++++ b/host/adhoc/server.hpp
+@@ -40,6 +40,10 @@ namespace portablekit::adhoc {
+ 
+ struct ServerConfig {
+     std::uint16_t adhocctl_port{kAdhocctlPort};  // the relay listens on relay_port_for() this
++    // Listens on 127.0.0.1 alone: for copies of a game on one computer, where
++    // nothing else should reach it and the system's firewall has nothing to
++    // ask about.
++    bool loopback_only{};
+     // Written to the network log as it happens; to the console as well when
+     // set, as in the standalone server.
+     bool print_events{};
+@@ -77,7 +81,7 @@ public:
+     Server(const Server &) = delete;
+     Server &operator=(const Server &) = delete;
+ 
+-    // Listens on every interface. False, with status().error set, when a
++    // Listens on every interface, or on loopback alone. False, with status().error set, when a
+     // port cannot be used, for example because another server has it.
+     bool start(const ServerConfig &config);
+     // Disconnects everyone and stops. The players' clients see a lost server.
+diff --git a/host/main.cpp b/host/main.cpp
+index 845bf0e..d2d6630 100644
+--- a/host/main.cpp
++++ b/host/main.cpp
+@@ -99,14 +99,16 @@ std::string usage() {
+     const std::string app = portablekit::game().app_name;
+     return "usage: " + app + " [game_dir]\n"
+            "       " + app + " --install [image.iso [--in-place]]\n"
+-           "       " + app + " --adhoc-server [port]\n"
++           "       " + app + " --adhoc-server [port] [--loopback]\n"
+            "  game_dir        play from a directory holding EBOOT.ELF, disc.iso and ms0/\n"
+            "  --install       run the setup again on screen, then play\n"
+            "  --install image set up from image.iso without the setup screens, then exit\n"
+            "  --in-place      use the image where it is instead of copying it\n"
+            "  --adhoc-server  run only the ad hoc server that Network > Host a session\n"
+            "                  starts, on TCP port (default 27312) and the next one up,\n"
+-           "                  announced on the local network, until Ctrl+C\n";
++           "                  announced on the local network, until Ctrl+C\n"
++           "  --loopback      for copies of the game on this computer alone: listen on\n"
++           "                  127.0.0.1 and announce nothing\n";
+ }
+ 
+ struct Options {
+@@ -270,8 +272,12 @@ int run_adhoc_server(int argc, char **argv) {
+     using namespace portablekit::adhoc;
+     ServerConfig config;
+     config.print_events = true;
+-    if (argc > 2) {
+-        const unsigned long port = std::strtoul(argv[2], nullptr, 10);
++    for (int i = 2; i < argc; ++i) {
++        if (std::string(argv[i]) == "--loopback") {
++            config.loopback_only = true;
++            continue;
++        }
++        const unsigned long port = std::strtoul(argv[i], nullptr, 10);
+         if (port < 1024u || port > 65534u) {
+             std::cerr << portablekit::game().app_name << ": --adhoc-server takes a port from 1024 to 65534\n";
+             return 2;
+@@ -283,6 +289,17 @@ int run_adhoc_server(int argc, char **argv) {
+         std::cerr << "Cannot start the ad hoc server: " << server.status().error << "\n";
+         return 1;
+     }
++    if (config.loopback_only) {
++        std::cout << "Ad hoc server on 127.0.0.1, TCP " << config.adhocctl_port << " and "
++                  << relay_port_for(config.adhocctl_port) << ", for copies of the game on this computer.\n"
++                  << "Ctrl+C stops it." << std::endl;
++        std::signal(SIGINT, on_stop_signal);
++        std::signal(SIGTERM, on_stop_signal);
++        while (!stop_server) std::this_thread::sleep_for(std::chrono::milliseconds(200));
++        server.stop();
++        Client::get().shutdown();
++        return 0;
++    }
+     std::string name = local_host_name();
+     if (name.empty()) name = std::string(portablekit::game().project_name) + " server";
+     Discovery::get().start_announcing(config.adhocctl_port, [&server, name] {
+-- 
+2.53.0.windows.1
+

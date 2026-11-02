@@ -1,0 +1,1030 @@
+From f37e44960a5f8252aa4d7c641a50fbf621974a4e Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Sun, 1 Nov 2026 14:01:43 +1030
+Subject: [PATCH] Ad hoc: sceNetAdhocMatching over the ad hoc server
+
+A matching engine (host/adhoc/matching.*) for sceNetAdhocMatching's parent,
+child and P2P modes: hello messages with the game's own data, requests,
+accepts, cancels, byes, keepalives and data with acknowledgement, between
+the group's members over the ad hoc server. Its events (HELLO, REQUEST,
+ACCEPT, ESTABLISHED, LEAVE, BYE, DATA, DATA_ACK, TIMEOUT...) reach the
+game's handler as interrupts from the vblank. The accepting side reports
+ESTABLISHED as soon as it accepts; a game that leaves the group right after
+ACCEPT does not wait for a confirmation round.
+
+Also:
+- sceNetAdhocctlGetPeerInfo.
+- sceNetAdhocPtpOpen refuses a second socket on the same local port to the
+  same peer, so a game that reopens its stream every frame until the
+  connection takes holds one.
+- sceNetAdhocPtpSend and PtpRecv write 0 to the length on would-block,
+  timeout or error: a game that adds the length to its count either way had
+  stalled a 3,744-byte message.
+
+Checked with Dissidia 012: two copies on one computer and this PC against a
+Steam Deck (LAN and the internet) go from its Online Lobby through the
+challenge and fighter select into a battle, and back for a rematch. Not
+checked: another game, Group Battle.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ CMakeLists.txt          |   1 +
+ cmake/PortableKit.cmake |   1 +
+ host/adhoc/matching.cpp | 367 ++++++++++++++++++++++++++++++++++++++++
+ host/adhoc/matching.hpp | 172 +++++++++++++++++++
+ host/hle/hle_adhoc.cpp  | 300 +++++++++++++++++++++++++++++++-
+ 5 files changed, 832 insertions(+), 9 deletions(-)
+ create mode 100644 host/adhoc/matching.cpp
+ create mode 100644 host/adhoc/matching.hpp
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 82e34b2..fa5fb11 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -231,6 +231,7 @@ if(PSPRECOMP_BUILD_TESTS)
+         "${PORTABLEKIT_ROOT}/host/profile.cpp"
+         "${PORTABLEKIT_ROOT}/host/adhoc/client.cpp"
+         "${PORTABLEKIT_ROOT}/host/adhoc/discovery.cpp"
++        "${PORTABLEKIT_ROOT}/host/adhoc/matching.cpp"
+         "${PORTABLEKIT_ROOT}/host/adhoc/server.cpp")
+     target_include_directories(portablekit_adhoc_tests PRIVATE
+         "${PORTABLEKIT_ROOT}/host" "${PORTABLEKIT_ROOT}/include")
+diff --git a/cmake/PortableKit.cmake b/cmake/PortableKit.cmake
+index 4e1ec2a..c0d4035 100644
+--- a/cmake/PortableKit.cmake
++++ b/cmake/PortableKit.cmake
+@@ -79,6 +79,7 @@ set(PORTABLEKIT_HOST_SOURCES
+     host/adhoc/client.cpp
+     host/adhoc/discovery.cpp
+     host/adhoc/host.cpp
++    host/adhoc/matching.cpp
+     host/adhoc/server.cpp
+     host/save_data/aes128.cpp
+     host/save_data/param_sfo.cpp
+diff --git a/host/adhoc/matching.cpp b/host/adhoc/matching.cpp
+new file mode 100644
+index 0000000..96739e2
+--- /dev/null
++++ b/host/adhoc/matching.cpp
+@@ -0,0 +1,367 @@
++#include "adhoc/matching.hpp"
++
++#include <utility>
++
++namespace portablekit::adhoc {
++namespace {
++
++// Every packet: "PM", a type, the sender's mode, then the body.
++constexpr char kMagic0 = 'P';
++constexpr char kMagic1 = 'M';
++constexpr std::size_t kHeaderSize = 4u;
++
++constexpr char kHello = 'H';
++constexpr char kRequest = 'R';
++constexpr char kAccept = 'A';
++constexpr char kCancel = 'X';
++constexpr char kBye = 'B';
++constexpr char kKeepalive = 'K';
++constexpr char kData = 'D';     // u32 sequence, then the payload
++constexpr char kDataAck = 'd';  // u32 sequence
++
++std::string u32_bytes(std::uint32_t value) {
++    std::string bytes(4u, '\0');
++    for (std::size_t i = 0; i < 4u; ++i) bytes[i] = static_cast<char>((value >> (8u * i)) & 0xFFu);
++    return bytes;
++}
++
++std::uint32_t read_u32(const std::string &bytes, std::size_t offset) {
++    std::uint32_t value = 0u;
++    for (std::size_t i = 0; i < 4u; ++i)
++        value |= static_cast<std::uint32_t>(static_cast<std::uint8_t>(bytes[offset + i])) << (8u * i);
++    return value;
++}
++
++} // namespace
++
++const char *matching_event_name(MatchingEvent event) {
++    switch (event) {
++    case MatchingEvent::Hello: return "HELLO";
++    case MatchingEvent::Request: return "REQUEST";
++    case MatchingEvent::Leave: return "LEAVE";
++    case MatchingEvent::Deny: return "DENY";
++    case MatchingEvent::Cancel: return "CANCEL";
++    case MatchingEvent::Accept: return "ACCEPT";
++    case MatchingEvent::Established: return "ESTABLISHED";
++    case MatchingEvent::Timeout: return "TIMEOUT";
++    case MatchingEvent::Error: return "ERROR";
++    case MatchingEvent::Bye: return "BYE";
++    case MatchingEvent::Data: return "DATA";
++    case MatchingEvent::DataAck: return "DATA_ACK";
++    case MatchingEvent::DataTimeout: return "DATA_TIMEOUT";
++    }
++    return "?";
++}
++
++Matching::Matching(const Mac &self, const MatchingConfig &config, Send send)
++    : self_(self), config_(config), send_(std::move(send)) {}
++
++void Matching::start(std::string hello, std::uint64_t now_us) {
++    running_ = true;
++    hello_ = std::move(hello);
++    peers_.clear();
++    if (advertising()) send_hello(now_us);
++}
++
++void Matching::stop() {
++    if (running_) send(kBroadcastMac, kBye, {});
++    running_ = false;
++    peers_.clear();
++}
++
++void Matching::set_hello(std::string hello, std::uint64_t now_us) {
++    hello_ = std::move(hello);
++    if (advertising()) send_hello(now_us);
++}
++
++std::uint32_t Matching::select_target(const Mac &peer, std::string data, std::uint64_t now_us) {
++    if (!running_) return matching_error::kNotRunning;
++    if (peer == self_ || peer == kBroadcastMac) return matching_error::kInvalidArg;
++    const auto found = peers_.find(peer);
++    if (found != peers_.end() && found->second.link == Link::Asked) {
++        // Accepting a peer that asked.
++        if (config_.mode == MatchingMode::P2P && established_count() != 0u) return matching_error::kAlreadyEstablished;
++        if (config_.mode == MatchingMode::Parent && established_count() + 1u >= config_.max_peers)
++            return matching_error::kExceedMaxPeers;
++        Peer &entry = found->second;
++        entry.link = Link::Established;
++        entry.since_us = now_us;
++        entry.sent_us = now_us;
++        entry.attempts = 0u;
++        entry.request = std::move(data);
++        send(peer, kAccept, entry.request);
++        notice(MatchingEvent::Established, peer);
++        return 0u;
++    }
++    if (found != peers_.end()) {
++        switch (found->second.link) {
++        case Link::Asking: return matching_error::kRequestInProgress;
++        case Link::Established: return matching_error::kAlreadyEstablished;
++        default: break;
++        }
++    }
++    // Asking to join: a parent never asks, and a child or P2P peer joins one.
++    if (config_.mode == MatchingMode::Parent) return matching_error::kTargetNotReady;
++    if (found == peers_.end()) return matching_error::kUnknownTarget;
++    if (established_count() != 0u) return matching_error::kAlreadyEstablished;
++    for (const auto &[mac, other] : peers_)
++        if (other.link == Link::Asking) return matching_error::kRequestInProgress;
++    Peer &entry = found->second;
++    entry.link = Link::Asking;
++    entry.since_us = now_us;
++    entry.sent_us = now_us;
++    entry.attempts = 0u;
++    entry.request = std::move(data);
++    send(peer, kRequest, entry.request);
++    return 0u;
++}
++
++std::uint32_t Matching::cancel_target(const Mac &peer, std::string data) {
++    if (!running_) return matching_error::kNotRunning;
++    const auto found = peers_.find(peer);
++    if (found == peers_.end() || found->second.link == Link::Heard) return matching_error::kUnknownTarget;
++    send(peer, kCancel, data);
++    Peer &entry = found->second;
++    entry.link = Link::Heard;
++    entry.request.clear();
++    entry.sending.reset();
++    return 0u;
++}
++
++std::uint32_t Matching::send_data(const Mac &peer, std::string data, std::uint64_t now_us) {
++    if (!running_) return matching_error::kNotRunning;
++    if (data.empty()) return matching_error::kInvalidDataLen;
++    const auto found = peers_.find(peer);
++    if (found == peers_.end() || found->second.link != Link::Established) return matching_error::kNotEstablished;
++    Peer &entry = found->second;
++    if (entry.sending) return matching_error::kDataBusy;
++    entry.sending = entry.next_sequence++;
++    entry.send_buffer = u32_bytes(*entry.sending) + data;
++    entry.data_sent_us = now_us;
++    entry.data_attempts = 0u;
++    send(peer, kData, entry.send_buffer);
++    return 0u;
++}
++
++std::uint32_t Matching::abort_send(const Mac &peer) {
++    const auto found = peers_.find(peer);
++    if (found == peers_.end()) return matching_error::kUnknownTarget;
++    found->second.sending.reset();
++    return 0u;
++}
++
++void Matching::receive(const Mac &from, const std::string &packet, std::uint64_t now_us) {
++    if (!running_ || from == self_ || packet.size() < kHeaderSize || packet[0] != kMagic0 || packet[1] != kMagic1)
++        return;
++    const char type = packet[2];
++    const auto mode = static_cast<MatchingMode>(static_cast<std::uint8_t>(packet[3]));
++    std::string body = packet.substr(kHeaderSize);
++    auto found = peers_.find(from);
++    if (found != peers_.end()) found->second.heard_us = now_us;
++
++    switch (type) {
++    case kHello: {
++        if (found == peers_.end()) {
++            if (!hears_hellos_from(mode)) return;
++            Peer entry;
++            entry.mode = mode;
++            entry.heard_us = now_us;
++            entry.since_us = now_us;
++            found = peers_.emplace(from, entry).first;
++        }
++        found->second.mode = mode;
++        if (hears_hellos_from(mode)) notice(MatchingEvent::Hello, from, std::move(body));
++        return;
++    }
++    case kRequest: {
++        const bool fits = (config_.mode == MatchingMode::P2P && mode == MatchingMode::P2P) ||
++                          (config_.mode == MatchingMode::Parent && mode == MatchingMode::Child);
++        if (!fits) return;
++        if (found != peers_.end()) {
++            const Link link = found->second.link;
++            if (link == Link::Asked) return;  // a resend
++            if (link == Link::Established) {
++                send(from, kAccept, found->second.request);  // the accept was lost
++                return;
++            }
++        }
++        const bool full = config_.mode == MatchingMode::P2P ? established_count() != 0u
++                                                            : established_count() + 1u >= config_.max_peers;
++        if (full) {
++            send(from, kCancel, {});
++            return;
++        }
++        if (found == peers_.end()) {
++            Peer entry;
++            entry.mode = mode;
++            entry.heard_us = now_us;
++            found = peers_.emplace(from, entry).first;
++        }
++        found->second.link = Link::Asked;
++        found->second.since_us = now_us;
++        notice(MatchingEvent::Request, from, std::move(body));
++        return;
++    }
++    case kAccept: {
++        if (found == peers_.end()) return;
++        Peer &entry = found->second;
++        if (entry.link != Link::Asking) return;
++        entry.link = Link::Established;
++        entry.since_us = now_us;
++        entry.sent_us = now_us;
++        entry.request.clear();
++        notice(MatchingEvent::Accept, from, std::move(body));
++        notice(MatchingEvent::Established, from);
++        return;
++    }
++    case kCancel: {
++        if (found == peers_.end()) return;
++        Peer &entry = found->second;
++        MatchingEvent event{};
++        switch (entry.link) {
++        case Link::Asking: event = MatchingEvent::Deny; break;
++        case Link::Asked: event = MatchingEvent::Cancel; break;
++        case Link::Established: event = MatchingEvent::Leave; break;
++        case Link::Heard: return;
++        }
++        entry.link = Link::Heard;
++        entry.request.clear();
++        entry.sending.reset();
++        notice(event, from, std::move(body));
++        return;
++    }
++    case kBye: {
++        if (found == peers_.end()) return;
++        peers_.erase(found);
++        notice(MatchingEvent::Bye, from);
++        return;
++    }
++    case kKeepalive: return;
++    case kData: {
++        if (body.size() < 4u) return;
++        const std::uint32_t sequence = read_u32(body, 0u);
++        send(from, kDataAck, u32_bytes(sequence));
++        if (found == peers_.end() || found->second.link != Link::Established) return;
++        if (sequence == found->second.last_received) return;  // a resend whose ack was lost
++        found->second.last_received = sequence;
++        notice(MatchingEvent::Data, from, body.substr(4u));
++        return;
++    }
++    case kDataAck: {
++        if (body.size() < 4u || found == peers_.end()) return;
++        Peer &entry = found->second;
++        if (!entry.sending || *entry.sending != read_u32(body, 0u)) return;
++        entry.sending.reset();
++        entry.send_buffer.clear();
++        notice(MatchingEvent::DataAck, from);
++        return;
++    }
++    default: return;
++    }
++}
++
++void Matching::tick(std::uint64_t now_us) {
++    if (!running_) return;
++    if (advertising() && now_us - hello_sent_us_ >= config_.hello_us) send_hello(now_us);
++    const std::uint64_t quiet_limit = config_.keepalive_us * 3u;
++    std::vector<Mac> gone;
++    for (auto &[mac, entry] : peers_) {
++        switch (entry.link) {
++        case Link::Heard:
++            if (now_us - entry.heard_us > config_.hello_us * 3u) gone.push_back(mac);
++            break;
++        case Link::Asking:
++            if (now_us - entry.sent_us < config_.retransmit_us) break;
++            if (entry.attempts >= config_.retries) {
++                entry.link = Link::Heard;
++                entry.request.clear();
++                notice(MatchingEvent::Timeout, mac);
++                break;
++            }
++            ++entry.attempts;
++            entry.sent_us = now_us;
++            send(mac, kRequest, entry.request);
++            break;
++        case Link::Asked: break;
++        case Link::Established:
++            if (now_us - entry.heard_us > quiet_limit) {
++                entry.link = Link::Heard;
++                entry.sending.reset();
++                notice(MatchingEvent::Timeout, mac);
++                break;
++            }
++            if (now_us - entry.sent_us >= config_.keepalive_us) {
++                entry.sent_us = now_us;
++                send(mac, kKeepalive, {});
++            }
++            break;
++        }
++        if (entry.sending && now_us - entry.data_sent_us >= config_.retransmit_us) {
++            if (entry.data_attempts >= config_.retries) {
++                entry.sending.reset();
++                entry.send_buffer.clear();
++                notice(MatchingEvent::DataTimeout, mac);
++            } else {
++                ++entry.data_attempts;
++                entry.data_sent_us = now_us;
++                send(mac, kData, entry.send_buffer);
++            }
++        }
++    }
++    for (const Mac &mac : gone) peers_.erase(mac);
++}
++
++std::vector<MatchingNotice> Matching::take_notices() { return std::exchange(notices_, {}); }
++
++std::vector<Mac> Matching::members() const {
++    std::vector<Mac> list;
++    for (const auto &[mac, entry] : peers_)
++        if (entry.link == Link::Established) list.push_back(mac);
++    return list;
++}
++
++bool Matching::advertising() const {
++    if (!running_) return false;
++    switch (config_.mode) {
++    case MatchingMode::Parent: return established_count() + 1u < config_.max_peers;
++    case MatchingMode::Child: return false;
++    case MatchingMode::P2P: return established_count() == 0u;
++    }
++    return false;
++}
++
++std::size_t Matching::established_count() const {
++    std::size_t count = 0u;
++    for (const auto &[mac, entry] : peers_)
++        if (entry.link == Link::Established) ++count;
++    return count;
++}
++
++bool Matching::hears_hellos_from(MatchingMode mode) const {
++    if (!running_ || established_count() != 0u) return false;
++    if (config_.mode == MatchingMode::P2P) return mode == MatchingMode::P2P;
++    if (config_.mode == MatchingMode::Child) return mode == MatchingMode::Parent;
++    return false;
++}
++
++void Matching::notice(MatchingEvent event, const Mac &peer, std::string data) {
++    notices_.push_back(MatchingNotice{event, peer, std::move(data)});
++}
++
++void Matching::send(const Mac &to, char type, const std::string &body) {
++    std::string packet;
++    packet.reserve(kHeaderSize + body.size());
++    packet.push_back(kMagic0);
++    packet.push_back(kMagic1);
++    packet.push_back(type);
++    packet.push_back(static_cast<char>(static_cast<std::uint8_t>(config_.mode)));
++    packet += body;
++    send_(to, packet);
++}
++
++void Matching::send_hello(std::uint64_t now_us) {
++    hello_sent_us_ = now_us;
++    send(kBroadcastMac, kHello, hello_);
++}
++
++} // namespace portablekit::adhoc
+diff --git a/host/adhoc/matching.hpp b/host/adhoc/matching.hpp
+new file mode 100644
+index 0000000..fefb3d2
+--- /dev/null
++++ b/host/adhoc/matching.hpp
+@@ -0,0 +1,172 @@
++#pragma once
++
++// sceNetAdhocMatching: the PSP library many games build their lobbies on,
++// as one protocol engine per matching object. It knows nothing of guest
++// memory or of the relay; the HLE layer feeds it the datagrams that arrive on
++// the object's port, gives it a way to send, and turns its notices into calls
++// of the game's event handler.
++//
++// What the game sees, as PSP games use it:
++// - A parent (mode 1) advertises itself with a hello carrying the game's data
++//   while it has room for children; a child (mode 2) hears parents' hellos
++//   and says nothing until it picks one; in P2P mode (3) both sides advertise
++//   until they are paired with one other.
++// - SelectTarget on a peer asks to join it (the peer gets REQUEST with the
++//   caller's data). SelectTarget on a peer that asked accepts it: the
++//   accepter gets ESTABLISHED at once, and the asker gets ACCEPT with the
++//   accepter's data, then ESTABLISHED. The accepter does not wait to hear
++//   back: a game may leave the group the moment it is matched (Dissidia 012
++//   does), and its last datagrams can be lost with it.
++// - CancelTarget withdraws a request (the peer gets CANCEL), refuses one (the
++//   asker gets DENY) or leaves an established peer (it gets LEAVE). Stopping
++//   says goodbye to every peer heard from (BYE).
++// - SendData goes to an established peer (DATA there), and is acknowledged
++//   (DATA_ACK here); one at a time per peer.
++// - A request with no answer and an established peer gone quiet end in
++//   TIMEOUT; unacknowledged data in DATA_TIMEOUT.
++//
++// The wire format is this engine's own: both ends of a session run it. The
++// timings are the game's own: the hello, keepalive and retransmission
++// intervals and the retry count it passes to Create.
++#include "adhoc/protocol.hpp"
++
++#include <cstdint>
++#include <functional>
++#include <map>
++#include <optional>
++#include <string>
++#include <vector>
++
++namespace portablekit::adhoc {
++
++enum class MatchingMode : std::uint32_t { Parent = 1u, Child = 2u, P2P = 3u };
++
++// The PSP's event numbers, as the game's handler receives them.
++enum class MatchingEvent : std::uint32_t {
++    Hello = 1u,
++    Request = 2u,
++    Leave = 3u,
++    Deny = 4u,
++    Cancel = 5u,
++    Accept = 6u,
++    Established = 7u,
++    Timeout = 8u,
++    Error = 9u,
++    Bye = 10u,
++    Data = 11u,
++    DataAck = 12u,
++    DataTimeout = 13u,
++};
++
++[[nodiscard]] const char *matching_event_name(MatchingEvent event);
++
++namespace matching_error {
++inline constexpr std::uint32_t kInvalidMode = 0x80410801u;
++inline constexpr std::uint32_t kInvalidMaxPeers = 0x80410803u;
++inline constexpr std::uint32_t kInvalidOptLen = 0x80410805u;
++inline constexpr std::uint32_t kInvalidArg = 0x80410806u;
++inline constexpr std::uint32_t kInvalidId = 0x80410807u;
++inline constexpr std::uint32_t kIsRunning = 0x8041080Au;
++inline constexpr std::uint32_t kNotRunning = 0x8041080Bu;
++inline constexpr std::uint32_t kUnknownTarget = 0x8041080Cu;
++inline constexpr std::uint32_t kTargetNotReady = 0x8041080Du;
++inline constexpr std::uint32_t kExceedMaxPeers = 0x8041080Eu;
++inline constexpr std::uint32_t kRequestInProgress = 0x8041080Fu;
++inline constexpr std::uint32_t kAlreadyEstablished = 0x80410810u;
++inline constexpr std::uint32_t kAlreadyInitialized = 0x80410812u;
++inline constexpr std::uint32_t kNotInitialized = 0x80410813u;
++inline constexpr std::uint32_t kPortInUse = 0x80410814u;
++inline constexpr std::uint32_t kInvalidDataLen = 0x80410816u;
++inline constexpr std::uint32_t kNotEstablished = 0x80410817u;
++inline constexpr std::uint32_t kDataBusy = 0x80410818u;
++} // namespace matching_error
++
++struct MatchingConfig {
++    MatchingMode mode{MatchingMode::P2P};
++    std::uint32_t max_peers{2u};  // this PSP included
++    std::uint64_t hello_us{5'000'000u};
++    std::uint64_t keepalive_us{10'000'000u};
++    std::uint32_t retries{30u};
++    std::uint64_t retransmit_us{2'000'000u};
++};
++
++struct MatchingNotice {
++    MatchingEvent event{};
++    Mac peer{};
++    std::string data;  // the peer's hello, request or accept data, or a DATA payload
++};
++
++class Matching {
++public:
++    // Sends one datagram to `to` on the object's port; kBroadcastMac means
++    // every member of the group.
++    using Send = std::function<void(const Mac &to, const std::string &packet)>;
++
++    Matching(const Mac &self, const MatchingConfig &config, Send send);
++
++    [[nodiscard]] const MatchingConfig &config() const noexcept { return config_; }
++    [[nodiscard]] bool running() const noexcept { return running_; }
++
++    void start(std::string hello, std::uint64_t now_us);
++    // Says goodbye to every peer and forgets them.
++    void stop();
++    void set_hello(std::string hello, std::uint64_t now_us);
++    [[nodiscard]] const std::string &hello() const noexcept { return hello_; }
++
++    // 0, or a matching_error code.
++    [[nodiscard]] std::uint32_t select_target(const Mac &peer, std::string data, std::uint64_t now_us);
++    [[nodiscard]] std::uint32_t cancel_target(const Mac &peer, std::string data);
++    [[nodiscard]] std::uint32_t send_data(const Mac &peer, std::string data, std::uint64_t now_us);
++    [[nodiscard]] std::uint32_t abort_send(const Mac &peer);
++
++    // One datagram from the object's port.
++    void receive(const Mac &from, const std::string &packet, std::uint64_t now_us);
++    // Hellos, keepalives, retransmissions and timeouts that are due.
++    void tick(std::uint64_t now_us);
++    [[nodiscard]] std::vector<MatchingNotice> take_notices();
++
++    // Established peers, for the parent its children, for a child its parent.
++    [[nodiscard]] std::vector<Mac> members() const;
++
++private:
++    enum class Link {
++        Heard,       // a hello came from it, nothing more
++        Asking,      // this side asked to join it
++        Asked,       // it asked to join this side
++        Established,
++    };
++    struct Peer {
++        Link link{Link::Heard};
++        MatchingMode mode{MatchingMode::P2P};
++        std::uint64_t heard_us{};
++        std::uint64_t since_us{};    // when the link took its current state
++        std::uint64_t sent_us{};     // the last request or keepalive sent to it
++        std::uint32_t attempts{};
++        std::string request;         // what this side's request or accept carried, for sending again
++        std::optional<std::uint32_t> sending;  // the sequence number of data waiting for an ack
++        std::string send_buffer;
++        std::uint64_t data_sent_us{};
++        std::uint32_t data_attempts{};
++        std::uint32_t next_sequence{1u};
++        std::uint32_t last_received{};  // sequence of the last DATA delivered, against duplicates
++    };
++
++    [[nodiscard]] bool advertising() const;
++    [[nodiscard]] std::size_t established_count() const;
++    [[nodiscard]] bool hears_hellos_from(MatchingMode mode) const;
++    void notice(MatchingEvent event, const Mac &peer, std::string data = {});
++    void send(const Mac &to, char type, const std::string &body);
++    void send_hello(std::uint64_t now_us);
++    void forget(const Mac &peer);
++
++    Mac self_;
++    MatchingConfig config_;
++    Send send_;
++    bool running_{};
++    std::string hello_;
++    std::uint64_t hello_sent_us_{};
++    std::map<Mac, Peer> peers_;
++    std::vector<MatchingNotice> notices_;
++};
++
++} // namespace portablekit::adhoc
+diff --git a/host/hle/hle_adhoc.cpp b/host/hle/hle_adhoc.cpp
+index fcc7fc2..6d7d18f 100644
+--- a/host/hle/hle_adhoc.cpp
++++ b/host/hle/hle_adhoc.cpp
+@@ -1,6 +1,8 @@
+-// sceNet, sceNetAdhoc, sceNetAdhocctl, sceNetAdhocDiscover, sceWlanDrv and the
+-// network configuration dialog (sceUtilityNetconf): PSP ad hoc play through a
+-// PSP ad hoc server (see adhoc/client.hpp).
++// sceNet, sceNetAdhoc, sceNetAdhocctl, sceNetAdhocMatching,
++// sceNetAdhocDiscover, sceWlanDrv and the network configuration dialog
++// (sceUtilityNetconf): PSP ad hoc play through a PSP ad hoc server (see
++// adhoc/client.hpp). Matching runs over a datagram socket on the matching
++// object's port (see adhoc/matching.hpp).
+ //
+ // The game joins a group through the network configuration dialog, finds the
+ // other players with sceNetAdhocctlGetPeerList and talks to them over PDP
+@@ -19,6 +21,7 @@
+ #include "hle_common.hpp"
+ 
+ #include "adhoc/client.hpp"
++#include "adhoc/matching.hpp"
+ #include "adhoc/session.hpp"
+ #include "settings/settings.hpp"
+ #include "utility_dialog.hpp"
+@@ -30,6 +33,7 @@
+ #include <cstdlib>
+ #include <iostream>
+ #include <map>
++#include <memory>
+ #include <optional>
+ #include <random>
+ #include <sstream>
+@@ -212,6 +216,14 @@ struct PtpSocket {
+     bool listener{};
+ };
+ 
++struct MatchingObject {
++    std::unique_ptr<adhoc::Matching> engine;
++    std::uint32_t handler{};
++    std::uint16_t port{};
++    std::uint32_t buffer{};
++    int socket{};  // the relay's datagram socket while started
++};
++
+ struct NetconfState {
+     DialogLifecycle dialog;
+     std::uint32_t params{};
+@@ -227,6 +239,9 @@ struct State {
+     std::uint32_t next_handler{1u};
+     std::map<std::uint32_t, PdpSocket> pdp;
+     std::map<std::uint32_t, PtpSocket> ptp;
++    bool matching_initialized{};
++    std::map<std::uint32_t, MatchingObject> matching;
++    std::uint32_t next_matching{1u};
+     NetconfState netconf;
+     bool hooked{};
+ };
+@@ -292,10 +307,54 @@ void pump_events() {
+     }
+ }
+ 
++// Calls a matching object's handler: (id, event, mac*, data length, data*).
++// The MAC and the data live in a block of guest memory freed when the handler
++// returns.
++void deliver_matching(std::uint32_t id, std::uint32_t handler, const adhoc::MatchingNotice &notice) {
++    const auto size = static_cast<std::uint32_t>((8u + notice.data.size() + 15u) & ~std::size_t{15u});
++    const std::int32_t block = kernel().allocate_block("matching event", 1u, size, 0u);
++    if (block < 0) {
++        Client::log("[adhoc] no guest memory for a matching event; " +
++                        std::string(adhoc::matching_event_name(notice.event)) + " dropped",
++                    true);
++        return;
++    }
++    const std::uint32_t address = kernel().find_block(block)->address;
++    auto &memory = kernel().runtime().memory();
++    write_mac(memory, address, notice.peer);
++    for (std::size_t i = 0; i < notice.data.size(); ++i)
++        memory.store8(address + 8u + static_cast<std::uint32_t>(i), static_cast<std::uint8_t>(notice.data[i]));
++    if (trace_adhoc())
++        trace_line("matching " + std::to_string(id) + " event " + adhoc::matching_event_name(notice.event) + " from " +
++                   adhoc::format_mac(notice.peer) + " length " + std::to_string(notice.data.size()));
++    InterruptCall call{};
++    call.function = handler;
++    call.arguments = {id, static_cast<std::uint32_t>(notice.event), address,
++                      static_cast<std::uint32_t>(notice.data.size()), notice.data.empty() ? 0u : address + 8u};
++    call.argument_count = 5u;
++    call.on_return = [block](std::uint32_t) { kernel().free_block(block); };
++    kernel().queue_interrupt(std::move(call));
++}
++
++// Feeds each started matching object what arrived on its port, runs its
++// timers and hands its events to the game.
++void pump_matching() {
++    const std::uint64_t now = kernel().now_us();
++    for (auto &[id, object] : state().matching) {
++        if (object.socket == 0) continue;
++        while (auto datagram = Client::get().pdp_receive(object.socket))
++            object.engine->receive(datagram->source, datagram->data, now);
++        object.engine->tick(now);
++        for (const adhoc::MatchingNotice &notice : object.engine->take_notices())
++            deliver_matching(id, object.handler, notice);
++    }
++}
++
+ void ensure_hooked() {
+     if (state().hooked) return;
+     state().hooked = true;
+     kernel().add_vblank_hook(pump_events);
++    kernel().add_vblank_hook(pump_matching);
+ }
+ 
+ // sceNet and sceWlanDrv ------------------------------------------------------
+@@ -488,6 +547,33 @@ void register_adhocctl(HleRegistrar &hle) {
+         memory.store32(length_address, count * kPeerInfoSize);
+         done(ctx, "sceNetAdhocctlGetPeerList", 2, 0u, std::to_string(count) + " peers");
+     });
++    // sceNetAdhocctlGetPeerInfo(const mac *, int size, SceNetAdhocctlPeerInfo *):
++    // one peer of the group, laid out as a GetPeerList entry. Games poll it to
++    // see whether a peer is still there: it fails once the peer has left, and
++    // while it is there its last-seen time is now, as the server keeps it alive.
++    hle.add("sceNetAdhocctl", "sceNetAdhocctlGetPeerInfo", [](Runtime &rt, AllegrexContext &ctx) {
++        const char *name = "sceNetAdhocctlGetPeerInfo";
++        auto &memory = rt.memory();
++        pump_events();
++        if (!state().ctl_initialized) return done(ctx, name, 3, err::kCtlNotInitialized);
++        if (arg(ctx, 0) == 0u || arg(ctx, 2) == 0u || arg(ctx, 1) < kPeerInfoSize)
++            return done(ctx, name, 3, err::kCtlInvalidArg);
++        const Mac mac = read_mac(memory, arg(ctx, 0));
++        for (const auto &peer : Client::get().peers()) {
++            if (peer.mac != mac) continue;
++            const std::uint32_t entry = arg(ctx, 2);
++            memory.store32(entry, 0u);
++            write_cstring(memory, entry + 4u, peer.nickname, 128u);
++            write_mac(memory, entry + 132u, peer.mac);
++            memory.store16(entry + 138u, 0u);
++            memory.store32(entry + 140u, 0u);
++            store64(memory, entry + 144u, kernel().now_us());
++            return done(ctx, name, 3, 0u, adhoc::format_mac(mac));
++        }
++        // UNVERIFIED: the PSP's code for a peer it does not know; the games
++        // traced only test for failure.
++        done(ctx, name, 3, err::kCtlInvalidArg, adhoc::format_mac(mac) + " not in the group");
++    });
+ }
+ 
+ // sceNetAdhoc: PDP ---------------------------------------------------------------
+@@ -639,14 +725,20 @@ std::optional<std::uint32_t> try_stream_receive(psprecomp::GuestMemory &memory,
+         memory.store32(length_address, static_cast<std::uint32_t>(count));
+         return 0u;
+     }
+-    if (info.state != adhoc::StreamState::Established) return stream_error(info);
++    if (info.state != adhoc::StreamState::Established) {
++        memory.store32(length_address, 0u);
++        return stream_error(info);
++    }
+     return std::nullopt;
+ }
+ 
+ std::optional<std::uint32_t> try_stream_send(psprecomp::GuestMemory &memory, int handle, std::uint32_t data,
+                                              std::uint32_t length_address) {
+     const adhoc::StreamInfo info = Client::get().ptp_info(handle);
+-    if (info.state != adhoc::StreamState::Established) return stream_error(info);
++    if (info.state != adhoc::StreamState::Established) {
++        memory.store32(length_address, 0u);
++        return stream_error(info);
++    }
+     const std::uint32_t length = memory.load32(length_address);
+     if (length == 0u) return 0u;
+     const std::size_t room = info.unsent >= info.capacity ? 0u : info.capacity - info.unsent;
+@@ -670,6 +762,18 @@ void register_ptp(HleRegistrar &hle) {
+         const Mac peer = read_mac(rt.memory(), arg(ctx, 2));
+         if (peer == adhoc::kBroadcastMac || peer == own_mac()) return done(ctx, name, 8, err::kInvalidAddr);
+         if (arg(ctx, 4) == 0u) return done(ctx, name, 8, err::kInvalidBufLen);
++        // One stream per local port and peer: a game may call PtpOpen again
++        // each frame until its connect goes through (Dissidia 012 does), and
++        // counts on the second open failing.
++        const auto local_port = static_cast<std::uint16_t>(arg(ctx, 1));
++        for (const auto &[id, socket] : state().ptp) {
++            if (socket.listener) continue;
++            const adhoc::StreamInfo info = Client::get().ptp_info(socket.handle);
++            if (info.local_port == local_port && info.peer == peer && info.state != adhoc::StreamState::Closed)
++                return done(ctx, name, 8, err::kPortInUse, "port " + std::to_string(local_port) + " to " +
++                                                               adhoc::format_mac(peer) + " is open as " +
++                                                               std::to_string(id));
++        }
+         const int handle = Client::get().ptp_open(static_cast<std::uint16_t>(arg(ctx, 1)), peer,
+                                                   static_cast<std::uint16_t>(arg(ctx, 3)), arg(ctx, 4), arg(ctx, 5),
+                                                   arg(ctx, 6));
+@@ -755,13 +859,22 @@ void register_ptp(HleRegistrar &hle) {
+         const std::uint32_t length_address = arg(ctx, 2);
+         if (const auto result = try_stream_send(memory, socket->handle, data, length_address))
+             return done(ctx, name, 5, *result, "len " + std::to_string(memory.load32(length_address)));
+-        if (arg(ctx, 4) != 0u) return done(ctx, name, 5, err::kWouldBlock);
++        // Nothing sent, and the length says so: Dissidia 012 adds the length
++        // to what it has sent even when the call would block.
++        if (arg(ctx, 4) != 0u) {
++            const std::uint32_t asked = memory.load32(length_address);
++            memory.store32(length_address, 0u);
++            return done(ctx, name, 5, err::kWouldBlock, "asked " + std::to_string(asked));
++        }
+         block(ctx, name, 5, arg(ctx, 3),
+               [&memory, id, data, length_address](bool timed_out) -> std::optional<std::uint32_t> {
+                   const PtpSocket *socket = find_ptp(id);
+                   if (socket == nullptr) return err::kInvalidSocketId;
+                   if (const auto result = try_stream_send(memory, socket->handle, data, length_address)) return result;
+-                  if (timed_out) return err::kTimeout;
++                  if (timed_out) {
++                      memory.store32(length_address, 0u);
++                      return err::kTimeout;
++                  }
+                   return std::nullopt;
+               });
+     });
+@@ -779,14 +892,20 @@ void register_ptp(HleRegistrar &hle) {
+         if (const auto result = try_stream_receive(memory, socket->handle, buffer, length_address))
+             return done(ctx, name, 5, *result,
+                         "asked " + std::to_string(asked) + " got " + std::to_string(memory.load32(length_address)));
+-        if (arg(ctx, 4) != 0u) return done(ctx, name, 5, err::kWouldBlock);
++        if (arg(ctx, 4) != 0u) {
++            memory.store32(length_address, 0u);
++            return done(ctx, name, 5, err::kWouldBlock);
++        }
+         block(ctx, name, 5, arg(ctx, 3),
+               [&memory, id, buffer, length_address](bool timed_out) -> std::optional<std::uint32_t> {
+                   const PtpSocket *socket = find_ptp(id);
+                   if (socket == nullptr) return err::kInvalidSocketId;
+                   if (const auto result = try_stream_receive(memory, socket->handle, buffer, length_address))
+                       return result;
+-                  if (timed_out) return err::kTimeout;
++                  if (timed_out) {
++                      memory.store32(length_address, 0u);
++                      return err::kTimeout;
++                  }
+                   return std::nullopt;
+               });
+     });
+@@ -858,6 +977,168 @@ void register_ptp(HleRegistrar &hle) {
+     });
+ }
+ 
++// sceNetAdhocMatching ------------------------------------------------------------
++
++MatchingObject *find_matching(std::uint32_t id) {
++    const auto found = state().matching.find(id);
++    return found != state().matching.end() ? &found->second : nullptr;
++}
++
++std::string read_bytes(const psprecomp::GuestMemory &memory, std::uint32_t address, std::uint32_t length) {
++    std::string bytes(address != 0u ? length : 0u, '\0');
++    for (std::size_t i = 0; i < bytes.size(); ++i)
++        bytes[i] = static_cast<char>(memory.load8(address + static_cast<std::uint32_t>(i)));
++    return bytes;
++}
++
++void stop_matching(MatchingObject &object) {
++    if (object.socket == 0) return;
++    object.engine->stop();
++    Client::get().pdp_close(object.socket);
++    object.socket = 0;
++}
++
++// The largest hello, request or data a datagram of the relay carries.
++constexpr std::uint32_t kMatchingDataMax = static_cast<std::uint32_t>(adhoc::relay::kPdpBlockMax) - 16u;
++
++void register_matching(HleRegistrar &hle) {
++    namespace merr = adhoc::matching_error;
++    // (pool size)
++    hle.add("sceNetAdhocMatching", "sceNetAdhocMatchingInit", [](Runtime &, AllegrexContext &ctx) {
++        if (state().matching_initialized) return done(ctx, "sceNetAdhocMatchingInit", 1, merr::kAlreadyInitialized);
++        state().matching_initialized = true;
++        ensure_hooked();
++        done(ctx, "sceNetAdhocMatchingInit", 1, 0u);
++    });
++    hle.add("sceNetAdhocMatching", "sceNetAdhocMatchingTerm", [](Runtime &, AllegrexContext &ctx) {
++        for (auto &[id, object] : state().matching) stop_matching(object);
++        state().matching.clear();
++        state().matching_initialized = false;
++        done(ctx, "sceNetAdhocMatchingTerm", 0, 0u);
++    });
++    // (mode, max peers, port, receive buffer, hello us, keepalive us, retry
++    // count, retransmit us, handler): the handler, the ninth argument, is on
++    // the stack.
++    hle.add("sceNetAdhocMatching", "sceNetAdhocMatchingCreate", [](Runtime &rt, AllegrexContext &ctx) {
++        const char *name = "sceNetAdhocMatchingCreate";
++        State &s = state();
++        if (!s.matching_initialized) return done(ctx, name, 8, merr::kNotInitialized);
++        const std::uint32_t mode = arg(ctx, 0);
++        if (mode < 1u || mode > 3u) return done(ctx, name, 8, merr::kInvalidMode);
++        if (arg(ctx, 1) < 2u || arg(ctx, 1) > 16u) return done(ctx, name, 8, merr::kInvalidMaxPeers);
++        const auto port = static_cast<std::uint16_t>(arg(ctx, 2));
++        for (const auto &[id, object] : s.matching)
++            if (object.port == port) return done(ctx, name, 8, merr::kPortInUse);
++        adhoc::MatchingConfig config;
++        config.mode = static_cast<adhoc::MatchingMode>(mode);
++        config.max_peers = arg(ctx, 1);
++        config.hello_us = arg(ctx, 4);
++        config.keepalive_us = arg(ctx, 5);
++        config.retries = arg(ctx, 6);
++        config.retransmit_us = arg(ctx, 7);
++        const std::uint32_t handler = rt.memory().load32(ctx.gpr[29]);
++        const std::uint32_t id = s.next_matching++;
++        MatchingObject object;
++        object.handler = handler;
++        object.port = port;
++        object.buffer = arg(ctx, 3);
++        object.engine =
++            std::make_unique<adhoc::Matching>(own_mac(), config, [id](const Mac &to, const std::string &packet) {
++                const MatchingObject *self = find_matching(id);
++                if (self == nullptr || self->socket == 0) return;
++                Client::get().pdp_send(self->socket, to, self->port, packet.data(), packet.size());
++            });
++        s.matching[id] = std::move(object);
++        done(ctx, name, 8, id, "handler " + psprecomp::hex32(handler));
++    });
++    // (id, event thread priority, stack, input thread priority, stack, hello
++    // length, hello data)
++    hle.add("sceNetAdhocMatching", "sceNetAdhocMatchingStart", [](Runtime &rt, AllegrexContext &ctx) {
++        const char *name = "sceNetAdhocMatchingStart";
++        MatchingObject *object = find_matching(arg(ctx, 0));
++        if (object == nullptr) return done(ctx, name, 7, merr::kInvalidId);
++        if (object->socket != 0) return done(ctx, name, 7, merr::kIsRunning);
++        if (arg(ctx, 5) > kMatchingDataMax) return done(ctx, name, 7, merr::kInvalidOptLen);
++        // Room for several hellos; they are read every frame, so they never pile up.
++        const int socket = Client::get().pdp_open(object->port, std::max<std::size_t>(object->buffer, 0x10000u));
++        if (socket == 0) return done(ctx, name, 7, merr::kPortInUse);
++        object->socket = socket;
++        object->engine->start(read_bytes(rt.memory(), arg(ctx, 6), arg(ctx, 5)), kernel().now_us());
++        done(ctx, name, 7, 0u, "port " + std::to_string(object->port) + " hello " + std::to_string(arg(ctx, 5)));
++    });
++    hle.add("sceNetAdhocMatching", "sceNetAdhocMatchingStop", [](Runtime &, AllegrexContext &ctx) {
++        MatchingObject *object = find_matching(arg(ctx, 0));
++        if (object == nullptr) return done(ctx, "sceNetAdhocMatchingStop", 1, merr::kInvalidId);
++        stop_matching(*object);
++        done(ctx, "sceNetAdhocMatchingStop", 1, 0u);
++    });
++    hle.add("sceNetAdhocMatching", "sceNetAdhocMatchingDelete", [](Runtime &, AllegrexContext &ctx) {
++        MatchingObject *object = find_matching(arg(ctx, 0));
++        if (object == nullptr) return done(ctx, "sceNetAdhocMatchingDelete", 1, merr::kInvalidId);
++        stop_matching(*object);
++        state().matching.erase(arg(ctx, 0));
++        done(ctx, "sceNetAdhocMatchingDelete", 1, 0u);
++    });
++    // (id, mac*, length, data*)
++    hle.add("sceNetAdhocMatching", "sceNetAdhocMatchingSelectTarget", [](Runtime &rt, AllegrexContext &ctx) {
++        const char *name = "sceNetAdhocMatchingSelectTarget";
++        MatchingObject *object = find_matching(arg(ctx, 0));
++        if (object == nullptr) return done(ctx, name, 4, merr::kInvalidId);
++        if (arg(ctx, 1) == 0u) return done(ctx, name, 4, merr::kInvalidArg);
++        if (arg(ctx, 2) > kMatchingDataMax) return done(ctx, name, 4, merr::kInvalidOptLen);
++        const Mac peer = read_mac(rt.memory(), arg(ctx, 1));
++        const std::uint32_t result = object->engine->select_target(
++            peer, read_bytes(rt.memory(), arg(ctx, 3), arg(ctx, 2)), kernel().now_us());
++        done(ctx, name, 4, result, adhoc::format_mac(peer));
++    });
++    const auto cancel = [](const char *name, unsigned argc, bool with_data) {
++        return [name, argc, with_data](Runtime &rt, AllegrexContext &ctx) {
++            MatchingObject *object = find_matching(arg(ctx, 0));
++            if (object == nullptr) return done(ctx, name, argc, merr::kInvalidId);
++            if (arg(ctx, 1) == 0u) return done(ctx, name, argc, merr::kInvalidArg);
++            const Mac peer = read_mac(rt.memory(), arg(ctx, 1));
++            const std::string data = with_data ? read_bytes(rt.memory(), arg(ctx, 3), arg(ctx, 2)) : std::string{};
++            done(ctx, name, argc, object->engine->cancel_target(peer, data), adhoc::format_mac(peer));
++        };
++    };
++    // (id, mac*)
++    hle.add("sceNetAdhocMatching", "sceNetAdhocMatchingCancelTarget",
++            cancel("sceNetAdhocMatchingCancelTarget", 2, false));
++    // (id, mac*, length, data*)
++    hle.add("sceNetAdhocMatching", "sceNetAdhocMatchingCancelTargetWithOpt",
++            cancel("sceNetAdhocMatchingCancelTargetWithOpt", 4, true));
++    // (id, length, data*)
++    hle.add("sceNetAdhocMatching", "sceNetAdhocMatchingSetHelloOpt", [](Runtime &rt, AllegrexContext &ctx) {
++        const char *name = "sceNetAdhocMatchingSetHelloOpt";
++        MatchingObject *object = find_matching(arg(ctx, 0));
++        if (object == nullptr) return done(ctx, name, 3, merr::kInvalidId);
++        if (arg(ctx, 1) > kMatchingDataMax) return done(ctx, name, 3, merr::kInvalidOptLen);
++        object->engine->set_hello(read_bytes(rt.memory(), arg(ctx, 2), arg(ctx, 1)), kernel().now_us());
++        done(ctx, name, 3, 0u);
++    });
++    // (id, mac*, length, data*)
++    hle.add("sceNetAdhocMatching", "sceNetAdhocMatchingSendData", [](Runtime &rt, AllegrexContext &ctx) {
++        const char *name = "sceNetAdhocMatchingSendData";
++        MatchingObject *object = find_matching(arg(ctx, 0));
++        if (object == nullptr) return done(ctx, name, 4, merr::kInvalidId);
++        if (arg(ctx, 1) == 0u) return done(ctx, name, 4, merr::kInvalidArg);
++        if (arg(ctx, 2) == 0u || arg(ctx, 2) > kMatchingDataMax || arg(ctx, 3) == 0u)
++            return done(ctx, name, 4, merr::kInvalidDataLen);
++        const Mac peer = read_mac(rt.memory(), arg(ctx, 1));
++        const std::uint32_t result = object->engine->send_data(
++            peer, read_bytes(rt.memory(), arg(ctx, 3), arg(ctx, 2)), kernel().now_us());
++        done(ctx, name, 4, result, adhoc::format_mac(peer));
++    });
++    // (id, mac*)
++    hle.add("sceNetAdhocMatching", "sceNetAdhocMatchingAbortSendData", [](Runtime &rt, AllegrexContext &ctx) {
++        MatchingObject *object = find_matching(arg(ctx, 0));
++        if (object == nullptr) return done(ctx, "sceNetAdhocMatchingAbortSendData", 2, merr::kInvalidId);
++        if (arg(ctx, 1) == 0u) return done(ctx, "sceNetAdhocMatchingAbortSendData", 2, merr::kInvalidArg);
++        done(ctx, "sceNetAdhocMatchingAbortSendData", 2,
++             object->engine->abort_send(read_mac(rt.memory(), arg(ctx, 1))));
++    });
++}
++
+ // sceNetAdhocDiscover ----------------------------------------------------------
+ //
+ // Discovery finds a nearby console for a one-to-one session with no group; it
+@@ -984,6 +1265,7 @@ void register_adhoc(HleRegistrar &hle) {
+     register_adhocctl(hle);
+     register_pdp(hle);
+     register_ptp(hle);
++    register_matching(hle);
+     register_discover(hle);
+     register_netconf(hle);
+ }
+-- 
+2.53.0.windows.1
+

@@ -14,6 +14,7 @@ STATE_FILE = ROOT / "build" / "port" / "setup" / "state.json"
 LOG_DIR = ROOT / "build" / "port" / "logs"
 VSENV = ROOT / "tools" / "port" / "setup" / "vsenv.cmd"
 PK_CMAKE = ROOT / "tools" / "port" / "pk_cmake.cmd"
+PK_CMAKE_MINGW = ROOT / "tools" / "port" / "pk_cmake_mingw.cmd"
 
 INTERACTIVE = True  # set by d012_setup.main()
 

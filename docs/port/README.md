@@ -99,6 +99,37 @@ disassembler and the new `tools/port/` scripts cover the analysis.
   battle's draw tasks run a second time from player 2's camera. Two copies over ad hoc are kept for later online
   play. Not started.
 
+## Online play (30 October 2026)
+
+- [Online play](online-play.md): a first investigation. PortableKit's ad hoc server and relay exist but lack
+  `sceNetAdhocMatching`, which Dissidia's Communication Mode needs. Recommended route: two copies of the port
+  exchanging inputs each frame (delay-based lockstep) through the local versus input path, after proving the two
+  copies stay identical. Rollback kept as a later option; an audit of what it needs is in section 9.
+- Phase 0 (section 10): with the busy clock off and the PSP clock pinned, two runs of the same build, data and
+  inputs keep all 32 MiB of guest RAM bit-identical for a whole session; the split-screen field of view changes the
+  simulation, so both copies must share view settings. Tools: `D012_SYNC_TRACE`, `D012_SYNC_EPOCH`,
+  `tools/port/sync_compare.py`.
+- The per-frame input record (section 11, `D012_INPUT_RECORD`, `D012_INPUT_REPLAY`): both pads, the extra buttons
+  and the system dialogs' answers, one record a frame. A replay reproduces a recorded run byte for byte, at 30 or
+  60 fps alike.
+- Lockstep (section 12, `D012_NET`): two copies on one PC, linked over loopback UDP, swap each frame's input with
+  3 frames of delay. From boot to a versus battle with player 2 on the second copy, 10,799 reads with all of guest
+  RAM the same in both.
+- [Communication Mode](communication-mode.md) (31 October 2026): a map of the game's five Communication Mode rows and
+  what each asks of the network. The battle is already an input lockstep in which both machines simulate both
+  fighters and cameras, so one function (`0x0890D664`) can be swapped for the port's lockstep with full analog. The
+  lobby and setup need the PSP's ad hoc functions provided over a modern connection. Two copies on one PC now go
+  from the Online Lobby into a battle (section 10), and the battle runs on the port's lockstep with full analog and
+  each player's right-stick camera, in step for a whole fight (section 11). It survives forfeits, rematches, a
+  vanished copy and simulated lag (section 12), and this PC against the Steam Deck played a whole battle over the
+  internet once the port carried its own `sinf`/`cosf`/`asinf`, since Wine's differ from Microsoft's (section 13).
+  With nothing set up, the hosting copy opens its router's ports (NAT-PMP or UPnP), the battle finds its address from the session and the input delay sets itself: the Deck on mobile data
+  joined the address the PC showed and played a whole battle (section 14). For players (section 15): both copies
+  must run the same program and rules or the battle says what differs, each player keeps their camera settings, a
+  wait shows a band the player can leave, and the Network page has the input delay.
+- [Playing online](play-online.md): the players' guide (test builds only): host, join, and what to do when the
+  router, a shared provider address or a firewall stops it, including Tailscale and ZeroTier.
+
 ## Texture packs (1 November 2026)
 
 - [Texture packs](texture-packs.md): the guide to using PPSSPP-format HD texture packs in the port and making them

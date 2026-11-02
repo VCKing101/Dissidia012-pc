@@ -3,9 +3,13 @@
 
 #include "d012_bgm_playlist.hpp"
 #include "d012_camera.hpp"
+#include "d012_comm_battle.hpp"
 #include "d012_dlc.hpp"
 #include "d012_hle.hpp"
+#include "d012_input.hpp"
+#include "d012_math_check.hpp"
 #include "d012_mods.hpp"
+#include "d012_sync.hpp"
 #include "d012_test_switches.hpp"
 #include "d012_versus.hpp"
 
@@ -97,6 +101,13 @@ void register_extra_hle(portablekit::HleRegistrar &hle) {
 
     // What DLC the game will find, in the log (d012_dlc.cpp).
     dlc::install(hle);
+    // Online play: the log unbuffered and the clock reads traced in network
+    // battles (d012_comm_battle.cpp), and the library maths' fingerprint.
+    comm_battle::install(hle);
+    math_check::run_if_asked();
+    // The frame's input record (d012_input.cpp): the innermost pad-read
+    // wrapper, so it goes before every other.
+    input::install(hle);
     // Mods: music added to the game (d012_mods.cpp, docs/port/mod-folder.md).
     mods::install(hle);
     // The loading screen's music choice by series (d012_bgm_playlist.cpp).
@@ -106,6 +117,8 @@ void register_extra_hle(portablekit::HleRegistrar &hle) {
     // Local versus: player 2 on a second controller (d012_versus.cpp), after
     // the camera's wrapper so the menus' pad swap is the last word.
     versus::install(hle);
+    // Online play, phase 0: a pinned PSP clock (d012_sync.cpp).
+    sync::install(hle);
     // Test switches, off by default (d012_test_switches.cpp).
     test_switches::install(hle);
 }

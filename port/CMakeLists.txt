@@ -67,12 +67,34 @@ portablekit_add_game(D012Native ${d012_corpus}
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_split_view.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_versus.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_versus_menu.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_sync.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_input.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_net.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_comm_battle.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_math_check.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_math.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_loading_layout.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_crash_report.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_test_switches.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_portable.cpp"
             ${d012_game_code})
 target_include_directories(D012Native PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/host")
+# d012::source_hash(), the port's own source hashed (cmake/source_hash.cmake):
+# online play checks both players run the same program. Remade whenever one of
+# those files changes; only the one generated file is compiled again.
+file(GLOB_RECURSE d012_hashed CONFIGURE_DEPENDS
+     "${CMAKE_CURRENT_SOURCE_DIR}/host/*.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/host/*.hpp"
+     "${CMAKE_CURRENT_SOURCE_DIR}/decomp/*.c" "${CMAKE_CURRENT_SOURCE_DIR}/decomp/*.h"
+     "${CMAKE_CURRENT_SOURCE_DIR}/config/*" "${CMAKE_CURRENT_SOURCE_DIR}/portablekit-patches/*.patch")
+set(d012_source_hash "${CMAKE_CURRENT_BINARY_DIR}/generated/d012_source_hash.cpp")
+add_custom_command(OUTPUT "${d012_source_hash}"
+    COMMAND ${CMAKE_COMMAND} "-DROOT=${CMAKE_CURRENT_SOURCE_DIR}" "-DOUT=${d012_source_hash}"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/source_hash.cmake"
+    DEPENDS ${d012_hashed} "${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt"
+            "${CMAKE_CURRENT_SOURCE_DIR}/cmake/source_hash.cmake"
+    COMMENT "Hashing the port's source for online play"
+    VERBATIM)
+target_sources(D012Native PRIVATE "${d012_source_hash}")
 # A release build (tools/local/port/build-d012-release, for the packaged
 # folder of tools/port/package_deck.py) runs its recompiled code only, with no
 # interpreter fallback unless D012_INTERPRETER is set (host/d012_portable.cpp).
@@ -89,7 +111,8 @@ if(D012_INSTALLER_BUILD)
     # What --compile-game needs beside the program, so bin/ is laid out as an
     # installation (the toolchain aside: D012_TOOLCHAIN_DIR, or toolchain/):
     # the recompiler, and in sdk/ the three headers the game's code includes,
-    # the two entry-point templates and the dispatch calls.
+    # the two entry-point templates, the dispatch calls and host/d012_math.cpp,
+    # which --compile-game builds into each library of the game's code.
     # A target of its own, so a new psp_recomp is copied whether or not the
     # program relinks.
     set(d012_sdk "${CMAKE_BINARY_DIR}/bin/sdk")
@@ -103,7 +126,8 @@ if(D012_INSTALLER_BUILD)
                 "${D012_PORTABLEKIT_DIR}/host/overlay_module.hpp" "${d012_sdk}/include"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "${D012_PORTABLEKIT_DIR}/host/corpus_module.cpp.in" "${D012_PORTABLEKIT_DIR}/host/overlay_module.cpp.in"
-                "${CMAKE_CURRENT_SOURCE_DIR}/config/dispatch-calls.txt" "${d012_sdk}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/config/dispatch-calls.txt"
+                "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_math.cpp" "${d012_sdk}"
         VERBATIM)
     add_dependencies(D012Native_installer_files psp_recomp D012Native)
 endif()
@@ -117,6 +141,9 @@ add_library(d012_decomp STATIC "${CMAKE_CURRENT_SOURCE_DIR}/decomp/bgm_table.c"
                                "${CMAKE_CURRENT_SOURCE_DIR}/decomp/pad.c"
                                "${CMAKE_CURRENT_SOURCE_DIR}/decomp/pad_walk.c")
 target_link_libraries(D012Native PRIVATE d012_decomp)
+if(WIN32)
+    target_link_libraries(D012Native PRIVATE ws2_32)  # online play (host/d012_net.cpp)
+endif()
 
 # The Battle BGM Maker (bgm_maker/): a program of its own beside D012Native,
 # for making battle music mods. It checks a mod with the game's own manifest

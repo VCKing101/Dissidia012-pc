@@ -1,0 +1,151 @@
+# Playing online
+
+Two players, each with their own copy of the port, fight a 1-on-1 battle over the internet through the game's
+Communications Mode. **Experimental:** it has been played between Windows and a Steam Deck, and the details may change.
+How it works and how it was tested: [Communication Mode](communication-mode.md), sections 11 to 15.
+
+Both players need the same version of the port, the same mods that change the game (music mods may differ) and the
+same test settings. The game checks as the battle starts and says what differs. Saves and official DLC may differ.
+
+Only the Online Lobby's 1-on-1 battles are supported. Group Battle and Communications are untested.
+
+One player **hosts** a session and the other **joins** it, both on the port's Network page. Then both go online in
+the game as they would on a PSP. The host should be the player on a home connection: mobile data cannot host (see
+[If something goes wrong](#if-something-goes-wrong)).
+
+The pictures use example addresses; yours are your own.
+
+## Host
+
+1. Open the port's menu: Esc, or L3 + R3 together on a controller. Press LB or RB (Q or W on a keyboard) until the
+   **Network** page shows.
+2. Select **Host a session**, the first row. It also turns on **Ad hoc play** further down the page, the game's
+   wireless switch; joining does the same.
+
+   ![The Network page with Host a session highlighted at the top, Join a session below it, and the row's help text at the foot](../images/online-host-start.png)
+
+3. The game asks your router to open its ports. After a moment the rows under Play together show your addresses:
+   - **Local network**: for a player on the same network as you. They need not type it: your session appears in
+     their Join a session list by itself.
+   - **Internet (NAT-PMP)** or **Internet (UPnP)**: for a player anywhere else. Select it and the address is copied
+     (it shows under **Copied**); paste it into a message to the other player.
+
+   ![The Network page while hosting: 2 players online, a local network address, the internet address 203.0.113.7 highlighted and shown again under Copied, and the two players in lobby LOBBY0 below](../images/online-hosting.png)
+
+4. The first time, Windows may ask whether to let the game use the network: allow it on private networks.
+5. Close the menu (B, Esc, or L3 + R3 again). The session runs as long as the game does; **Stop hosting**, further
+   down the same rows, ends it.
+
+**Hosting** shows how many players are online in the game, you included, and lists them. If the internet row says
+the router did not open the ports, or that your provider shares the address, see
+[If something goes wrong](#if-something-goes-wrong).
+
+## Join
+
+1. Open the port's menu and go to the **Network** page, as the host did.
+2. **On the same network as the host:** their session is listed under Join a session as **Join** with their name and
+   address. Select it, and skip to step 4.
+3. **Anywhere else:** select **Address**. Type the address the host sent you, with a keyboard or the on-screen keys,
+   and confirm with **OK** (Start on a controller, Enter on a keyboard).
+
+   ![The Address box with 203.0.113.7 typed and the on-screen keyboard below it](../images/online-join-address.png)
+
+4. **Joined** shows the host's address: the game connects when you go online. Every address you join is kept
+   under Join, so next time one press joins again.
+
+   ![The Network page after joining: Joined 203.0.113.7 recent highlighted under Address](../images/online-joined.png)
+
+5. Close the menu.
+
+## Then, in the game
+
+Both players do the same from here.
+
+1. On the main menu, choose **Communications Mode**, then **Online Lobby**. The game goes online through the
+   session.
+2. Both pick **the same lobby**, for example 1 Cornelia. Lobbies 1 to 8 are for customised characters, 9 to 16 for
+   preset ones.
+
+   <p>
+     <img src="../images/online-game-menu.png" width="49%" alt="The main menu with Communications Mode open and Online Lobby highlighted">
+     <img src="../images/online-game-lobbies.png" width="49%" alt="The Online Lobby's 16 lobbies, Cornelia highlighted">
+   </p>
+
+3. In the lobby the other player's Friend Card appears, marked **Online**. One player selects it and chooses
+   **Battle Request [1-on-1]**. The other is told "You've been challenged to an online match!" and answers **YES**
+   to accept.
+
+   <p>
+     <img src="../images/online-game-challenge.png" width="49%" alt="The lobby with the other player's Friend Card selected and a menu open on Battle Request [1-on-1]">
+     <img src="../images/online-game-challenged.png" width="49%" alt="The other player's lobby: You've been challenged to an online match!">
+   </p>
+
+4. Both pick a fighter. The game gives one player the **HOST** badge (not necessarily the one who hosts the
+   session): that player sets the stage and rules and selects **Enter Battle**.
+
+   <p>
+     <img src="../images/online-game-fighter.png" width="49%" alt="Online Battle 1-on-1 Player Select with Lightning chosen">
+     <img src="../images/online-game-enter.png" width="49%" alt="The battle setup with a HOST and a GUEST badge, Enter Battle highlighted, and Stage, Rules and Judgment below">
+   </p>
+
+The battle then finds its own way to the other player. After it, both are back at the battle setup, where Enter
+Battle starts a rematch.
+
+## During a battle
+
+**Input delay** (Network page, Online battles): the frames between pressing a button and the fighter acting. The
+host's setting counts. **Auto**, the default, sets it from the connection as the battle starts: 2 frames on a home
+network, 3 at a round trip of about 75 to 100 ms, more when it is longer. A fixed number smooths a poor connection
+(higher) or responds sooner (lower).
+
+![The Network page's Ad hoc play and Online battles sections, with Input delay set to Auto and its help text below](../images/online-input-delay.png)
+
+**Waiting.** If the other player's game falls silent, a band says "Waiting for the other player" and counts the
+seconds. Hold B (or Esc) to leave the battle: the bar along the band's foot fills, and the battle ends when it is full.
+After 30 seconds the game gives up by itself.
+
+![The waiting band: Waiting for the other player... 4 s, with Hold to leave and the bar partly filled](../images/online-waiting.png)
+
+**Each player keeps their own camera settings.** The right-stick camera's dead zone, sensitivity and inverted axes
+are sent across, so the other game turns your camera the way you set it.
+
+## If something goes wrong
+
+**"This battle cannot start: the other player's game differs in ..."** The two games are not the same: update both
+to the same release, and use the same mods that change the game. The notice names what differs; here, one player had
+turned analog walking in battle on:
+
+![This battle cannot start: the other player's game differs in analog walking in battle (D012_SMOOTH_STICK_BATTLE), with an OK button](../images/online-differs.png)
+
+**"The other player's game did not answer."** The battle's UDP port does not get through to the host. See the next
+paragraphs.
+
+**The row says the router did not open the ports.** Turn on UPnP or NAT-PMP in the router's settings, or forward
+these ports on the router to the host's local address, which the Network page lists:
+
+| Port | For |
+| --- | --- |
+| TCP 27312 | The lobby |
+| TCP 27313 | The lobby's relay |
+| UDP 27420 | The battle |
+
+Then turn off **Open router ports** on the Network page, so the game stops asking.
+
+**The row says your provider shares the address.** Your router has no address of its own on the internet: your
+provider shares one among many customers (carrier-grade NAT, the rule on mobile data and common on some home
+connections), or another router sits in front of yours. Opening ports does nothing then. The other player hosts
+instead, or you both use a VPN.
+
+**A VPN** puts both PCs on one private network, so no router is involved:
+[Tailscale](https://tailscale.com/) or [ZeroTier](https://www.zerotier.com/). Both players install it and join the
+same network. The host hosts as above; the joiner types the host's VPN address, which the host's Network page lists
+too (Tailscale's start with `100.`).
+
+**Something else blocks it.** A firewall program on the host other than Windows' own needs the same three ports
+allowed.
+
+## Not tested yet
+
+- Two Windows PCs on separate machines (Windows against the Steam Deck, and two copies on one PC, were).
+- The Steam Deck hosting: let the PC host.
+- A router that only has UPnP (the one tested answered NAT-PMP first).

@@ -33,6 +33,7 @@ CACHE_DAYS = 7
 
 # Where the port's build keeps FFmpeg, most likely first.
 SEARCH_PATTERNS = (
+    "tools/local/port/build-d012-clang/_deps/ffmpeg/*/bin",
     "tools/local/port/build-d012-recomp/_deps/ffmpeg/*/bin",
     "tools/local/port/build-d012/_deps/ffmpeg/*/bin",
     "tools/local/port/*/_deps/ffmpeg/*/bin",

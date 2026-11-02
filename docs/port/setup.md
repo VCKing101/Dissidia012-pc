@@ -16,11 +16,11 @@ changes, developing the port, or making the Steam Deck package.
 | | Why | Get it |
 | --- | --- | --- |
 | Windows 10 or 11, 64-bit | | |
-| Visual Studio 2022 Community (free) or Build Tools 2022, with the workload **Desktop development with C++** | The compiler, CMake, Ninja and the Windows SDK. The workload's default items include them all. | [visualstudio.microsoft.com/downloads](https://visualstudio.microsoft.com/downloads/) |
+| Visual Studio 2022 Community (free) or Build Tools 2022, with the workload **Desktop development with C++** | CMake, Ninja and the Windows SDK's tools; its compiler builds only the optional encoder of the BGM Maker's ISO export. The port itself is compiled with clang, which setup downloads ([why](#why-clang)). The workload's default items include them all. | [visualstudio.microsoft.com/downloads](https://visualstudio.microsoft.com/downloads/) |
 | Python 3.10 or newer | The setup and the port's scripts | [python.org/downloads/windows](https://www.python.org/downloads/windows/). Tick "Add python.exe to PATH" |
 | Git | Fetches PortableKit and applies this port's changes to it | [git-scm.com/download/win](https://git-scm.com/download/win) |
 | A graphics driver with Vulkan | The renderer. Any GPU from about 2016 on, with its vendor's current driver | AMD, NVIDIA or Intel's site |
-| About 5 GB free on the drive with the repository | Build files about 1.5 GB, dependencies 0.3 GB. Add 1.7 GB if your ISO is on another drive, because it is then copied | |
+| About 6 GB free on the drive with the repository | Build files about 1.5 GB, dependencies 1.2 GB (clang is 0.9 GB of it). Add 1.7 GB if your ISO is on another drive, because it is then copied | |
 | Your own copy of the game: the USA disc **ULUS10566** v1.00 as an `.iso` file | No game data comes with this project. The port decrypts the game's executable from it ([below](#the-decrypted-eboot)) | |
 
 If something is missing, setup stops before changing anything and says what to install. It never installs software
@@ -49,7 +49,7 @@ run only. Windows blocks scripts by default, and nothing is changed for good.)
 
 The first time, setup asks for:
 
-1. **Permission to continue.** It will download about 100 MB and compile for 5 to 30 minutes.
+1. **Permission to continue.** It will download about 290 MB and compile for 5 to 30 minutes.
 2. **Your ISO.** Type or paste its path, or drag the file into the window, then press Enter. An ISO of the right
    size at the repository root is offered as the default.
 
@@ -60,10 +60,10 @@ It remembers the path in `build/port/setup/state.json`, so later runs ask nothin
 | Step | What happens | Skipped on a re-run when |
 | --- | --- | --- |
 | 1. Prerequisites | Checks Visual Studio (with `vswhere`), its compiler, CMake, Ninja and Windows SDK; Python 3.10 or newer; Git; `System32\vulkan-1.dll`; free disk space. Makes `.venv` and installs [requirements-port.txt](../../requirements-port.txt) (pycdlib, Pillow) | `.venv` already has that file's packages |
-| 2. Dependencies | Downloads SDL3 3.4.18, glslang 16.6.0 and Vulkan-Headers vulkan-sdk-1.4.363.0 into `tools/local/port-deps/dl/`, checks each SHA-256 (table below) and unpacks them where `tools/port/pk_cmake.cmd` looks. Makes `vulkan-1.lib` from your driver's `vulkan-1.dll` with `dumpbin /exports` and `lib /def`, so no Vulkan SDK and no administrator rights are needed. FFmpeg is fetched later by PortableKit's own configure step, which checks its own pinned hash | The zips are in place and verified, and already unpacked |
+| 2. Dependencies | Downloads SDL3 3.4.18, glslang 16.6.0, Vulkan-Headers vulkan-sdk-1.4.363.0 and llvm-mingw 20260922 (clang, 182 MB) into `tools/local/port-deps/dl/`, checks each SHA-256 (table below) and unpacks them where `tools/port/pk_cmake_mingw.cmd` looks: llvm-mingw into `tools/local/llvm-mingw-20260922-ucrt-x86_64`. Makes `vulkan-1.lib` from your driver's `vulkan-1.dll` with `dumpbin /exports` and `lib /def`, so no Vulkan SDK and no administrator rights are needed. FFmpeg is fetched later by PortableKit's own configure step, which checks its own pinned hash | The zips are in place and verified, and already unpacked |
 | 3. PortableKit | Clones [TeamGDB/PortableKit](https://github.com/TeamGDB/PortableKit) into `tools/local/port/PortableKit`, and puts the local branch `dissidia` at commit `33800c4` plus this repository's patches (`port/portablekit-patches/*.patch`, with `git am`) | The patches have not changed since the last run |
 | 4. Your game files | Checks the ISO ([below](#what-is-checked)). Takes the three overlays (`OVL_*.ELF`) and `LIBSUPPREACC.PRX` from the ISO into `build/port/ovl` and `build/port/prx`, and makes the shortcut's icon `build/port/launcher/dissidia012.ico` from the disc's `ICON0.PNG`. Makes the decrypted EBOOT: configures the build (as in step 5), compiles `D012Native` with no game code yet (PortableKit's bootstrap stage; the full build reuses these objects), and runs `D012Native --install <iso> --in-place` with `D012_DATA_DIR` and `D012_GAME_DIR` set to the temporary folder `build/port/setup/decrypt`, stopped after 60 s at most. It checks the SHA-256 of the `EBOOT.ELF` written there and removes the folder. Then it prepares `build/port/game` with `tools/port/prepare_game_dir.py`: `EBOOT.ELF` copied, `disc.iso` a hard link to your ISO (a copy if it is on another drive), and an empty `ms0/` | Files already right are kept; the ISO's SHA-1 is computed only once; nothing is decrypted while `build/port/game/EBOOT.ELF` has the right SHA-256 |
-| 5. Build | Configures `tools/local/port/build-d012-recomp` as in port/README.md ("Recompiled build"; already done in step 4 on a first run), builds `psp_recomp`, generates the C++ corpora (main with `--dispatch-call` for the main rows of `port/config/dispatch-calls.txt`, then the overlays and the PRX with `tools/port/overlay_meta.py --recompile`), and builds everything: `D012Native` and the Battle BGM Maker, `BgmMaker.exe`. Then it builds atracdenc, the encoder of the BGM Maker's "Make a PSP / PPSSPP ISO", with `tools/port/build_atracdenc.cmd`, which clones its source from GitHub the first time (`build/external/atracdenc-src`, at a fixed commit); if that fails setup warns and goes on, because only the ISO export needs it | Ninja rebuilds only what changed; the corpora are regenerated only when `psp_recomp`, the EBOOT, the overlays, `dispatch-calls.txt` or `overlay_meta.py` changed, and even then only changed files are replaced; atracdenc is built again only when its commit changes |
+| 5. Build | Configures `tools/local/port/build-d012-clang` with clang (`tools/port/pk_cmake_mingw.cmd`), as in port/README.md ("Recompiled build"; already done in step 4 on a first run), builds `psp_recomp`, generates the C++ corpora (main with `--dispatch-call` for the main rows of `port/config/dispatch-calls.txt`, then the overlays and the PRX with `tools/port/overlay_meta.py --recompile`), and builds everything: `D012Native` and the Battle BGM Maker, `BgmMaker.exe`. Then it builds atracdenc, the encoder of the BGM Maker's "Make a PSP / PPSSPP ISO", with `tools/port/build_atracdenc.cmd`, which clones its source from GitHub the first time (`build/external/atracdenc-src`, at a fixed commit); if that fails setup warns and goes on, because only the ISO export needs it | Ninja rebuilds only what changed; the corpora are regenerated only when `psp_recomp`, the EBOOT, the overlays, `dispatch-calls.txt` or `overlay_meta.py` changed, and even then only changed files are replaced; atracdenc is built again only when its commit changes |
 | 6. Shortcuts | A desktop shortcut and a Start Menu entry, "Dissidia 012 (PC port)", that run `tools/port/play_d012.ps1` in a hidden window | Re-made each time (the same shortcut) |
 
 The output of every long command is kept in `build/port/logs/setup-*.log`. On a failure setup prints the last lines
@@ -71,12 +71,12 @@ and the log's name.
 
 ### How long it takes
 
-On the PC it was tested on (20 logical CPUs, 32 GB of memory, 24 October 2026), a full first run in a fresh clone,
-given only the ISO, took **4 minutes 4 seconds**, plus the downloads: 9 s to configure, 40 s for the bootstrap
-compile, 2 s to decrypt the EBOOT, 25 s to generate the corpora and 2 min 24 s for the rest of the compile, which
-recompiled none of the bootstrap's host code. (That test took PortableKit and the dependency zips from local copies,
-and the ISO's SHA-1 took 1 s because the file was already in the disk cache; 13 s is more usual.) Compiling
-the generated code needs a lot of memory, so setup lets one generated unit compile per 4 GB of memory, which is
+On the PC it was tested on (20 logical CPUs, 32 GB of memory, a hard disk), a full first run with clang in a fresh
+clone, given only the ISO and `-Deck`, took **11 minutes 21 seconds** on 2 November 2026, plus the downloads: 14 s to
+configure, 42 s for the bootstrap compile, 2 s to decrypt the EBOOT, 57 s to generate the corpora, 3 min
+31 s for the rest of the compile, 21 s for atracdenc, and 4 min 6 s for the Steam Deck's release build (without
+`-Deck`, about 7 minutes). That test took PortableKit and the dependency zips from local copies. Compiling the
+generated code needs a lot of memory, so setup lets one generated unit compile per 4 GB of memory, which is
 PortableKit's rule. With 8 GB that is two at a time, so expect 30 minutes or more on such a PC. A re-run with nothing
 changed takes a few seconds. After a change to the patches that rebuilds `psp_recomp`, it takes about half a minute,
 because the corpora are regenerated (and come out the same).
@@ -86,7 +86,7 @@ because the corpora are regenerated (and come out the same).
 | Option | What it does |
 | --- | --- |
 | `-Update` | Re-applies the PortableKit patches and rebuilds, asking nothing. Uses the ISO given before |
-| `-Deck` | Also builds the release build (`tools/local/port/build-d012-release`) and the Steam Deck package `build/port/deck-package/Dissidia012` with `tools/port/package_deck.py`. Sending it to the Deck is a separate step: [steam-deck.md](steam-deck.md) |
+| `-Deck` | Also builds the release build (`tools/local/port/build-d012-release-clang`) and the Steam Deck package `build/port/deck-package/Dissidia012` with `tools/port/package_deck.py`. Sending it to the Deck is a separate step: [steam-deck.md](steam-deck.md) |
 | `-NonInteractive -Iso <path>` | For scripts: never asks, fails with a message instead |
 | `-Eboot <path>` | Use a decrypted EBOOT you already have instead of decrypting the ISO's. It must have the SHA-256 [below](#the-decrypted-eboot) |
 | `-NoShortcuts` | No shortcuts |
@@ -108,8 +108,8 @@ opens the port's menu: video, controls and audio.
 | Settings | `build/port/data/settings.ini` (written by the port's menu) |
 | Mods | `build/port/data/mods/` ([mod-folder.md](mod-folder.md)) |
 | DLC you added | `build/port/data/ms0/PSP/GAME/ULUS10566/` (the folder must have that name; [README](../../README.md#downloadable-content-dlc)) |
-| The program | `tools/local/port/build-d012-recomp/bin/D012Native.exe` |
-| The Battle BGM Maker | `tools/local/port/build-d012-recomp/bin/BgmMaker.exe`, on `build/port/data/mods` ([mod-folder.md](mod-folder.md), section 8). Setup makes no shortcut for it |
+| The program | `tools/local/port/build-d012-clang/bin/D012Native.exe` |
+| The Battle BGM Maker | `tools/local/port/build-d012-clang/bin/BgmMaker.exe`, on `build/port/data/mods` ([mod-folder.md](mod-folder.md), section 8). Setup makes no shortcut for it |
 
 Setup never writes to `build/port/data`, except to create the empty folder.
 
@@ -123,6 +123,35 @@ git pull
 Setup notices what changed and redoes only that. If the PortableKit patches changed, the branch `dissidia` is moved
 to 33800c4 plus the new patches. Files that the new patches leave unchanged are not rewritten, so only the changed
 parts are recompiled. `.\setup.ps1 -Update` does the same without asking anything.
+
+**From a setup made with Visual Studio** (before 0.5.0): the first run after `git pull` downloads clang (182 MB) and
+compiles the whole port once into `tools/local/port/build-d012-clang`, as long as a first setup. The game's generated
+C++ is reused. Saves, settings, mods and texture packs in `build/port/data` are untouched, and the shortcuts start
+the new build. The old Visual Studio folders, `tools/local/port/build-d012-recomp` and, after `-Deck`,
+`build-d012-release` (about 2 GB together), are no longer used: setup says so at the end and leaves them for you to
+delete. Until setup has run again, the shortcuts still start the old build.
+
+## Why clang
+
+Since 0.5.0, setup compiles the port with clang (llvm-mingw) rather than Visual Studio's compiler (MSVC), so that
+every way of getting the port is built the same way: the Windows setup on the releases page has always used clang,
+and now `setup.ps1` and the Steam Deck package it makes do too.
+
+- **Online play needs it.** Both players' games compute every frame of a battle themselves and must get the same
+  bits. The game's VFPU maths (sine, cosine, arcsine, log2, exp2) round the last bit differently in Microsoft's C
+  runtime and in Wine's under Proton, so the port carries its own versions (`port/host/d012_math.cpp`;
+  [communication-mode.md](communication-mode.md), section 13). Only clang lets the program use them in place of the
+  C runtime's: MSVC refuses to define `sinf` (it is one of its intrinsics) and sends `exp2f` straight to
+  `ucrtbase.dll`. An MSVC build would therefore part from the others in a battle, so a battle now checks the
+  compiler too, and refuses a copy built with the other one with a message naming it.
+- **One compiler for all.** The Windows setup, `setup.ps1` and the Deck package then make the same program from the
+  same source, and a problem found in one is the same in the others.
+- **Speed.** In the installer's tests (28 October 2026), the game's code compiled with clang ran about three times
+  as fast as MSVC's, which PortableKit compiles without inlining (`/Ob0`) to keep its build time down.
+
+Visual Studio is still needed for its CMake, Ninja and tools, and its compiler builds atracdenc, the optional
+encoder. Building with MSVC by hand still works (`tools/port/pk_cmake.cmd`, port/README.md), for debugging with
+Visual Studio for example, but such a build cannot play online against a clang build.
 
 ## The decrypted EBOOT
 
@@ -145,6 +174,7 @@ skipped.
 | SDL3-devel-3.4.18-VC.zip | SHA-256 `78d84602ae616cfe26b33a73b7d3b9b6b56e8a6650e53d92c9c6ca938f747acd` |
 | glslang-16.6.0-windows-x86_64-release.zip | SHA-256 `82bf434e69b9bb4829de7e2b4bc2c5e7a7861e53d66cf75e5cc70f5f694a8d9b` |
 | Vulkan-Headers-vulkan-sdk-1.4.363.0.zip | SHA-256 `f4be95220ff0ee0b1c620301ff4fe9ae48592d71f4c30f2d5c571351a153ae81`, or else its contents (see below) |
+| llvm-mingw-20260922-ucrt-x86_64.zip | SHA-256 `e3ad77d117a4bea19a7a3b333341824d79a5a371004a10e25b8504e7b3047666`, from [mstorsjo/llvm-mingw](https://github.com/mstorsjo/llvm-mingw/releases/tag/20260922) |
 | FFmpeg (PortableKit's pinned BtbN build) | Checked by PortableKit's `cmake/FFmpeg.cmake` against its own pinned hash |
 | PortableKit | Commit `33800c4060c53f3233e08f8ab2cc4590a0872063`, with the patches applied by `git am` |
 
@@ -177,7 +207,7 @@ A file that fails its check is moved aside as `<name>.rejected` and setup stops.
 | The folder path contains `!`, `%`, `^` or `&` | Move the repository to a plain path; the Windows build scripts cannot handle those characters |
 | A save copied to PPSSPP says "Unable to load data", or a save from PPSSPP will not load in the port | Fixed after v0.1.1: update and run setup again. The port then writes saves the way PPSSPP and a PSP do, and reads theirs. A save the port wrote before is fixed the next time you start the port, as the game loads it; copy it to PPSSPP after that. The save folder is `ULUS10566GameData00`, in `build\port\data\ms0\PSP\SAVEDATA` here and in `PSP\SAVEDATA` in PPSSPP's memory stick folder. Copy, don't move, and keep a backup of both |
 | The shortcut does nothing | Run `.\tools\port\play_d012.ps1` in PowerShell to see the message. If the port is not built, it says so in a window |
-| Start over | Delete `tools/local/port/build-d012-recomp` and `build/port/recomp` (build files), or `build/port/setup/state.json` (to be asked for the ISO again). Keep `build/port/data`: your saves are there |
+| Start over | Delete `tools/local/port/build-d012-clang` and `build/port/recomp` (build files), or `build/port/setup/state.json` (to be asked for the ISO again). Keep `build/port/data`: your saves are there |
 
 ## For developers
 
