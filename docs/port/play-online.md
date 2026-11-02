@@ -30,14 +30,15 @@ The pictures use example addresses; yours are your own.
    - **Internet (NAT-PMP)** or **Internet (UPnP)**: for a player anywhere else. Select it and the address is copied
      (it shows under **Copied**); paste it into a message to the other player.
 
-   ![The Network page while hosting: 2 players connected, a local network address, the internet address 203.0.113.7 highlighted and shown again under Copied, and the connected players below](../images/online-hosting.png)
+   ![The Network page while hosting: 2 players on line, a local network address, the internet address 203.0.113.7 highlighted and shown again under Copied, and the two players in lobby LOBBY0 below](../images/online-hosting.png)
 
 4. The first time, Windows may ask whether to let the game use the network: allow it on private networks.
 5. Close the menu (B, Esc, or L3 + R3 again). The session runs as long as the game does; **Stop hosting**, further
    down the same rows, ends it.
 
-Once the other player has joined and gone on line, **Hosting** counts both of you ("2 players connected") and lists
-each player. If the internet row says the router did not open the ports, or that your provider shares the address,
+**Hosting** counts the players whose game is on line, you included ("2 players on line"), and lists them. Joining
+on the Network page only chooses the session: a player is counted from when their game goes on line, in
+Communications Mode. If the internet row says the router did not open the ports, or that your provider shares the address,
 see [If something goes wrong](#if-something-goes-wrong).
 
 ## Join
@@ -50,8 +51,10 @@ see [If something goes wrong](#if-something-goes-wrong).
 
    ![The Address box with 203.0.113.7 typed and the on-screen keyboard below it](../images/online-join-address.png)
 
-4. A row **Joined** with the host's address appears under Address, and **Server** further down shows it too. Next
-   time the same row joins again in one press: the game keeps recent addresses.
+4. A row **Joined** with the host's address appears under Address, and **Server** further down shows it too. Your
+   game connects to the host when it goes on line, and the host counts you from then. Next time the same row joins
+   again in one press: the game keeps recent addresses, a home network's, an internet one or a server's name alike
+   (also one typed into **Server**).
 
    ![The Network page after joining: Joined 203.0.113.7 recent highlighted under Address](../images/online-joined.png)
 

@@ -541,6 +541,10 @@ said so.
 - `D012_EXAMPLE_ADDRESSES=1` shows documentation addresses (RFC 5737) on the Network page, for the README's picture.
   PortableKit's Network page no longer uses Monster Hunter's words: no "Online Guild Hall" in the hosting rows, and
   rooms, not halls, in the Server status and the Ad hoc play help.
+- From the release test against the Deck (patch 0074): Hosting counts "players on line", since joining on the page
+  only chooses the session and the game connects when it goes on line, and a joining player's Joined row says so; a
+  server typed into Server is remembered like a joined one; ImGui's "conflicting ID" box, which a status row showed
+  on the Deck, appears only with `<PREFIX>_UI_ID_CHECK=1`.
 
 **Results (V; two copies on this PC, copy 1 hosting, copy 2 joining its LAN address, both with nothing set).**
 
