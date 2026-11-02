@@ -9,7 +9,7 @@ same test settings. The game checks as the battle starts and says what differs. 
 
 Only the Online Lobby's 1-on-1 battles are supported. Group Battle and Communications are untested.
 
-One player **hosts** a session and the other **joins** it, both on the port's Network page. Then both go on line in
+One player **hosts** a session and the other **joins** it, both on the port's Network page. Then both go online in
 the game as they would on a PSP. The host should be the player on a home connection: mobile data cannot host (see
 [If something goes wrong](#if-something-goes-wrong)).
 
@@ -30,16 +30,15 @@ The pictures use example addresses; yours are your own.
    - **Internet (NAT-PMP)** or **Internet (UPnP)**: for a player anywhere else. Select it and the address is copied
      (it shows under **Copied**); paste it into a message to the other player.
 
-   ![The Network page while hosting: 2 players on line, a local network address, the internet address 203.0.113.7 highlighted and shown again under Copied, and the two players in lobby LOBBY0 below](../images/online-hosting.png)
+   ![The Network page while hosting: 2 players online, a local network address, the internet address 203.0.113.7 highlighted and shown again under Copied, and the two players in lobby LOBBY0 below](../images/online-hosting.png)
 
 4. The first time, Windows may ask whether to let the game use the network: allow it on private networks.
 5. Close the menu (B, Esc, or L3 + R3 again). The session runs as long as the game does; **Stop hosting**, further
    down the same rows, ends it.
 
-**Hosting** counts the players whose game is on line, you included ("2 players on line"), and lists them. Joining
-on the Network page only chooses the session: a player is counted from when their game goes on line, in
-Communications Mode. If the internet row says the router did not open the ports, or that your provider shares the address,
-see [If something goes wrong](#if-something-goes-wrong).
+**Hosting** shows how many players are online in the game, you included, and lists them. If the internet row says
+the router did not open the ports, or that your provider shares the address, see
+[If something goes wrong](#if-something-goes-wrong).
 
 ## Join
 
@@ -51,10 +50,8 @@ see [If something goes wrong](#if-something-goes-wrong).
 
    ![The Address box with 203.0.113.7 typed and the on-screen keyboard below it](../images/online-join-address.png)
 
-4. A row **Joined** with the host's address appears under Address, and **Server** further down shows it too. Your
-   game connects to the host when it goes on line, and the host counts you from then. Next time the same row joins
-   again in one press: the game keeps recent addresses, a home network's, an internet one or a server's name alike
-   (also one typed into **Server**).
+4. **Joined** shows the host's address: the game connects when you go online. Every address you join is kept
+   under Join, so next time one press joins again.
 
    ![The Network page after joining: Joined 203.0.113.7 recent highlighted under Address](../images/online-joined.png)
 
@@ -64,7 +61,7 @@ see [If something goes wrong](#if-something-goes-wrong).
 
 Both players do the same from here.
 
-1. On the main menu, choose **Communications Mode**, then **Online Lobby**. The game goes on line through the
+1. On the main menu, choose **Communications Mode**, then **Online Lobby**. The game goes online through the
    session.
 2. Both pick **the same lobby**, for example 1 Cornelia. Lobbies 1 to 8 are for customised characters, 9 to 16 for
    preset ones.
