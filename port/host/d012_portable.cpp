@@ -50,6 +50,8 @@
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+
+#include <io.h>
 #endif
 
 #if defined(D012_INSTALLER_BUILD)
@@ -93,6 +95,12 @@ void set(const char *name, const std::string &value) {
 // A windowed program started from a shortcut has no standard output: keep
 // what it prints, for the player's bug reports. Output a parent redirected
 // (the installer, the test tools) is left where it goes.
+//
+// Both streams write through one open file, unbuffered, so a crash or a kill
+// loses nothing and the lines stay in order. (Windows' C runtime treats
+// _IOLBF as full buffering, which lost the last 4 KB of a crashed run; and
+// stdout and stderr opened separately each wrote at a position of their own,
+// over each other's lines; issue 7.)
 void log_to_file_without_console(const std::filesystem::path &logs) {
     const HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
     if (out != nullptr && out != INVALID_HANDLE_VALUE) return;
@@ -100,8 +108,12 @@ void log_to_file_without_console(const std::filesystem::path &logs) {
     std::filesystem::create_directories(logs, ec);
     const std::filesystem::path log = logs / "D012Native.log";
     std::filesystem::rename(log, logs / "D012Native-previous.log", ec);
-    if (std::freopen(log.string().c_str(), "w", stdout) != nullptr) std::setvbuf(stdout, nullptr, _IOLBF, 4096);
-    std::freopen(log.string().c_str(), "a", stderr);
+    if (std::freopen(log.string().c_str(), "w", stdout) == nullptr) return;
+    std::setvbuf(stdout, nullptr, _IONBF, 0);
+    if (std::freopen(log.string().c_str(), "a", stderr) != nullptr) {
+        _dup2(_fileno(stdout), _fileno(stderr));
+        std::setvbuf(stderr, nullptr, _IONBF, 0);
+    }
 }
 #endif
 
