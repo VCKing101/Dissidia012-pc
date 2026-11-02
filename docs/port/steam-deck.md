@@ -77,25 +77,10 @@ cannot, it stops and prints these steps.
 
 ## 3. The release build (once)
 
-From the repository root. It has its own build directory and uses the recompiled build's corpus
-(`build/port/recomp`, see [port/README.md](../../port/README.md), "Recompiled build"), so make that first. The
-first build compiles the whole corpus and takes several minutes.
-
-```powershell
-.\tools\port\pk_cmake.cmd -S port -B tools/local/port/build-d012-release -G Ninja -DPORTABLEKIT_RELEASE=ON `
-    "-DD012_PORTABLEKIT_DIR=$PWD/tools/local/port/PortableKit" `
-    "-DD012_WORK_DIR=$PWD/build/port/recomp" -DPSPRECOMP_GENERATED_JOBS=4
-.\tools\port\pk_cmake.cmd --build tools/local/port/build-d012-release -j4
-```
-
-`PORTABLEKIT_RELEASE=ON` leaves out PortableKit's fallback to the checkout's game folder, so the program depends on
-nothing on this PC. A release build runs its recompiled code only: no interpreter fallback (as
-`PSPRECOMP_NO_INTERPRETER=1` does in `play_d012.ps1`).
-
-**Faster: the clang release build.** With llvm-mingw unpacked in `tools/local` (as for the installer build,
-[port/README.md](../../port/README.md)), the same release built with clang runs the game's code about three times
-faster than MSVC's, which compiles it without inlining. The package and the deploy use it whenever it is configured
-(`--build-dir` picks another):
+`setup.ps1 -Deck` makes it, with clang, and the package in one go ([setup.md](setup.md)). By hand, from the
+repository root: it has its own build directory and uses the recompiled build's corpus (`build/port/recomp`, see
+[port/README.md](../../port/README.md), "Recompiled build"), so make that first. It needs llvm-mingw unpacked in
+`tools/local`, as setup leaves it. The first build compiles the whole corpus and takes several minutes.
 
 ```powershell
 .\tools\port\pk_cmake_mingw.cmd -S port -B tools/local/port/build-d012-release-clang -DPORTABLEKIT_RELEASE=ON `
@@ -104,8 +89,16 @@ faster than MSVC's, which compiles it without inlining. The package and the depl
 .\tools\port\pk_cmake_mingw.cmd --build tools/local/port/build-d012-release-clang -j8
 ```
 
-`-O1` is the installer's level too: about 3 minutes to compile here, and `-O2` is barely faster for over three times
-the compile.
+`PORTABLEKIT_RELEASE=ON` leaves out PortableKit's fallback to the checkout's game folder, so the program depends on
+nothing on this PC. A release build runs its recompiled code only: no interpreter fallback (as
+`PSPRECOMP_NO_INTERPRETER=1` does in `play_d012.ps1`). `-O1` is the Windows setup's level too: about 3 minutes to
+compile here, and `-O2` is barely faster for over three times the compile.
+
+**Clang, not Visual Studio's compiler.** The package and the deploy use `build-d012-release-clang` whenever it is
+configured (`--build-dir` picks another). An MSVC release build (`tools/port/pk_cmake.cmd`, in
+`tools/local/port/build-d012-release`) still works, but it runs the game's code about three times slower (MSVC's is
+compiled without inlining), and it cannot play online against a PC: under Proton it rounds the game's maths as Wine
+does, not as the PC does, so a battle refuses it ([setup.md](setup.md#why-clang)).
 
 ## 4. First deploy
 

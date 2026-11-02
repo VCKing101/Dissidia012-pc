@@ -33,6 +33,7 @@
 #include <windows.h>
 #endif
 
+#if !defined(_MSC_VER)  // under MSVC, <cmath>'s own declarations (d012_math.cpp)
 extern "C" {
 float sinf(float);
 float cosf(float);
@@ -40,6 +41,7 @@ float asinf(float);
 float log2f(float);
 float exp2f(float);
 }
+#endif
 
 namespace d012::math_check {
 namespace {

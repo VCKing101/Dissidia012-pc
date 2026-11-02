@@ -7,7 +7,9 @@
 // part two copies of a network battle sooner or later (docs/port/
 // communication-mode.md, section 13). Defined here, in the program itself,
 // they take the place of the C runtime's for all of its code, and give the
-// same bits wherever the program runs.
+// same bits wherever the program runs. The installer's game code is compiled
+// apart from the program, into libraries that would take the C runtime's:
+// --compile-game builds this file into each of them too (sdk/d012_math.cpp).
 //
 // Each works in double precision with nothing but IEEE additions,
 // multiplications, divisions and square roots, which every machine rounds
@@ -151,6 +153,12 @@ double power_of_two(int n) { return double_of(static_cast<std::uint64_t>(n + 102
 
 } // namespace
 
+// Microsoft's compiler does not let a program define these (sinf is one of its
+// intrinsics, and its callers reach exp2f straight through ucrtbase.dll), so
+// an MSVC build keeps the C runtime's: setup.ps1 and the installer build with
+// clang, and a battle refuses a copy built with the other compiler
+// (d012_comm_battle.cpp).
+#if !defined(_MSC_VER)
 extern "C" {
 
 float sinf(float x) {
@@ -231,3 +239,4 @@ float exp2f(float x) {
 }
 
 } // extern "C"
+#endif

@@ -20,7 +20,8 @@
 //   toolchain/bin/clang++   llvm-mingw, trimmed (D012_TOOLCHAIN_DIR names
 //                           another; D012_RECOMPILER another recompiler)
 //   sdk/                    the three headers the game's code includes, the
-//                           two entry-point templates and dispatch-calls.txt
+//                           two entry-point templates, dispatch-calls.txt and
+//                           d012_math.cpp
 //   game-code/              the result: main.dll, overlays/*.dll, key.txt
 //
 // Steps: the three overlays and LIBSUPPREACC.PRX are read from the disc and
@@ -30,7 +31,10 @@
 // times (the dispatch-call rows of port/config/dispatch-calls.txt passed to
 // each); clang compiles every unit, in parallel, and links main.dll and one
 // library per overlay. Every library links on its own (-static): the game's
-// code reaches the program only through the corpus ABI. The result is built
+// code reaches the program only through the corpus ABI. Each also gets the
+// port's own sinf, cosf, asinf, log2f and exp2f (d012_math.cpp), so its maths
+// round alike on every machine, as the program's do; linked on its own, it
+// would take the C runtime's (docs/port/communication-mode.md, section 13). The result is built
 // in game-code.new/ and replaces game-code/ only when everything succeeded.
 //
 // key.txt is a SHA-256 over everything the code is made from (the inputs'
@@ -421,7 +425,7 @@ void check_inputs(const Paths &p) {
         throw Error("the disc image is not known; pass --iso <your ULUS10566 .iso>");
     for (const fs::path &tool : {p.recompiler, p.compiler})
         if (!fs::is_regular_file(tool, ec)) throw Error(text(tool) + " is missing; reinstall the port");
-    for (const char *name : {"corpus_module.cpp.in", "overlay_module.cpp.in", "dispatch-calls.txt"})
+    for (const char *name : {"corpus_module.cpp.in", "overlay_module.cpp.in", "dispatch-calls.txt", "d012_math.cpp"})
         if (!fs::is_regular_file(p.sdk / name, ec)) throw Error(text(p.sdk / name) + " is missing; reinstall the port");
 }
 
@@ -556,6 +560,7 @@ int run(const Options &options) {
             for (const auto &entry : fs::directory_iterator(library.generated))
                 if (entry.path().extension() == ".cpp") sources.push_back(entry.path());
             std::sort(sources.begin(), sources.end());
+            sources.push_back(p.sdk / "d012_math.cpp");
             for (const fs::path &source : sources) {
                 const fs::path object = p.work / "objects" / ("u" + std::to_string(units.size()) + ".o");
                 library.objects.push_back(object);

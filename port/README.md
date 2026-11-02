@@ -287,6 +287,11 @@ It has its own build directory and work directory, so the interpreter build abov
 | `build/port/ovl`, `build/port/prx` | Copies of the overlay ELFs and of the disc PRX that the corpora are generated from |
 | `build/port/data-recomp` | Data directory for its runs |
 
+`setup.ps1` makes this build with clang instead, in `tools/local/port/build-d012-clang` (`tools/port/pk_cmake_mingw.cmd`
+with `-DPSPRECOMP_GENERATED_OPT_LEVEL=1`, the options otherwise the same). The MSVC commands below still work, for
+Visual Studio's debugger for example, but an MSVC build cannot play online against a clang build: the game's maths
+are the port's own only under clang (docs/port/setup.md, "Why clang").
+
 ```powershell
 .\tools\port\pk_cmake.cmd -S port -B tools/local/port/build-d012-recomp -G Ninja `
     "-DD012_PORTABLEKIT_DIR=$PWD/tools/local/port/PortableKit" `
@@ -371,7 +376,7 @@ over the home network with one command. Step by step, for the owner: [docs/port/
 
 | Path | What it is |
 | --- | --- |
-| `tools/local/port/build-d012-release` | Release build directory (`PORTABLEKIT_RELEASE=ON`, the recompiled build's corpus in `build/port/recomp`) |
+| `tools/local/port/build-d012-release-clang` | Release build directory (`PORTABLEKIT_RELEASE=ON`, the recompiled build's corpus in `build/port/recomp`), with clang as `setup.ps1 -Deck` makes it; `build-d012-release` is the MSVC one |
 | `host/d012_portable.cpp` | The portable layout: with `game/EBOOT.ELF` next to the executable, `D012_GAME_DIR`, `D012_DATA_DIR` and `D012_MEMORY_STICK_DIR` default to `<folder>/game`, `<folder>/data` and `<data>/ms0`, and the interpreter is off (`PSPRECOMP_NO_INTERPRETER=1`; `D012_INTERPRETER=1` keeps it). A variable already set always wins. A release build turns the interpreter off wherever it runs |
 | `tools/port/package_deck.py` | Assembles `build/port/deck-package/Dissidia012`: the program, its DLLs, `overlays/`, licences, `game/` (EBOOT.ELF copied, disc.iso hard-linked) and `data/settings.ini` with Deck defaults if absent; never saves or mods |
 | `tools/port/deploy_deck.py` | Builds, packages and sends only what changed (SHA-256 manifest, `.deploy-manifest.json` in the destination) over Windows' OpenSSH with a key; never touches the destination's `data/`. `--local-target DIR` deploys to a local folder |

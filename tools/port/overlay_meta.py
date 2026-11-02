@@ -59,7 +59,7 @@ DEFAULT_CODE_SIZE = 4096 - HEADER_BYTES
 NAMES = {"OVL_MENU_APP.ELF": "menu", "OVL_BATTLE_APP.ELF": "battle", "OVL_EXTRA_APP.ELF": "extra",
          "LIBSUPPREACC.PRX": "suppreacc"}
 RECOMPILERS = [os.path.join(ROOT, "tools", "local", "port", build, "portablekit", "psp_recomp.exe")
-               for build in ("build-d012-recomp", "build-d012")]
+               for build in ("build-d012-clang", "build-d012-recomp", "build-d012")]
 PRX_BASE = 0x09B81000  # where port/host/d012_prx.cpp's block allocation places the PRX
 SHT_PSP_REL = 0x700000A0
 R_MIPS_32, R_MIPS_26, R_MIPS_HI16, R_MIPS_LO16 = 2, 4, 5, 6

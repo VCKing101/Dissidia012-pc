@@ -42,6 +42,10 @@
 //
 // MIT licence; see port/README.md.
 
+#if defined(_WIN32) && !defined(NOMINMAX)
+#define NOMINMAX  // <windows.h>'s min and max macros break std::min under MSVC
+#endif
+
 #include "d012_net.hpp"
 
 #include "adhoc/session.hpp"

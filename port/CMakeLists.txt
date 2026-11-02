@@ -111,7 +111,8 @@ if(D012_INSTALLER_BUILD)
     # What --compile-game needs beside the program, so bin/ is laid out as an
     # installation (the toolchain aside: D012_TOOLCHAIN_DIR, or toolchain/):
     # the recompiler, and in sdk/ the three headers the game's code includes,
-    # the two entry-point templates and the dispatch calls.
+    # the two entry-point templates, the dispatch calls and host/d012_math.cpp,
+    # which --compile-game builds into each library of the game's code.
     # A target of its own, so a new psp_recomp is copied whether or not the
     # program relinks.
     set(d012_sdk "${CMAKE_BINARY_DIR}/bin/sdk")
@@ -125,7 +126,8 @@ if(D012_INSTALLER_BUILD)
                 "${D012_PORTABLEKIT_DIR}/host/overlay_module.hpp" "${d012_sdk}/include"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "${D012_PORTABLEKIT_DIR}/host/corpus_module.cpp.in" "${D012_PORTABLEKIT_DIR}/host/overlay_module.cpp.in"
-                "${CMAKE_CURRENT_SOURCE_DIR}/config/dispatch-calls.txt" "${d012_sdk}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/config/dispatch-calls.txt"
+                "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_math.cpp" "${d012_sdk}"
         VERBATIM)
     add_dependencies(D012Native_installer_files psp_recomp D012Native)
 endif()

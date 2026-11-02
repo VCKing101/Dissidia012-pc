@@ -8,8 +8,14 @@ param(
 )
 $ErrorActionPreference = "Stop"
 $root = Resolve-Path (Join-Path $PSScriptRoot "..\..")
-$build = if ($Interpreter) { "tools/local/port/build-d012" } else { "tools/local/port/build-d012-recomp" }
+# setup.ps1 builds with clang into build-d012-clang; before it did, with Visual Studio into
+# build-d012-recomp, which still starts until setup has been run again.
+$build = if ($Interpreter) { "tools/local/port/build-d012" } else { "tools/local/port/build-d012-clang" }
 $exe = Join-Path $root "$build/bin/D012Native.exe"
+if (-not $Interpreter -and -not (Test-Path $exe)) {
+    $older = Join-Path $root "tools/local/port/build-d012-recomp/bin/D012Native.exe"
+    if (Test-Path $older) { $exe = $older }
+}
 if (-not (Test-Path $exe)) {
     # The desktop shortcut runs this hidden, so say it in a window too.
     $message = "The port is not built yet ($exe).`nRun setup.ps1 (or setup.cmd) in the repository folder first."

@@ -298,7 +298,7 @@ game's own FFmpeg libraries. It never uses the network and never runs the game's
 
 - **Installed with the setup** when you tick *Battle BGM Maker* there (about 4 MB; run the setup again to add or
   remove it): *Battle BGM Maker* in the Start menu. It works on the install's `data\mods`.
-- **Built from source:** `setup.ps1` builds it, as `tools\local\port\build-d012-recomp\bin\BgmMaker.exe`; it finds
+- **Built from source:** `setup.ps1` builds it, as `tools\local\port\build-d012-clang\bin\BgmMaker.exe`; it finds
   the checkout's `build\port\data\mods` by itself.
 - `BgmMaker.exe D:\my-data\mods` works on any mods folder, and *Open another...* picks one in the window.
 

@@ -426,12 +426,19 @@ void install(portablekit::HleRegistrar &hle) {
     // only, which may differ; a kind of mod that changes the game sets this
     // item), and the test switches that change how a fighter or a camera
     // moves. The right-stick camera's own settings may differ: each copy sends
-    // its player's (d012_camera.cpp).
+    // its player's (d012_camera.cpp). The compiler counts too: the same source
+    // built with clang and with MSVC need not round the game's maths alike
+    // (d012_math.cpp takes the C runtime's place only under clang).
     const auto env = [](const char *name) {
         const char *value = std::getenv(name);
         return std::string(value != nullptr ? value : "");
     };
     net::battle::must_match("the port's version", source_hash());
+#if defined(__clang__)
+    net::battle::must_match("the compiler the port was built with", "clang " __clang_version__);
+#elif defined(_MSC_VER)
+    net::battle::must_match("the compiler the port was built with", "MSVC " + std::to_string(_MSC_FULL_VER));
+#endif
     net::battle::must_match("mods that change the game", "");
     net::battle::must_match("the right-stick camera (D012_NO_RIGHT_STICK_CAMERA)", camera::enabled() ? "on" : "off");
     net::battle::must_match("the smooth stick (D012_NO_SMOOTH_STICK)", decomp::smooth_stick_on() ? "on" : "off");

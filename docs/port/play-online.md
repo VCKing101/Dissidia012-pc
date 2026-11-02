@@ -18,8 +18,9 @@ The pictures use example addresses; yours are your own.
 ## Host
 
 1. Open the port's menu: Esc, or L3 + R3 together on a controller. Press LB or RB (Q or W on a keyboard) until the
-   **Network** page shows. Further down the page, **Ad hoc play** must be on; it is unless you turned it off.
-2. Select **Host a session**, the first row.
+   **Network** page shows.
+2. Select **Host a session**, the first row. It also turns on **Ad hoc play** further down the page, the game's
+   wireless switch; joining does the same.
 
    ![The Network page with Host a session highlighted at the top, Join a session below it, and the row's help text at the foot](../images/online-host-start.png)
 
