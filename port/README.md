@@ -27,7 +27,7 @@ the menus to Quick Battles, with the HUD's HP bars, billboarded particles and si
 | `host/d012_dlc.cpp`, `.hpp` | DLC: one startup log line saying what DLC the game will find in `ms0:/PSP/GAME/ULUS10566`, how many files are still encrypted EDATA, and a warning for `.edat` files in a folder of another name; it only reports ([README](../README.md#downloadable-content-dlc)) |
 | `host/d012_loading_layout.cpp`, `.hpp` | The loading screen's right-half pages moved down and made shorter for the track wheel, by checked edits of the screen's layout data in memory (section 11) |
 | `host/d012_test_switches.cpp`, `.hpp` | Test switches, off by default: `D012_TEST_UNLOCK_FIGHTERS`, `D012_TEST_EX_FULL` ([docs/port/graphics-triage.md](../docs/port/graphics-triage.md)) |
-| `host/d012_crash_report.cpp` | `D012_CRASH_DUMP=<dir>`: a minidump and a symbolised stack on an unhandled exception, for diagnosis ([docs/port/quit-crash.md](../docs/port/quit-crash.md)) |
+| `host/d012_crash_report.cpp` | The crash report, always on: an unhandled exception or an abort logs the exception, its module and offset, and the stack, and writes a minidump to `data/logs/D012Native-crash.dmp` (`D012_CRASH_DUMP=<dir>`: one per run in that folder) ([docs/port/quit-crash.md](../docs/port/quit-crash.md)) |
 | `host/d012_decomp_harness.cpp`, `.hpp`, `host/d012_decomp_bgm.cpp` | Decompiled functions as native overrides, and the differential test against the recompiled originals |
 | `decomp/` | The decompiled BGM functions (C) |
 | `examples/mods/example-tones/` | An example mod: a manifest and a script that writes its generated test tones (no audio files are kept) |
@@ -143,7 +143,8 @@ The profile's own switches:
 | `D012_DECOMP_BGM=1`, `D012_DECOMP_VERIFY=1` | All twelve decompiled BGM functions in the game; the differential test of them (bgm-playlist-design.md, section 2) |
 | `D012_TEST_UNLOCK_FIGHTERS=1` | Test only: every fighter can be picked on the select screens (the unlock flags are set in the running game; an autosave keeps them, so use a copy of the data directory) |
 | `D012_TEST_EX_FULL=1` | Test only: in battle the player's EX gauge is kept full (R + square enters EX Mode; the next HP attack that lands is an EX Burst) |
-| `D012_CRASH_DUMP=<dir>` | On an unhandled exception, write `<dir>/crash_<pid>.dmp` and log the faulting stack (names from `D012Native.pdb` when the build links with `/DEBUG`) |
+| `D012_CRASH_DUMP=<dir>` | On a crash, write the minidump to `<dir>/crash_<pid>.dmp` instead of `<data>/logs/D012Native-crash.dmp` (the logged stack has names from `D012Native.pdb` when the build links with `/DEBUG`, else module+offset) |
+| `D012_TEST_CRASH=<s>[,abort]` | Test only: a thread reads address 0 (or calls `abort()`) that many seconds after start, to check the crash report |
 
 And the framework changes' off switches, each restoring the old behaviour: `D012_NO_COLOR_DOUBLING=1` (colour
 doubling), `D012_NO_PIXEL_MASK=1` (pixel mask), `D012_NO_VBLANK_CALLBACKS=1` (callbacks in the vblank waits),
@@ -314,7 +315,8 @@ In this build the portable layout always applies: `data/` beside the program hol
 (`EBOOT.ELF`, and `settings.ini` naming the player's disc image where it is) with the saves, settings and mods, as
 PortableKit lays out a data directory; `D012_GAME_DIR` is set only when a `game/` folder is there. It is a windowed
 program, so no console opens behind the game; started without one, it writes its output to
-`data/logs/D012Native.log`.
+`data/logs/D012Native.log`, unbuffered and through one open file for both streams, so a crash or a kill loses no line;
+a crash adds its report there and a minidump, `data/logs/D012Native-crash.dmp`.
 
 **The Windows setup**: `tools/port/package_installer.py --version X.Y.Z` builds the installer build
 (`tools/port/pk_cmake_mingw.cmd`), stages the folder (program, `BgmMaker.exe`, DLLs, `psp_recomp.exe`, `sdk/`,

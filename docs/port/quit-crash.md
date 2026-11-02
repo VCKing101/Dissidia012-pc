@@ -57,6 +57,14 @@ The earlier all-camera pattern was chance: 5 crashes against 5 clean camera-off 
 
 - It writes `crash_<pid>.dmp`, a minidump of every thread, with DbgHelp, which is part of Windows.
 - It logs the faulting stack with names.
+- Since 2 November 2026 (issue 7) the report is always on: without the variable the minidump goes to
+  `<data>/logs/D012Native-crash.dmp`, the exception line names the module and offset, and `abort()` is reported too.
+  Stack lines name functions only from a PDB; the release's llvm-mingw build has none, so they read
+  `D012Native.exe+0x264b74`. `tools/port/package_installer.py` keeps each release's programs in
+  `build/port/installer/symbols/<version>/`, and the image base is `0x140000000`, so
+  `llvm-symbolizer --obj=build\port\installer\symbols\0.4.0\D012Native.exe 0x140264b74` names the function.
+  Offsets in `main.dll` (the game's code, compiled on the player's PC) need that release's compile of the same disc.
+  `D012_TEST_CRASH=<seconds>[,abort]` checks the report.
 - The recompiled build now links with `/DEBUG:FULL` (`CMAKE_EXE_LINKER_FLAGS_RELEASE`), so `D012Native.pdb` sits
   next to the executable.
 

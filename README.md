@@ -109,6 +109,10 @@ or L3 + R3 on a controller, opens the port's menu. Your saves are in `data\ms0` 
 **To update:** run the new release's setup and install into the same folder. Your saves, settings and mods stay, and
 the game's code is compiled again only when the new version needs it.
 
+**If it crashes or freezes,** please [open an issue](https://github.com/VCKing101/Dissidia012-pc/issues/new/choose)
+and attach the log, `data\logs\D012Native.log` in the install folder. Starting the game again renames it to
+`D012Native-previous.log`, so attach that one if you have. A crash writes where it happened at the end of the log.
+
 You need Windows 10 or 11 (64-bit), a graphics driver with Vulkan (any GPU from about 2016 on) and about 2.5 GB of
 free disk space.
 

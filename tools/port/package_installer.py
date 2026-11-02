@@ -17,6 +17,9 @@
    - a path of this machine (the checkout, the user's home folder) in the port's own files.
 4. Compiles tools/port/installer/dissidia012.iss with Inno Setup (tools/local/innosetup/ISCC.exe) and writes
    SHA256SUMS beside the setup.
+5. Keeps the release's own programs in build/port/installer/symbols/<version>/ (never shipped): a player's crash
+   report names a module and an offset, and llvm-symbolizer turns them into a function with the same file
+   (docs/port/quit-crash.md).
 
 Nothing of the game is ever needed or read: the setup is made from the build and the repository alone.
 """
@@ -41,6 +44,7 @@ INSTALLER = ROOT / "tools" / "port" / "installer"
 OUT = ROOT / "build" / "port" / "installer"
 STAGE = OUT / "stage"
 DIST = OUT / "dist"
+SYMBOLS = OUT / "symbols"
 SDL3_LICENSE = ROOT / "tools" / "local" / "port-deps" / "sdl3" / "SDL3-3.4.18" / "LICENSE.txt"
 # atracdenc (LGPL-2.1, with libgha: BSD-2, and KISS FFT: BSD-3), built from its source at the commit
 # build_atracdenc.cmd names; shipped unmodified beside BgmMaker.exe, which runs it as a program of its own.
@@ -295,6 +299,14 @@ def compile_setup(version):
     print(f"  {setup} ({setup.stat().st_size / 2**20:.0f} MB), SHA-256 {digest}")
 
 
+def keep_symbols(version):
+    kept = SYMBOLS / version
+    kept.mkdir(parents=True, exist_ok=True)
+    for name in ("D012Native.exe", "BgmMaker.exe"):
+        shutil.copy2(STAGE / name, kept / name)
+    print(f"  the programs kept for crash reports in {kept}")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.strip().splitlines()[0])
     parser.add_argument("--version", required=True, help="the release's version, e.g. 0.3.0")
@@ -316,6 +328,7 @@ def main():
         check_stage(portablekit)
         print("4. compiling the setup")
         compile_setup(options.version)
+        keep_symbols(options.version)
     except PackagingError as error:
         print(f"package_installer: {error}", file=sys.stderr)
         return 1

@@ -44,8 +44,9 @@ body:
     id: logs
     attributes:
       label: Error text or log
-      description: Paste any error message or the end of the log. It will be shown as code.
-      render: text
+      description: >-
+        Drag in the log, `data\logs\D012Native.log` in the install folder, or `D012Native-previous.log` if you
+        started the game again since. A crash writes where it happened at the end of it. Paste any error message too.
   - type: checkboxes
     id: no-game-data
     attributes:
