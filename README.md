@@ -1,8 +1,8 @@
 # Dissidia 012 Duodecim Final Fantasy: native PC port and decompilation
 
-A native PC port of *Dissidia 012 Duodecim Final Fantasy* (PSP, USA release ULUS10566 v1.00 or European release ULES01505 v1.00), built by static
-recompilation on [PortableKit](https://github.com/TeamGDB/PortableKit), together with a matching decompilation of the
-game's executable and overlays.
+A native PC port of *Dissidia 012 Duodecim Final Fantasy* (PSP, USA release ULUS10566 or European release ULES01505,
+v1.00), built by static recompilation on [PortableKit](https://github.com/TeamGDB/PortableKit), together with a
+matching decompilation of the game's executable and overlays.
 
 - **The port** (`port/`) recompiles the game's MIPS code to C++ and runs it on PortableKit's re-implemented PSP
   kernel, system modules and Vulkan renderer. Decompiled C replaces recompiled functions where an enhancement needs
@@ -181,7 +181,7 @@ spimdisasm and Ghidra with the Allegrex extension); see [getting started](docs/d
 
 The game's own DLC, its music packs and costumes, works in the port once you add it yourself. This project does not
 include or link to any. Put the DLC's files in a folder named after your disc in your memory stick folder:
-**`ULUS10566`** for the USA disc, **`ULES01505`** for the European disc. For the USA disc:
+**`ULUS10566`** for the USA disc, **`ULES01505`** for the European disc.
 
 | Installed with | Put the files in |
 | --- | --- |
@@ -189,8 +189,9 @@ include or link to any. Put the DLC's files in a folder named after your disc in
 | `setup.ps1` (from source) | `build\port\data\ms0\PSP\GAME\ULUS10566\` |
 | The Steam Deck package | `data/ms0/PSP/GAME/ULUS10566/` in its folder |
 
-Make the `GAME` and `ULUS10566` (or `ULES01505`) folders if they are not there. The files go straight in that folder
-(`.edat` files with names like `8c0b30f1.edat`, and a `PARAM.PBP`), not in another folder inside it.
+With the European disc, the last folder is `ULES01505` instead. Make the `GAME` folder and that one if they are not
+there. The files go straight in it (`.edat` files with names like `8c0b30f1.edat`, and a `PARAM.PBP`), not in another
+folder inside it.
 
 - **The folder's name matters.** The game reads DLC only from the folder named after your disc. A copy with the other
   release's name has to be renamed, or the game never sees it.
