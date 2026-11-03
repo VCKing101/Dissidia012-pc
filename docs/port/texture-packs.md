@@ -39,7 +39,8 @@ shows the folder in Explorer.
 ## 2. What is supported
 
 - **`textures.ini`**, in the sections PPSSPP defined:
-  - `[options]`: `hash` (`xxh64` or `xxh32`; required), `ignoreAddress`, `reduceHash`, `ignoreMipmap`,
+  - `[options]`: `hash` (`xxh64`, `xxh32`, or `quick`, matched by picture: section 4; required), `ignoreAddress`,
+    `reduceHash`, `ignoreMipmap`,
     `skipLastDXT1Blocks128x64`, `skipLastDXT1Blocks128x128`.
   - `[hashes]`: `key = image`, the image's path relative to the pack. An empty image keeps the game's texture.
   - `[hashranges]`, `[reducehashranges]`, `[filtering]` (`nearest`, `linear` or `auto` per key).
@@ -55,7 +56,6 @@ Not supported yet:
 - `.dds`, `.ktx2` and `.zim` images (some newer PPSSPP packs use them): the ini loads, those images fail, and the
   game's own textures are drawn.
 - Zipped packs (`textures.zip`): unpack them first. The import says so.
-- `hash = quick`, PPSSPP's first hash: the pack does not load.
 
 ## 3. How replacement behaves
 
@@ -75,7 +75,47 @@ Not supported yet:
 - **Same texture, different places:** the game often loads one texture at different addresses in different scenes.
   Packs with `ignoreAddress = true` (what the dump writes) match it everywhere.
 
-## 4. Making a pack
+## 4. Packs made with `hash = quick`
+
+PPSSPP's first hash, `quick`, is not computed here, and older packs use it, a community HD pack for this game among
+them. A key's first 16 digits, the texture's size and palette, are the same with any hash; only the last
+8, the hash of the pixels, differ. So the port finds each texture's image by picture:
+
+1. **When the pack loads**, every image it names is shrunk to a 16x16 signature and a thumbnail of at most 64
+   pixels. This is saved, so only new or changed images are read again (2,116 images took 5 to 30 seconds the
+   first time, depending on the disk; the game runs meanwhile).
+2. **The first time the game draws a texture** the pack's keys do not cover, a background thread compares it with
+   the images of its shape whose key's first half is its own or zero: the four closest signatures, then their
+   thumbnails. The game's texture is drawn until then; a match appears a frame or two later.
+3. **A match is taken only when it is clear**: it scores below 45 (colour difference where both are solid, plus
+   the share of pixels solid in only one), the next image is at least 1.7 times further off or is the same picture,
+   and it is not a recolour (another costume's colours: at most 8% of the blurred picture may differ in hue).
+   Anything else keeps the game's own texture, as PPSSPP would.
+4. **Matches are kept** in `textures\.matched\<pack id>.ini` in the data folder, as a `textures.ini` in the port's
+   own keys, with the textures that matched nothing under `[unmatched]`. The next session uses them at once.
+   Delete the file to match everything again. A match made for a key with no address or palette half applies to
+   the texture at any address, or in any palette, as such keys do in the format.
+
+`D012_TRACE_TEXTURE_PACK=1` logs each comparison with its scores:
+
+```text
+[texpack] textures.ini uses hash = quick: 2324 keys are matched to the game's textures by picture
+[texpack] matching by picture: 2116 images ready (2116 read in 5.0 s, 10 unreadable)
+[texpack] 00000000fe215bc66a68ded1 256x256 matched characters/cecil/cecilmenuport.png (12.5, next 93.1, alike 93.9, recoloured 0%)
+[texpack] 00000000e451fb3aa01e08e7 128x128 not matched: closest characters/lightning/lightningbattleport.png (41.6, next 70.7, alike 67.1, recoloured 11%)
+```
+
+The last line of that example is Lightning's portrait in her other colours, which the pack has no image for.
+`D012_NO_QUICK_MATCH=1` refuses quick packs, as before.
+
+**How the limits were set:** a community HD pack (2,326 keys, 2,116 images) against 622 textures dumped from the menus
+and Quick Battles at the Old Chaos Shrine. Every one of the 64 textures matched was checked by eye and was right; the
+closest wrong candidates had a next image at most 1.26 times further off. Correct matches it misses: some logos and
+low-contrast stage textures with a near twin in the pack (they keep the game's texture). The fan-made Naofumi costume
+pack (5 keys, no `ignoreAddress`) matched all 5 with scores under 1. Not tried: other quick packs, story mode, the
+world map, the Steam Deck.
+
+## 5. Making a pack
 
 1. Open the menu, go to **Video**, and turn on **Dump textures**. It is off again each time the game starts, so a
    dump left on cannot fill the disk unnoticed.
@@ -116,7 +156,7 @@ and 8 for the hash of its pixels. Two things catch pack makers out:
 - **The same picture with another palette is another texture.** Indexed textures mix their palette into the key,
   so a recoloured variant (a costume, a team colour) needs its own image.
 
-## 5. Checking a pack
+## 6. Checking a pack
 
 Start the game with `D012_TRACE_TEXTURE_PACK=1` set. The log then lists each texture the game uses, the first time
 it is drawn, with its address, size, format, key and whether the pack has an image for it:
@@ -129,7 +169,7 @@ it is drawn, with its address, size, format, key and whether the pack has an ima
 [texpack] frame 1028: uploaded title/title.png (21888 KiB with mips)
 ```
 
-`(not in the pack)` on a texture you meant to replace usually means a second key (section 4) or another palette.
+`(not in the pack)` on a texture you meant to replace usually means a second key (section 5) or another palette.
 `cannot use <image>` means the image is missing or not a PNG. Every 60 frames the log also says how many draws
 were replaced and how much GPU memory the images use.
 
@@ -148,7 +188,7 @@ Setting a variable:
 - **From source:** set it in PowerShell (`$env:D012_TRACE_TEXTURE_PACK = "1"`) before `tools\port\play_d012.ps1`,
   or pass `--env NAME=VALUE` to `tools/port/run_d012.py`.
 
-## 6. Tested
+## 7. Tested
 
 On Windows, with the clang build (1 November 2026): a pack made from a dump of the title screen, with its images
 four times the size, replaced the whole title screen; a pack of four-times images of everything a Quick Battle at the
