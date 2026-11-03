@@ -61,7 +61,7 @@ TOOLCHAIN_BIN = ["clang.exe", "clang++.exe", "clang-target-wrapper.exe", "ld.lld
 # A program without the game's code is about 8 MB; with the main corpus linked in it was 120 MB.
 MAX_PROGRAM_BYTES = 30 * 1024 * 1024
 FORBIDDEN_NAMES = re.compile(r"(^eboot|\.iso$|\.cso$|\.zso$|\.pbp$|\.prx$|\.elf$|\.ovl$|^param\.sfo$|^data\.bin$|"
-                             r"^umd_data|^generated_unit|^generated_registry|^ovl0[0-9a-f]{7}_|ulus10566|"
+                             r"^umd_data|^generated_unit|^generated_registry|^ovl0[0-9a-f]{7}_|ulus10566|ules01505|"
                              r"^game-code|^dissidia\.bin$)", re.I)
 
 
