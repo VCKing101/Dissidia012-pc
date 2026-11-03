@@ -1,8 +1,8 @@
 # Dissidia 012 Duodecim Final Fantasy: native PC port and decompilation
 
-A native PC port of *Dissidia 012 Duodecim Final Fantasy* (PSP, USA release ULUS10566 v1.00), built by static
-recompilation on [PortableKit](https://github.com/TeamGDB/PortableKit), together with a matching decompilation of the
-game's executable and overlays.
+A native PC port of *Dissidia 012 Duodecim Final Fantasy* (PSP, USA release ULUS10566 or European release ULES01505,
+v1.00), built by static recompilation on [PortableKit](https://github.com/TeamGDB/PortableKit), together with a
+matching decompilation of the game's executable and overlays.
 
 - **The port** (`port/`) recompiles the game's MIPS code to C++ and runs it on PortableKit's re-implemented PSP
   kernel, system modules and Vulkan renderer. Decompiled C replaces recompiled functions where an enhancement needs
@@ -10,7 +10,8 @@ game's executable and overlays.
 - **The matching decompilation** (`src/`, `include/`, `config/`, `tools/`) rebuilds the decrypted executable and all
   three overlays byte for byte with the original compilers, and is the reference for what the original code does.
 
-**You need your own legally obtained copy of the game (USA ULUS10566); no game data is included or distributed.**
+**You need your own legally obtained copy of the game (USA ULUS10566 or Europe ULES01505); no game data is included or
+distributed.**
 
 ## Current state
 
@@ -118,7 +119,8 @@ Steam Deck hosting are untested.
 **1. Download** `Dissidia012-PC-Setup-<version>.exe` from the
 [latest release](https://github.com/VCKing101/Dissidia012-pc/releases). Nothing else needs to be installed first.
 
-**2. Have your game ready:** your own USA disc image (**ULUS10566**), as an `.iso` file.
+**2. Have your game ready:** your own USA disc image (**ULUS10566**) or European disc image (**ULES01505**), as an
+`.iso` file. The Japanese and Asian releases do not work.
 
 **3. Run the setup.** It is not code-signed, so Windows may say "Windows protected your PC": choose **More info**,
 then **Run anyway**. The wizard asks where to install (no administrator rights needed) and for your ISO, then sets the
@@ -178,8 +180,8 @@ spimdisasm and Ghidra with the Allegrex extension); see [getting started](docs/d
 ## Downloadable content (DLC)
 
 The game's own DLC, its music packs and costumes, works in the port once you add it yourself. This project does not
-include or link to any. Put the DLC's files in a folder named **`ULUS10566`** (the USA game's id) in your memory
-stick folder:
+include or link to any. Put the DLC's files in a folder named after your disc in your memory stick folder:
+**`ULUS10566`** for the USA disc, **`ULES01505`** for the European disc.
 
 | Installed with | Put the files in |
 | --- | --- |
@@ -187,11 +189,12 @@ stick folder:
 | `setup.ps1` (from source) | `build\port\data\ms0\PSP\GAME\ULUS10566\` |
 | The Steam Deck package | `data/ms0/PSP/GAME/ULUS10566/` in its folder |
 
-Make the `GAME` and `ULUS10566` folders if they are not there. The files go straight in `ULUS10566` (`.edat` files
-with names like `8c0b30f1.edat`, and a `PARAM.PBP`), not in another folder inside it.
+With the European disc, the last folder is `ULES01505` instead. Make the `GAME` folder and that one if they are not
+there. The files go straight in it (`.edat` files with names like `8c0b30f1.edat`, and a `PARAM.PBP`), not in another
+folder inside it.
 
-- **The folder's name matters.** The game reads DLC from `ULUS10566` only. A copy named after the European release,
-  `ULES01505`, has to be renamed, or the game never sees it.
+- **The folder's name matters.** The game reads DLC only from the folder named after your disc. A copy with the other
+  release's name has to be renamed, or the game never sees it.
 - **Music** joins the battle music list under its own game, after that game's tracks from the disc. A DLC track with
   the same title as one on the disc shows "(DLC)" after it.
 - **Costumes:** at character select, press Square (Look) to step through a character's costumes. The DLC ones are
@@ -225,8 +228,10 @@ it is. The **Texture pack** row turns packs on and off and says how many texture
 - **Packs made with PPSSPP's older `hash = quick`** are matched to the game's textures by
   picture: each texture is compared with the pack's images the first time it is drawn, takes the one that clearly
   matches, and keeps it for next time. A texture with no clear match keeps the game's own picture.
+- **Use `ULUS10566` with the European disc too.** Its textures are the same as the USA disc's.
 - **Packs for another release** of the game load only if their `[games]` section lists `ULUS10566`, and images of
-  text made for that release may not match.
+  text made for that release may not match. A pack made for the European release has the same images, but its
+  `[games]` section must still list `ULUS10566`.
 - **A replaced texture appears a frame late** the first time it is drawn (two or three frames for 2048x2048
   images), while its image is decoded; after that it is replaced at once.
 - **To check a pack:** start the game with `D012_TRACE_TEXTURE_PACK=1` set; the log lists each texture the game

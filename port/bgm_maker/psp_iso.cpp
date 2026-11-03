@@ -281,14 +281,14 @@ bool read_music(Image &image, Music &m, std::string &error) {
     const auto package = image.files.find(kPackage);
     const auto info = image.files.find(kPackageInfo);
     if (package == image.files.end() || info == image.files.end()) {
-        error = "it has no PSP_GAME/USRDIR/DATA/PACKAGE.BIN; is it Dissidia 012 (ULUS10566)?";
+        error = "it has no PSP_GAME/USRDIR/DATA/PACKAGE.BIN; is it Dissidia 012?";
         return false;
     }
     m.info = image.file_data(info->second);
     const auto main_entry = package_entry(m.info, kMainArchive);
     const auto lang_entry = package_entry(m.info, kLangArchive);
     if (!main_entry || !lang_entry) {
-        error = "its package has no main archives; is it Dissidia 012 (ULUS10566)?";
+        error = "its package has no main archives; is it Dissidia 012?";
         return false;
     }
     m.main_entry = *main_entry;
@@ -972,7 +972,7 @@ bool check_retail(const std::filesystem::path &iso, const Progress &progress, st
         return false;
     }
     if (size != kRetailSize) {
-        error = "it is " + std::to_string(size) + " bytes, but a clean dump of Dissidia 012 (USA, ULUS10566 v1.00) is " +
+        error = "it is " + std::to_string(size) + " bytes, but a clean dump of Dissidia 012 (USA or Europe, v1.00) is " +
                 std::to_string(kRetailSize) + " (Redump); pick the original, not a trimmed or patched copy";
         return false;
     }
@@ -999,9 +999,9 @@ bool check_retail(const std::filesystem::path &iso, const Progress &progress, st
         error = "reading it stopped early";
         return false;
     }
-    if (sha.hex() != kRetailSha1) {
-        error = "its SHA-1 is not the clean dump's (Redump): it was patched or is another version. "
-                "Pick the original Dissidia 012 (USA) ISO";
+    if (const std::string sha1 = sha.hex(); std::find(kRetailSha1.begin(), kRetailSha1.end(), sha1) == kRetailSha1.end()) {
+        error = "its SHA-1 is not a clean dump's (Redump): it was patched or is another version. "
+                "Pick the original Dissidia 012 ISO (USA or Europe)";
         return false;
     }
     return true;

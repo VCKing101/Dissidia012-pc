@@ -344,7 +344,7 @@ void App::psp_section() {
     const PspPlan &plan = *psp_plan_;
 
     ImGui::PushTextWrapPos(0.0f);
-    widgets::muted("Makes a copy of your Dissidia 012 ISO (USA) with the battle music of every mod that is on in the mods "
+    widgets::muted("Makes a copy of your Dissidia 012 ISO (USA or Europe) with the battle music of every mod that is on in the mods "
                    "folder added to the game's own list, for PPSSPP or a PSP with custom firmware. Your ISO is not changed. "
                    "The game's list has no series, so each track is named \"<short name> - <title>\" (the short name is "
                    "set on the Music step).");

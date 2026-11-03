@@ -1,0 +1,561 @@
+From c514357fd284f1e0a6a2cce814f657baf1d855c3 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Tue, 3 Nov 2026 13:57:10 +1030
+Subject: [PATCH] Profile: other regions' discs of the same executable
+ (RegionRelease)
+
+A profile can list another region's disc that holds its executable byte for
+byte in its own encrypted EBOOT.BIN. The installer takes it and decrypts it
+to the same executable, so the same corpus runs it. At start the framework
+reads the disc id from the image; the save screens and save transfers use
+that release's save folders, and the interface names the disc it is.
+Textures and the ad hoc product code stay the profile's own.
+---
+ docs/PROFILE_GUIDE.md                   |  2 ++
+ host/install/executable_preparation.cpp |  6 ++--
+ host/install/executable_preparation.hpp |  4 +--
+ host/install/installer.cpp              | 39 ++++++++++++++++----
+ host/install/installer.hpp              |  9 ++++-
+ host/install/installer_dialogs.cpp      |  6 ++--
+ host/main.cpp                           | 11 +++++-
+ host/profile.cpp                        | 48 +++++++++++++++++++++++++
+ host/profile.hpp                        | 38 ++++++++++++++++++++
+ host/save_data/save_transfer.cpp        | 14 ++++----
+ host/ui/menu.cpp                        |  2 +-
+ host/ui/setup_screens.cpp               | 13 +++----
+ tests/profile_tests.cpp                 | 22 +++++++++++-
+ tests/test_profile.cpp                  | 15 ++++++++
+ 14 files changed, 199 insertions(+), 30 deletions(-)
+
+diff --git a/docs/PROFILE_GUIDE.md b/docs/PROFILE_GUIDE.md
+index cb98c0a..6c3eaa3 100644
+--- a/docs/PROFILE_GUIDE.md
++++ b/docs/PROFILE_GUIDE.md
+@@ -54,6 +54,8 @@ Read the values off the player's own disc rather than recalling them:
+ 
+ `release_name` and `other_releases` are for the installer's refusal: the first names the supported release ("the Japanese release"), the second gives the sentence to add for a release a player is likely to have instead. Yakumo tells a player with the original PSP release, ULJM05800, that it is not the HD release.
+ 
++`region_releases` is for another region's disc that holds the same executable byte for byte in its own encrypted `EBOOT.BIN`: decrypt both and compare. Each `RegionRelease` gives that disc's id, its encrypted `EBOOT.BIN`'s `sha256` and the save folders the game names on it. The installer takes it, the same corpus runs it, and at start the framework reads the disc id from the image, so the save screens and save transfers use that release's folders. Textures and the ad hoc product code stay the profile's own. Dissidia 012's European disc, ULES01505, is the North American executable, and the game takes its disc id for its save folders from its own data.
++
+ Two fields are hooks rather than values. `register_extra_hle` adds calls this game makes that the framework does not implement, or replaces one it gets wrong for this game. `patch_loaded_image` is for per-game fixes with no better home. Both may be null, and a profile that needs neither is the goal.
+ 
+ Two more are for a port that goes further than the PSP did, and both are null until a game has earned them:
+diff --git a/host/install/executable_preparation.cpp b/host/install/executable_preparation.cpp
+index d06b605..ba89235 100644
+--- a/host/install/executable_preparation.cpp
++++ b/host/install/executable_preparation.cpp
+@@ -231,9 +231,11 @@ std::vector<std::uint8_t> prepare_executable(std::span<const std::uint8_t> eboot
+         return {eboot_bin.begin(), eboot_bin.end()};
+     }
+     const ProfileVariant *variant = find_variant_by_encrypted(eboot_sha256);
+-    if (variant == nullptr && eboot_sha256 != game().encrypted_executable_sha256)
++    // A region release's EBOOT.BIN decrypts to the profile's own executable.
++    if (variant == nullptr && eboot_sha256 != game().encrypted_executable_sha256 &&
++        find_region_release_by_encrypted(eboot_sha256) == nullptr)
+         throw psprecomp::Error("EBOOT.BIN is not the supported executable of " + std::string(game().game_title) + " (" +
+-                               game().disc_id_display + ")");
++                               supported_discs_display() + ")");
+     // The hash already pins the file; the profile names the key its tag selects.
+     const TagKeyMaterial tag{game().decryption_tag, game().decryption_key, game().decryption_key_table};
+     std::vector<std::uint8_t> executable = decrypt_executable(eboot_bin, tag, progress);
+diff --git a/host/install/executable_preparation.hpp b/host/install/executable_preparation.hpp
+index 0fdef5e..90b9b95 100644
+--- a/host/install/executable_preparation.hpp
++++ b/host/install/executable_preparation.hpp
+@@ -14,8 +14,8 @@ namespace portablekit::install {
+ // the recompiled code was generated from.
+ //
+ // This is deliberately not a general tool: it accepts only the one file whose
+-// SHA-256 is portablekit::game().encrypted_executable_sha256, handles only the header layout that
+-// file uses, and checks the result against portablekit::game().executable_sha256. Anything else is
++// SHA-256 is portablekit::game().encrypted_executable_sha256 (or a region release's, whose
++// EBOOT.BIN holds the same executable), handles only the header layout that file uses, and checks the result against portablekit::game().executable_sha256. Anything else is
+ // refused with psprecomp::Error. Only the installer calls it, with a callback
+ // that receives the bytes decrypted so far and the total.
+ [[nodiscard]] std::vector<std::uint8_t>
+diff --git a/host/install/installer.cpp b/host/install/installer.cpp
+index 41bdf27..891cc76 100644
+--- a/host/install/installer.cpp
++++ b/host/install/installer.cpp
+@@ -125,16 +125,24 @@ Inspection inspect(const std::filesystem::path &path) {
+     if (disc_id == sfo.end())
+         throw InstallError("\"" + name + "\" has no disc id in PSP_GAME/PARAM.SFO, so it is not an image " + std::string(portablekit::game().project_name) + " "
+                            "supports.");
+-    if (disc_id->second != portablekit::game().disc_id) {
++    if (!portablekit::is_supported_disc_id(disc_id->second)) {
+         const auto title = sfo.find("TITLE");
+         std::string what = "\"" + name + "\" is ";
+         what += title != sfo.end() && !title->second.empty() ? title->second + " (" + disc_id->second + ")"
+                                                               : "disc " + disc_id->second;
+         const GameProfile &profile = portablekit::game();
+-        what += ". " + std::string(profile.project_name) + " supports only " + std::string(profile.game_title) +
+-                (profile.release_name != nullptr ? ", " + std::string(profile.release_name) + " with disc id "
+-                                                 : std::string(", disc id ")) +
+-                profile.disc_id_display + ".";
++        std::string supported = profile.release_name != nullptr
++                                    ? std::string(profile.release_name) + " with disc id " + profile.disc_id_display
++                                    : "disc id " + std::string(profile.disc_id_display);
++        for (std::size_t i = 0; i < profile.region_releases.size(); ++i) {
++            const RegionRelease &release = profile.region_releases[i];
++            supported += i + 1u == profile.region_releases.size() ? " or " : ", ";
++            supported += release.release_name != nullptr
++                             ? std::string(release.release_name) + " with disc id " + release.disc_id_display
++                             : std::string(release.disc_id_display);
++        }
++        what += ". " + std::string(profile.project_name) + " supports only " + std::string(profile.game_title) + ", " +
++                supported + ".";
+         const auto other = std::find_if(profile.other_releases.begin(), profile.other_releases.end(),
+                                         [&](const OtherRelease &release) { return disc_id->second == release.disc_id; });
+         what += other != profile.other_releases.end() ? " " + std::string(other->note)
+@@ -142,6 +150,9 @@ Inspection inspect(const std::filesystem::path &path) {
+         throw InstallError(what);
+     }
+ 
++    const RegionRelease *region = portablekit::find_region_release(disc_id->second);
++    const char *disc_display = region != nullptr ? region->disc_id_display : portablekit::game().disc_id_display;
++
+     const auto eboot_entry = iso->find(portablekit::game().executable_path_on_disc);
+     if (!eboot_entry || eboot_entry->directory)
+         throw InstallError("\"" + name + "\" has the right disc id but no PSP_GAME/SYSDIR/EBOOT.BIN. The image is "
+@@ -155,16 +166,18 @@ Inspection inspect(const std::filesystem::path &path) {
+     // the profile agrees to run without knowing it.
+     const bool known = eboot_sha256 == portablekit::game().encrypted_executable_sha256 ||
+                        portablekit::find_variant_by_encrypted(eboot_sha256) != nullptr ||
++                       portablekit::find_region_release_by_encrypted(eboot_sha256) != nullptr ||
+                        (plain && portablekit::is_known_executable(eboot_sha256));
+     if (!known && plain && portablekit::game().run_unknown_executables)
+         std::cerr << "warning: " << name << " holds an edition of " << portablekit::game().game_title
+                   << " this build does not know (executable SHA-256 " << eboot_sha256
+                   << "); it will run under the interpreter\n";
+     else if (!known)
+-        throw InstallError("\"" + name + "\" is " + portablekit::game().game_title + " (" + portablekit::game().disc_id_display +
++        throw InstallError("\"" + name + "\" is " + portablekit::game().game_title + " (" + disc_display +
+                            "), but its executable is not the version " + std::string(portablekit::game().project_name) + " supports. The image may be patched, "
+                            "modified or damaged; make it again from an unmodified disc.");
+     result.info.size_bytes = iso->size_bytes();
++    result.info.disc_id_display = disc_display;
+     return result;
+ }
+ 
+@@ -266,6 +279,20 @@ void install_checked(const std::filesystem::path &image, ImageStorage storage, c
+ 
+ ImageInfo check_image(const std::filesystem::path &path) { return inspect(path).info; }
+ 
++std::optional<std::string> disc_id_of(const std::filesystem::path &image) {
++    try {
++        IsoImage iso(image);
++        const auto entry = iso.find(portablekit::game().param_sfo_path_on_disc);
++        if (!entry || entry->directory) return std::nullopt;
++        const auto sfo = parse_sfo(read_file(iso, *entry));
++        const auto disc_id = sfo.find("DISC_ID");
++        if (disc_id == sfo.end()) return std::nullopt;
++        return disc_id->second;
++    } catch (const std::exception &) {
++        return std::nullopt;
++    }
++}
++
+ void install(const std::filesystem::path &image, ImageStorage storage, const std::filesystem::path &data_dir,
+              const ProgressFn &progress) {
+     try {
+diff --git a/host/install/installer.hpp b/host/install/installer.hpp
+index 896f5ef..933da33 100644
+--- a/host/install/installer.hpp
++++ b/host/install/installer.hpp
+@@ -37,13 +37,20 @@ enum class ImageStorage {
+ 
+ struct ImageInfo {
+     std::uint64_t size_bytes{};
++    // The disc it is, as it is printed: the profile's own or a region
++    // release's (RegionRelease).
++    const char *disc_id_display = nullptr;
+ };
+ 
+-// Checks that path is an unmodified image of the supported release: the disc
++// Checks that path is an unmodified image of a supported release: the disc
+ // id in PARAM.SFO and the hash of the encrypted executable. Throws
+ // InstallError saying plainly what is wrong otherwise.
+ ImageInfo check_image(const std::filesystem::path &path);
+ 
++// DISC_ID in an image's PSP_GAME/PARAM.SFO; nothing when the image or the
++// file cannot be read. Checks nothing else.
++[[nodiscard]] std::optional<std::string> disc_id_of(const std::filesystem::path &image);
++
+ // Called with the bytes done so far and the total; stage names the step.
+ using ProgressFn = std::function<void(const std::string &stage, std::uint64_t done, std::uint64_t total)>;
+ 
+diff --git a/host/install/installer_dialogs.cpp b/host/install/installer_dialogs.cpp
+index 7d53cb0..d691458 100644
+--- a/host/install/installer_dialogs.cpp
++++ b/host/install/installer_dialogs.cpp
+@@ -65,13 +65,13 @@ public:
+         // renderer failed), so these dialogs stand in for them.
+         (void)data_dir;
+         const std::string text = std::string(portablekit::game().project_name) + " needs your own copy of " +
+-                                 portablekit::game().game_title + " (" + portablekit::game().disc_id_display +
++                                 portablekit::game().game_title + " (" + portablekit::supported_discs_display() +
+                                  ") as a disc image (.iso).\n\n"
+                                  "Choose the image next, in Android's file picker. " +
+                                  portablekit::game().project_name +
+                                  " copies it into its own storage, checks it and prepares the game from it.";
+ #else
+-        std::string text = std::string(portablekit::game().project_name) + " needs your own copy of " + portablekit::game().game_title + " (" + portablekit::game().disc_id_display +
++        std::string text = std::string(portablekit::game().project_name) + " needs your own copy of " + portablekit::game().game_title + " (" + portablekit::supported_discs_display() +
+                            ") as a disc image (.iso).\n\n"
+                            "Choose the image next. " + std::string(portablekit::game().project_name) + " checks it, prepares the game's executable from it and "
+                            "copies it into its data folder, so the game keeps working if you move or delete the "
+@@ -145,7 +145,7 @@ public:
+ #endif
+         const std::uint64_t tenths = (info.size_bytes + 50'000'000u) / 100'000'000u;
+         const std::string size = std::to_string(tenths / 10u) + "." + std::to_string(tenths % 10u) + " GB";
+-        const std::string text = "The image is " + std::string(portablekit::game().game_title) + " (" + portablekit::game().disc_id_display +
++        const std::string text = "The image is " + std::string(portablekit::game().game_title) + " (" + info.disc_id_display +
+                                  ") and passed its checks.\n\n"
+                                  "Copy it into " + std::string(portablekit::game().project_name) + "'s data folder (recommended, " +
+                                  size +
+diff --git a/host/main.cpp b/host/main.cpp
+index 5455ce7..1dddf0e 100644
+--- a/host/main.cpp
++++ b/host/main.cpp
+@@ -239,7 +239,7 @@ std::optional<GameFiles> locate_game(const Options &options) {
+         if (!ui) {
+             std::cerr << "No game data found in " << install::path_to_utf8(data_dir)
+                       << (checkout_game_dir.empty() ? std::string() : " or " + checkout_game_dir.string()) << ".\n"
+-                      << "Set up from your disc image of " << portablekit::game().game_title << " (" << portablekit::game().disc_id_display
++                      << "Set up from your disc image of " << portablekit::game().game_title << " (" << portablekit::supported_discs_display()
+                       << ") with:\n  " << portablekit::game().app_name << " --install /path/to/image.iso\n";
+             return std::nullopt;
+         }
+@@ -386,6 +386,15 @@ int main(int argc, char **argv) {
+         }
+         if (!std::filesystem::is_regular_file(executable))
+             throw psprecomp::Error("Missing " + executable.string() + " (run scripts/prepare_game.sh)");
++        // Which region's disc this is (RegionRelease): the executable is the
++        // same, but the game names its saves and downloads by its disc id.
++        if (!paths.disc_image.empty())
++            if (const auto disc_id = portablekit::install::disc_id_of(paths.disc_image)) {
++                const portablekit::RegionRelease *release = portablekit::find_region_release(*disc_id);
++                portablekit::set_active_region_release(release);
++                if (release != nullptr)
++                    std::cout << "Release:    " << release->release_name << " (" << release->disc_id_display << ")\n";
++            }
+ 
+         const std::string sha256 = psprecomp::sha256_file(executable);
+         // Which edition this is decides which corpus may run it: code
+diff --git a/host/profile.cpp b/host/profile.cpp
+index 5a603c6..a081528 100644
+--- a/host/profile.cpp
++++ b/host/profile.cpp
+@@ -66,4 +66,52 @@ std::span<const std::uint32_t> active_overlay_slots() {
+     return game().overlay_slots;
+ }
+ 
++namespace {
++const RegionRelease *g_active_region_release = nullptr;
++}
++
++const RegionRelease *find_region_release(std::string_view disc_id) {
++    for (const RegionRelease &release : game().region_releases)
++        if (release.disc_id != nullptr && disc_id == release.disc_id) return &release;
++    return nullptr;
++}
++
++const RegionRelease *find_region_release_by_encrypted(std::string_view eboot_sha256) {
++    for (const RegionRelease &release : game().region_releases)
++        if (release.encrypted_executable_sha256 != nullptr && eboot_sha256 == release.encrypted_executable_sha256)
++            return &release;
++    return nullptr;
++}
++
++bool is_supported_disc_id(std::string_view disc_id) {
++    return disc_id == game().disc_id || find_region_release(disc_id) != nullptr;
++}
++
++std::string supported_discs_display() {
++    std::string text = game().disc_id_display;
++    const auto releases = game().region_releases;
++    for (std::size_t i = 0; i < releases.size(); ++i)
++        text += std::string(i + 1u == releases.size() ? " or " : ", ") + releases[i].disc_id_display;
++    return text;
++}
++
++void set_active_region_release(const RegionRelease *release) { g_active_region_release = release; }
++const RegionRelease *active_region_release() { return g_active_region_release; }
++
++const char *active_disc_id() {
++    return g_active_region_release != nullptr ? g_active_region_release->disc_id : game().disc_id;
++}
++
++const char *active_disc_id_display() {
++    return g_active_region_release != nullptr ? g_active_region_release->disc_id_display : game().disc_id_display;
++}
++
++const char *active_save_game_name() {
++    return g_active_region_release != nullptr ? g_active_region_release->save_game_name : game().save_game_name;
++}
++
++std::span<const SaveFolder> active_save_folders() {
++    return g_active_region_release != nullptr ? g_active_region_release->save_folders : game().save_folders;
++}
++
+ } // namespace portablekit
+diff --git a/host/profile.hpp b/host/profile.hpp
+index ddcf7eb..38782dc 100644
+--- a/host/profile.hpp
++++ b/host/profile.hpp
+@@ -62,6 +62,21 @@ struct TiltControls {
+     const char *note;
+ };
+ 
++// Another region's disc of the same game that holds the same executable, byte
++// for byte, in its own encrypted EBOOT.BIN (Dissidia 012's European disc
++// against its North American one). The installer takes it like the profile's
++// own release and the same corpus runs it. A game that reads its own disc id
++// from its data names its saves and downloads by this disc id, so they follow
++// it; textures and the ad hoc product code stay the profile's.
++struct RegionRelease {
++    const char *disc_id;                     // DISC_ID in its PARAM.SFO, e.g. "ULES01505"
++    const char *disc_id_display;             // the same, as it is printed
++    const char *release_name;                // "the European release"
++    const char *encrypted_executable_sha256; // its EBOOT.BIN, which decrypts to executable_sha256
++    const char *save_game_name;              // its saves' main folder, e.g. "ULES01505"
++    std::span<const SaveFolder> save_folders;
++};
++
+ // Another release of the game than the one a port supports, and what the
+ // installer tells a player who hands it that one.
+ struct OtherRelease {
+@@ -153,6 +168,9 @@ struct GameProfile {
+     // Which release that is, as the installer names it when it is handed
+     // another one: "the Japanese release". Null: it is named by disc id alone.
+     const char *release_name = nullptr;
++    // Other regions' discs of the same executable (see RegionRelease), which
++    // the installer takes as well. Empty: only the disc above.
++    std::span<const RegionRelease> region_releases = {};
+     // Releases a player may mistake for it. The installer says the note of
+     // the one it was handed, instead of "Other releases and regions are not
+     // supported."
+@@ -316,6 +334,26 @@ using PatchImageHook = void (*)(psprecomp::Runtime &, const psprecomp::Elf32Imag
+ [[nodiscard]] ExtraHleHook active_register_extra_hle();
+ [[nodiscard]] PatchImageHook active_patch_loaded_image();
+ [[nodiscard]] std::span<const std::uint32_t> active_overlay_slots();
++
++// --- Regions (RegionRelease) ------------------------------------------------
++// The region release with this disc id, or whose encrypted EBOOT.BIN has this
++// SHA-256; null for the profile's own disc and for an unknown one.
++[[nodiscard]] const RegionRelease *find_region_release(std::string_view disc_id);
++[[nodiscard]] const RegionRelease *find_region_release_by_encrypted(std::string_view eboot_sha256);
++// True for the profile's own disc id and the region releases'.
++[[nodiscard]] bool is_supported_disc_id(std::string_view disc_id);
++// Every supported disc, for the player: "ULUS-10566 or ULES-01505".
++[[nodiscard]] std::string supported_discs_display();
++// The disc running now, chosen by host/main.cpp from the disc image's
++// PARAM.SFO; null for the profile's own (and before it is known).
++void set_active_region_release(const RegionRelease *release);
++[[nodiscard]] const RegionRelease *active_region_release();
++// The running disc's id and save folders: the profile's own or the active
++// region release's.
++[[nodiscard]] const char *active_disc_id();
++[[nodiscard]] const char *active_disc_id_display();
++[[nodiscard]] const char *active_save_game_name();
++[[nodiscard]] std::span<const SaveFolder> active_save_folders();
+ // GameProfile::extra_buttons, or 0 with <prefix>_NO_EXTRA_BUTTONS set.
+ [[nodiscard]] std::uint32_t active_extra_buttons();
+ 
+diff --git a/host/save_data/save_transfer.cpp b/host/save_data/save_transfer.cpp
+index c2cc015..eabc064 100644
+--- a/host/save_data/save_transfer.cpp
++++ b/host/save_data/save_transfer.cpp
+@@ -28,11 +28,11 @@ constexpr std::size_t kFileListNameSize = 13u;
+ // The folders an export carries. A profile marks the ones worth carrying:
+ // a cache the game rebuilds is left out, being several times the size of the
+ // rest.
+-std::string_view game_name_view() { return portablekit::game().save_game_name; }
++std::string_view game_name_view() { return portablekit::active_save_game_name(); }
+ 
+ std::vector<std::string_view> names_of_save_folders(bool exported_only) {
+     std::vector<std::string_view> names;
+-    for (const SaveFolder &folder : portablekit::game().save_folders)
++    for (const SaveFolder &folder : portablekit::active_save_folders())
+         if (!exported_only || folder.exported) names.emplace_back(folder.name);
+     return names;
+ }
+@@ -42,7 +42,7 @@ std::vector<std::string_view> all_save_names() { return names_of_save_folders(fa
+ 
+ // A folder the save-data utility writes through, which lists its data file.
+ bool is_exported_save_name(std::string_view name) {
+-    for (const SaveFolder &folder : portablekit::game().save_folders)
++    for (const SaveFolder &folder : portablekit::active_save_folders())
+         if (name == folder.name) return folder.exported;
+     return true;
+ }
+@@ -145,18 +145,18 @@ bool same_folder(const fs::path &a, const fs::path &b) {
+ } // namespace
+ 
+ bool is_game_save_name(std::string_view folder_name) {
+-    for (const SaveFolder &folder : portablekit::game().save_folders)
++    for (const SaveFolder &folder : portablekit::active_save_folders())
+         if (folder_name == folder.name) return true;
+     return false;
+ }
+ 
+ std::string save_label(std::string_view folder_name) {
+-    for (const SaveFolder &folder : portablekit::game().save_folders)
++    for (const SaveFolder &folder : portablekit::active_save_folders())
+         if (folder_name == folder.name) return folder.description;
+     return std::string(folder_name);
+ }
+ 
+-std::string_view game_name() { return portablekit::game().save_game_name; }
++std::string_view game_name() { return portablekit::active_save_game_name(); }
+ 
+ void remember_game_key(const std::string &game_name, const Block &key) {
+     if (game_name != game_name_view() || is_zero(key)) return;
+@@ -398,7 +398,7 @@ namespace {
+ bool encrypt_plain_save(const fs::path &folder, const std::string &name, const fs::path &memory_stick,
+                         std::string &error) {
+     const std::optional<Block> key = game_key();
+-    const std::string game = portablekit::game().save_game_name != nullptr ? portablekit::game().save_game_name : "";
++    const std::string game = portablekit::active_save_game_name() != nullptr ? portablekit::active_save_game_name() : "";
+     if (!savedata_keys_available() || !key || game.empty() || !name.starts_with(game)) return false;
+     const auto sfo_bytes = read_file(folder / "PARAM.SFO");
+     const auto sfo = sfo_bytes ? ParamSfo::parse(*sfo_bytes) : std::nullopt;
+diff --git a/host/ui/menu.cpp b/host/ui/menu.cpp
+index 016193d..011124a 100644
+--- a/host/ui/menu.cpp
++++ b/host/ui/menu.cpp
+@@ -1506,7 +1506,7 @@ void Menu::system() {
+     section("About");
+     info_row(portablekit::game().project_name, std::string(kBuildVersion));
+     if (*kBuildLabel != '\0') info_row("Build", kBuildLabel);
+-    info_row("Game", std::string(portablekit::game().game_title) + " (" + portablekit::game().disc_id_display + ")");
++    info_row("Game", std::string(portablekit::game().game_title) + " (" + portablekit::active_disc_id_display() + ")");
+     info_row("Data folder", data_dir);
+     if (!savedata::memory_stick().empty())
+         info_row("Saves folder", install::path_to_utf8(savedata::memory_stick() / "PSP" / "SAVEDATA"));
+diff --git a/host/ui/setup_screens.cpp b/host/ui/setup_screens.cpp
+index d440b66..1cabeff 100644
+--- a/host/ui/setup_screens.cpp
++++ b/host/ui/setup_screens.cpp
+@@ -106,7 +106,7 @@ bool SetupScreens::introduce(const fs::path &data_dir) {
+             ImGui::Dummy({0.0f, font() * 0.3f});
+             paragraph(std::string(portablekit::game().project_name) + " plays " + portablekit::game().game_title +
+                       " from your own copy of the game. It needs the disc image of the game's PSP disc, " +
+-                      portablekit::game().disc_id_display + ", as an .iso file: the PlayStation 3 release carries it.");
++                      portablekit::supported_discs_display() + ", as an .iso file: the PlayStation 3 release carries it.");
+             ImGui::Dummy({0.0f, font() * 0.4f});
+ #if defined(PORTABLEKIT_ANDROID_APP)
+             paragraph(std::string("Choose the image next, in Android's file picker. ") + portablekit::game().project_name + " copies it into its own storage (an "
+@@ -132,8 +132,9 @@ bool SetupScreens::introduce(const fs::path &data_dir) {
+             ImGui::Dummy({0.0f, font() * 0.4f});
+             paragraph("You can also drop the .iso file onto this window.", colors::kTextDim);
+ #endif
+-            layer.set_description(std::string(portablekit::game().game_title) + " (" + portablekit::game().disc_id_display +
+-                                  ") is the only release supported.");
++            layer.set_description(std::string(portablekit::game().game_title) + " (" + portablekit::supported_discs_display() +
++                                  (portablekit::game().region_releases.empty() ? ") is the only release supported."
++                                                                               : ") are the releases supported."));
+             begin_footer();
+             hints({{Control::Confirm, "Select"}, {Control::Back, "Quit"}});
+             end_panel();
+@@ -189,7 +190,7 @@ std::optional<fs::path> SetupScreens::choose_image() {
+             begin_panel("##browser", "Choose the disc image", kSubtitle, false);
+             begin_content();
+             const FileBrowser::Result result = browser.frame(back || pad_back);
+-            layer.set_description(std::string("Look for the .iso image of ") + portablekit::game().disc_id_display +
++            layer.set_description(std::string("Look for the .iso image of ") + portablekit::supported_discs_display() +
+                                   ". Removable drives and SD cards are listed next to Home.");
+             begin_footer();
+             if (layer.input_device() == InputDevice::Gamepad)
+@@ -233,7 +234,7 @@ std::optional<install::ImageStorage> SetupScreens::choose_storage(const fs::path
+             if (ImGui::IsKeyPressed(cancel, false)) return false;
+             begin_panel("##storage", "Disc image found", kSubtitle, false);
+             begin_content();
+-            paragraph(std::string(portablekit::game().game_title) + " (" + portablekit::game().disc_id_display + "), " +
++            paragraph(std::string(portablekit::game().game_title) + " (" + info.disc_id_display + "), " +
+                           human_size(info.size_bytes) + ". It passed its checks.",
+                       colors::kGood);
+             ImGui::Dummy({0.0f, font() * 0.2f});
+@@ -389,7 +390,7 @@ bool SetupScreens::offer_retry(const std::string &message) {
+             answer = button_pair("Choose another file", "Quit", first);
+             first = false;
+             layer.set_description(std::string(portablekit::game().project_name) + " supports only " + portablekit::game().game_title + ", " +
+-                                  portablekit::game().disc_id_display + ", as an unmodified, uncompressed .iso image.");
++                                  portablekit::supported_discs_display() + ", as an unmodified, uncompressed .iso image.");
+             begin_footer();
+             hints({{Control::Confirm, "Select"}, {Control::Back, "Quit"}});
+             end_panel();
+diff --git a/tests/profile_tests.cpp b/tests/profile_tests.cpp
+index 7b7d1d8..d4cdb7d 100644
+--- a/tests/profile_tests.cpp
++++ b/tests/profile_tests.cpp
+@@ -1,5 +1,7 @@
+ // Editions of a game (ProfileVariant): finding one by its executable's hash,
+-// and the hooks and overlay slots the running one sets. No game data.
++// and the hooks and overlay slots the running one sets. Other regions' discs
++// (RegionRelease): finding one, and the disc id and saves the running one
++// sets. No game data.
+ 
+ #include "profile.hpp"
+ 
+@@ -43,6 +45,24 @@ int main() {
+           "an edition that changes nothing keeps the profile's own");
+     set_active_variant(nullptr);
+ 
++    const std::string region_eboot(64, '4');
++    check(is_supported_disc_id("TEST00001") && is_supported_disc_id("TEST00002") && !is_supported_disc_id("TEST00003"),
++          "the profile's disc and its region release are supported, another disc is not");
++    check(find_region_release("TEST00001") == nullptr, "the profile's own disc is not a region release");
++    check(find_region_release_by_encrypted(region_eboot) == find_region_release("TEST00002") &&
++              find_region_release_by_encrypted(unknown) == nullptr,
++          "a region release is found by its EBOOT.BIN's hash");
++    check(supported_discs_display() == "TEST-00001 or TEST-00002", "the supported discs are listed for the player");
++    check(std::string(active_disc_id()) == "TEST00001" && std::string(active_save_game_name()) == "TEST00001" &&
++              active_save_folders().size() == 3u,
++          "before a disc is chosen, the profile's own disc id and saves apply");
++    set_active_region_release(find_region_release("TEST00002"));
++    check(std::string(active_disc_id()) == "TEST00002" && std::string(active_disc_id_display()) == "TEST-00002" &&
++              std::string(active_save_game_name()) == "TEST00002" && active_save_folders().size() == 1u,
++          "the region release's disc id and saves apply while it runs");
++    check(std::string(game().disc_id) == "TEST00001", "the profile's own disc id stays for textures and ad hoc");
++    set_active_region_release(nullptr);
++
+     if (g_failures != 0) std::printf("%d failed\n", g_failures);
+     return g_failures == 0 ? 0 : 1;
+ }
+diff --git a/tests/test_profile.cpp b/tests/test_profile.cpp
+index 21ef987..8b44667 100644
+--- a/tests/test_profile.cpp
++++ b/tests/test_profile.cpp
+@@ -33,6 +33,20 @@ constexpr ProfileVariant kVariants[] = {
+      .executable_sha256 = "3333333333333333333333333333333333333333333333333333333333333333"},
+ };
+ 
++// Another region's disc of the same executable, with its own save folders.
++constexpr SaveFolder kRegionSaveFolders[] = {
++    {"TEST00002", "Game data", true},
++};
++
++constexpr RegionRelease kRegionReleases[] = {
++    {.disc_id = "TEST00002",
++     .disc_id_display = "TEST-00002",
++     .release_name = "the other region's release",
++     .encrypted_executable_sha256 = "4444444444444444444444444444444444444444444444444444444444444444",
++     .save_game_name = "TEST00002",
++     .save_folders = kRegionSaveFolders},
++};
++
+ } // namespace
+ 
+ const GameProfile &game() {
+@@ -47,6 +61,7 @@ const GameProfile &game() {
+         .game_title = "PortableKit test game",
+         .executable_path_on_disc = "PSP_GAME/SYSDIR/EBOOT.BIN",
+         .param_sfo_path_on_disc = "PSP_GAME/PARAM.SFO",
++        .region_releases = kRegionReleases,
+         .encrypted_executable_sha256 = "",
+         .executable_sha256 = "",
+         .decryption_tag = 0u,
+-- 
+2.53.0.windows.1
+

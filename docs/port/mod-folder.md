@@ -376,7 +376,8 @@ added to the game's own battle music list, for PPSSPP or a PSP with custom firmw
   ("FFXVI - Titan Lost"). `short` is the series' short name (section 2's series table; *Short name (PSP)* in the
   Music step); without one the tool makes it from the name (`FINAL FANTASY XVI` becomes `FFXVI`). A name longer
   than 37 characters, the disc's longest, may not fit the selector's box: the section warns.
-- **The original** must be the clean USA dump the setup accepts (ULUS10566 v1.00, checked by size and SHA-1). It
+- **The original** must be a clean dump the setup accepts (USA ULUS10566 or European ULES01505, v1.00, checked by
+  size and SHA-1; the European one is accepted but not tried yet). It
   is only read, never written. The installed game's ISO is filled in for you (`settings.ini`'s `disc_image`).
 - **The new ISO** is written as `<name>.part`, then renamed; nothing is left behind if it fails or you cancel.
   Each track is encoded to ATRAC3 (132 kbps, stereo, 44.1 kHz) by atracdenc (`atracdenc.exe` beside the tool, LGPL

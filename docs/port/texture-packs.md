@@ -9,7 +9,8 @@ research on where the game's textures come from and how late a replacement appea
 ## 1. Installing a pack
 
 Put the pack's files in a folder named **`ULUS10566`** (the USA game's id) in the `textures` folder of the data
-folder, so that `textures.ini` is directly inside it:
+folder, so that `textures.ini` is directly inside it. Use that name with the European disc too: its textures are the
+same.
 
 | Installed with | Put the pack in |
 | --- | --- |

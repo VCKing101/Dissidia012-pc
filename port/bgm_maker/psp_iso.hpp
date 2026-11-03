@@ -1,7 +1,7 @@
 #pragma once
 
 // The PSP / PPSSPP export's disc side: a copy of the player's Dissidia 012
-// ISO (ULUS10566 v1.00) with tracks added to the game's own battle music
+// ISO (ULUS10566 or ULES01505 v1.00) with tracks added to the game's own battle music
 // list, for PPSSPP or a PSP with custom firmware. The track list is data:
 // bgm_entry.bin (in general_archive/main/main.bin) gets a row per track and
 // bgm_name.bin (in general_archive/main/EN/main_lang.bin) a name; both
@@ -27,9 +27,14 @@ namespace d012::psp_iso {
 
 using Bytes = std::vector<std::uint8_t>;
 
-// The clean dump the port's setup accepts (Redump).
+// The clean dumps the port's setup accepts (Redump): the USA and the European
+// disc, the same size and, but for one file's header, the same files
+// (docs/port/regions.md).
 inline constexpr std::uint64_t kRetailSize = 1754529792u;
-inline constexpr std::string_view kRetailSha1 = "ec23f5beac89312a2a25654e202ae1c997999c9e";
+inline constexpr std::array<std::string_view, 2> kRetailSha1 = {
+    "ec23f5beac89312a2a25654e202ae1c997999c9e",  // ULUS10566
+    "2e6e8b71a1f66a5ba1390fa68ea36188ac4fe2b6",  // ULES01505
+};
 // The table the game loads the rows into has room for 256 (DLC rows share it).
 inline constexpr int kTableRows = 256;
 inline constexpr std::int16_t kFirstId = 0x4000;
