@@ -110,7 +110,7 @@ Type: dirifempty; Name: "{app}"
 
 [Code]
 const
-  IsoPageText = 'Choose the .iso of your own Dissidia 012 Duodecim Final Fantasy disc (USA, ULUS10566). '
+  IsoPageText = 'Choose the .iso of your own Dissidia 012 Duodecim Final Fantasy disc (USA ULUS10566 or Europe ULES01505). '
     + 'Setup reads the game from it, decrypts its program and compiles the game''s code for your PC. '
     + 'Nothing is downloaded, and nothing made from your disc leaves your PC.';
   MinimumIsoBytes = 100000000;

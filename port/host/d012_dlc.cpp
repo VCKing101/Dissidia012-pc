@@ -1,7 +1,9 @@
 // Downloadable content: what the game will find, said once at start.
 //
-// The game reads DLC from ms0:/PSP/GAME/ULUS10566/<name hash>.edat (main
-// 0x088626AC; docs/research/character-assets.md section 7) and nothing else:
+// The game reads DLC from ms0:/PSP/GAME/<disc id>/<name hash>.edat (main
+// 0x088626AC; docs/research/character-assets.md section 7) and nothing else,
+// the disc id being the one its data names: ULUS10566, or ULES01505 on the
+// European disc (docs/port/regions.md):
 // music packs, costumes and the Aerith key, each file looked up by the hash of
 // its name when the game wants it. The port only reports here, so that a
 // player who added DLC can see in the log whether it is where the game looks:
@@ -10,8 +12,7 @@
 //   [dlc] none in <ms0>/PSP/GAME/ULUS10566
 //
 // and, for .edat files in another folder of PSP/GAME (a copy named after the
-// European release, ULES01505, is the usual one), that the game never reads
-// them there. Files still in PSP's EDATA form (they start "\0PSPEDAT") are
+// other release is the usual one), that the game never reads them there. Files still in PSP's EDATA form (they start "\0PSPEDAT") are
 // counted apart: PortableKit's sceNpDrmEdataSetupKey does not decrypt, and
 // the port has been tried with decrypted DLC only (31 October 2026: the USA
 // DLC's 13 music packs and 43 costumes, docs/port/bgm-playlist-design.md).
@@ -36,8 +37,6 @@
 
 namespace d012::dlc {
 namespace {
-
-constexpr const char *kDiscId = "ULUS10566";
 
 std::string utf8(const std::filesystem::path &path) { return portablekit::install::path_to_utf8(path); }
 
@@ -79,7 +78,8 @@ void report() {
     const std::filesystem::path ms0 = memory_stick();
     if (ms0.empty()) return;
     const std::filesystem::path games = ms0 / "PSP" / "GAME";
-    const std::filesystem::path ours = games / kDiscId;
+    const std::string disc_id = portablekit::active_disc_id();
+    const std::filesystem::path ours = games / disc_id;
     std::error_code ec;
     const Count found = std::filesystem::is_directory(ours, ec) ? count_edat(ours) : Count{};
     if (found.files == 0) std::cout << "[dlc] none in " << utf8(ours) << "\n";
@@ -89,11 +89,11 @@ void report() {
                   << " still encrypted, as a PSP keeps them; the port has "
                   << "been tried with decrypted DLC only and may not read these\n";
     for (const auto &entry : std::filesystem::directory_iterator(games, ec)) {
-        if (!entry.is_directory(ec) || entry.path().filename() == kDiscId) continue;
+        if (!entry.is_directory(ec) || entry.path().filename() == disc_id) continue;
         const Count other = count_edat(entry.path());
         if (other.files == 0) continue;
         std::cout << "[dlc] warning: " << other.files << " DLC files in " << utf8(entry.path())
-                  << " are never read: the game reads DLC only from a folder named " << kDiscId
+                  << " are never read: the game reads DLC only from a folder named " << disc_id
                   << " (rename the folder to use them)\n";
     }
 }

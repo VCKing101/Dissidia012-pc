@@ -21,7 +21,7 @@ changes, developing the port, or making the Steam Deck package.
 | Git | Fetches PortableKit and applies this port's changes to it | [git-scm.com/download/win](https://git-scm.com/download/win) |
 | A graphics driver with Vulkan | The renderer. Any GPU from about 2016 on, with its vendor's current driver | AMD, NVIDIA or Intel's site |
 | About 6 GB free on the drive with the repository | Build files about 1.5 GB, dependencies 1.2 GB (clang is 0.9 GB of it). Add 1.7 GB if your ISO is on another drive, because it is then copied | |
-| Your own copy of the game: the USA disc **ULUS10566** v1.00 as an `.iso` file | No game data comes with this project. The port decrypts the game's executable from it ([below](#the-decrypted-eboot)) | |
+| Your own copy of the game: the USA disc **ULUS10566** or the European disc **ULES01505**, v1.00, as an `.iso` file | No game data comes with this project. The port decrypts the game's executable from it ([below](#the-decrypted-eboot)) | |
 
 If something is missing, setup stops before changing anything and says what to install. It never installs software
 by itself. These commands install the tools from PowerShell with winget, if you prefer that:
@@ -107,7 +107,7 @@ opens the port's menu: video, controls and audio.
 | Saves | `build/port/data/ms0/PSP/SAVEDATA/` (the game makes them through New Game; back this folder up) |
 | Settings | `build/port/data/settings.ini` (written by the port's menu) |
 | Mods | `build/port/data/mods/` ([mod-folder.md](mod-folder.md)) |
-| DLC you added | `build/port/data/ms0/PSP/GAME/ULUS10566/` (the folder must have that name; [README](../../README.md#downloadable-content-dlc)) |
+| DLC you added | `build/port/data/ms0/PSP/GAME/ULUS10566/`, or `ULES01505/` with the European disc (the folder must have your disc's name; [README](../../README.md#downloadable-content-dlc)) |
 | The program | `tools/local/port/build-d012-clang/bin/D012Native.exe` |
 | The Battle BGM Maker | `tools/local/port/build-d012-clang/bin/BgmMaker.exe`, on `build/port/data/mods` ([mod-folder.md](mod-folder.md), section 8). Setup makes no shortcut for it |
 
@@ -159,8 +159,8 @@ The game's main executable, `PSP_GAME/SYSDIR/EBOOT.BIN`, is encrypted on the dis
 The port's profile (`port/host/d012_profile.cpp`) carries the public decryption key for the executable's tag, the
 value pspdecrypt and the PSP emulators carry, so `D012Native --install` decrypts it from your own ISO, and setup
 does that for you (step 4). The result is accepted only if its SHA-256 is
-`0bc8e779aad2814a3d1bd77346f69ca5e16665845ed053cd0ad44a9cbfaefe6d` (4,640,948 bytes), the decrypted ULUS10566 v1.00
-executable.
+`0bc8e779aad2814a3d1bd77346f69ca5e16665845ed053cd0ad44a9cbfaefe6d` (4,640,948 bytes), the decrypted v1.00
+executable. The USA and European discs hold the same one ([regions.md](regions.md)).
 
 If you already have that file, `-Eboot <path>` uses it instead, and the bootstrap compile and the decryption are
 skipped.
@@ -169,7 +169,7 @@ skipped.
 
 | Input | Check |
 | --- | --- |
-| ISO | `PARAM.SFO` says disc `ULUS10566`, version 1.00; the size is 1,754,529,792 bytes; the three overlays and `LIBSUPPREACC.PRX` have the retail SHA-256 values; the whole image's SHA-1 is `ec23f5beac89312a2a25654e202ae1c997999c9e` (Redump's USA v1.00 entry, see [usa-comparison.md](../decomp/usa-comparison.md)). Compressed images (`.cso`, `.chd`) are refused |
+| ISO | `PARAM.SFO` says disc `ULUS10566` or `ULES01505`, version 1.00; the size is 1,754,529,792 bytes; the three overlays and `LIBSUPPREACC.PRX` have the retail SHA-256 values; the whole image's SHA-1 is `ec23f5beac89312a2a25654e202ae1c997999c9e` (Redump's USA v1.00 entry, see [usa-comparison.md](../decomp/usa-comparison.md)) or `2e6e8b71a1f66a5ba1390fa68ea36188ac4fe2b6` (Redump's European v1.00 entry, see [regions.md](regions.md)). Compressed images (`.cso`, `.chd`) are refused |
 | EBOOT | The file decrypted from the ISO, or the one given with `-Eboot`: an ELF file (not the encrypted `~PSP` one) with the SHA-256 above. `D012Native --install` also checks the disc ID and the SHA-256 of the disc's `EBOOT.BIN` before it decrypts |
 | SDL3-devel-3.4.18-VC.zip | SHA-256 `78d84602ae616cfe26b33a73b7d3b9b6b56e8a6650e53d92c9c6ca938f747acd` |
 | glslang-16.6.0-windows-x86_64-release.zip | SHA-256 `82bf434e69b9bb4829de7e2b4bc2c5e7a7861e53d66cf75e5cc70f5f694a8d9b` |
@@ -195,7 +195,7 @@ A file that fails its check is moved aside as `<name>.rejected` and setup stops.
 | "Python 3.10 or newer" although Python is installed | Open a new PowerShell window. If `python` opens the Microsoft Store, install Python from python.org and tick "Add python.exe to PATH" |
 | pip fails | Check the internet connection. Behind a proxy, set `HTTPS_PROXY` first. Delete `.venv` to start that step over |
 | A download fails or a SHA-256 does not match | Run setup again. A file that still fails was changed upstream: report it, and do not use it |
-| "is disc ULES01505" | That is the European release. The port supports the USA release ULUS10566 only |
+| "is disc NPJH50377" | That is the Japanese release, a different build of the game. The port supports the USA release ULUS10566 and the European release ULES01505 |
 | "SHA-1 ..., but a clean dump ... has ..." | The image is not the Redump dump: a different dump tool, or a modified image. If its game files passed, `-SkipIsoHash` lets you try it |
 | "is the encrypted EBOOT.BIN" | `-Eboot` was given the file from the disc. Leave `-Eboot` out, and setup decrypts it |
 | "an ELF file, but not the decrypted executable the port knows" | The `-Eboot` file is from another release or version, or patched. Leave `-Eboot` out |
@@ -205,7 +205,7 @@ A file that fails its check is moved aside as `<name>.rejected` and setup stops.
 | The build fails | Read the log setup names (`build/port/logs/setup-build.log`). Out of memory: close other programs and run again (it continues). A path-length error: move the repository closer to the drive root, for example `C:\Games\Dissidia012-pc` |
 | "pk_cmake.cmd failed with exit code 2", with `error C2001: newline in constant` or `warning C4819` in the log | Windows is set to a language whose code page is not UTF-8 (Chinese, Japanese, Korean and others). Fixed after v0.1.0: update and run setup again. On v0.1.0, run `$env:_CL_ = "/utf-8"` in PowerShell, then `.\setup.ps1` in the same window |
 | The folder path contains `!`, `%`, `^` or `&` | Move the repository to a plain path; the Windows build scripts cannot handle those characters |
-| A save copied to PPSSPP says "Unable to load data", or a save from PPSSPP will not load in the port | Fixed after v0.1.1: update and run setup again. The port then writes saves the way PPSSPP and a PSP do, and reads theirs. A save the port wrote before is fixed the next time you start the port, as the game loads it; copy it to PPSSPP after that. The save folder is `ULUS10566GameData00`, in `build\port\data\ms0\PSP\SAVEDATA` here and in `PSP\SAVEDATA` in PPSSPP's memory stick folder. Copy, don't move, and keep a backup of both |
+| A save copied to PPSSPP says "Unable to load data", or a save from PPSSPP will not load in the port | Fixed after v0.1.1: update and run setup again. The port then writes saves the way PPSSPP and a PSP do, and reads theirs. A save the port wrote before is fixed the next time you start the port, as the game loads it; copy it to PPSSPP after that. The save folder is `ULUS10566GameData00` (`ULES01505GameData00` with the European disc), in `build\port\data\ms0\PSP\SAVEDATA` here and in `PSP\SAVEDATA` in PPSSPP's memory stick folder. Copy, don't move, and keep a backup of both |
 | The shortcut does nothing | Run `.\tools\port\play_d012.ps1` in PowerShell to see the message. If the port is not built, it says so in a window |
 | Start over | Delete `tools/local/port/build-d012-clang` and `build/port/recomp` (build files), or `build/port/setup/state.json` (to be asked for the ISO again). Keep `build/port/data`: your saves are there |
 

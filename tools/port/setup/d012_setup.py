@@ -29,7 +29,7 @@ def parse():
     parser.add_argument("--update", action="store_true", help="re-apply the patches and rebuild; no questions")
     parser.add_argument("--deck", action="store_true", help="also build the Steam Deck package")
     parser.add_argument("--non-interactive", action="store_true", help="never ask; fail instead")
-    parser.add_argument("--iso", help="the USA ULUS10566 ISO")
+    parser.add_argument("--iso", help="the USA ULUS10566 or European ULES01505 ISO")
     parser.add_argument("--eboot", help="a decrypted EBOOT.ELF to use instead of decrypting the ISO's")
     parser.add_argument("--no-shortcuts", action="store_true", help="make no desktop or Start Menu shortcut")
     parser.add_argument("--shortcut-dir", help="make the two shortcuts under this folder instead (for tests)")

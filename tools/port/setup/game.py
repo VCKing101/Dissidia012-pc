@@ -1,11 +1,14 @@
 """The game: the user's ISO checked, the overlays, the disc PRX and the icon taken from the ISO,
 the decrypted EBOOT made from the ISO, and build/port/game prepared (tools/port/prepare_game_dir.py).
 
+The ISO is the USA disc ULUS10566 or the European disc ULES01505, both v1.00: they hold the same
+executable, overlays and data files (docs/port/regions.md).
+
 Nothing here decrypts anything itself. The port does: `D012Native --install <iso> --in-place`, with
 the profile's key for the executable's tag (port/host/d012_profile.cpp), writes EBOOT.ELF into its
 data directory, here a temporary folder (decrypt()). A decrypted EBOOT the user already has can be
-given instead (-Eboot). Either way it is accepted only if its SHA-256 is that of the known ULUS10566
-v1.00 executable.
+given instead (-Eboot). Either way it is accepted only if its SHA-256 is that of the known v1.00
+executable.
 """
 
 import hashlib
@@ -23,11 +26,20 @@ from ui import ROOT, SetupError, ask, info, warn
 sys.path.insert(0, str(ROOT / "tools" / "port"))
 import prepare_game_dir  # noqa: E402
 
-DISC_ID = "ULUS10566"
 DISC_VERSION = "1.00"
-# docs/decomp/usa-comparison.md and docs/decomp/iso-inventory-usa.json: Redump's USA v1.00 entry.
+# Redump's v1.00 entries: docs/decomp/usa-comparison.md for the USA disc, docs/port/regions.md for the
+# European one. Both images have the same size.
+RELEASES = {  # DISC_ID in PARAM.SFO: (region, SHA-1 of the whole image)
+    "ULUS10566": ("USA", "ec23f5beac89312a2a25654e202ae1c997999c9e"),
+    "ULES01505": ("Europe", "2e6e8b71a1f66a5ba1390fa68ea36188ac4fe2b6"),
+}
+OTHER_RELEASES = {  # releases a player may have instead (docs/port/regions.md)
+    "NPJH50377": "the Japanese release, a different build of the game",
+    "UCAS40329": "the Asian release, which has not been checked",
+    "UCKS45166": "the Asian release, which has not been checked",
+}
+SUPPORTED = "ULUS10566 (USA) or ULES01505 (Europe)"
 ISO_SIZE = 1754529792
-ISO_SHA1 = "ec23f5beac89312a2a25654e202ae1c997999c9e"
 EBOOT_SHA256 = prepare_game_dir.EBOOT_SHA256
 EBOOT_SIZE = 4640948
 DECRYPT_TIMEOUT = 60  # seconds; decrypting takes a second or two
@@ -120,7 +132,7 @@ class Disc:
 
 
 def check_iso(path, state, skip_hash=False):
-    """Raises SetupError with the reason when path is not the USA v1.00 disc; returns the Disc."""
+    """Raises SetupError with the reason when path is not a supported v1.00 disc; returns the Disc."""
     path = Path(path)
     if not path.is_file():
         raise SetupError(f"no such file: {path}")
@@ -135,18 +147,19 @@ def check_iso(path, state, skip_hash=False):
         disc.close()
         raise SetupError(f"{path.name}: its PARAM.SFO cannot be read")
     disc_id, version = sfo.get("DISC_ID"), sfo.get("DISC_VERSION")
-    if disc_id != DISC_ID:
+    if disc_id not in RELEASES:
         disc.close()
-        hint = " (the European release; the port supports the USA release only)" if disc_id == "ULES01505" else ""
+        hint = f" ({OTHER_RELEASES[disc_id]})" if disc_id in OTHER_RELEASES else ""
         raise SetupError(f"{path.name} is disc {disc_id} \"{sfo.get('TITLE', '?')}\"{hint}; "
-                         f"the port needs {DISC_ID} (Dissidia 012 Duodecim Final Fantasy, USA)")
+                         f"the port needs Dissidia 012 Duodecim Final Fantasy, {SUPPORTED}")
+    region, iso_sha1 = RELEASES[disc_id]
     if version != DISC_VERSION:
         disc.close()
-        raise SetupError(f"{path.name} is {DISC_ID} version {version}; the port needs version {DISC_VERSION}")
+        raise SetupError(f"{path.name} is {disc_id} version {version}; the port needs version {DISC_VERSION}")
     size = path.stat().st_size
     if size != ISO_SIZE:
         disc.close()
-        raise SetupError(f"{path.name} is {size:,} bytes; a clean dump of {DISC_ID} v{DISC_VERSION} is "
+        raise SetupError(f"{path.name} is {size:,} bytes; a clean dump of {disc_id} v{DISC_VERSION} is "
                          f"{ISO_SIZE:,} bytes (Redump). The image is trimmed, padded or modified.")
     for iso_path, (_folder, expected) in DISC_FILES.items():
         if hashlib.sha256(disc.read(iso_path)).hexdigest() != expected:
@@ -158,13 +171,13 @@ def check_iso(path, state, skip_hash=False):
         warn("the ISO's SHA-1 check was skipped (-SkipIsoHash)")
     elif state.get("iso_checked") != key:
         sha1 = sha1_with_progress(path, size)
-        if sha1 != ISO_SHA1:
+        if sha1 != iso_sha1:
             disc.close()
-            raise SetupError(f"{path.name}: SHA-1 {sha1}, but a clean dump of {DISC_ID} v{DISC_VERSION} has "
-                             f"{ISO_SHA1} (Redump). Its game files look right, so it may still work: "
+            raise SetupError(f"{path.name}: SHA-1 {sha1}, but a clean dump of {disc_id} v{DISC_VERSION} has "
+                             f"{iso_sha1} (Redump). Its game files look right, so it may still work: "
                              "run setup again with -SkipIsoHash to use it anyway.")
         state["iso_checked"] = key
-    info(f"ISO: {DISC_ID} v{DISC_VERSION}, {size:,} bytes, matches the known-good dump")
+    info(f"ISO: {disc_id} ({region}) v{DISC_VERSION}, {size:,} bytes, matches the known-good dump")
     return disc
 
 
@@ -186,10 +199,10 @@ def check_eboot(path):
         raise SetupError(
             f"{path.name} is an ELF file ({size:,} bytes), but not the decrypted executable the port knows.\n"
             f"    SHA-256 {digest}\n    expected {EBOOT_SHA256} ({EBOOT_SIZE:,} bytes)\n"
-            "    Possible reasons: it comes from another release or version of the game (only USA v1.00, "
-            "ULUS10566, is supported), it was patched, or it was written in another form. Leave -Eboot out "
-            "and setup makes the right file from your ISO.")
-    info(f"EBOOT: the decrypted ULUS10566 v1.00 executable ({size:,} bytes, SHA-256 matches)")
+            "    Possible reasons: it comes from another release or version of the game (only v1.00 of "
+            f"{SUPPORTED} is supported), it was patched, or it was written in another form. Leave -Eboot "
+            "out and setup makes the right file from your ISO.")
+    info(f"EBOOT: the decrypted v1.00 executable ({size:,} bytes, SHA-256 matches)")
 
 
 def extract_disc_files(disc):
@@ -260,12 +273,13 @@ def ensure(state, iso=None, eboot=None, interactive=True, skip_iso_hash=False):
         iso_path = Path(iso).resolve()
     elif interactive:
         candidates = sorted(ROOT.glob("*.iso")) + sorted(ROOT.glob("*.ISO"))
+        candidates.sort(key=lambda p: "(USA)" not in p.name)  # the USA image first, as before
         default = next((str(p) for p in candidates if p.stat().st_size == ISO_SIZE), "")
-        info("Your Dissidia 012 Duodecim Final Fantasy disc image (USA, ULUS10566), as an .iso file.")
+        info(f"Your Dissidia 012 Duodecim Final Fantasy disc image ({SUPPORTED}), as an .iso file.")
         info("Type or paste its full path, or drag the file into this window, then press Enter.")
         iso_path, disc = ask_path("ISO file", default, lambda p: check_iso(p, state, skip_iso_hash))
     else:
-        raise SetupError("no ISO given: pass -Iso <path to your ULUS10566 .iso>")
+        raise SetupError("no ISO given: pass -Iso <path to your ULUS10566 or ULES01505 .iso>")
     state["iso"] = str(iso_path)
     try:
         extract_disc_files(disc)
@@ -280,7 +294,7 @@ def ensure(state, iso=None, eboot=None, interactive=True, skip_iso_hash=False):
         state["eboot"] = str(Path(eboot).resolve())
         return iso_path, Path(eboot).resolve()
     if target.is_file() and sha256_file(target) == EBOOT_SHA256:
-        info("EBOOT: build/port/game/EBOOT.ELF is the decrypted ULUS10566 v1.00 executable (kept)")
+        info("EBOOT: build/port/game/EBOOT.ELF is the decrypted v1.00 executable (kept)")
         return iso_path, target.resolve()
     remembered = state.get("eboot")
     if remembered and Path(remembered).is_file():

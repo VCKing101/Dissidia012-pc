@@ -1,5 +1,6 @@
 // The PortableKit profile for Dissidia 012 Duodecim Final Fantasy, USA
-// release ULUS10566 v1.00.
+// release ULUS10566 v1.00, and the European release ULES01505 v1.00, whose
+// disc holds the same executable (docs/port/regions.md).
 //
 // Constants only, as PortableKit's profile guide asks. Every value here is a
 // fact about the game's own files (hashes, header words, addresses from the
@@ -23,6 +24,38 @@ namespace {
 constexpr SaveFolder kSaveFolders[] = {
     {"ULUS10566GameData00", "Save slot 1", true},
     {"ULUS10566GameData01", "Save slot 2", true},
+};
+
+// The European disc: the same executable, overlays and data files, byte for
+// byte, but for its encrypted EBOOT.BIN and the header of PACKAGE.BIN. The
+// game takes its disc id from that header, so on this disc it saves as
+// ULES01505 and reads DLC from PSP/GAME/ULES01505.
+constexpr SaveFolder kEuropeanSaveFolders[] = {
+    {"ULES01505GameData00", "Save slot 1", true},
+    {"ULES01505GameData01", "Save slot 2", true},
+};
+
+constexpr RegionRelease kRegionReleases[] = {
+    {.disc_id = "ULES01505",
+     .disc_id_display = "ULES-01505",
+     .release_name = "the European release",
+     // sha256 of PSP_GAME/SYSDIR/EBOOT.BIN on the European disc; it
+     // decrypts to executable_sha256 below.
+     .encrypted_executable_sha256 = "0c0c12c0f46e9cc37adb0a649a761975fab92a20c8d2e9252f514ef29d1ca289",
+     .save_game_name = "ULES01505",
+     .save_folders = kEuropeanSaveFolders},
+};
+
+// Releases a player may have instead. The Japanese one is built from other
+// code (docs/port/regions.md); the Asian one, sold under two serials, was
+// not looked at.
+constexpr OtherRelease kOtherReleases[] = {
+    {"NPJH50377", "This is the Japanese release, a different build of the game; only the North American and "
+                  "European releases work."},
+    {"UCAS40329", "This is the Asian release, which has not been checked; only the North American and European "
+                  "releases work."},
+    {"UCKS45166", "This is the Asian release, which has not been checked; only the North American and European "
+                  "releases work."},
 };
 
 // One overlay window. The game loads OVL_MENU_APP.ELF, OVL_BATTLE_APP.ELF or
@@ -62,7 +95,9 @@ const GameProfile &game() {
         .game_title = "Dissidia 012 Duodecim Final Fantasy",
         .executable_path_on_disc = "PSP_GAME/SYSDIR/EBOOT.BIN",
         .param_sfo_path_on_disc = "PSP_GAME/PARAM.SFO",
-        .release_name = "the North American release (ULUS10566 v1.00)",
+        .release_name = "the North American release",
+        .region_releases = kRegionReleases,
+        .other_releases = kOtherReleases,
         // sha256 of PSP_GAME/SYSDIR/EBOOT.BIN on the disc, and of its
         // decryption (build/ULUS10566/EBOOT.ELF, tools/decrypt_main.sh).
         .encrypted_executable_sha256 = "8fbf3541ab121aff85aae72795760736dfe37706996b2b0f9b81d36fc98f3394",
@@ -84,6 +119,8 @@ const GameProfile &game() {
         .save_game_name = "ULUS10566",
         .save_folders = kSaveFolders,
 
+        // Both releases announce the North American code, so a European copy
+        // and a North American one can find each other.
         .adhoc_product_code = "ULUS10566",
 
         // L2 and R2, which a PSP lacks, switch the loading screen's D-pad
