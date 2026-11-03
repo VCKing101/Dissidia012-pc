@@ -221,7 +221,10 @@ pack in a folder you pick, including PPSSPP's `PSP/TEXTURES/...` layout, checks 
 it is. The **Texture pack** row turns packs on and off and says how many textures loaded.
 
 - **Images must be PNG.** Packs that ship `.dds`, `.ktx2` or `.zim` images are not read yet. A zipped pack
-  (`textures.zip`) has to be unpacked first, and packs whose `textures.ini` says `hash = quick` do not load.
+  (`textures.zip`) has to be unpacked first.
+- **Packs made with PPSSPP's older `hash = quick`** are matched to the game's textures by
+  picture: each texture is compared with the pack's images the first time it is drawn, takes the one that clearly
+  matches, and keeps it for next time. A texture with no clear match keeps the game's own picture.
 - **Packs for another release** of the game load only if their `[games]` section lists `ULUS10566`, and images of
   text made for that release may not match.
 - **A replaced texture appears a frame late** the first time it is drawn (two or three frames for 2048x2048

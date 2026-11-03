@@ -1,0 +1,1683 @@
+From de3fc139c91fd40374bd1a021100866275765ae0 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Tue, 3 Nov 2026 14:38:52 +1030
+Subject: [PATCH] Texture packs: packs keyed with hash = quick are matched by
+ picture
+
+- PPSSPP's first hash, quick, is not computed here, so such packs were
+  refused. Their keys' first halves (dimension and palette) are the same
+  with any hash; only the data halves differ. A quick pack now loads:
+  its keys with no data half are used as they are, and each texture
+  those do not cover is compared with the pack's images by picture the
+  first time it is drawn (host/gpu/texture_pack_match.cpp).
+- Index: every image is shrunk to a 16x16 signature and a thumbnail of
+  at most 64 pixels, on up to three threads, and saved as
+  textures/.matched/<pack id>.index (the id is the xxh64 of
+  textures.ini), so only new or changed images are read again.
+- Match: on the matcher's thread, the four closest signatures among the
+  images of the texture's shape whose keys can name it (same first
+  half, zero, or zero address half), then their thumbnails. Accepted
+  when the score is below 45, the next is 1.7 times further off or the
+  same picture, and at most 8% of the blurred picture differs in chroma
+  (a recolour, such as another costume's colours, keeps its own
+  texture). The game's texture is drawn until then; a match becomes an
+  ordinary replacement a frame or two later.
+- Matches are kept in textures/.matched/<pack id>.ini in this program's
+  keys, in the form of the pack's key (full, any address, or any
+  palette), and textures compared with something but matched with
+  nothing under [unmatched]; the next session uses them at once.
+  Textures no image has the shape of are not decoded.
+- find() takes a callback that decodes the texture, called only for a
+  quick pack's texture not matched yet. The import accepts quick packs
+  and says how they are matched; the menu's status shows the count.
+- <PREFIX>_NO_QUICK_MATCH=1 refuses quick packs, as before.
+- portablekit_texture_pack_tests checks the scoring, the rule, the
+  saved matches and index, and gains --match <pack> <dump> [state] to
+  run the matcher over a texture dump.
+
+Tested on Windows with a port's clang and MSVC builds: the texture pack
+checks and 21 framework tests (ad hoc ones left out). A community pack
+of 2,326 keys and 2,116 images, against 622 dumped textures of menus
+and a battle stage: 64 textures matched, each checked by eye and right;
+in the game the matches appear in the first session and at once in the
+next. A five-key pack without ignoreAddress matched all five. Not
+tried: other packs, other games, Linux.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ CMakeLists.txt                  |   3 +-
+ cmake/PortableKit.cmake         |   1 +
+ docs/SOURCE_PROVENANCE.md       |   2 +-
+ host/gpu/texture_pack.cpp       | 165 ++++++++-
+ host/gpu/texture_pack.hpp       |  43 ++-
+ host/gpu/texture_pack_match.cpp | 638 ++++++++++++++++++++++++++++++++
+ host/gpu/texture_pack_match.hpp | 187 ++++++++++
+ host/gpu/vulkan_renderer.cpp    |  25 +-
+ host/ui/texture_pack_screen.cpp |   7 +-
+ tests/texture_pack_tests.cpp    | 233 +++++++++++-
+ 10 files changed, 1278 insertions(+), 26 deletions(-)
+ create mode 100644 host/gpu/texture_pack_match.cpp
+ create mode 100644 host/gpu/texture_pack_match.hpp
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index aafbcb2..46a4107 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -368,7 +368,8 @@ if(PSPRECOMP_BUILD_TESTS)
+         "${PORTABLEKIT_ROOT}/host/profile.cpp"
+         "${PORTABLEKIT_ROOT}/host/gpu/texture_decode.cpp"
+         "${PORTABLEKIT_ROOT}/host/gpu/texture_pack.cpp"
+-        "${PORTABLEKIT_ROOT}/host/gpu/texture_pack_import.cpp")
++        "${PORTABLEKIT_ROOT}/host/gpu/texture_pack_import.cpp"
++        "${PORTABLEKIT_ROOT}/host/gpu/texture_pack_match.cpp")
+     target_include_directories(portablekit_texture_pack_tests PRIVATE
+         "${PORTABLEKIT_ROOT}/host" "${PORTABLEKIT_ROOT}/host/gpu" "${PORTABLEKIT_ROOT}/third_party")
+     find_package(Threads REQUIRED)
+diff --git a/cmake/PortableKit.cmake b/cmake/PortableKit.cmake
+index e041175..9ff5769 100644
+--- a/cmake/PortableKit.cmake
++++ b/cmake/PortableKit.cmake
+@@ -44,6 +44,7 @@ set(PORTABLEKIT_HOST_SOURCES
+     host/input/tilt.cpp
+     host/gpu/texture_pack.cpp
+     host/gpu/texture_pack_import.cpp
++    host/gpu/texture_pack_match.cpp
+     host/perf/frame_stats.cpp
+     host/perf/perf_overlay.cpp
+     host/overlays.cpp
+diff --git a/docs/SOURCE_PROVENANCE.md b/docs/SOURCE_PROVENANCE.md
+index d6c43da..4d4c4f0 100644
+--- a/docs/SOURCE_PROVENANCE.md
++++ b/docs/SOURCE_PROVENANCE.md
+@@ -26,7 +26,7 @@ The router port mapping (`port_mapping.cpp`, which asks the router to forward a
+ 
+ ## Texture packs
+ 
+-`host/gpu/texture_pack.cpp` and `replacement_textures.cpp` load HD texture packs made for PPSSPP, in its `textures.ini` format. They were written for this project. The format was learnt from PPSSPP's public documentation and pull requests about texture replacement, from reading PPSSPP's GPL-licensed source to find the format's facts (the layout of a key, the hash seeds, how the palette and the texture's dimensions enter the key, the order in which wildcard keys are tried, the ini sections and options), and from the keys a real community pack for Monster Hunter Portable 3rd HD Ver. uses, which the implementation reproduces. Only those facts and constants were taken; no code was copied, adapted or translated line by line. PPSSPP's `quick` hash is not implemented. Hashing uses xxHash, and PNG files are read and written with stb_image and stb_image_write, all unmodified (table below).
++`host/gpu/texture_pack.cpp` and `replacement_textures.cpp` load HD texture packs made for PPSSPP, in its `textures.ini` format. They were written for this project. The format was learnt from PPSSPP's public documentation and pull requests about texture replacement, from reading PPSSPP's GPL-licensed source to find the format's facts (the layout of a key, the hash seeds, how the palette and the texture's dimensions enter the key, the order in which wildcard keys are tried, the ini sections and options), and from the keys a real community pack for Monster Hunter Portable 3rd HD Ver. uses, which the implementation reproduces. Only those facts and constants were taken; no code was copied, adapted or translated line by line. PPSSPP's `quick` hash is not implemented: packs keyed with it are matched to the game's textures by picture instead (`host/gpu/texture_pack_match.cpp`, written for this project from no other code; it uses only the key layout above). Hashing uses xxHash, and PNG files are read and written with stb_image and stb_image_write, all unmodified (table below).
+ 
+ ## Profile code
+ 
+diff --git a/host/gpu/texture_pack.cpp b/host/gpu/texture_pack.cpp
+index 6a62ddd..419fc33 100644
+--- a/host/gpu/texture_pack.cpp
++++ b/host/gpu/texture_pack.cpp
+@@ -1,5 +1,6 @@
+ #include "../profile.hpp"
+ #include "texture_pack.hpp"
++#include "texture_pack_match.hpp"
+ 
+ #include <algorithm>
+ #include <bit>
+@@ -12,6 +13,7 @@
+ #include <iterator>
+ #include <sstream>
+ #include <system_error>
++#include <tuple>
+ 
+ #define XXH_INLINE_ALL
+ #include "xxhash/xxhash.h"
+@@ -135,7 +137,8 @@ bool is_paletted(TextureFormat format) {
+ }
+ 
+ std::uint32_t data_hash(const std::uint8_t *data, std::size_t size, TexturePackHash hash) {
+-    // xxh64 keys keep the low 32 bits of the 64-bit hash.
++    // xxh64 keys keep the low 32 bits of the 64-bit hash. A quick pack's
++    // textures are keyed with xxh64 too, and matched by picture.
+     return hash == TexturePackHash::Xxh32 ? XXH32(data, size, kDataSeed)
+                                           : static_cast<std::uint32_t>(XXH64(data, size, kDataSeed));
+ }
+@@ -253,26 +256,81 @@ bool compute_texture_pack_key(const GuestMemory &memory, const TextureState &tex
+ }
+ 
+ std::unique_ptr<TexturePack> TexturePack::open(const std::filesystem::path &directory, const std::string &game_id,
+-                                               std::string &error) {
++                                               std::string &error, const std::filesystem::path &match_root) {
+     std::unique_ptr<TexturePack> pack = parse(directory, game_id, error);
+     if (!pack) return nullptr;
+     const unsigned threads = std::clamp(std::thread::hardware_concurrency() / 4u, 1u, 2u);
+     for (unsigned i = 0; i < threads; ++i) pack->loaders_.emplace_back([p = pack.get()] { p->loader_main(); });
++    if (!pack->quick_entries_.empty()) pack->start_matching(match_root);
+     return pack;
+ }
+ 
++void TexturePack::start_matching(const std::filesystem::path &match_root) {
++    // One candidate per image, with the first halves of the keys naming it.
++    std::unordered_map<std::string, std::size_t> by_file;
++    std::vector<MatchCandidate> images;
++    for (const auto &[key, name] : quick_entries_) {
++        if (name.empty()) continue;
++        const auto [at, inserted] = by_file.try_emplace(name, images.size());
++        if (inserted) {
++            images.emplace_back();
++            images.back().file = name;
++        }
++        std::vector<std::uint64_t> &prefixes = images[at->second].prefixes;
++        if (std::find(prefixes.begin(), prefixes.end(), key.cache_key) == prefixes.end())
++            prefixes.push_back(key.cache_key);
++    }
++    // The pack is known by its textures.ini, wherever it is kept.
++    const std::vector<std::uint8_t> ini = read_file(directory_ / "textures.ini");
++    char id[24];
++    std::snprintf(id, sizeof(id), "%016llx",
++                  static_cast<unsigned long long>(XXH64(ini.data(), ini.size(), kDataSeed)));
++    auto reader = [this](const std::string &name, std::vector<std::uint8_t> &rgba, std::uint32_t &width,
++                         std::uint32_t &height) {
++        std::vector<std::uint8_t> bytes = read_file(directory_ / std::filesystem::path(name));
++        if (bytes.empty()) {
++            std::filesystem::path folded;
++            {
++                std::lock_guard lock(resolve_mutex_);
++                folded = resolve(name);
++            }
++            if (!folded.empty()) bytes = read_file(folded);
++        }
++        int w = 0, h = 0, channels = 0;
++        stbi_uc *image = bytes.empty() ? nullptr
++                                       : stbi_load_from_memory(bytes.data(), static_cast<int>(bytes.size()), &w, &h,
++                                                               &channels, 4);
++        if (image == nullptr || w <= 0 || h <= 0 || w > kMaxImageSide || h > kMaxImageSide) {
++            if (image != nullptr) stbi_image_free(image);
++            return false;
++        }
++        rgba.assign(image, image + static_cast<std::size_t>(w) * static_cast<std::size_t>(h) * 4u);
++        stbi_image_free(image);
++        width = static_cast<std::uint32_t>(w);
++        height = static_cast<std::uint32_t>(h);
++        return true;
++    };
++    std::cout << "[texpack] textures.ini uses hash = quick: " << quick_entries_.size()
++              << " keys are matched to the game's textures by picture\n";
++    matcher_ = std::make_unique<TexturePackMatcher>(directory_, std::move(images), id, match_root, std::move(reader));
++}
++
++std::string TexturePack::match_status() const { return matcher_ ? matcher_->status() : std::string(); }
++
+ bool TexturePack::inspect(const std::filesystem::path &directory, const std::string &game_id, TexturePackInfo &info,
+                           std::string &error) {
+     info = {};
+     const std::unique_ptr<TexturePack> pack = parse(directory, game_id, error);
+     if (!pack) return false;
+     info.options = pack->options_;
+-    info.keys = pack->entries_.size();
++    info.keys = pack->entry_count();
+     info.games = pack->games_;
+     std::vector<std::string> files;
+-    files.reserve(pack->entries_.size());
++    files.reserve(pack->entry_count());
+     for (const auto &[key, name] : pack->entries_)
+         if (!name.empty()) files.push_back(name);
++    for (const auto &[key, name] : pack->quick_entries_)
++        if (!name.empty()) files.push_back(name);
+     std::sort(files.begin(), files.end());
+     files.erase(std::unique(files.begin(), files.end()), files.end());
+     info.files = std::move(files);
+@@ -343,10 +401,28 @@ std::unique_ptr<TexturePack> TexturePack::parse(const std::filesystem::path &dir
+         error = "no textures.ini and no hash-named images in " + directory.string();
+         return nullptr;
+     }
++    if (pack->options_.hash == TexturePackHash::Quick) {
++        // Keys with no data half name a texture by its shape and palette alone
++        // and need no hash; the others are matched by picture.
++        for (auto it = pack->entries_.begin(); it != pack->entries_.end();) {
++            if (it->first.data_hash == 0u) {
++                ++it;
++                continue;
++            }
++            pack->quick_entries_.emplace_back(it->first, it->second);
++            it = pack->entries_.erase(it);
++        }
++        std::sort(pack->quick_entries_.begin(), pack->quick_entries_.end(), [](const auto &a, const auto &b) {
++            return std::tie(a.second, a.first.cache_key, a.first.data_hash) <
++                   std::tie(b.second, b.first.cache_key, b.first.data_hash);
++        });
++    }
+     return pack;
+ }
+ 
+ TexturePack::~TexturePack() {
++    // Its thread reads the pack's images and finishes matches.
++    matcher_.reset();
+     {
+         std::lock_guard lock(mutex_);
+         stopping_ = true;
+@@ -384,11 +460,14 @@ bool TexturePack::load_ini(const std::filesystem::path &path, bool is_override,
+             const std::string option = lower(name);
+             if (option == "hash") {
+                 const std::string kind = lower(value);
++                static const bool no_quick_match = portablekit::env("NO_QUICK_MATCH") != nullptr;
+                 if (kind == "xxh64") options_.hash = TexturePackHash::Xxh64;
+                 else if (kind == "xxh32") options_.hash = TexturePackHash::Xxh32;
++                else if (kind == "quick" && !no_quick_match) options_.hash = TexturePackHash::Quick;
+                 else if (!value.empty() || !is_override) {
+-                    // "quick" was the format's first hash; packs made with it
+-                    // are rare, and it is not implemented here.
++                    // "quick" was the format's first hash. It is not computed
++                    // here; such packs are matched by picture unless
++                    // <prefix>_NO_QUICK_MATCH is set.
+                     error = "textures.ini: hash = " + value + " is not supported (xxh64 and xxh32 are)";
+                     return false;
+                 }
+@@ -504,13 +583,15 @@ typename Map::const_iterator TexturePack::lookup(const Map &map, const TexturePa
+ }
+ 
+ std::shared_ptr<Replacement> TexturePack::find(const GuestMemory &memory, const TextureState &texture,
+-                                               std::uint16_t max_seen_v) {
++                                               std::uint16_t max_seen_v, const TexturePixels &pixels) {
+     TexturePackKey key;
+     std::uint32_t covered_width = 0u, covered_height = 0u;
+     if (!compute_texture_pack_key(memory, texture, max_seen_v, options_, key, covered_width, covered_height))
+         return nullptr;
+     const auto entry = lookup(entries_, key);
+     const bool found = entry != entries_.end() && !entry->second.empty();
++    if (!found && entry == entries_.end() && matcher_) return find_by_picture(texture, key, covered_width,
++                                                                            covered_height, pixels);
+     if (texture_pack_trace()) {
+         std::cout << "[texpack] 0x" << std::hex << texture.address << std::dec << " " << texture.width << "x"
+                   << texture.height << " fmt=" << static_cast<int>(texture.format) << " key "
+@@ -521,11 +602,75 @@ std::shared_ptr<Replacement> TexturePack::find(const GuestMemory &memory, const
+                   << "\n";
+     }
+     if (!found) return nullptr;
+-    auto [file, inserted] = files_.try_emplace(entry->second);
++    return replacement_for(entry->second, key, texture, covered_width, covered_height);
++}
++
++std::shared_ptr<Replacement> TexturePack::find_by_picture(const TextureState &texture, const TexturePackKey &key,
++                                                          std::uint32_t covered_width, std::uint32_t covered_height,
++                                                          const TexturePixels &pixels) {
++    std::string file;
++    const TexturePackMatcher::Known known = matcher_->known(key.cache_key, key.data_hash, file);
++    if (known == TexturePackMatcher::Known::Matched) {
++        if (texture_pack_trace())
++            std::cout << "[texpack] 0x" << std::hex << texture.address << std::dec << " " << texture.width << "x"
++                      << texture.height << " key " << format_texture_pack_key(key) << " -> " << file
++                      << " (matched by picture)\n";
++        return replacement_for(file, key, texture, covered_width, covered_height);
++    }
++    if (known == TexturePackMatcher::Known::Unmatched) return nullptr;
++    if (const auto waiting = matching_.find(key); waiting != matching_.end()) return waiting->second;
++    if (!matcher_->has_shape(texture.width, texture.height)) return nullptr;
++    std::vector<std::uint32_t> decoded;
++    if (!pixels || !pixels(decoded) || decoded.size() < static_cast<std::size_t>(texture.width) * texture.height) {
++        if (texture_pack_trace())
++            std::cout << "[texpack] 0x" << std::hex << texture.address << std::dec << " " << texture.width << "x"
++                      << texture.height << " key " << format_texture_pack_key(key)
++                      << " cannot be decoded to match by picture\n";
++        return nullptr;
++    }
++    if (texture_pack_trace())
++        std::cout << "[texpack] 0x" << std::hex << texture.address << std::dec << " " << texture.width << "x"
++                  << texture.height << " fmt=" << static_cast<int>(texture.format) << " key "
++                  << format_texture_pack_key(key) << " (matching by picture)\n";
++    auto placeholder = std::make_shared<Replacement>();
++    placeholder->state.store(Replacement::State::Matching, std::memory_order_relaxed);
++    placeholder->texture_width = texture.width;
++    placeholder->texture_height = texture.height;
++    placeholder->covered_width = covered_width;
++    placeholder->covered_height = covered_height;
++    auto filter = lookup(filters_, key);
++    if (filter == filters_.end()) filter = filters_.find(TexturePackKey{});
++    if (filter != filters_.end()) placeholder->filter = filter->second;
++    TexturePackMatcher::Job job;
++    job.cache_key = key.cache_key;
++    job.data_hash = key.data_hash;
++    job.width = texture.width;
++    job.height = texture.height;
++    job.pixels = std::move(decoded);
++    // The game's texture is drawn until then. A match is decoded like any
++    // image; a texture that matched nothing stays the game's.
++    job.done = [placeholder, folder = directory_](const std::string &name) {
++        if (name.empty()) {
++            placeholder->state.store(Replacement::State::Failed, std::memory_order_release);
++            return;
++        }
++        placeholder->name = name;
++        placeholder->file = folder / std::filesystem::path(name);
++        placeholder->state.store(Replacement::State::Unloaded, std::memory_order_release);
++    };
++    if (!matcher_->submit(std::move(job))) return nullptr;
++    matching_.emplace(key, placeholder);
++    return placeholder;
++}
++
++std::shared_ptr<Replacement> TexturePack::replacement_for(const std::string &name, const TexturePackKey &key,
++                                                          const TextureState &texture, std::uint32_t covered_width,
++                                                          std::uint32_t covered_height) {
++    auto [file, inserted] = files_.try_emplace(name);
+     if (inserted) {
+         auto replacement = std::make_shared<Replacement>();
+-        replacement->name = entry->second;
+-        replacement->file = directory_ / std::filesystem::path(entry->second);
++        replacement->name = name;
++        replacement->file = directory_ / std::filesystem::path(name);
+         replacement->texture_width = texture.width;
+         replacement->texture_height = texture.height;
+         replacement->covered_width = covered_width;
+diff --git a/host/gpu/texture_pack.hpp b/host/gpu/texture_pack.hpp
+index fb617ef..1f76c76 100644
+--- a/host/gpu/texture_pack.hpp
++++ b/host/gpu/texture_pack.hpp
+@@ -7,6 +7,7 @@
+ #include <cstdint>
+ #include <deque>
+ #include <filesystem>
++#include <functional>
+ #include <memory>
+ #include <mutex>
+ #include <string>
+@@ -33,6 +34,10 @@
+ // for this project from the format's public description and from the keys
+ // real packs use; see docs/SOURCE_PROVENANCE.md.
+ //
++// Packs keyed with the format's first hash, `hash = quick`, are matched to
++// the game's textures by picture instead (texture_pack_match.hpp);
++// <prefix>_NO_QUICK_MATCH=1 refuses them as before.
++//
+ // This file knows nothing about Vulkan: it hashes textures, finds their
+ // replacement files and decodes those on worker threads. The renderer uploads
+ // the decoded images (replacement_textures.hpp).
+@@ -49,6 +54,8 @@ struct Replacement {
+         Decoded,   // pixels below are ready for the renderer to upload
+         Resident,  // uploaded; the pixels have been freed
+         Failed,    // missing or unreadable; never tried again
++        Matching,  // hash = quick: still being compared with the pack's
++                   // images; Unloaded once it matched one, else Failed
+     };
+ 
+     std::filesystem::path file;  // absolute
+@@ -86,7 +93,8 @@ struct TexturePackKey {
+ // "0000000022585cbda625131a"
+ [[nodiscard]] std::string format_texture_pack_key(const TexturePackKey &key);
+ 
+-enum class TexturePackHash : std::uint8_t { Xxh32, Xxh64 };
++// Quick packs' textures are keyed with xxh64 here, and matched by picture.
++enum class TexturePackHash : std::uint8_t { Xxh32, Xxh64, Quick };
+ 
+ // What [options] says, plus the parts of the other sections that change a
+ // texture's key.
+@@ -125,12 +133,20 @@ struct TexturePackInfo {
+ // or cannot be read.
+ [[nodiscard]] std::vector<std::string> texture_pack_games(const std::filesystem::path &ini);
+ 
++class TexturePackMatcher;
++
++// Decodes the texture being looked up, width x height RGBA8 (red in the low
++// byte); false when it cannot. find() asks only for a quick pack's textures
++// that need matching.
++using TexturePixels = std::function<bool(std::vector<std::uint32_t> &pixels)>;
++
+ class TexturePack {
+ public:
+     // Reads textures.ini (and the hash-named images in the folder itself) from
+     // `directory`. Returns null with `error` set when there is no usable pack.
++    // A quick pack keeps its matches in `match_root` (none when empty).
+     static std::unique_ptr<TexturePack> open(const std::filesystem::path &directory, const std::string &game_id,
+-                                             std::string &error);
++                                             std::string &error, const std::filesystem::path &match_root = {});
+     // Reads a pack as open() does, without starting anything. False with
+     // `error` set when open() would refuse it.
+     static bool inspect(const std::filesystem::path &directory, const std::string &game_id, TexturePackInfo &info,
+@@ -141,9 +157,10 @@ public:
+ 
+     // Hashes `texture` and finds its replacement: null when the pack has none
+     // or says to leave the texture alone. Hashing reads the whole texture, so
+-    // call it once per texture upload, never per draw.
++    // call it once per texture upload, never per draw. In a quick pack a
++    // texture not matched yet is decoded with `pixels` and returned Matching.
+     std::shared_ptr<Replacement> find(const GuestMemory &memory, const TextureState &texture,
+-                                      std::uint16_t max_seen_v);
++                                      std::uint16_t max_seen_v, const TexturePixels &pixels = {});
+ 
+     // Starts decoding an Unloaded replacement on a loader thread. Only the
+     // renderer's thread calls this and consumed().
+@@ -154,7 +171,9 @@ public:
+ 
+     [[nodiscard]] const std::filesystem::path &directory() const noexcept { return directory_; }
+     [[nodiscard]] const TexturePackOptions &options() const noexcept { return options_; }
+-    [[nodiscard]] std::size_t entry_count() const noexcept { return entries_.size(); }
++    [[nodiscard]] std::size_t entry_count() const noexcept { return entries_.size() + quick_entries_.size(); }
++    // A quick pack's matching, for the menu; empty for other packs.
++    [[nodiscard]] std::string match_status() const;
+ 
+ private:
+     TexturePack() = default;
+@@ -175,6 +194,15 @@ private:
+     [[nodiscard]] std::filesystem::path resolve(const std::string &name);
+     void loader_main();
+     void decode(Replacement &replacement);
++    // The Replacement for one image of the pack, shared by its keys.
++    std::shared_ptr<Replacement> replacement_for(const std::string &name, const TexturePackKey &key,
++                                                 const TextureState &texture, std::uint32_t covered_width,
++                                                 std::uint32_t covered_height);
++    void start_matching(const std::filesystem::path &match_root);
++    // find() for a quick pack's texture that no key names without its hash.
++    std::shared_ptr<Replacement> find_by_picture(const TextureState &texture, const TexturePackKey &key,
++                                                 std::uint32_t covered_width, std::uint32_t covered_height,
++                                                 const TexturePixels &pixels);
+ 
+     std::filesystem::path directory_;
+     TexturePackOptions options_;
+@@ -182,6 +210,11 @@ private:
+     // Key -> file name relative to the pack; an empty name means "keep the
+     // original texture".
+     std::unordered_map<TexturePackKey, std::string, KeyHash> entries_;
++    // A quick pack's keys whose data half needs its hash: matched by picture.
++    std::vector<std::pair<TexturePackKey, std::string>> quick_entries_;
++    std::unique_ptr<TexturePackMatcher> matcher_;
++    // Textures being matched, so a texture uploaded again waits on the same.
++    std::unordered_map<TexturePackKey, std::shared_ptr<Replacement>, KeyHash> matching_;
+     std::unordered_map<TexturePackKey, ReplacementFilter, KeyHash> filters_;
+     // One Replacement per file name.
+     std::unordered_map<std::string, std::shared_ptr<Replacement>> files_;
+diff --git a/host/gpu/texture_pack_match.cpp b/host/gpu/texture_pack_match.cpp
+new file mode 100644
+index 0000000..810d087
+--- /dev/null
++++ b/host/gpu/texture_pack_match.cpp
+@@ -0,0 +1,638 @@
++#include "texture_pack_match.hpp"
++
++#include "texture_pack.hpp"
++
++#include <algorithm>
++#include <cctype>
++#include <chrono>
++#include <cmath>
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#include <fstream>
++#include <iostream>
++#include <numeric>
++#include <sstream>
++#include <system_error>
++
++namespace portablekit::gpu {
++namespace {
++
++constexpr std::uint32_t kSignatureSide = 16u;
++constexpr std::uint32_t kThumbnailSide = 64u;
++constexpr std::size_t kShortlist = 4u;
++constexpr float kScoreLimit = 45.0f;
++constexpr float kRunnerUpRatio = 1.7f;
++constexpr float kSamePicture = 3.0f;
++constexpr float kRecolourChroma = 16.0f;
++constexpr float kRecolourShare = 0.08f;
++constexpr std::uint8_t kSolidAlpha = 128u;
++constexpr std::size_t kMinSolidPixels = 16u;
++constexpr double kMinSpread = 6.0;
++constexpr float kNoScore = 999.0f;
++// Pixels waiting for the matcher, at most; a burst of textures at a scene's
++// start is held, not dropped.
++constexpr std::size_t kMaxQueuedBytes = 256u * 1024u * 1024u;
++
++constexpr char kIndexMagic[8] = {'P', 'K', 'Q', 'M', 'A', 'T', 'C', 'H'};
++constexpr std::uint32_t kIndexVersion = 1u;
++
++// The source pixels each output pixel covers, with their shares of it.
++struct Span {
++    std::uint32_t first{};
++    std::vector<float> weights;
++};
++
++std::vector<Span> spans(std::uint32_t from, std::uint32_t to) {
++    std::vector<Span> out(to);
++    const double scale = static_cast<double>(from) / static_cast<double>(to);
++    for (std::uint32_t i = 0; i < to; ++i) {
++        const double begin = i * scale;
++        const double end = (i + 1u) * scale;
++        Span &span = out[i];
++        span.first = static_cast<std::uint32_t>(begin);
++        double total = 0.0;
++        for (std::uint32_t s = span.first; s < from && static_cast<double>(s) < end; ++s) {
++            const double weight = std::min(end, s + 1.0) - std::max(begin, static_cast<double>(s));
++            span.weights.push_back(static_cast<float>(weight));
++            total += weight;
++        }
++        if (span.weights.empty()) {
++            span.first = std::min(span.first, from - 1u);
++            span.weights.push_back(1.0f);
++            total = 1.0;
++        }
++        for (float &weight : span.weights) weight = static_cast<float>(weight / total);
++    }
++    return out;
++}
++
++// The share of pixels solid in both whose chroma (Cb, Cr) differs by more
++// than kRecolourChroma.
++float recoloured_share(const MatchImage &a, const MatchImage &b) {
++    if (a.rgba.size() != b.rgba.size()) return 1.0f;
++    std::size_t both = 0u, changed = 0u;
++    for (std::size_t i = 0; i < a.rgba.size(); i += 4u) {
++        if (a.rgba[i + 3u] < kSolidAlpha || b.rgba[i + 3u] < kSolidAlpha) continue;
++        ++both;
++        const auto chroma = [](const std::uint8_t *p, float &cb, float &cr) {
++            cb = -0.1687f * p[0] - 0.3313f * p[1] + 0.5f * p[2];
++            cr = 0.5f * p[0] - 0.4187f * p[1] - 0.0813f * p[2];
++        };
++        float cb_a = 0.0f, cr_a = 0.0f, cb_b = 0.0f, cr_b = 0.0f;
++        chroma(&a.rgba[i], cb_a, cr_a);
++        chroma(&b.rgba[i], cb_b, cr_b);
++        if (std::hypot(cb_a - cb_b, cr_a - cr_b) > kRecolourChroma) ++changed;
++    }
++    return both != 0u ? static_cast<float>(changed) / static_cast<float>(both) : 0.0f;
++}
++
++void format_key(char (&text)[32], std::uint64_t cache_key, std::uint32_t data_hash) {
++    std::snprintf(text, sizeof(text), "%016llx%08x", static_cast<unsigned long long>(cache_key),
++                  static_cast<unsigned>(data_hash));
++}
++
++bool parse_key(const std::string &text, std::uint64_t &cache_key, std::uint32_t &data_hash) {
++    if (text.size() != 24u) return false;
++    char *end = nullptr;
++    cache_key = std::strtoull(text.substr(0, 16u).c_str(), &end, 16);
++    if (end == nullptr || *end != '\0') return false;
++    data_hash = static_cast<std::uint32_t>(std::strtoul(text.substr(16u).c_str(), &end, 16));
++    return end != nullptr && *end == '\0';
++}
++
++std::string trim(const std::string &text) {
++    std::size_t begin = 0u, end = text.size();
++    while (begin < end && std::isspace(static_cast<unsigned char>(text[begin])) != 0) ++begin;
++    while (end > begin && std::isspace(static_cast<unsigned char>(text[end - 1u])) != 0) --end;
++    return text.substr(begin, end - begin);
++}
++
++template <typename T> void put(std::ostream &out, const T &value) {
++    out.write(reinterpret_cast<const char *>(&value), sizeof(value));
++}
++template <typename T> bool get(std::istream &in, T &value) {
++    return static_cast<bool>(in.read(reinterpret_cast<char *>(&value), sizeof(value)));
++}
++
++struct FileStamp {
++    std::uint64_t size{};
++    std::int64_t time{};
++    bool operator==(const FileStamp &) const = default;
++};
++
++FileStamp stamp(const std::filesystem::path &path) {
++    std::error_code ec;
++    FileStamp result;
++    result.size = static_cast<std::uint64_t>(std::filesystem::file_size(path, ec));
++    if (ec) return {};
++    const auto time = std::filesystem::last_write_time(path, ec);
++    if (!ec) result.time = static_cast<std::int64_t>(time.time_since_epoch().count());
++    return result;
++}
++
++} // namespace
++
++MatchImage resample(const std::uint8_t *rgba, std::uint32_t from_width, std::uint32_t from_height,
++                    std::uint32_t width, std::uint32_t height) {
++    MatchImage out;
++    out.width = width;
++    out.height = height;
++    out.rgba.assign(static_cast<std::size_t>(width) * height * 4u, 0u);
++    if (rgba == nullptr || from_width == 0u || from_height == 0u || width == 0u || height == 0u) return out;
++    // Averaged with the colour weighted by alpha, so the colour of clear
++    // pixels does not bleed into the solid ones beside them.
++    const std::vector<Span> across = spans(from_width, width);
++    const std::vector<Span> down = spans(from_height, height);
++    std::vector<float> rows(static_cast<std::size_t>(width) * from_height * 4u, 0.0f);
++    for (std::uint32_t y = 0; y < from_height; ++y) {
++        const std::uint8_t *row = rgba + static_cast<std::size_t>(y) * from_width * 4u;
++        float *target = rows.data() + static_cast<std::size_t>(y) * width * 4u;
++        for (std::uint32_t x = 0; x < width; ++x) {
++            float r = 0.0f, g = 0.0f, b = 0.0f, a = 0.0f;
++            const Span &span = across[x];
++            for (std::size_t i = 0; i < span.weights.size(); ++i) {
++                const std::uint8_t *p = row + (span.first + i) * 4u;
++                const float w = span.weights[i];
++                const float alpha = p[3] * w;
++                r += p[0] * alpha;
++                g += p[1] * alpha;
++                b += p[2] * alpha;
++                a += alpha;
++            }
++            target[x * 4u + 0u] = r;
++            target[x * 4u + 1u] = g;
++            target[x * 4u + 2u] = b;
++            target[x * 4u + 3u] = a;
++        }
++    }
++    for (std::uint32_t y = 0; y < height; ++y) {
++        const Span &span = down[y];
++        for (std::uint32_t x = 0; x < width; ++x) {
++            float sum[4] = {};
++            for (std::size_t i = 0; i < span.weights.size(); ++i) {
++                const float *p = rows.data() + ((span.first + i) * width + x) * 4u;
++                for (int c = 0; c < 4; ++c) sum[c] += p[c] * span.weights[i];
++            }
++            std::uint8_t *q = out.rgba.data() + (static_cast<std::size_t>(y) * width + x) * 4u;
++            const float alpha = sum[3];
++            q[3] = static_cast<std::uint8_t>(std::clamp(alpha + 0.5f, 0.0f, 255.0f));
++            for (int c = 0; c < 3; ++c)
++                q[c] = alpha > 0.0f ? static_cast<std::uint8_t>(std::clamp(sum[c] / alpha + 0.5f, 0.0f, 255.0f)) : 0u;
++        }
++    }
++    return out;
++}
++
++void match_thumbnail_size(std::uint32_t width, std::uint32_t height, std::uint32_t &out_width,
++                          std::uint32_t &out_height) {
++    const std::uint32_t longer = std::max(width, height);
++    if (longer <= kThumbnailSide) {
++        out_width = width;
++        out_height = height;
++        return;
++    }
++    out_width = std::max(1u, width * kThumbnailSide / longer);
++    out_height = std::max(1u, height * kThumbnailSide / longer);
++}
++
++float match_score(const MatchImage &a, const MatchImage &b) {
++    if (a.width != b.width || a.height != b.height || a.rgba.size() != b.rgba.size()) return kNoScore;
++    std::size_t both = 0u, either = 0u;
++    std::uint64_t difference = 0u;
++    for (std::size_t i = 0; i < a.rgba.size(); i += 4u) {
++        const bool solid_a = a.rgba[i + 3u] >= kSolidAlpha;
++        const bool solid_b = b.rgba[i + 3u] >= kSolidAlpha;
++        if (!solid_a && !solid_b) continue;
++        ++either;
++        if (!solid_a || !solid_b) continue;
++        ++both;
++        for (std::size_t c = 0; c < 3u; ++c)
++            difference += static_cast<std::uint64_t>(std::abs(int(a.rgba[i + c]) - int(b.rgba[i + c])));
++    }
++    if (either == 0u) return kNoScore;
++    const float overlap = static_cast<float>(both) / static_cast<float>(either);
++    const float colour = both != 0u ? static_cast<float>(difference) / (3.0f * static_cast<float>(both)) : 100.0f;
++    return colour + 100.0f * (1.0f - overlap);
++}
++
++bool match_informative(const MatchImage &image) {
++    std::size_t solid = 0u;
++    double sum[3] = {}, squares[3] = {};
++    for (std::size_t i = 0; i < image.rgba.size(); i += 4u) {
++        if (image.rgba[i + 3u] < kSolidAlpha) continue;
++        ++solid;
++        for (std::size_t c = 0; c < 3u; ++c) {
++            const double v = image.rgba[i + c];
++            sum[c] += v;
++            squares[c] += v * v;
++        }
++    }
++    if (solid < kMinSolidPixels) return false;
++    double spread = 0.0;
++    for (int c = 0; c < 3; ++c) {
++        const double mean = sum[c] / static_cast<double>(solid);
++        spread = std::max(spread, std::sqrt(std::max(0.0, squares[c] / static_cast<double>(solid) - mean * mean)));
++    }
++    return spread >= kMinSpread;
++}
++
++void index_match_candidate(MatchCandidate &candidate, const std::uint8_t *rgba, std::uint32_t width,
++                           std::uint32_t height) {
++    candidate.width = width;
++    candidate.height = height;
++    candidate.signature = resample(rgba, width, height, kSignatureSide, kSignatureSide);
++    std::uint32_t thumb_width = 0u, thumb_height = 0u;
++    match_thumbnail_size(width, height, thumb_width, thumb_height);
++    candidate.thumbnail = resample(rgba, width, height, thumb_width, thumb_height);
++}
++
++MatchDecision match_texture(const std::vector<MatchCandidate> &candidates, const std::uint8_t *rgba,
++                            std::uint32_t width, std::uint32_t height, std::uint64_t cache_key) {
++    MatchDecision decision;
++    if (rgba == nullptr || width == 0u || height == 0u) return decision;
++    MatchImage native;
++    native.width = width;
++    native.height = height;
++    native.rgba.assign(rgba, rgba + static_cast<std::size_t>(width) * height * 4u);
++    decision.informative = match_informative(native);
++    if (!decision.informative) return decision;
++
++    const MatchImage signature = resample(rgba, width, height, kSignatureSide, kSignatureSide);
++    std::uint32_t thumb_width = 0u, thumb_height = 0u;
++    match_thumbnail_size(width, height, thumb_width, thumb_height);
++    const MatchImage thumbnail =
++        thumb_width == width && thumb_height == height ? native : resample(rgba, width, height, thumb_width, thumb_height);
++
++    // The shortlist: the closest signatures among images of the texture's
++    // shape whose keys can name it.
++    std::vector<std::pair<float, int>> ranked;
++    for (std::size_t i = 0; i < candidates.size(); ++i) {
++        const MatchCandidate &c = candidates[i];
++        if (c.width == 0u || static_cast<std::uint64_t>(c.width) * height != static_cast<std::uint64_t>(c.height) * width)
++            continue;
++        const bool named = std::any_of(c.prefixes.begin(), c.prefixes.end(),
++                                       [&](std::uint64_t prefix) {
++                                           // A key with no address half names the texture at any address.
++                                           return prefix == 0u || prefix == cache_key ||
++                                                  (prefix >> 32u == 0u && prefix == (cache_key & 0xFFFFFFFFull));
++                                       });
++        if (!named) continue;
++        ranked.emplace_back(match_score(signature, c.signature), static_cast<int>(i));
++    }
++    if (ranked.empty()) return decision;
++    const std::size_t shortlist = std::min(kShortlist, ranked.size());
++    std::partial_sort(ranked.begin(), ranked.begin() + static_cast<std::ptrdiff_t>(shortlist), ranked.end());
++
++    // Each again at thumbnail size.
++    std::vector<std::pair<float, int>> verified;
++    std::vector<MatchImage> sized(shortlist);
++    for (std::size_t i = 0; i < shortlist; ++i) {
++        const MatchCandidate &c = candidates[static_cast<std::size_t>(ranked[i].second)];
++        sized[i] = c.thumbnail.width == thumb_width && c.thumbnail.height == thumb_height
++                       ? c.thumbnail
++                       : resample(c.thumbnail.rgba.data(), c.thumbnail.width, c.thumbnail.height, thumb_width,
++                                  thumb_height);
++        verified.emplace_back(match_score(thumbnail, sized[i]), static_cast<int>(i));
++    }
++    std::sort(verified.begin(), verified.end());
++    const auto &[best_score, best_slot] = verified[0];
++    decision.closest = ranked[static_cast<std::size_t>(best_slot)].second;
++    decision.score = best_score;
++    if (verified.size() > 1u) {
++        decision.runner_up = verified[1].first;
++        decision.alike = match_score(sized[static_cast<std::size_t>(best_slot)],
++                                     sized[static_cast<std::size_t>(verified[1].second)]);
++    }
++    decision.recolour = recoloured_share(signature, candidates[static_cast<std::size_t>(decision.closest)].signature);
++    const bool clear = decision.runner_up >= kRunnerUpRatio * decision.score || decision.alike < kSamePicture;
++    if (decision.score < kScoreLimit && clear && decision.recolour <= kRecolourShare) decision.best = decision.closest;
++    return decision;
++}
++
++TexturePackMatcher::TexturePackMatcher(std::filesystem::path pack_folder, std::vector<MatchCandidate> images,
++                                       std::string pack_id, std::filesystem::path match_root, ImageReader reader)
++    : folder_(std::move(pack_folder)), candidates_(std::move(images)), pack_id_(std::move(pack_id)),
++      root_(std::move(match_root)), reader_(std::move(reader)) {
++    // Matches made before are known at once; only new textures wait for the
++    // index.
++    load_matches();
++    worker_ = std::thread([this] { worker_main(); });
++}
++
++TexturePackMatcher::~TexturePackMatcher() {
++    stopping_ = true;
++    {
++        std::lock_guard lock(mutex_);
++    }
++    wake_.notify_all();
++    worker_.join();
++}
++
++TexturePackMatcher::Known TexturePackMatcher::known(std::uint64_t cache_key, std::uint32_t data_hash,
++                                                    std::string &file) const {
++    std::lock_guard lock(mutex_);
++    if (const auto found = matches_.find({cache_key, data_hash}); found != matches_.end()) {
++        file = found->second;
++        return Known::Matched;
++    }
++    // Then at any address, then for any palette: the wildcard order of keys.
++    for (const std::uint64_t wider : {cache_key & 0xFFFFFFFFull, std::uint64_t{0u}}) {
++        if (const auto found = matches_.find({wider, data_hash}); found != matches_.end()) {
++            file = found->second;
++            return Known::Matched;
++        }
++    }
++    return unmatched_.count({cache_key, data_hash}) != 0u ? Known::Unmatched : Known::No;
++}
++
++namespace {
++
++std::uint64_t shape_of(std::uint32_t width, std::uint32_t height) {
++    const std::uint32_t divisor = std::max(1u, std::gcd(width, height));
++    return static_cast<std::uint64_t>(width / divisor) << 32u | (height / divisor);
++}
++
++} // namespace
++
++bool TexturePackMatcher::has_shape(std::uint32_t width, std::uint32_t height) const {
++    if (!ready_.load(std::memory_order_acquire)) return true;
++    return shapes_.count(shape_of(width, height)) != 0u;
++}
++
++bool TexturePackMatcher::submit(Job job) {
++    const std::size_t bytes = job.pixels.size() * sizeof(std::uint32_t);
++    {
++        std::lock_guard lock(mutex_);
++        if (queued_bytes_ + bytes > kMaxQueuedBytes) return false;
++        queued_bytes_ += bytes;
++        queue_.push_back(std::move(job));
++    }
++    wake_.notify_one();
++    return true;
++}
++
++void TexturePackMatcher::drain() {
++    std::unique_lock lock(mutex_);
++    idle_.wait(lock, [&] { return stopping_ || (ready_ && queue_.empty() && !busy_); });
++}
++
++std::string TexturePackMatcher::status() const {
++    if (!ready_) {
++        return "reading images to match: " + std::to_string(indexed_.load()) + " of " +
++               std::to_string(candidates_.size());
++    }
++    std::lock_guard lock(mutex_);
++    return std::to_string(matches_.size()) + " matched by picture";
++}
++
++void TexturePackMatcher::worker_main() {
++    const auto started = std::chrono::steady_clock::now();
++    load_index();
++    const std::size_t loaded = indexed_.load();
++    build_index();
++    if (stopping_) {
++        idle_.notify_all();
++        return;
++    }
++    if (indexed_.load() != loaded) save_index();
++    std::size_t unreadable = 0u;
++    for (const MatchCandidate &c : candidates_) {
++        unreadable += c.width == 0u ? 1u : 0u;
++        if (c.width != 0u) shapes_.insert(shape_of(c.width, c.height));
++    }
++    const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
++    char took[32];
++    std::snprintf(took, sizeof(took), "%.1f", seconds);
++    std::cout << "[texpack] matching by picture: " << candidates_.size() << " images ready ("
++              << (indexed_.load() - loaded) << " read in " << took << " s"
++              << (unreadable != 0u ? ", " + std::to_string(unreadable) + " unreadable" : std::string()) << ")\n";
++    {
++        std::lock_guard lock(mutex_);
++        ready_ = true;
++    }
++    idle_.notify_all();
++
++    for (;;) {
++        Job job;
++        {
++            std::unique_lock lock(mutex_);
++            wake_.wait(lock, [&] { return stopping_ || !queue_.empty(); });
++            if (stopping_) break;
++            job = std::move(queue_.front());
++            queue_.pop_front();
++            queued_bytes_ -= std::min(queued_bytes_, job.pixels.size() * sizeof(std::uint32_t));
++            busy_ = true;
++        }
++        const MatchDecision decision =
++            match_texture(candidates_, reinterpret_cast<const std::uint8_t *>(job.pixels.data()), job.width,
++                          job.height, job.cache_key);
++        std::string file;
++        char key[32];
++        if (decision.best >= 0) {
++            const MatchCandidate &c = candidates_[static_cast<std::size_t>(decision.best)];
++            file = c.file;
++            // The match is kept in the form of the pack's key: with this
++            // texture's first half, with its dimension and palette at any
++            // address, or for any palette, so other palettes find it.
++            const std::uint64_t low = job.cache_key & 0xFFFFFFFFull;
++            const auto has = [&](std::uint64_t prefix) {
++                return std::find(c.prefixes.begin(), c.prefixes.end(), prefix) != c.prefixes.end();
++            };
++            const std::uint64_t kept = job.cache_key != 0u && has(job.cache_key) ? job.cache_key
++                                       : low != 0u && has(low)                    ? low
++                                                                                  : 0u;
++            format_key(key, kept, job.data_hash);
++            std::lock_guard lock(mutex_);
++            matches_[{kept, job.data_hash}] = file;
++            append_match_line("hashes", std::string(key) + " = " + file);
++        } else {
++            format_key(key, job.cache_key, job.data_hash);
++            std::lock_guard lock(mutex_);
++            unmatched_.insert({job.cache_key, job.data_hash});
++            // Only textures that were compared with something are saved: a
++            // texture no image has the shape of costs nothing to try again,
++            // and lines of text, new with every text, would fill the file.
++            if (decision.closest >= 0) append_match_line("unmatched", key);
++        }
++        if (texture_pack_trace()) {
++            char scores[96];
++            std::snprintf(scores, sizeof(scores), "%.1f, next %.1f, alike %.1f, recoloured %.0f%%", decision.score,
++                          decision.runner_up, decision.alike, 100.0f * decision.recolour);
++            format_key(key, job.cache_key, job.data_hash);
++            const std::string closest =
++                decision.closest >= 0 ? candidates_[static_cast<std::size_t>(decision.closest)].file : "-";
++            std::cout << "[texpack] " << key << " " << job.width << "x" << job.height
++                      << (decision.best >= 0         ? " matched " + file + " ("
++                          : !decision.informative    ? std::string(" not matched: too plain (")
++                                                     : " not matched: closest " + closest + " (")
++                      << (decision.informative ? scores : "-") << ")\n";
++        }
++        if (job.done) job.done(file);
++        {
++            std::lock_guard lock(mutex_);
++            busy_ = false;
++        }
++        idle_.notify_all();
++    }
++    idle_.notify_all();
++}
++
++void TexturePackMatcher::build_index() {
++    std::vector<std::size_t> missing;
++    for (std::size_t i = 0; i < candidates_.size(); ++i)
++        if (!candidates_[i].indexed) missing.push_back(i);
++    if (missing.empty()) return;
++    std::atomic<std::size_t> next{0};
++    const unsigned threads = std::clamp(std::thread::hardware_concurrency() / 4u, 1u, 3u);
++    std::vector<std::thread> readers;
++    for (unsigned t = 0; t < threads; ++t) {
++        readers.emplace_back([&] {
++            std::vector<std::uint8_t> rgba;
++            for (;;) {
++                if (stopping_) return;
++                const std::size_t at = next.fetch_add(1u);
++                if (at >= missing.size()) return;
++                MatchCandidate &c = candidates_[missing[at]];
++                std::uint32_t width = 0u, height = 0u;
++                if (reader_(c.file, rgba, width, height) && width != 0u && height != 0u)
++                    index_match_candidate(c, rgba.data(), width, height);
++                else
++                    c.width = c.height = 0u;
++                c.indexed = true;
++                indexed_.fetch_add(1u);
++            }
++        });
++    }
++    for (std::thread &reader : readers) reader.join();
++}
++
++void TexturePackMatcher::load_index() {
++    if (root_.empty()) return;
++    std::ifstream in(root_ / (pack_id_ + ".index"), std::ios::binary);
++    if (!in) return;
++    char magic[8] = {};
++    std::uint32_t version = 0u, count = 0u;
++    if (!in.read(magic, sizeof(magic)) || std::memcmp(magic, kIndexMagic, sizeof(magic)) != 0 || !get(in, version) ||
++        version != kIndexVersion || !get(in, count))
++        return;
++    std::unordered_map<std::string, std::size_t> by_name;
++    for (std::size_t i = 0; i < candidates_.size(); ++i) by_name.emplace(candidates_[i].file, i);
++    for (std::uint32_t n = 0; n < count; ++n) {
++        std::uint32_t name_length = 0u, width = 0u, height = 0u, thumb_width = 0u, thumb_height = 0u;
++        FileStamp saved;
++        if (!get(in, name_length) || name_length > 4096u) return;
++        std::string name(name_length, '\0');
++        if (!in.read(name.data(), name_length) || !get(in, saved.size) || !get(in, saved.time) || !get(in, width) ||
++            !get(in, height) || !get(in, thumb_width) || !get(in, thumb_height) || thumb_width > kThumbnailSide ||
++            thumb_height > kThumbnailSide)
++            return;
++        MatchCandidate entry;
++        entry.width = width;
++        entry.height = height;
++        if (width != 0u) {
++            entry.signature = {kSignatureSide, kSignatureSide,
++                               std::vector<std::uint8_t>(kSignatureSide * kSignatureSide * 4u)};
++            entry.thumbnail = {thumb_width, thumb_height,
++                               std::vector<std::uint8_t>(static_cast<std::size_t>(thumb_width) * thumb_height * 4u)};
++            if (!in.read(reinterpret_cast<char *>(entry.signature.rgba.data()),
++                         static_cast<std::streamsize>(entry.signature.rgba.size())) ||
++                !in.read(reinterpret_cast<char *>(entry.thumbnail.rgba.data()),
++                         static_cast<std::streamsize>(entry.thumbnail.rgba.size())))
++                return;
++        }
++        const auto found = by_name.find(name);
++        // An image changed since it was read is read again.
++        if (found == by_name.end() || !(stamp(folder_ / std::filesystem::path(name)) == saved)) continue;
++        MatchCandidate &c = candidates_[found->second];
++        c.width = entry.width;
++        c.height = entry.height;
++        c.signature = std::move(entry.signature);
++        c.thumbnail = std::move(entry.thumbnail);
++        c.indexed = true;  // unreadable ones too, so they are not tried again
++        indexed_.fetch_add(1u);
++    }
++}
++
++void TexturePackMatcher::save_index() const {
++    if (root_.empty()) return;
++    std::error_code ec;
++    std::filesystem::create_directories(root_, ec);
++    const std::filesystem::path path = root_ / (pack_id_ + ".index");
++    const std::filesystem::path temporary = root_ / (pack_id_ + ".index.part");
++    {
++        std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
++        if (!out) return;
++        out.write(kIndexMagic, sizeof(kIndexMagic));
++        put(out, kIndexVersion);
++        put(out, static_cast<std::uint32_t>(candidates_.size()));
++        for (const MatchCandidate &c : candidates_) {
++            put(out, static_cast<std::uint32_t>(c.file.size()));
++            out.write(c.file.data(), static_cast<std::streamsize>(c.file.size()));
++            const FileStamp now = stamp(folder_ / std::filesystem::path(c.file));
++            put(out, now.size);
++            put(out, now.time);
++            put(out, c.width);
++            put(out, c.height);
++            const bool has = c.width != 0u;
++            put(out, has ? c.thumbnail.width : 0u);
++            put(out, has ? c.thumbnail.height : 0u);
++            if (has) {
++                out.write(reinterpret_cast<const char *>(c.signature.rgba.data()),
++                          static_cast<std::streamsize>(c.signature.rgba.size()));
++                out.write(reinterpret_cast<const char *>(c.thumbnail.rgba.data()),
++                          static_cast<std::streamsize>(c.thumbnail.rgba.size()));
++            }
++        }
++        if (!out) return;
++    }
++    std::filesystem::rename(temporary, path, ec);
++    if (ec) std::filesystem::remove(temporary, ec);
++}
++
++void TexturePackMatcher::load_matches() {
++    if (root_.empty()) return;
++    std::ifstream in(root_ / (pack_id_ + ".ini"));
++    std::string line, section;
++    while (std::getline(in, line)) {
++        line = trim(line);
++        if (line.empty() || line[0] == '#' || line[0] == ';') continue;
++        if (line.front() == '[') {
++            section = line;
++            continue;
++        }
++        std::uint64_t cache_key = 0u;
++        std::uint32_t data_hash = 0u;
++        if (section == "[hashes]") {
++            const std::size_t equals = line.find('=');
++            if (equals == std::string::npos || !parse_key(trim(line.substr(0, equals)), cache_key, data_hash)) continue;
++            matches_[{cache_key, data_hash}] = trim(line.substr(equals + 1u));
++        } else if (section == "[unmatched]" && parse_key(line, cache_key, data_hash)) {
++            unmatched_.insert({cache_key, data_hash});
++        }
++    }
++}
++
++void TexturePackMatcher::append_match_line(const std::string &section, const std::string &line) {
++    // Under mutex_. Each line goes under its section's header; the file may
++    // repeat headers, which readers of the format allow.
++    if (root_.empty()) return;
++    std::error_code ec;
++    std::filesystem::create_directories(root_, ec);
++    const std::filesystem::path path = root_ / (pack_id_ + ".ini");
++    const bool fresh = !std::filesystem::exists(path, ec);
++    std::ofstream out(path, std::ios::app);
++    if (!out) return;
++    if (fresh) {
++        out << "# Textures matched by picture to the images of a texture pack whose textures.ini uses\n"
++               "# hash = quick, in this program's keys. Delete this file to match them again.\n";
++        last_section_.clear();
++    }
++    if (last_section_ != section) {
++        out << "[" << section << "]\n";
++        last_section_ = section;
++    }
++    out << line << "\n";
++}
++
++} // namespace portablekit::gpu
+diff --git a/host/gpu/texture_pack_match.hpp b/host/gpu/texture_pack_match.hpp
+new file mode 100644
+index 0000000..22ad935
+--- /dev/null
++++ b/host/gpu/texture_pack_match.hpp
+@@ -0,0 +1,187 @@
++#pragma once
++
++#include <atomic>
++#include <condition_variable>
++#include <cstdint>
++#include <deque>
++#include <filesystem>
++#include <functional>
++#include <mutex>
++#include <string>
++#include <thread>
++#include <unordered_map>
++#include <unordered_set>
++#include <utility>
++#include <vector>
++
++// Packs whose textures.ini says `hash = quick` were keyed with PPSSPP's first
++// hash, which this framework does not compute. Their keys' first halves (the
++// dimension and palette word, texture_pack.hpp) are the same as ours, but the
++// data halves cannot be found by hashing. Instead each texture the pack does
++// not already cover is matched to the pack's images by picture, the first
++// time the game draws it, and the match is kept:
++//
++//   1. Index: every image the pack names is shrunk once to a 16x16 signature
++//      and a thumbnail at most 64 pixels on its longer side (box filter). The
++//      index is saved, so only new or changed images are read again.
++//   2. Match: the game's texture is compared with the signatures of the images
++//      of its shape whose key's first half is its own, or zero; the four
++//      closest are compared again at thumbnail size.
++//   3. The closest is accepted only when it scores below 45 and the next is at
++//      least 1.7 times further off, or the next is the same picture; and when
++//      it is not a recolour: at signature size, where an upscale's redrawn
++//      detail is blurred away, at most 8% of the pixels may differ in chroma
++//      by more than 16. A texture in another costume's colours keeps its own
++//      picture rather than take the pack's image for the first colours.
++//
++// Two images of one size are scored over the pixels solid (alpha >= 128) in
++// either: the mean RGB difference where both are solid, plus 100 times the
++// share of those pixels solid in only one. Textures with fewer than 16 solid
++// pixels or nearly one colour are never matched. The limits were set on a
++// community pack of over two thousand images against dumps of a game's menus
++// and a battle, where every accepted match was right.
++//
++// A match to a key whose first half is zero (any palette) is kept as a
++// data-only key, so the texture's other palettes find it too, as such keys do
++// in the format. Matches are written to <match root>/<pack id>.ini as
++// `[hashes]` lines in this framework's keys; textures that matched nothing are
++// listed under `[unmatched]` and not compared again. Deleting the file matches
++// everything again.
++//
++// This file knows nothing about Vulkan or the GE.
++namespace portablekit::gpu {
++
++// An RGBA8 image, rows packed, red in the lowest byte.
++struct MatchImage {
++    std::uint32_t width{};
++    std::uint32_t height{};
++    std::vector<std::uint8_t> rgba;
++};
++
++// `rgba` (from_width x from_height) at width x height, each new pixel the
++// average of the area it covers.
++[[nodiscard]] MatchImage resample(const std::uint8_t *rgba, std::uint32_t from_width, std::uint32_t from_height,
++                                  std::uint32_t width, std::uint32_t height);
++// A thumbnail's size: the longer side at most 64, the shape kept.
++void match_thumbnail_size(std::uint32_t width, std::uint32_t height, std::uint32_t &out_width,
++                          std::uint32_t &out_height);
++// The score above for two images of one size; 999 when neither has a solid
++// pixel.
++[[nodiscard]] float match_score(const MatchImage &a, const MatchImage &b);
++// False when a texture has too few solid pixels, or too little colour, to be
++// matched.
++[[nodiscard]] bool match_informative(const MatchImage &image);
++
++// One image of the pack and the keys that name it.
++struct MatchCandidate {
++    std::string file;                     // relative to the pack
++    std::vector<std::uint64_t> prefixes;  // first halves of its keys; 0 stands for any
++    std::uint32_t width{};                // the image's size; 0 when it cannot be read
++    std::uint32_t height{};
++    MatchImage signature;                 // 16x16
++    MatchImage thumbnail;                 // match_thumbnail_size()
++    bool indexed{};                       // read, or found unreadable
++};
++
++// Fills a candidate's size, signature and thumbnail from its decoded image.
++void index_match_candidate(MatchCandidate &candidate, const std::uint8_t *rgba, std::uint32_t width,
++                           std::uint32_t height);
++
++struct MatchDecision {
++    int best{-1};         // the accepted candidate; -1 when none is
++    int closest{-1};      // the closest candidate, accepted or not
++    float score{999.0f};
++    float runner_up{999.0f};
++    float alike{999.0f};  // the closest two candidates scored against each other
++    float recolour{};     // share of signature pixels whose chroma differs, for the closest
++    bool informative{};
++};
++
++// Compares a game texture (RGBA8, width x height) with the candidates;
++// `cache_key` is its key's first half.
++[[nodiscard]] MatchDecision match_texture(const std::vector<MatchCandidate> &candidates, const std::uint8_t *rgba,
++                                          std::uint32_t width, std::uint32_t height, std::uint64_t cache_key);
++
++// A pack's matching: its index, the matches found so far and the thread that
++// builds the index and compares the textures.
++class TexturePackMatcher {
++public:
++    struct Job {
++        std::uint64_t cache_key{};
++        std::uint32_t data_hash{};
++        std::uint32_t width{};
++        std::uint32_t height{};
++        std::vector<std::uint32_t> pixels;  // RGBA8, red in the low byte
++        // Called on the matcher's thread with the matched image, or an empty
++        // name when nothing matched. Never called after the matcher is gone.
++        std::function<void(const std::string &file)> done;
++    };
++    // Reads one of the pack's images as RGBA8; false when it cannot.
++    using ImageReader = std::function<bool(const std::string &file, std::vector<std::uint8_t> &rgba,
++                                           std::uint32_t &width, std::uint32_t &height)>;
++
++    // `images`: each image file of the pack in `pack_folder`, with its keys'
++    // first halves. The index and the matches are saved as
++    // <match_root>/<pack_id>.index and .ini; an empty root saves nothing.
++    TexturePackMatcher(std::filesystem::path pack_folder, std::vector<MatchCandidate> images, std::string pack_id,
++                       std::filesystem::path match_root, ImageReader reader);
++    ~TexturePackMatcher();
++    TexturePackMatcher(const TexturePackMatcher &) = delete;
++    TexturePackMatcher &operator=(const TexturePackMatcher &) = delete;
++
++    enum class Known : std::uint8_t { No, Matched, Unmatched };
++    // What earlier matching found for a texture: its own key first, then its
++    // data half alone.
++    [[nodiscard]] Known known(std::uint64_t cache_key, std::uint32_t data_hash, std::string &file) const;
++    // False when no image of the pack has a texture's shape, once the index
++    // is ready: such a texture need not be decoded to know it matches nothing.
++    [[nodiscard]] bool has_shape(std::uint32_t width, std::uint32_t height) const;
++    // Queues a texture. False when too much is queued; the caller can try
++    // again later.
++    bool submit(Job job);
++    // Waits until the queue is empty (for tests and the offline check).
++    void drain();
++
++    // For the menu: how far the index is, or how many textures matched.
++    [[nodiscard]] std::string status() const;
++
++private:
++    using Key = std::pair<std::uint64_t, std::uint32_t>;
++    struct KeyHash {
++        std::size_t operator()(const Key &key) const noexcept {
++            return static_cast<std::size_t>(key.first * 0x9E3779B97F4A7C15ull ^ key.second);
++        }
++    };
++
++    void worker_main();
++    void build_index();
++    void load_index();
++    void save_index() const;
++    void load_matches();
++    void append_match_line(const std::string &section, const std::string &line);
++
++    std::filesystem::path folder_;
++    std::vector<MatchCandidate> candidates_;
++    std::string pack_id_;
++    std::filesystem::path root_;
++    ImageReader reader_;
++
++    mutable std::mutex mutex_;
++    std::condition_variable wake_;
++    std::condition_variable idle_;
++    std::deque<Job> queue_;
++    std::size_t queued_bytes_{};
++    bool busy_{};
++    std::atomic<bool> stopping_{false};
++    std::unordered_map<Key, std::string, KeyHash> matches_;
++    std::unordered_set<Key, KeyHash> unmatched_;
++    std::string last_section_;  // of the matches file, as this session last wrote it
++    // The images' shapes, width and height divided by their greatest common
++    // divisor; written before ready_ is set and only read after.
++    std::unordered_set<std::uint64_t> shapes_;
++    std::atomic<std::size_t> indexed_{0};
++    std::atomic<bool> ready_{false};
++    std::thread worker_;
++};
++
++} // namespace portablekit::gpu
+diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
+index 3896bea..4b514fc 100644
+--- a/host/gpu/vulkan_renderer.cpp
++++ b/host/gpu/vulkan_renderer.cpp
+@@ -5088,7 +5088,10 @@ VulkanRenderer::Impl::Texture &VulkanRenderer::Impl::texture_for(const GuestMemo
+             const std::uint16_t seen = update_max_seen_v(texture.max_seen_v, drawn_max_v(call), call.through);
+             if (seen != texture.max_seen_v) {
+                 texture.max_seen_v = seen;
+-                if (pack) texture.replacement = pack->find(memory, state, seen);
++                if (pack)
++                    texture.replacement = pack->find(memory, state, seen, [&](std::vector<std::uint32_t> &out) {
++                        return decode_texture(memory, state, out) && !out.empty();
++                    });
+                 std::vector<std::uint32_t> again;
+                 if (dumper && decode_texture(memory, state, again) && !again.empty())
+                     dumper->dump(memory, state, seen, pack ? pack->options() : kDumpOptions, again.data());
+@@ -5163,6 +5166,7 @@ VulkanRenderer::Impl::Texture &VulkanRenderer::Impl::texture_for(const GuestMemo
+         textures.erase(oldest);
+         ++textures_erased;
+     }
++    const bool decoded_now = !job;  // `job` is handed over below
+     Texture texture = job ? create_texture_image(state.width, state.height)
+                           : create_texture(state.width, state.height, pixels.data());
+     if (texture.descriptor == VK_NULL_HANDLE) return white_texture;
+@@ -5177,7 +5181,16 @@ VulkanRenderer::Impl::Texture &VulkanRenderer::Impl::texture_for(const GuestMemo
+     texture.max_seen_v = max_seen_v;
+     // The pack's hash reads the whole texture, so it is taken here, once per
+     // upload, and never on the per-draw path above.
+-    if (pack) texture.replacement = pack->find(memory, state, max_seen_v);
++    // A quick pack's texture not matched yet is compared by picture: the
++    // decoded pixels, decoded here when the background decode has them.
++    if (pack)
++        texture.replacement = pack->find(memory, state, max_seen_v, [&](std::vector<std::uint32_t> &out) {
++            if (decoded_now) {
++                out.assign(pixels.begin(), pixels.end());
++                return !out.empty();
++            }
++            return decode_texture(memory, state, out) && !out.empty();
++        });
+     Texture &cached = textures.emplace(key, std::move(texture)).first->second;
+     memo->texture = &cached;
+     memo->erased = textures_erased;
+@@ -5221,7 +5234,9 @@ void VulkanRenderer::Impl::apply_texture_pack() {
+                                           settings::current().texture_pack_folder);
+     const std::filesystem::path &folder = pack_location.folder;
+     std::string error;
+-    pack = TexturePack::open(folder, portablekit::game().disc_id, error);
++    // A quick pack's matches are kept beside the installed packs, whichever
++    // folder the pack is read from.
++    pack = TexturePack::open(folder, portablekit::game().disc_id, error, VulkanRenderer::textures_root() / ".matched");
+     if (!pack) {
+         std::error_code ec;
+         if (std::filesystem::is_directory(folder, ec)) pack_status = "Not loaded: " + error;
+@@ -7467,7 +7482,9 @@ std::string VulkanRenderer::texture_pack_status() const {
+     if (impl.pack_held) return "Updating";
+     if (impl.pack_wanted != impl.pack_applied || impl.pack_reload) return impl.pack_wanted ? "Loading" : "Off";
+     if (!impl.pack) return impl.pack_status;
+-    return impl.pack_status + ", " + std::to_string(impl.replacements.resident_count()) + " on the GPU (" +
++    const std::string matching = impl.pack->match_status();
++    return impl.pack_status + (matching.empty() ? "" : ", " + matching) + ", " +
++           std::to_string(impl.replacements.resident_count()) + " on the GPU (" +
+            std::to_string(impl.replacements.resident_bytes() >> 20u) + " MB)";
+ }
+ 
+diff --git a/host/ui/texture_pack_screen.cpp b/host/ui/texture_pack_screen.cpp
+index efa6e59..8882dcf 100644
+--- a/host/ui/texture_pack_screen.cpp
++++ b/host/ui/texture_pack_screen.cpp
+@@ -298,8 +298,13 @@ void review_screen(bool back) {
+         info_row("Folder", utf8(c.folder));
+         if (c.keys > 0u) {
+             info_row("Textures", count(c.keys, "key", "keys") + ", hash " +
+-                                     (c.hash == gpu::TexturePackHash::Xxh64 ? "xxh64" : "xxh32") +
++                                     (c.hash == gpu::TexturePackHash::Xxh64   ? "xxh64"
++                                      : c.hash == gpu::TexturePackHash::Xxh32 ? "xxh32"
++                                                                              : "quick") +
+                                      (c.ignore_address ? ", addresses ignored" : ""));
++            if (c.hash == gpu::TexturePackHash::Quick)
++                indented("Each texture is matched to the pack's images by picture the first time it is drawn, "
++                         "and the match is kept.");
+             info_row("Images", count(c.images, "file", "files") + ", " + human_size(c.bytes) + " in all " +
+                                    count(c.files, "file", "files"));
+             if (c.missing > 0u) {
+diff --git a/tests/texture_pack_tests.cpp b/tests/texture_pack_tests.cpp
+index 9f92967..bff62c0 100644
+--- a/tests/texture_pack_tests.cpp
++++ b/tests/texture_pack_tests.cpp
+@@ -10,21 +10,39 @@
+ // example a real pack, and reads nothing but that folder.
+ //
+ // It also checks the decoding of the PSP's DXT blocks, whose layout is not
+-// the PC's (Yakumo issue #144).
++// the PC's (Yakumo issue #144), and the matching of quick-hash packs by
++// picture:
++//
++//   portablekit_texture_pack_tests --match <pack folder> <dump folder> [<state folder>]
++//
++// matches every texture of a dump (images named by their key) to a quick
++// pack's images, as the game would the first time it drew them, and prints
++// each decision.
+ #include "gpu/texture_decode.hpp"
+ #include "profile.hpp"
+ #include "gpu/texture_pack.hpp"
+ #include "gpu/texture_pack_import.hpp"
++#include "gpu/texture_pack_match.hpp"
+ #include "perf/frame_stats.hpp"
+ 
++#include <algorithm>
+ #include <chrono>
+ #include <cstdio>
+ #include <cstdlib>
++#include <cstring>
+ #include <filesystem>
+ #include <fstream>
+ #include <random>
+ #include <string>
+ #include <thread>
++#include <unordered_map>
++
++#define STBI_ONLY_PNG
++#define STBI_NO_LINEAR
++#define STBI_NO_HDR
++#define STB_IMAGE_STATIC
++#define STB_IMAGE_IMPLEMENTATION
++#include "stb_image.h"
+ 
+ using namespace portablekit::gpu;
+ namespace fs = std::filesystem;
+@@ -166,8 +184,7 @@ void test_hashes(const fs::path &root) {
+     quick.replace(quick.find("xxh64"), 5, "quick");
+     make_pack(root / "quick" / kGame, quick);
+     TexturePackCheck c = check_texture_pack(root / "quick", kGame);
+-    check(c.found() && !c.ok() && c.problem.find("\"quick\" hash") != std::string::npos,
+-          "hash = quick is refused with its reason");
++    check(c.ok() && c.hash == TexturePackHash::Quick && c.keys == 4u, "hash = quick is accepted, to match by picture");
+     std::string xxh32 = kIni;
+     xxh32.replace(xxh32.find("xxh64"), 5, "xxh32");
+     make_pack(root / "xxh32" / kGame, xxh32);
+@@ -276,7 +293,10 @@ int check_folder(const char *folder) {
+     std::printf("pack     %s\n", c.found() ? c.folder.string().c_str() : "(none)");
+     std::printf("layout   %s\n", c.layout.c_str());
+     if (!c.made_for.empty()) std::printf("made for %s\n", c.made_for.c_str());
+-    std::printf("hash     %s%s\n", c.hash == TexturePackHash::Xxh64 ? "xxh64" : "xxh32",
++    std::printf("hash     %s%s\n",
++                c.hash == TexturePackHash::Xxh64   ? "xxh64"
++                : c.hash == TexturePackHash::Xxh32 ? "xxh32"
++                                                   : "quick",
+                 c.ignore_address ? ", ignoreAddress" : "");
+     std::printf("keys     %zu\n", c.keys);
+     std::printf("images   %zu\n", c.images);
+@@ -362,8 +382,212 @@ void test_dxt_decode() {
+     check(texture_key(memory, texture) == before, "a DXT texture's key does not follow the CLUT");
+ }
+ 
++// A test picture: smooth gradients with a few hard edges, `shift` added to
++// every colour.
++std::vector<std::uint8_t> picture(std::uint32_t width, std::uint32_t height, int shift, std::uint32_t seed = 1u) {
++    std::vector<std::uint8_t> rgba(static_cast<std::size_t>(width) * height * 4u);
++    for (std::uint32_t y = 0; y < height; ++y) {
++        for (std::uint32_t x = 0; x < width; ++x) {
++            std::uint8_t *p = rgba.data() + (static_cast<std::size_t>(y) * width + x) * 4u;
++            const std::uint32_t u = x * 64u / width, v = y * 64u / height;
++            const int r = static_cast<int>((u * 4u * seed) % 256u);
++            const int g = static_cast<int>((v * 4u + seed * 50u) % 256u);
++            const int b = ((u / 16u + v / 16u) % 2u) != 0u ? 200 : 40;
++            p[0] = static_cast<std::uint8_t>(std::clamp(r + shift, 0, 255));
++            p[1] = static_cast<std::uint8_t>(std::clamp(g + shift, 0, 255));
++            p[2] = static_cast<std::uint8_t>(std::clamp(b + shift, 0, 255));
++            p[3] = 255u;
++        }
++    }
++    return rgba;
++}
++
++MatchCandidate candidate(const std::string &file, std::uint64_t prefix, std::uint32_t width, std::uint32_t height,
++                         const std::vector<std::uint8_t> &rgba) {
++    MatchCandidate c;
++    c.file = file;
++    c.prefixes = {prefix};
++    index_match_candidate(c, rgba.data(), width, height);
++    c.indexed = true;
++    return c;
++}
++
++void test_matching(const fs::path &root) {
++    // Averaging: a clear red pixel does not tint the solid blue beside it.
++    const std::uint8_t two[] = {255, 0, 0, 0, 0, 0, 255, 255};
++    const MatchImage one = resample(two, 2u, 1u, 1u, 1u);
++    check(one.rgba[0] == 0u && one.rgba[2] == 255u && one.rgba[3] == 128u, "colours average weighted by alpha");
++
++    const std::vector<std::uint8_t> game = picture(32u, 32u, 0);
++    MatchImage a{32u, 32u, game};
++    check(match_score(a, a) == 0.0f, "a picture scores 0 against itself");
++    MatchImage clear{32u, 32u, std::vector<std::uint8_t>(32u * 32u * 4u, 0u)};
++    check(match_score(clear, clear) > 900.0f, "two clear pictures are not comparable");
++    MatchImage flat{32u, 32u, std::vector<std::uint8_t>(32u * 32u * 4u, 200u)};
++    check(match_informative(a) && !match_informative(flat) && !match_informative(clear),
++          "plain and clear textures are not matched");
++
++    // The game's 32x32 texture, an HD image of it four times the size, other
++    // pictures, and one of another shape.
++    std::vector<MatchCandidate> images;
++    images.push_back(candidate("other.png", 0u, 128u, 128u, picture(128u, 128u, 0, 3u)));
++    images.push_back(candidate("hd.png", 0u, 128u, 128u, picture(128u, 128u, 3)));
++    images.push_back(candidate("wide.png", 0u, 256u, 128u, picture(256u, 128u, 0)));
++    images.push_back(candidate("third.png", 0u, 128u, 128u, picture(128u, 128u, 0, 7u)));
++    MatchDecision d = match_texture(images, game.data(), 32u, 32u, 0x0505u);
++    check(d.best == 1 && d.score < 10.0f, "the texture matches its HD image");
++
++    // An image named only by keys for another palette is not a candidate.
++    images[1].prefixes = {0x1234u};
++    d = match_texture(images, game.data(), 32u, 32u, 0x0505u);
++    check(d.best != 1, "an image whose keys are for another palette is left out");
++    d = match_texture(images, game.data(), 32u, 32u, 0x1234u);
++    check(d.best == 1, "and taken for its own palette");
++    d = match_texture(images, game.data(), 32u, 32u, 0x08C6000000001234ull);
++    check(d.best == 1, "a key with no address names the texture at any address");
++
++    // The texture in other colours over a fifth of it (another costume's)
++    // does not take the image made for the first colours.
++    std::vector<std::uint8_t> recoloured = game;
++    for (std::size_t i = 0; i < recoloured.size() / 5u; i += 4u) std::swap(recoloured[i], recoloured[i + 2u]);
++    d = match_texture(images, recoloured.data(), 32u, 32u, 0x1234u);
++    check(d.closest == 1 && d.best < 0 && d.recolour > 0.08f, "a recoloured texture is not matched");
++
++    // Two different images equally close: no match. Two copies of one: either.
++    std::vector<std::uint8_t> between = picture(32u, 32u, 10);
++    std::vector<MatchCandidate> twins;
++    twins.push_back(candidate("darker.png", 0u, 128u, 128u, picture(128u, 128u, 0)));
++    twins.push_back(candidate("lighter.png", 0u, 128u, 128u, picture(128u, 128u, 20)));
++    d = match_texture(twins, between.data(), 32u, 32u, 0u);
++    check(d.best < 0 && d.closest >= 0, "a texture between two different images matches neither");
++    twins[1] = candidate("copy.png", 0u, 128u, 128u, picture(128u, 128u, 0));
++    d = match_texture(twins, game.data(), 32u, 32u, 0u);
++    check(d.best >= 0, "a texture whose image is in the pack twice matches one of them");
++
++    // The matcher: a match is kept, as a data-only key for an image named for
++    // any palette, saved, and known to the next session without matching.
++    const fs::path state = root / "matched";
++    std::vector<MatchCandidate> files;
++    for (const char *name : {"other.png", "hd.png", "third.png"}) {
++        MatchCandidate c;
++        c.file = name;
++        c.prefixes = {0u};
++        files.push_back(c);
++    }
++    int reads = 0;
++    auto reader = [&](const std::string &name, std::vector<std::uint8_t> &rgba, std::uint32_t &width,
++                      std::uint32_t &height) {
++        ++reads;
++        width = height = 128u;
++        rgba = name == "hd.png" ? picture(128u, 128u, 3) : picture(128u, 128u, 0, name == "other.png" ? 3u : 7u);
++        return true;
++    };
++    std::string matched;
++    {
++        TexturePackMatcher matcher(root, files, "0123456789abcdef", state, reader);
++        TexturePackMatcher::Job job;
++        job.cache_key = 0x0505u;
++        job.data_hash = 0xCAFEu;
++        job.width = job.height = 32u;
++        job.pixels.resize(32u * 32u);
++        std::memcpy(job.pixels.data(), game.data(), game.size());
++        job.done = [&](const std::string &file) { matched = file; };
++        check(matcher.submit(std::move(job)), "a texture is queued");
++        TexturePackMatcher::Job plain;
++        plain.cache_key = 0x0505u;
++        plain.data_hash = 0xBEEFu;
++        plain.width = plain.height = 32u;
++        plain.pixels.assign(32u * 32u, 0xFF808080u);
++        matcher.submit(std::move(plain));
++        matcher.drain();
++        check(matched == "hd.png", "the matcher finds the texture's image");
++        std::string file;
++        check(matcher.known(0x9999u, 0xCAFEu, file) == TexturePackMatcher::Known::Matched && file == "hd.png",
++              "a match for any palette is found by the texture's data alone");
++        check(matcher.known(0x0505u, 0xBEEFu, file) == TexturePackMatcher::Known::Unmatched,
++              "a texture that matched nothing is remembered");
++        check(reads == 3, "each image is read once");
++    }
++    check(fs::exists(state / "0123456789abcdef.ini") && fs::exists(state / "0123456789abcdef.index"),
++          "the matches and the index are saved");
++    TexturePackMatcher again(root, files, "0123456789abcdef", state, reader);
++    std::string file;
++    check(again.known(0x0505u, 0xCAFEu, file) == TexturePackMatcher::Known::Matched && file == "hd.png",
++          "the next session knows the match at once");
++    again.drain();
++    check(reads == 3, "and reads no image again: the saved index is used");
++}
++
++// --match: the decisions for every texture of a dump.
++int match_folder(const fs::path &pack, const fs::path &dump, const fs::path &state) {
++    std::ifstream ini(pack / "textures.ini");
++    std::string line, section;
++    std::unordered_map<std::string, std::size_t> by_file;
++    std::vector<MatchCandidate> images;
++    while (std::getline(ini, line)) {
++        while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) line.pop_back();
++        if (!line.empty() && line.front() == '[') {
++            section = line;
++            continue;
++        }
++        const std::size_t equals = line.find('=');
++        if (section != "[hashes]" || equals == std::string::npos) continue;
++        std::string key = line.substr(0, equals), name = line.substr(equals + 1u);
++        while (!key.empty() && key.back() == ' ') key.pop_back();
++        while (!name.empty() && name.front() == ' ') name.erase(0, 1);
++        std::replace(name.begin(), name.end(), '\\', '/');
++        if (key.size() != 24u || name.empty() || key.substr(16u) == "00000000") continue;
++        const std::uint64_t prefix = std::strtoull(key.substr(0, 16u).c_str(), nullptr, 16);
++        const auto [at, inserted] = by_file.try_emplace(name, images.size());
++        if (inserted) {
++            images.emplace_back();
++            images.back().file = name;
++        }
++        images[at->second].prefixes.push_back(prefix);
++    }
++    auto reader = [&](const std::string &name, std::vector<std::uint8_t> &rgba, std::uint32_t &width,
++                      std::uint32_t &height) {
++        int w = 0, h = 0, n = 0;
++        stbi_uc *image = stbi_load((pack / fs::path(name)).string().c_str(), &w, &h, &n, 4);
++        if (image == nullptr) return false;
++        rgba.assign(image, image + static_cast<std::size_t>(w) * h * 4u);
++        stbi_image_free(image);
++        width = static_cast<std::uint32_t>(w);
++        height = static_cast<std::uint32_t>(h);
++        return true;
++    };
++    std::printf("%zu images\n", images.size());
++    TexturePackMatcher matcher(pack, images, "offline", state, reader);
++    std::size_t textures = 0u;
++    for (const auto &entry : fs::directory_iterator(dump)) {
++        const std::string stem = entry.path().stem().string();
++        if (entry.path().extension() != ".png" || stem.size() != 24u) continue;
++        int w = 0, h = 0, n = 0;
++        stbi_uc *image = stbi_load(entry.path().string().c_str(), &w, &h, &n, 4);
++        if (image == nullptr) continue;
++        TexturePackMatcher::Job job;
++        job.cache_key = std::strtoull(stem.substr(0, 16u).c_str(), nullptr, 16);
++        job.data_hash = static_cast<std::uint32_t>(std::strtoul(stem.substr(16u).c_str(), nullptr, 16));
++        job.width = static_cast<std::uint32_t>(w);
++        job.height = static_cast<std::uint32_t>(h);
++        job.pixels.resize(static_cast<std::size_t>(w) * h);
++        std::memcpy(job.pixels.data(), image, job.pixels.size() * 4u);
++        stbi_image_free(image);
++        job.done = [stem](const std::string &file) {
++            if (!file.empty()) std::printf("match %s %s\n", stem.c_str(), file.c_str());
++        };
++        while (!matcher.submit(std::move(job))) matcher.drain();
++        ++textures;
++    }
++    matcher.drain();
++    std::printf("%zu textures, %s\n", textures, matcher.status().c_str());
++    return 0;
++}
++
+ int main(int argc, char **argv) {
+     if (argc == 3 && std::string(argv[1]) == "--check") return check_folder(argv[2]);
++    if ((argc == 4 || argc == 5) && std::string(argv[1]) == "--match")
++        return match_folder(argv[2], argv[3], argc == 5 ? fs::path(argv[4]) : fs::path());
+     const Scratch scratch;
+     test_layouts(scratch.root);
+     test_games(scratch.root);
+@@ -371,6 +595,7 @@ int main(int argc, char **argv) {
+     test_copy(scratch.root);
+     test_location(scratch.root);
+     test_dxt_decode();
++    test_matching(scratch.root);
+     std::printf("%s\n", failures == 0 ? "all texture pack checks passed" : "texture pack checks FAILED");
+     return failures == 0 ? 0 : 1;
+ }
+-- 
+2.53.0.windows.1
+
