@@ -28,8 +28,9 @@ distributed.**
 
 - **60 fps** display by frame interpolation over the game's 30 Hz logic.
 - **Higher internal resolution.**
-- **A right-stick camera** in battle and on the world map; R3 recentres. The mouse turns it too, as the stick does:
-  sideways turns, forward and back move the camera further and closer ([notes](docs/port/right-stick-camera.md)).
+- **A right-stick camera** in battle and on the world map; R3 recentres. The mouse turns it too:
+  directly in the free camera and on the world map, sideways turns and forward and back move the camera further and
+  closer ([notes](docs/port/right-stick-camera.md)).
 - **True analog movement** on the world map instead of the original's 8 directions, and full diagonals from a
   modern stick ([notes](docs/port/analog-movement.md)).
 - **A mod folder** for content that adds to the game and never replaces it; the first kind is battle music in MP3,

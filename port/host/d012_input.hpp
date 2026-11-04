@@ -23,6 +23,11 @@ struct Pad {
     std::uint8_t ly = 0x80u;
     std::uint8_t rx = 0x80u;
     std::uint8_t ry = 0x80u;
+    // A linked battle's only (d012_camera.hpp, send_mouse): the mouse's turn
+    // of the free camera this frame, in 1/100 degree, and its vertical motion
+    // in 1/4 degree.
+    std::int16_t mouse_yaw = 0;
+    std::int8_t mouse_pitch = 0;
 };
 
 struct Frame {

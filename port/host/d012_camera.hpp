@@ -11,6 +11,10 @@ namespace portablekit {
 class HleRegistrar;
 }
 
+namespace d012::input {
+struct Pad;
+}
+
 namespace d012::camera {
 
 // False with D012_NO_RIGHT_STICK_CAMERA=1: the game's own camera, untouched.
@@ -22,6 +26,14 @@ namespace d012::camera {
 // battle the link does before sending the pad. Nothing with
 // D012_NO_MOUSE_CAMERA=1 (or without the right-stick camera).
 void add_mouse(std::uint8_t &x, std::uint8_t &y);
+// A linked battle's: the mouse's motion since the last frame into the pad
+// this copy sends, as direct degrees while its free camera takes input, else
+// as add_mouse's push of the right stick.
+void send_mouse(input::Pad &mine);
+// The direct degrees in an exchanged pad, for that player's camera (both
+// copies give it both players'); cleared as a battle links.
+void linked_mouse(int player, const input::Pad &pad);
+void clear_linked_mouse();
 // The pad-read wrapper that keeps the right stick and gives R3 its meaning.
 // The camera's two overrides go in from this file's static initialiser.
 void install(portablekit::HleRegistrar &hle);
