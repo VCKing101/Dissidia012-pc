@@ -206,6 +206,8 @@ void run_handler(Guest *g, const decomp::CallState &in, GuestRegs &out) {
     mine.ly = now.analog_y;
     mine.rx = now.right_x;
     mine.ry = now.right_y;
+    // The mouse as a push of that stick, so both copies turn the camera by it.
+    camera::add_mouse(mine.rx, mine.ry);
     // R3 is the camera's recentre, SELECT, as on the port's own pad reads.
     if ((mine.extra & ext::kExtraR3) != 0u) mine.buttons |= kSelect;
     const net::battle::Pads pads = net::battle::exchange(frame, mine);
@@ -456,6 +458,11 @@ bool active(Guest *g) {
     const gaddr net = session + kSessionNet;
     const std::uint32_t flags = g_ld32(g, net + kFlags);
     return (flags & (kOpen | kRunning)) == (kOpen | kRunning) && (flags & kQuit) == 0u && g_ld32(g, net + kRole) == 0u;
+}
+
+int local_player(Guest *g) {
+    if (!active(g)) return -1;
+    return static_cast<int>(g_ld32(g, g_ld32(g, kSession) + kSessionNet + kLocal));
 }
 
 } // namespace d012::comm_battle

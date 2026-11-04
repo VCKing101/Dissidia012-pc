@@ -33,5 +33,7 @@ void install(portablekit::HleRegistrar &hle);
 // its own player's right stick, from the bytes 10 and 11 of that player's
 // injected sample (d012_camera.cpp), the same on both copies.
 [[nodiscard]] bool active(Guest *g);
+// This copy's player, 0 or 1, while active(); -1 otherwise.
+[[nodiscard]] int local_player(Guest *g);
 
 } // namespace d012::comm_battle

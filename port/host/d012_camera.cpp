@@ -34,12 +34,14 @@
 
 #include "../decomp/battle_camera.h"
 
+#include "camera/camera_input.hpp"
 #include "hle/hle_common.hpp"
 #include "portablekit/hle_extension.hpp"
 
 #include "psprecomp/runtime.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -76,6 +78,8 @@ float number(const char *name, float fallback, float low, float high) {
 
 struct Options {
     bool enabled = true;
+    // The mouse pushes player 1's right stick (add_mouse below).
+    bool mouse = true;
     // The plugin's: each axis's dead zone, the response rescaled to start
     // from 0 at its edge. On top of PortableKit's radial dead zone for the
     // stick (the menu's Dead zone), as the plugin's was on top of PPSSPP's.
@@ -99,6 +103,7 @@ const Options &options() {
     static const Options o = [] {
         Options v;
         v.enabled = !flag("D012_NO_RIGHT_STICK_CAMERA");
+        v.mouse = v.enabled && !flag("D012_NO_MOUSE_CAMERA");
         v.dead_zone = number("D012_CAMERA_DEAD_ZONE", v.dead_zone, 0.0f, 0.9f);
         v.sensitivity = number("D012_CAMERA_SENSITIVITY", v.sensitivity, 0.05f, 4.0f);
         v.invert_x = flag("D012_CAMERA_INVERT_X");
@@ -139,6 +144,36 @@ float stick_axis(std::uint8_t raw, float zone) {
     return value < 0.0f ? -magnitude : magnitude;
 }
 
+// The byte stick_axis reads back as `value` with dead zone `zone`.
+std::uint8_t stick_byte(float value, float zone) {
+    if (value == 0.0f) return 0x80u;
+    const float raw = zone + std::min(std::fabs(value), 1.0f) * (1.0f - zone);
+    const int offset = std::min(static_cast<int>(std::lround(raw * 127.0f)), 127);
+    return static_cast<std::uint8_t>(value < 0.0f ? 128 - offset : 128 + offset);
+}
+
+// The mouse. PortableKit turns its motion into degrees (the menu's Mouse
+// sensitivity and its two inversions) for a game's camera driver to take, and
+// drops what nothing took at the next flip. This port registers no driver
+// (its menu rows are for another game's camera), so the motion is taken here,
+// in the camera update between the flip that brought it and the next, and
+// becomes a push of player 1's right stick (add_mouse). A full push is the
+// turn the local camera last made for one (its stock step with the
+// camera-speed option, times the sensitivity); what one update cannot turn is
+// carried to the next. Vertical motion moves the camera closer or further,
+// as the stick does.
+struct Mouse {
+    float yaw = 0.0f;  // degrees carried to the next update
+    float pitch = 0.0f;
+    float full = 9.0f;  // degrees a full push turns in one update
+    std::chrono::steady_clock::time_point last{};
+};
+
+Mouse &mouse() {
+    static Mouse m;
+    return m;
+}
+
 // The local player's camera with manual input on, while the game takes
 // input: the gates of the game's own pad accessors (input muted, a replay
 // playing) and hardware feeding pad 0 (not ad-hoc).
@@ -165,7 +200,9 @@ int local_camera(Guest *g, gaddr camera) {
 
 // What the stick asks of this camera: turn > 0 is what D-pad right does,
 // closer > 0 what D-pad up does, after the player's two direction options.
-bool camera_stick(Guest *g, gaddr camera, float &turn, float &closer) {
+// `full` is the degrees a full push turns this camera in this update, before
+// the sensitivity; the local player's sizes the mouse's push.
+bool camera_stick(Guest *g, gaddr camera, float full, float &turn, float &closer) {
     const int player = local_camera(g, camera);
     if (player < 0) return false;
     const auto player_flags = [&]() {
@@ -178,6 +215,9 @@ bool camera_stick(Guest *g, gaddr camera, float &turn, float &closer) {
         // sends its player's as the battle links) and the game's own options
         // for that player: the same turn on both copies.
         const net::battle::Camera settings = net::battle::camera(player);
+        // This copy's mouse is already in its player's sample (the battle link
+        // sent it); the next push it gives is sized by this camera.
+        if (player == comm_battle::local_player(g)) mouse().full = full * settings.sensitivity;
         const gaddr sample = g_ld32(g, G_PAD_MANAGER) + static_cast<std::uint32_t>(player) * 0x60u + 0x40u;
         turn = stick_axis(g_ld8(g, sample + 10u), settings.dead_zone);
         closer = -stick_axis(g_ld8(g, sample + 11u), settings.dead_zone);
@@ -201,8 +241,10 @@ bool camera_stick(Guest *g, gaddr camera, float &turn, float &closer) {
         const versus::RightStick stick = versus::player2_right_stick();
         x = stick.x;
         y = stick.y;
-    } else if (battle) {
-        p.live_read = p.reads;
+    } else {
+        if (battle) p.live_read = p.reads;
+        mouse().full = full * options().sensitivity;
+        add_mouse(x, y);
     }
     turn = stick_axis(x, options().dead_zone);
     closer = -stick_axis(y, options().dead_zone);  // the Y axis grows downward
@@ -267,12 +309,12 @@ void announce(const char *mode) {
 
 // After the free camera's stock input (battle 0x08B3F7F4).
 void free_hook(Guest *g, gaddr mode, gaddr camera) {
-    float turn = 0.0f, closer = 0.0f;
-    if (!camera_stick(g, camera, turn, closer)) return;
     const gaddr row = row_of(g, camera);
     const float step = time_step(g, camera);
-    float yaw = ldf(g, mode + FREE_YAW) +
-                turn * kDegrees * ldf(g, row + ROW_FREE_YAW_SPEED + 4u * speed_index(g, camera)) * step;
+    const float speed = ldf(g, row + ROW_FREE_YAW_SPEED + 4u * speed_index(g, camera));
+    float turn = 0.0f, closer = 0.0f;
+    if (!camera_stick(g, camera, speed * step, turn, closer)) return;
+    float yaw = ldf(g, mode + FREE_YAW) + turn * kDegrees * speed * step;
     // One frame turns well under half a circle, so one wrap is enough.
     if (yaw > kPi) yaw -= 2.0f * kPi;
     else if (yaw < -kPi) yaw += 2.0f * kPi;
@@ -288,12 +330,12 @@ void free_hook(Guest *g, gaddr mode, gaddr camera) {
 // written this frame's turn from the D-pad; the game applies it, at most at
 // the stock speed, later in the same update.
 void lock_hook(Guest *g, gaddr mode, gaddr camera) {
-    float turn = 0.0f, closer = 0.0f;
-    if (!camera_stick(g, camera, turn, closer)) return;
     const gaddr row = row_of(g, camera);
     const float step = time_step(g, camera);
-    const float delta = ldf(g, mode + LOCK_YAW_DELTA) +
-                        turn * kDegrees * ldf(g, row + ROW_LOCK_YAW_SPEED + 4u * speed_index(g, camera)) * step;
+    const float speed = ldf(g, row + ROW_LOCK_YAW_SPEED + 4u * speed_index(g, camera));
+    float turn = 0.0f, closer = 0.0f;
+    if (!camera_stick(g, camera, speed * step, turn, closer)) return;
+    const float delta = ldf(g, mode + LOCK_YAW_DELTA) + turn * kDegrees * speed * step;
     g_stf(g, mode + LOCK_YAW_DELTA, delta);
     const float distance = std::clamp(ldf(g, mode + LOCK_DISTANCE) - closer * ldf(g, row + ROW_LOCK_DISTANCE_SPEED) * step,
                                       ldf(g, row + ROW_LOCK_MIN), ldf(g, row + ROW_LOCK_MAX));
@@ -426,6 +468,53 @@ struct Install {
 } // namespace
 
 bool enabled() { return options().enabled; }
+
+void add_mouse(std::uint8_t &x, std::uint8_t &y) {
+    namespace pk = portablekit::camera;
+    const Options &o = options();
+    if (!o.mouse) return;
+    Mouse &m = mouse();
+    // What was carried is for the next update, not for one after a menu or a
+    // load.
+    const auto now = std::chrono::steady_clock::now();
+    if (now - m.last > std::chrono::milliseconds(250)) m.yaw = m.pitch = 0.0f;
+    m.last = now;
+    const pk::Turn taken = pk::take(pk::Source::Mouse);
+    // At most half a second of full pushes waits: a big swipe ends rather
+    // than spinning on.
+    const float most = m.full * 15.0f;
+    m.yaw = std::clamp(m.yaw + taken.yaw_degrees, -most, most);
+    m.pitch = std::clamp(m.pitch + taken.pitch_degrees, -most, most);
+    if ((m.yaw == 0.0f && m.pitch == 0.0f) || m.full <= 0.0f) return;
+    const std::uint8_t stick_x = x, stick_y = y;
+    // On top of the stick's own push, as far as a full push; what was not
+    // turned stays carried.
+    const auto push = [&](std::uint8_t &byte, float &carried) {
+        if (carried == 0.0f) return;
+        const float stick = stick_axis(byte, o.dead_zone);
+        const float wanted = std::clamp(stick + carried / m.full, -1.0f, 1.0f);
+        int pushed = stick_byte(wanted, o.dead_zone);
+        // Never past what is carried (the byte rounded to the nearest would
+        // swing a small remainder from side to side for ever): a step back
+        // toward the stick's own byte; stick_axis grows with the byte.
+        const int step = carried > 0.0f ? -1 : 1;
+        while (pushed != byte && std::fabs(stick_axis(static_cast<std::uint8_t>(pushed), o.dead_zone) - stick) >
+                                     std::fabs(wanted - stick))
+            pushed += step;
+        carried -= (stick_axis(static_cast<std::uint8_t>(pushed), o.dead_zone) - stick) * m.full;
+        byte = static_cast<std::uint8_t>(pushed);
+    };
+    push(x, m.yaw);
+    push(y, m.pitch);
+    // Less than a step of the stick's bytes turns nothing.
+    if (std::fabs(m.yaw) < 0.01f) m.yaw = 0.0f;
+    if (std::fabs(m.pitch) < 0.01f) m.pitch = 0.0f;
+    if (o.trace)
+        std::printf("[camera] read %u mouse %+.2f %+.2f degrees, stick %02X %02X -> %02X %02X, carried %+.2f %+.2f "
+                    "(full push %.2f)\n",
+                    pad().reads, taken.yaw_degrees, taken.pitch_degrees, stick_x, stick_y, x, y, m.yaw, m.pitch,
+                    m.full);
+}
 
 void install(portablekit::HleRegistrar &hle) {
     static bool installed = false;
