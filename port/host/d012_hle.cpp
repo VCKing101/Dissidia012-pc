@@ -2,6 +2,7 @@
 // profile's hooks. MIT licence; see port/README.md.
 
 #include "d012_bgm_playlist.hpp"
+#include "d012_bloom.hpp"
 #include "d012_camera.hpp"
 #include "d012_comm_battle.hpp"
 #include "d012_dlc.hpp"
@@ -114,6 +115,8 @@ void register_extra_hle(portablekit::HleRegistrar &hle) {
     playlist::install(hle);
     // The right-stick battle camera and R3 (d012_camera.cpp).
     camera::install(hle);
+    // Bloom and the Video page's switch for it (d012_bloom.cpp).
+    bloom::install(hle);
     // Local versus: player 2 on a second controller (d012_versus.cpp), after
     // the camera's wrapper so the menus' pad swap is the last word.
     versus::install(hle);
