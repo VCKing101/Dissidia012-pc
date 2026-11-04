@@ -45,7 +45,7 @@ distributed.**
 - **Online versus (experimental)**: 1-on-1 battles over the internet through the game's own Communication Mode, with
   full analog and each player's right-stick camera ([guide](docs/port/play-online.md)).
 - **Japanese voices** from your own Japanese disc image, with English text: choose the disc in the game's Options,
-  under Voice ([notes](docs/port/japanese-voices.md)).
+  under Voice ([below](#japanese-voices)).
 
 ## BGM playlist selector
 
@@ -115,6 +115,21 @@ When the router cannot open its ports, or your provider shares one address among
 the [players' guide](docs/port/play-online.md) has the fixes: forwarding three ports by hand, or a VPN such as
 Tailscale. Only the Online Lobby's 1-on-1 battles are supported so far; two Windows PCs on separate machines and the
 Steam Deck hosting are untested.
+
+## Japanese voices
+
+The North American and European discs have English voices only. With your own copy of the Japanese disc
+(NPJH-50377) as an ISO, the characters speak Japanese while the text stays English.
+
+1. In the game's **Options**, select **Japanese Voice Disc** (under Voice) and choose the Japanese ISO.
+2. **Voice Language** appears under it: set it to **Japanese**. It takes effect when you leave Options.
+
+Both settings are kept in `settings.ini`, not in the game's save ([notes](docs/port/japanese-voices.md)).
+
+<p>
+  <img src="docs/images/japanese-voices-english.png" width="49%" alt="Options with Voice, Japanese Voice Disc showing the disc's name, and Voice Language highlighted and set to English">
+  <img src="docs/images/japanese-voices-japanese.png" width="49%" alt="The same Options screen with Voice Language set to Japanese">
+</p>
 
 ## Quick start (Windows)
 
