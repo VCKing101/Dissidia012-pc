@@ -131,6 +131,7 @@ The profile's own switches:
 | --- | --- |
 | `D012_NO_SUPPREACC=1` | Do not load `LIBSUPPREACC.PRX`; its imports become logging stubs answering 0, as in plain PortableKit |
 | `D012_DUMP_SLOT=N`, `D012_DUMP_SLOT_DIR=dir` | Write the overlay window to `dir/overlay_window_N.bin` at the game's Nth vblank wait, for `overlay_meta.py --check` |
+| `D012_BLOOM=0` or `1` | Bloom off or on for this run, whatever the menu's Video page says (`game.bloom` in `settings.ini`; `port/host/d012_bloom.cpp`: the bloom at `0x0885E150` is left out) |
 | `D012_NO_MODS=1` | Load no mods ([mod-folder.md](../docs/port/mod-folder.md)) |
 | `D012_MODS_DIR=dir` | Read mods from `dir` instead of `<data dir>/mods` |
 | `D012_TEST_BGM_OVERRIDE=<track id>` | Test only: the next BGM file the game opens plays that mod track instead (`example-tones:intro-loop`, or its number in hex) |
@@ -148,7 +149,8 @@ The profile's own switches:
 | `D012_TEST_CRASH=<s>[,abort]` | Test only: a thread reads address 0 (or calls `abort()`) that many seconds after start, to check the crash report |
 
 And the framework changes' off switches, each restoring the old behaviour: `D012_NO_QUICK_MATCH=1` (texture packs
-with `hash = quick` are refused instead of matched by picture), `D012_NO_COLOR_DOUBLING=1` (colour
+with `hash = quick` are refused instead of matched by picture), `D012_SHARP_RENDER_TARGETS=1` (with Texture filter on Sharp, render targets sampled
+as textures are sharp too, so the bloom shows blocks), `D012_NO_COLOR_DOUBLING=1` (colour
 doubling), `D012_NO_PIXEL_MASK=1` (pixel mask), `D012_NO_VBLANK_CALLBACKS=1` (callbacks in the vblank waits),
 `D012_NO_STENCIL=1` (GE stencil), `D012_NO_SHARED_DEPTH=1` (depth buffers shared by address),
 `D012_NO_THROUGH_DEPTH=1` (depth in through mode), `D012_NO_SCREEN_SPRITES=1` (transformed sprites upright on the
@@ -263,6 +265,7 @@ fresh clone of `33800c4`, apply them with `git checkout -b dissidia 33800c4` and
 | 0075 | A texture whose descriptor set cannot be allocated is not made (its draws sample white), and the texture cache keeps fewer so evictions give sets back; the set is allocated before the image. A frame slot holding 256 or more evicted textures waits for pending presents to free them rather than putting them off again (`<prefix>_NO_EVICTION_WAIT`, as before). `<prefix>_TEXTURE_SETS` makes the pool smaller, to test a full one | A player's game closed while scrolling a shop: the set's allocation failed unchecked on an AMD RX 9060 XT and the driver read through the null set ([issue 7](https://github.com/VCKing101/Dissidia012-pc/issues/7); [quit-crash.md](../docs/port/quit-crash.md)) |
 | 0076 | Texture packs with `hash = quick` load: each texture their keys do not cover is matched to the pack's images by picture the first time it is drawn (`host/gpu/texture_pack_match.cpp`: 16x16 signatures and 64-pixel thumbnails, a clear-winner rule and a recolour check), and the matches are kept in `textures/.matched/`. `<prefix>_NO_QUICK_MATCH` refuses such packs, as before. `portablekit_texture_pack_tests --match` runs the matcher over a texture dump | PPSSPP packs for this game made with the quick hash did not load: a community HD pack and a fan-made DLC costume's pack ([texture-packs.md](../docs/port/texture-packs.md), section 4) |
 | 0077 | A profile can list another region's disc of the same executable (`RegionRelease`, `region_releases`): the installer takes it and decrypts it to the same executable, the start reads the disc id from the image, and the save screens and transfers use that release's save folders; the interface names the disc it is. Textures and the ad hoc product code stay the profile's | The European disc ULES01505 holds the North American executable, overlays and data byte for byte ([regions.md](../docs/port/regions.md)) |
+| 0078 | Render targets sampled as textures are always filtered smoothly; the Texture filter setting applies to the game's textures and replacement images (`host/gpu/vulkan_renderer.cpp`); `<prefix>_SHARP_RENDER_TARGETS` samples them as the textures again | With Sharp, the bloom (a 120x68 or 30x17 target stretched over the screen) showed as square blocks ([issue 13](https://github.com/VCKing101/Dissidia012-pc/issues/13)) |
 
 Patches 0012 and 0013 were made on a separate worktree branch during the recompiled-build work and merged onto
 `dissidia` on 18 October 2026; patches 0014 and 0015 followed the same day (bring-up log, section "Stencil"), and

@@ -40,6 +40,7 @@ distributed.**
   ([guide](docs/port/mod-folder.md#8-making-a-mod-with-the-battle-bgm-maker)).
 - **Local split-screen versus**: two players on one PC, each with their own controller and camera
   ([notes](docs/port/local-versus.md)).
+- **A Bloom switch** on the menu's Video page: the game's soft glow over battles and the world map, on or off.
 - **HD texture packs** in PPSSPP's format, and a menu option that dumps the game's textures to start one
   ([below](#hd-texture-packs)).
 - **Online versus (experimental)**: 1-on-1 battles over the internet through the game's own Communication Mode, with

@@ -1,0 +1,46 @@
+From 0638736d64b370adcb5860f6075ef96a802f3e64 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Wed, 4 Nov 2026 15:33:29 +1030
+Subject: [PATCH] Renderer: render targets sampled smooth whatever the texture
+ filter
+
+With the texture filter on Sharp, render targets sampled as textures used
+nearest filtering too. A game's glow or blur is a small target stretched
+over the screen, so its pixels showed as square blocks (Dissidia 012's
+bloom: a 120x68 or 30x17 target over a 480x272 screen). Render targets now
+always sample linearly; Sharp applies to the game's textures and to
+replacement images, as the menu says. <prefix>_SHARP_RENDER_TARGETS
+samples them as the textures again.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/gpu/vulkan_renderer.cpp | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
+index 4b514fc..b0731dc 100644
+--- a/host/gpu/vulkan_renderer.cpp
++++ b/host/gpu/vulkan_renderer.cpp
+@@ -1659,6 +1659,9 @@ struct VulkanRenderer::Impl {
+     VkSampler sharp_sampler{};  // nearest, for the sharp texture setting
+     // The same, clamped to the edge, for render targets sampled as textures:
+     // the game's texture is usually larger than the 480x272 the target holds.
++    // Linear whatever the texture setting: a game's glow or blur is a small
++    // target stretched over the screen, and nearest shows its pixels as
++    // blocks (<prefix>_SHARP_RENDER_TARGETS samples them as the textures).
+     VkSampler clamp_sampler{};
+     VkSampler clamp_sharp_sampler{};
+     std::map<PipelineKey, VkPipeline> pipelines;
+@@ -2527,7 +2530,8 @@ struct VulkanRenderer::Impl {
+ 
+     [[nodiscard]] VkSampler texture_sampler() const { return sharp_textures ? sharp_sampler : sampler; }
+     [[nodiscard]] VkSampler framebuffer_sampler() const {
+-        return sharp_textures ? clamp_sharp_sampler : clamp_sampler;
++        static const bool sharp_targets = portablekit::env_set("SHARP_RENDER_TARGETS");
++        return sharp_textures && sharp_targets ? clamp_sharp_sampler : clamp_sampler;
+     }
+     [[nodiscard]] VkPresentModeKHR wanted_present_mode() const;
+     bool create_swapchain(std::string &error);
+-- 
+2.53.0.windows.1
+

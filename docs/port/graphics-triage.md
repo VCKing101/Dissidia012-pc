@@ -232,3 +232,39 @@ follows the wall clock, but this route repeats its timeline exactly):
 **Not verified.** The Steam Deck and the native Linux and macOS builds. The owner's other report from the same
 play, the world map's "Power of the dead" light trails flickering at 60 and 90 fps, is not this cause (the fix
 changes nothing on the world map, and blended stills there look like the 30 fps frames); it is still open.
+
+## Bloom: blocks with Sharp, and a switch to turn it off
+
+> 4 November 2026, [issue 13](https://github.com/VCKing101/Dissidia012-pc/issues/13): "Pixelated/Blocky bloom
+> effects", and a wish for an option to turn bloom off. PortableKit: patch 0078 on `dissidia`.
+
+**The bloom.** The scene's draw, `0x08892760` in the main executable, ends with up to two calls to `0x0885E150`. It
+points the GE at the scratch buffer `0x0CC000` (8888; the variable `0x09AFEE54` holds its address, 0 in the
+game's other buffer mode), shrinks the frame into it by `1 << n` (n from its parameter block: 2 in battle,
+120x68 drawn as four 120-pixel strips into a 128-wide target; 4 on the world map, 30x17 in one sprite into a
+64-wide one), points the GE back at the frame (`0x08866AE0`) and lays up to four layers of it over the screen,
+each with its own blend, colour, scale and offset. It only adds GE commands and changes no game state.
+
+**Blocks with Sharp.** PortableKit drew every render target sampled as a texture with the Texture filter's
+sampler. With Sharp (nearest), each pixel of the 120x68 or 30x17 target became a square of 4 or 16 PSP pixels on
+the screen: square patches round the moogle and in the world map's sky, over Lightning on Lunar Subterrane,
+across Old Chaos Shrine's pillars. With Smooth the same stages look as on the handheld. Render targets are now
+always sampled linearly (patch 0078); `D012_SHARP_RENDER_TARGETS=1` brings back the old sampling. The texture
+filter still applies to the game's own textures: Order's Sanctuary's sky is a low-resolution cloud texture and
+stays blocky with Sharp, bloom on or off.
+
+**Bloom off.** `port/host/d012_bloom.cpp` overrides `0x0885E150` (a call from another 16 KiB unit, so through
+dispatch): with bloom off it returns at once, otherwise it runs the original. **Bloom** on the Video page
+(section "Effects") switches it while the game runs, kept as `game.bloom` in `settings.ini`; `D012_BLOOM=0` or `1`
+decides for one run. Online play is unaffected: the bloom draws only.
+
+**Verified** (Windows, clang release build `build-d012-bloom`, internal scale 4, 30 fps, the triage data copy and a
+copy of it with `video.sharp_textures=1`): the world map (Chapter 12-1), Old Chaos Shrine, Lunar Subterrane and
+Order's Sanctuary in Smooth, Sharp, Sharp with `D012_SHARP_RENDER_TARGETS=1` and bloom off, at the same scripted
+frames. With Sharp the blocks are gone; with bloom off the glow is gone and nothing else changes. The world map's
+mean difference from Smooth is 14.3 of 255 with bloom off, against 2.0 with Sharp. At 60 fps (`D012_CAPTURE_BLENDED=1`) the
+world map's interpolated frames show no blocks with Sharp either. The Video page's row switches the bloom while the
+game runs and writes `game.bloom=0`.
+
+**Not verified.** The Steam Deck, every stage, the EX Burst and story cutscenes. The issue's other report, lights
+flickering while dashing, did not show in 60 and 30 fps stills of a dash on Old Chaos Shrine; it needs the reporter's details.
