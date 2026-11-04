@@ -44,6 +44,8 @@ distributed.**
   ([below](#hd-texture-packs)).
 - **Online versus (experimental)**: 1-on-1 battles over the internet through the game's own Communication Mode, with
   full analog and each player's right-stick camera ([guide](docs/port/play-online.md)).
+- **Japanese voices** from your own Japanese disc image, with English text: choose the disc in the game's Options,
+  under Voice ([notes](docs/port/japanese-voices.md)).
 
 ## BGM playlist selector
 
