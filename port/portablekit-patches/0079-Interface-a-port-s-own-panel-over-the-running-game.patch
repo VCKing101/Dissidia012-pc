@@ -1,0 +1,94 @@
+From 494613798b52f4b2a36ec68a3e5a5dba7aa9300c Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Wed, 4 Nov 2026 19:41:49 +1030
+Subject: [PATCH] Interface: a port's own panel over the running game
+
+ui::open_panel_over_game(frame) opens a panel of the port's own over the
+game, from one of the game's own screens: a file browser for a setting the
+port adds to the game's Options, say. `frame` draws it inside each game
+frame and returns false when it is done. While it is open the game gets no
+input and the menu does not open; the game's own dialogs and the menu are
+drawn instead of it until they close. ui::panel_over_game() says whether
+one is open.
+---
+ host/ui/menu.cpp | 30 +++++++++++++++++++++++++++++-
+ host/ui/ui.hpp   |  8 ++++++++
+ 2 files changed, 37 insertions(+), 1 deletion(-)
+
+diff --git a/host/ui/menu.cpp b/host/ui/menu.cpp
+index 011124a..e806d89 100644
+--- a/host/ui/menu.cpp
++++ b/host/ui/menu.cpp
+@@ -1675,6 +1675,21 @@ void add_game_overlay(bool (*visible)(), void (*draw)()) {
+     if (visible != nullptr && draw != nullptr) game_overlays().push_back({visible, draw});
+ }
+ 
++namespace {
++bool (*g_panel_over_game)() = nullptr;
++} // namespace
++
++void open_panel_over_game(bool (*frame)()) {
++    if (frame == nullptr || g_panel_over_game != nullptr) return;
++    Layer &layer = Layer::get();
++    if (!layer.attached()) return;
++    g_panel_over_game = frame;
++    layer.renderer().set_game_input(false);
++    layer.set_interactive(true);
++}
++
++bool panel_over_game() { return g_panel_over_game != nullptr; }
++
+ void add_menu_rows(void (*rows)()) {
+     if (rows != nullptr) port_rows().push_back(rows);
+ }
+@@ -1705,6 +1720,17 @@ void draw_over_game() {
+         layer.end_frame();
+         return;
+     }
++    // A panel of the port's own, the same way.
++    if (g_panel_over_game != nullptr && !menu) {
++        layer.begin_frame();
++        if (!g_panel_over_game()) {
++            g_panel_over_game = nullptr;
++            layer.set_interactive(false);
++            layer.renderer().set_game_input(true);
++        }
++        layer.end_frame();
++        return;
++    }
+     const double hint_left = menu || settings::current().menu_hint_seen ? -1.0 : hint_seconds_left();
+     const bool overlay = network_overlay();
+     const bool touch = !menu && layer.renderer().touch_controls_visible();
+@@ -1753,7 +1779,9 @@ bool take_quit_request() { return std::exchange(quit_requested(), false); }
+ 
+ bool menu_requested() {
+     Layer &layer = Layer::get();
+-    if (!layer.attached() || text_input_open() || game_message_open() || game_save_list_open()) return false;
++    if (!layer.attached() || text_input_open() || game_message_open() || game_save_list_open() ||
++        g_panel_over_game != nullptr)
++        return false;
+     // The on-screen menu button, then Esc or L3+R3.
+     const bool touched = layer.renderer().take_touch_menu();
+     return layer.take_menu_toggle() || touched;
+diff --git a/host/ui/ui.hpp b/host/ui/ui.hpp
+index 15079a1..1bdb9fe 100644
+--- a/host/ui/ui.hpp
++++ b/host/ui/ui.hpp
+@@ -38,6 +38,14 @@ void set_status_overlay(bool (*visible)(), void (*draw)());
+ // game_picture(). The game's dialogs and the menu, when open, are drawn
+ // instead. Several may be added; they are drawn in the order added.
+ void add_game_overlay(bool (*visible)(), void (*draw)());
++// A panel of the port's own over the running game, opened from one of the
++// game's screens (a file browser for a setting the port adds there, say):
++// `frame` draws it inside each game frame, as ImGui windows of its own, and
++// returns false when it is done. The game gets no input while it is open;
++// the game's own dialogs and the menu are drawn instead of it until they
++// close. Opening one while another is open does nothing.
++void open_panel_over_game(bool (*frame)());
++[[nodiscard]] bool panel_over_game();
+ // Settings of the port's own, at the end of the menu's Video page, after
+ // PortableKit's: `rows` is called each frame the page is shown and draws its
+ // rows with widgets.hpp (a section(), then choice_row, toggle_row,
+-- 
+2.53.0.windows.1
+

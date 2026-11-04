@@ -59,6 +59,8 @@ disassembler and the new `tools/port/` scripts cover the analysis.
 - **EU and USA code are identical.** The EU image's decrypted `EBOOT.OLD` and its overlays match the USA ones byte
   for byte, so EU and USA addresses are the same. Confirmed on a clean EU dump on 3 November 2026, with Japan
   compared too, and the EU disc supported the same day: [other releases](regions.md).
+- **Japanese voices** come from the player's own Japanese disc, set in the game's Options (issue 8, 4 November
+  2026): [japanese-voices.md](japanese-voices.md).
 - **The menu overlay's runtime object** at `0x09AE7070` is built by `menu:0x089DD4D0`. That constructor is matched C
   here (`src/menu/runtime_lifecycle.c`). It runs from main's menu start-up callback `0x0887801C` after the game's own
   overlay loader loads `ovl_menu_app.elf`. Main also has a 47-entry static-initialiser table at `0x089C60B0`.

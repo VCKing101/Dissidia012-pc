@@ -13,6 +13,7 @@
 #include "d012_sync.hpp"
 #include "d012_test_switches.hpp"
 #include "d012_versus.hpp"
+#include "d012_voices.hpp"
 
 #include "hle/hle_common.hpp"
 #include "profile.hpp"
@@ -109,6 +110,9 @@ void register_extra_hle(portablekit::HleRegistrar &hle) {
     // The frame's input record (d012_input.cpp): the innermost pad-read
     // wrapper, so it goes before every other.
     input::install(hle);
+    // Japanese voices from the player's Japanese disc (d012_voices.cpp).
+    voices::install(hle);
+    voices::install_menu(hle);
     // Mods: music added to the game (d012_mods.cpp, docs/port/mod-folder.md).
     mods::install(hle);
     // The loading screen's music choice by series (d012_bgm_playlist.cpp).
