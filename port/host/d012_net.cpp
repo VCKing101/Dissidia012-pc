@@ -17,7 +17,8 @@
 //   copy's clock in ms and u32 the other copy's clock from its latest INPUT
 //   plus how long this copy has held it (~0 for none: the round trip is the
 //   sender's clock less that echo), then 16 bytes a frame: u8 dialog, u8 save,
-//   u8 connected, u8 lx, ly, rx, ry, spare, u32 buttons, u32 extra.
+//   u8 connected, u8 lx, ly, rx, ry, s8 mouse pitch, u32 buttons, u32 extra
+//   (its low 16 bits; the high 16, an s16, the mouse's yaw: input::Pad).
 // - BYE (4): this copy has left (a battle link closed by a quit); nothing more
 //   will come.
 // - PROBE (5), the listening copy to the joining one before its WELCOME: u32
@@ -466,8 +467,10 @@ void send_input(Link &l) {
         out[at + 4u] = m.pad.ly;
         out[at + 5u] = m.pad.rx;
         out[at + 6u] = m.pad.ry;
+        out[at + 7u] = static_cast<std::uint8_t>(m.pad.mouse_pitch);
         put32(out, at + 8u, m.pad.buttons);
-        put32(out, at + 12u, m.pad.extra);
+        put32(out, at + 12u,
+              (m.pad.extra & 0xFFFFu) | static_cast<std::uint32_t>(static_cast<std::uint16_t>(m.pad.mouse_yaw)) << 16u);
     }
     send(l, out);
     l.sent = Clock::now();
@@ -530,8 +533,11 @@ void take_input(Link &l, const std::uint8_t *data, std::size_t size) {
         m.pad.ly = in[4];
         m.pad.rx = in[5];
         m.pad.ry = in[6];
+        m.pad.mouse_pitch = static_cast<std::int8_t>(in[7]);
         m.pad.buttons = get<std::uint32_t>(in + 8u);
-        m.pad.extra = get<std::uint32_t>(in + 12u);
+        const std::uint32_t extra = get<std::uint32_t>(in + 12u);
+        m.pad.extra = extra & 0xFFFFu;
+        m.pad.mouse_yaw = static_cast<std::int16_t>(static_cast<std::uint16_t>(extra >> 16u));
         l.theirs[frame] = m;
     }
     while (l.theirs.count(l.their_count) != 0u) ++l.their_count;

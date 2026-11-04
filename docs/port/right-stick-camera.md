@@ -61,8 +61,13 @@ callers` finds no `jal`). An indirect call goes through dispatch, so an override
     `distance = clamp(distance − closer × row[0x4C] × dt, row[0x44], row[0x48])`.
   - **dt** is the camera's own time step, read as battle `0x08B3B4FC` does.
   - **Direction.** `turn > 0` is what D-pad right does and `closer > 0` is what D-pad up does, after the player's two
-    camera direction options (`*(u16*)0x09AFD960`, bits 2 and 1). So the stick moves the camera the way the D-pad does
-    in every option setting.
+    camera direction options. So the stick moves the camera the way the D-pad does in every option setting.
+  - The options are read from the camera's logical pad's key table (`logical+0x4C`, entries of u64 raw source and
+    u64 logical key), which main `0x0887309C` rewrites from them. If the yaw-plus key comes from D-pad left (or the
+    nub's left), horizontal is flipped; if the closer key comes from D-pad down (or the nub's down), vertical is.
+    The options' own copy, `*(u16*)0x09AFD960` (bits 2 and 1), is only the fallback for a pad with no table. That
+    copy is filled as a battle is set up. On the first Story Mode world map after loading a save it was still 0, so
+    the stick there turned against a reversed horizontal option until the first battle.
 - **The stick.**
   - It is read from the pad the game itself reads. The profile wraps `sceCtrlReadBufferPositive`, the game's only pad
     read, and takes bytes 10 and 11 of the sample. PortableKit already fills those with the right stick, and the game
@@ -92,6 +97,8 @@ No framework change was needed. PortableKit already has:
 | Right stick up/down | closer/further as D-pad up/down, within the row's limits (lock-on 2..5 on row 0, free 3..6) | nothing: row 5's distance is 6..6 |
 | R3 | recentres (the game's SELECT) | nothing |
 | Keyboard I / J / K / L | PortableKit's camera keys push the right stick fully, so they do the same as the stick | the same |
+| Mouse sideways | free camera: turns it directly, on top of the stick; lock-on: pushes the right stick sideways (section 4a) | turns it directly |
+| Mouse forward/back | further/closer, as the stick: directly in free mode, as a stick push in lock-on | nothing (as the stick) |
 | Keyboard Backspace (SELECT) | recentres, as in the stock game | the game's SELECT |
 | D-pad, L (lock-on toggle), L/R on the world map | unchanged, the game's own | unchanged |
 
@@ -109,6 +116,7 @@ Limits, all from the stock game:
 
 | Variable | Effect |
 | --- | --- |
+| `D012_NO_MOUSE_CAMERA=1` | The mouse turns nothing (as before 4 November 2026); the stick is unchanged |
 | `D012_NO_RIGHT_STICK_CAMERA=1` | The game's own camera: no stick hook, no pad wrapper, and R3 does nothing. The free update stays in, without the hook, while the world map's camera-follow dead zone is on ([analog-movement.md](analog-movement.md) section 7) |
 | `D012_CAMERA_SENSITIVITY=<f>` | Full deflection as a share of the stock D-pad step; default 1.0, from 0.05 to 4. Lock-on still caps at 1 |
 | `D012_CAMERA_DEAD_ZONE=<f>` | The per-axis dead zone; default 0.18 (the plugin's), from 0 to 0.9 |
@@ -124,7 +132,67 @@ PortableKit's controls page already has the entries that apply:
 
 The "Analog camera" and "Camera speed" rows appear only for a profile with a `CameraDriver`. This port does not
 register one: those rows would turn the camera in degrees a second in place of the game's speed option, and they say
-"quest camera". So sensitivity is the variable above. Mouse look was skipped.
+"quest camera". So sensitivity is the variable above. The mouse is section 4a.
+
+## 4a. The mouse
+
+> 4 November 2026, for [issue #14](https://github.com/VCKing101/Dissidia012-pc/issues/14): the menu had a Mouse row
+> (on by default) whose pointer capture worked and whose Mouse sensitivity did nothing, because nothing took the motion.
+
+PortableKit turns the mouse's motion into degrees (the menu's Mouse sensitivity, 0.10 degrees a count by default,
+and its two Invert mouse rows) and hands them to the game's camera driver, dropping at each flip what nothing took.
+This port has no driver, so the camera hook takes them itself (`port/host/d012_camera.cpp`), in the camera update
+between the flip that brought them and the next.
+
+- **Free camera and world map: direct.** The degrees go straight onto the yaw, on top of the stick's step, with no
+  speed cap and nothing carried, so a flick turns as far and as fast as the hand. Vertical degrees move the distance
+  by what the stick's full push moves it while turning that many degrees (`row[0x08] / row[0x14 + 4·speed]` a
+  degree). The stick's sensitivity (`D012_CAMERA_SENSITIVITY`) does not apply; the menu's Mouse sensitivity does.
+  The first stick-only version (below) felt wrong to the owner: a quick flick trailed the hand at the stick's 180
+  degrees a second.
+- **Lock-on: a push of player 1's right stick** (`add_mouse`). Lock-on caps its turn at the stock speed and swings
+  back to the target anyway. The degrees become bytes 10 and 11 of the pad, on top of the stick's own push.
+- **Online.** In a linked battle the sending copy picks by its camera's latest update (`send_mouse`): while its free
+  camera took input within 250 ms, the degrees ride in the pad the link sends, the yaw as an s16 in 1/100 degree in
+  the high half of the frame's `extra` word and the vertical as an s8 in 1/4 degree in its spare byte
+  (`d012_net.cpp`); the rounding's remainder goes with the next frame. Otherwise they go in as the stick push. Both
+  copies apply each player's degrees in that player's camera update (`linked_mouse`), so the camera turns alike; a
+  frame that reaches lock-on with degrees adds them to the game's own per-frame turn.
+- **Size of a push.** A full push is the turn the local camera last made for one: the row's stock step at the camera-speed
+  option times dt, times `D012_CAMERA_SENSITIVITY` (6 degrees in lock-on and in free mode at the middle speed). A
+  frame turns at most that; the rest is carried to the next update, up to 15 full pushes (half a second), so a big
+  swipe ends instead of spinning on. Lock-on still caps the visible turn at the D-pad's, as for the stick.
+- **Vertical** is the stick's vertical: the distance (which sets the height). With the game's default options, mouse
+  forward moves the camera further and higher, as stick up does; Invert mouse vertically flips it.
+- **Direction** is the stick's in both paths: the same direction options (section 2) and `D012_CAMERA_INVERT_X/Y`.
+- **Rounding** (lock-on). A push never goes past what is carried: rounded to the nearest byte, a small remainder swung from
+  side to side for ever. Under 0.01 degrees is dropped.
+- Carried degrees (lock-on) older than 250 ms are dropped, so nothing left from before a menu or a load turns the camera.
+
+The menu's mouse rows are PortableKit's and apply unchanged. Mouse off (the row, or `D012_MOUSE=0`) does not capture
+the pointer, and then the mouse does nothing. Each device keeps its own inversion: Invert camera horizontally turns the
+gamepad's stick the other way, not the mouse (Invert mouse horizontally does).
+
+**Verified** (Windows, clang release build, scripted Quick Battles and Story Mode with `mouse DX DY` steps and
+`D012_TRACE_STICK_CAMERA=1`; logs in `build/port/gfx-mouse/`, never committed): in lock-on and in free mode, 900
+counts over 30 frames (90 degrees at 0.10) turned 15.00 full pushes of 6 degrees, 90 degrees; a 1,500-count swipe
+(150 degrees) turned the 15-push limit, 90; 600 counts back turned 59.9; forward and back moved the distance to the
+row's limits and back. On the Cornelia Plains world map, 90 degrees sent turned 90, and forward did nothing. With
+`D012_NO_MOUSE_CAMERA=1` the same input turned nothing. A stick push alone after the mouse turned as before, with no
+mouse line. The port's tests pass. **Not verified:** a linked online battle (the mouse goes into the pad the link
+sends; no two-copy run), split-screen versus, the Steam Deck's trackpads as a mouse, and the differential test of the
+hooked updates (`D012_CAMERA_VERIFY_HOOK`): under `D012_DECOMP_VERIFY` the scripted route no longer reaches a battle.
+
+**The direct path, verified** the same way: in free mode, 30 counts a frame turned 3.00 degrees a frame and a
+1,500-count swipe turned 150 degrees in one update; forward and back moved the distance to the row's limit and back
+(0.027 a degree on that row); the stick alone afterwards turned +0.424 an update, as before; lock-on still took the
+mouse as a push (a 150-degree swipe: full push, 84 carried). The owner played it and confirmed both. **Not
+verified:** the online path (no two-copy run).
+
+**The first world map, verified** on a copy of the owner's save, which has both direction options reversed: the
+options' copy read `0x0000` on the first world map and `0x007F` in a Quick Battle; both pads' key tables mapped the
+yaw-plus key to D-pad left in both places. Before the fix the stick pushed right turned the world map's yaw down,
+the other way from battle; after it, up, as in battle. The owner confirmed it in play.
 
 ## 5. Other modes
 

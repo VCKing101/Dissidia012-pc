@@ -182,6 +182,7 @@ void run_handler(Guest *g, const decomp::CallState &in, GuestRegs &out) {
         const int player = static_cast<int>(g_ld32(g, net + kLocal));
         s.linked = net::battle::open(player, tag_for(g));
         s.frame = 0u;
+        camera::clear_linked_mouse();
         if (!s.linked) {
             std::cerr << "[comm-battle] no link to the other fighter's copy; the battle ends" << std::endl;
             // Why, before the game's own error box: the other copy differs, or
@@ -206,6 +207,8 @@ void run_handler(Guest *g, const decomp::CallState &in, GuestRegs &out) {
     mine.ly = now.analog_y;
     mine.rx = now.right_x;
     mine.ry = now.right_y;
+    // The mouse in the pad sent, so both copies turn the camera by it.
+    camera::send_mouse(mine);
     // R3 is the camera's recentre, SELECT, as on the port's own pad reads.
     if ((mine.extra & ext::kExtraR3) != 0u) mine.buttons |= kSelect;
     const net::battle::Pads pads = net::battle::exchange(frame, mine);
@@ -225,7 +228,10 @@ void run_handler(Guest *g, const decomp::CallState &in, GuestRegs &out) {
             return quit(g, net, frame, out);
         }
     }
-    for (int player = 0; player < 2; ++player) inject(g, player, pads.player[player]);
+    for (int player = 0; player < 2; ++player) {
+        inject(g, player, pads.player[player]);
+        camera::linked_mouse(player, pads.player[player]);
+    }
     note_frame_step(g, frame);
     s.frame = frame + 1u;
     g_st32(g, net + kFrame, frame + 1u);
@@ -456,6 +462,11 @@ bool active(Guest *g) {
     const gaddr net = session + kSessionNet;
     const std::uint32_t flags = g_ld32(g, net + kFlags);
     return (flags & (kOpen | kRunning)) == (kOpen | kRunning) && (flags & kQuit) == 0u && g_ld32(g, net + kRole) == 0u;
+}
+
+int local_player(Guest *g) {
+    if (!active(g)) return -1;
+    return static_cast<int>(g_ld32(g, g_ld32(g, kSession) + kSessionNet + kLocal));
 }
 
 } // namespace d012::comm_battle
