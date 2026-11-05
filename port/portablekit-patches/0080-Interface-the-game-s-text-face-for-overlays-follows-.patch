@@ -1,0 +1,131 @@
+From ca904956a4b21bc81ee969c5009f5168aa20c9d4 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Thu, 5 Nov 2026 13:58:46 +1030
+Subject: [PATCH] Interface: the game's text face for overlays follows the Font
+ setting
+
+game_text_font(), the face a port draws beside the game's text with
+(add_game_overlay), was loaded once when the interface started. After the
+player chose another font the game's text changed and the overlay's did
+not, so the two no longer matched; and a face without some character (the
+arrows of a key line in a Latin font) drew it as "?".
+
+Before each interface frame, when the fonts' generation moved and the face
+is another, it is loaded again; a face replaced stays in the atlas, so no
+frame in flight loses its glyphs. The fallback face is merged into it, so
+characters the chosen face lacks come from the fallback, as in the game's
+own text (fonts::fallback_face).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/fonts/game_font.cpp |  8 ++++++++
+ host/fonts/game_font.hpp |  3 +++
+ host/ui/layer.cpp        | 28 +++++++++++++++++++++++++---
+ host/ui/ui.hpp           |  4 ++--
+ 4 files changed, 38 insertions(+), 5 deletions(-)
+
+diff --git a/host/fonts/game_font.cpp b/host/fonts/game_font.cpp
+index 56a5f96..94f9bea 100644
+--- a/host/fonts/game_font.cpp
++++ b/host/fonts/game_font.cpp
+@@ -659,6 +659,14 @@ bool active_face(std::string &path, int &index) {
+     return true;
+ }
+ 
++bool fallback_face(std::string &path, int &index) {
++    const State &s = loaded_state();
++    if (!s.fallback) return false;
++    path = s.fallback->path;
++    index = s.fallback->index;
++    return true;
++}
++
+ std::string fallback_name() {
+     const State &s = loaded_state();
+     return s.fallback ? s.fallback->name : std::string();
+diff --git a/host/fonts/game_font.hpp b/host/fonts/game_font.hpp
+index 697dbe1..aeeafc9 100644
+--- a/host/fonts/game_font.hpp
++++ b/host/fonts/game_font.hpp
+@@ -114,6 +114,9 @@ void start_catalog();
+ // The file (UTF-8) and face index the game's text is drawn from now: the
+ // chosen font, else the fallback. False when there is no font at all.
+ bool active_face(std::string &path, int &index);
++// The fallback's file and face index, which characters the chosen font lacks
++// come from. False when there is none.
++bool fallback_face(std::string &path, int &index);
+ [[nodiscard]] std::string fallback_name();
+ // Why the chosen font was not used, or "" when it was.
+ [[nodiscard]] std::string problem();
+diff --git a/host/ui/layer.cpp b/host/ui/layer.cpp
+index e59c220..58f490f 100644
+--- a/host/ui/layer.cpp
++++ b/host/ui/layer.cpp
+@@ -69,17 +69,38 @@ const char *const kJapaneseFonts[] = {
+ };
+ 
+ ImFont *g_game_text_font = nullptr;
++std::uint64_t g_game_text_generation = 0;
++std::string g_game_text_path;
++int g_game_text_index = -1;
+ 
+ // The game's own text face as a font of the interface's, for pictures drawn
+-// beside the game's text (add_game_overlay). The face is the one in use when
+-// the interface starts.
++// beside the game's text (add_game_overlay): the face in use now, loaded
++// again before a frame when the player chooses another font. A face replaced
++// stays in the atlas (fonts change rarely), so no frame in flight loses its
++// glyphs.
+ void load_game_text_font() {
++    g_game_text_generation = fonts::generation();
+     std::string path;
+     int index = 0;
+     if (!fonts::active_face(path, index)) return;
++    if (g_game_text_font != nullptr && path == g_game_text_path && index == g_game_text_index) return;
+     ImFontConfig config;
+     config.FontNo = index;
+-    g_game_text_font = ImGui::GetIO().Fonts->AddFontFromFileTTF(path.c_str(), 0.0f, &config);
++    ImFont *font = ImGui::GetIO().Fonts->AddFontFromFileTTF(path.c_str(), 0.0f, &config);
++    if (font == nullptr) return;
++    // Characters the face lacks (arrows in a Latin font, say) from the
++    // fallback, as in the game's own text.
++    std::string fallback;
++    int fallback_index = 0;
++    if (fonts::fallback_face(fallback, fallback_index) && (fallback != path || fallback_index != index)) {
++        ImFontConfig merge;
++        merge.FontNo = fallback_index;
++        merge.MergeMode = true;
++        ImGui::GetIO().Fonts->AddFontFromFileTTF(fallback.c_str(), 0.0f, &merge);
++    }
++    g_game_text_font = font;
++    g_game_text_path = path;
++    g_game_text_index = index;
+ }
+ 
+ bool exists(const char *path) {
+@@ -351,6 +372,7 @@ void Layer::begin_frame() {
+     if (gamepad_armed_) io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
+     else io.ConfigFlags &= ~ImGuiConfigFlags_NavEnableGamepad;
+     apply_theme();
++    if (fonts::generation() != g_game_text_generation) load_game_text_font();
+     ImGui::NewFrame();
+     description_.clear();
+ }
+diff --git a/host/ui/ui.hpp b/host/ui/ui.hpp
+index 1bdb9fe..d5be2f1 100644
+--- a/host/ui/ui.hpp
++++ b/host/ui/ui.hpp
+@@ -66,8 +66,8 @@ struct GamePicture {
+     float height{272.0f};
+ };
+ [[nodiscard]] GamePicture game_picture();
+-// The face the game's text is drawn with (the menu's Font setting when the
+-// interface started), as an ImGui font, for text that sits beside the game's;
++// The face the game's text is drawn with (the menu's Font setting, followed
++// when it changes), as an ImGui font, for text that sits beside the game's;
+ // the interface's own font when there is none. Only inside a frame.
+ [[nodiscard]] ImFont *game_text_font();
+ 
+-- 
+2.53.0.windows.1
+
