@@ -11,6 +11,7 @@
 #include <functional>
 #include <iostream>
 #include <limits>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -273,6 +274,15 @@ bool &pages_moved_flag() {
     return value;
 }
 
+// The plans applied, by the layout's data. Between the battles of a
+// continuous fight (Quick Battle (Party)) the game keeps the layout it loaded
+// for the first screen and shows it again: a plan made from those values
+// would move the pages down once more each time, until the frames fold up.
+std::map<gaddr, Plan> &applied() {
+    static std::map<gaddr, Plan> plans;
+    return plans;
+}
+
 } // namespace
 
 bool move_pages(Guest *g, gaddr screen) {
@@ -284,16 +294,39 @@ bool move_pages(Guest *g, gaddr screen) {
         return false;
     }
     const gaddr data = g_ld32(g, holder + 0x0Cu);
-    Plan plan = make_plan(g, data);
-    std::size_t already = 0;
-    for (const Write &w : plan.writes) {
-        const std::int16_t now = g_ld16s(g, w.at);
-        if (now == w.to) ++already;
-        else if (now != w.from && plan.error.empty()) {
-            char text[128];
-            std::snprintf(text, sizeof text, "the value at 0x%08X is %d, not %d", w.at, now, w.from);
-            plan.error = text;
+    // Each value must be as the plan found it, or as it made it: nothing is
+    // written otherwise. `already` counts the values already as wanted.
+    const auto check = [&](Plan &plan, std::size_t &already) {
+        already = 0;
+        for (const Write &w : plan.writes) {
+            const std::int16_t now = g_ld16s(g, w.at);
+            if (now == w.to) ++already;
+            else if (now != w.from && plan.error.empty()) {
+                char text[128];
+                std::snprintf(text, sizeof text, "the value at 0x%08X is %d, not %d", w.at, now, w.from);
+                plan.error = text;
+            }
         }
+    };
+    // A layout seen before is either as its plan left it (kept from the last
+    // screen) or as it was before (loaded again at the same place); anything
+    // else is another layout loaded there, planned afresh.
+    const auto known = applied().find(data);
+    bool seen = known != applied().end();
+    Plan plan;
+    std::size_t already = 0;
+    if (seen) {
+        plan = known->second;
+        check(plan, already);
+        if (plan.error.empty() && already != 0u && already != plan.writes.size()) plan.error = "moved in part";
+        if (!plan.error.empty()) {
+            applied().erase(known);
+            seen = false;
+        }
+    }
+    if (!seen) {
+        plan = make_plan(g, data);
+        check(plan, already);
     }
     if (!plan.error.empty()) {
         std::cerr << "[playlist] error: the loading screen's layout is not the one expected (" << plan.error
@@ -306,14 +339,20 @@ bool move_pages(Guest *g, gaddr screen) {
             g_st16(g, w.at, static_cast<std::uint16_t>(w.to));
             ++done;
         }
-    for (const gaddr cache : plan.caches) g_stf(g, cache, std::numeric_limits<float>::quiet_NaN());
+    if (done != 0u)
+        for (const gaddr cache : plan.caches) g_stf(g, cache, std::numeric_limits<float>::quiet_NaN());
+    if (!seen) applied()[data] = plan;
     // The pages that scroll show fewer rows at once.
     for (const gaddr page : {screen + 0xB0u, screen + 0x144u})
         if (g_ld32s(g, page) > kVisibleRows) g_st32(g, page, static_cast<std::uint32_t>(kVisibleRows));
     pages_moved_flag() = true;
-    std::cout << "[playlist] the loading screen's pages moved down for the track list: " << done << " of "
-              << plan.writes.size() << " layout values changed"
-              << (already != 0u ? ", " + std::to_string(already) + " already were" : std::string()) << std::endl;
+    if (done == 0u && seen)
+        std::cout << "[playlist] the loading screen's pages are where the track list needs them (the layout kept "
+                     "from the last screen)" << std::endl;
+    else
+        std::cout << "[playlist] the loading screen's pages moved down for the track list: " << done << " of "
+                  << plan.writes.size() << " layout values changed"
+                  << (already != 0u ? ", " + std::to_string(already) + " already were" : std::string()) << std::endl;
     return true;
 }
 
