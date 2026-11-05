@@ -1,5 +1,10 @@
 # Playing the port on the Steam Deck
 
+> **The easy way now (6 November 2026): the Linux setup.** Download the AppImage on the Deck, run it in Desktop Mode
+> and add the game to Steam; it runs natively, with no PC needed. See
+> [Quick start (Linux and Steam Deck)](../../README.md#quick-start-linux-and-steam-deck). The rest of this page is the
+> older route, still working: the Windows build, made on a PC and sent to the Deck over SSH, run through Proton.
+
 > Written 21 October 2026. The Windows build of the native port, run on the Deck through Proton. A native Linux
 > build comes later. Everything below was tested on the PC only (a package started from a folder of its own, and
 > deploys to a local folder); nothing has run on a Deck yet.
