@@ -25,6 +25,16 @@
 // (it is built as a windowed program), so its output goes to
 // <data>/logs/D012Native.log, the previous run's to D012Native-previous.log.
 //
+// On Linux a portable copy (the installer build or a packaged folder) keeps
+// that log too when what it prints would be lost: started from a menu entry
+// (its output /dev/null, a socket or closed), or from Steam, whose pipe ends in
+// Steam's own console-linux.txt among everything else (Steam sets SteamGameId
+// or SteamAppId for every game it starts, a non-Steam one too). A terminal, a
+// file, or another pipe keeps the output; so does any run with
+// D012_KEEP_OUTPUT=1, which the setup sets for --install and --compile-game,
+// whose progress it reads through a pipe. The crash report
+// (host/d012_crash_report.cpp) writes to the log.
+//
 // A variable already set always wins, so run_d012.py, play_d012.ps1 and the
 // test tools, which set all of them, behave as before. A build directory's
 // bin/ has no game/ beside it, so a developer build is unchanged too. A build
@@ -53,6 +63,9 @@
 #include <windows.h>
 
 #include <io.h>
+#else
+#include <sys/stat.h>
+#include <unistd.h>
 #endif
 
 #if defined(D012_INSTALLER_BUILD)
@@ -118,9 +131,12 @@ void log_to_file_without_console(const std::filesystem::path &logs) {
 }
 #endif
 
+bool g_printing_to_log = false;
+
 // What the program prints goes to `log` from here on, unbuffered, so that a
 // closed or crashed copy loses nothing.
 void print_to(const std::string &log) {
+    g_printing_to_log = true;
     if (std::freopen(log.c_str(), "a", stdout) != nullptr) std::setvbuf(stdout, nullptr, _IONBF, 0);
     if (std::freopen(log.c_str(), "a", stderr) != nullptr) std::setvbuf(stderr, nullptr, _IONBF, 0);
 }
@@ -160,6 +176,27 @@ void log_online_copy(const std::filesystem::path &data) {
     print_to(log.string());
 }
 
+#if !defined(_WIN32)
+// A copy whose output nothing reads (see the top of this file) logs to
+// <data>/logs/D012Native.log, the previous run's kept as D012Native-previous.log.
+void log_when_output_is_lost(const std::filesystem::path &data) {
+    if (g_printing_to_log || is_set("D012_LOG_FILE") || is_set("D012_KEEP_OUTPUT")) return;
+    const bool steam = is_set("SteamGameId") || is_set("SteamAppId");
+    struct stat out{};
+    if (fstat(STDOUT_FILENO, &out) == 0 &&
+        (isatty(STDOUT_FILENO) || S_ISREG(out.st_mode) || (S_ISFIFO(out.st_mode) && !steam)))
+        return;
+    std::error_code ec;
+    std::filesystem::create_directories(data / "logs", ec);
+    const std::filesystem::path log = data / "logs" / "D012Native.log";
+    // The last line where the output went before, saying where it goes now.
+    std::cout << "[portable] the log is " << log.string() << std::endl;
+    std::filesystem::remove(data / "logs" / "D012Native-previous.log", ec);
+    std::filesystem::rename(log, data / "logs" / "D012Native-previous.log", ec);
+    print_to(log.string());
+}
+#endif
+
 struct PortableLayout {
     PortableLayout() {
         log_to_named_file();
@@ -195,6 +232,9 @@ struct PortableLayout {
         log_to_file_without_console(std::filesystem::path(std::u8string(data.begin(), data.end())) / "logs");
 #endif
         log_online_copy(std::filesystem::path(std::u8string(data.begin(), data.end())));
+#if !defined(_WIN32)
+        log_when_output_is_lost(std::filesystem::path(std::u8string(data.begin(), data.end())));
+#endif
         if (!is_set(kMemoryStickDir))
             set(kMemoryStickDir, utf8(std::filesystem::path(std::u8string(data.begin(), data.end())) / "ms0"));
 #if defined(D012_INSTALLER_BUILD)

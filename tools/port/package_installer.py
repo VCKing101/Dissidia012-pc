@@ -1,6 +1,9 @@
 """Builds the Windows installer, build/port/installer/dist/Dissidia012-PC-Setup-<version>.exe.
 
-    python tools/port/package_installer.py --version 0.3.0 [--portablekit DIR] [--no-build]
+    python tools/port/package_installer.py [--version 0.3.0] [--portablekit DIR] [--no-build]
+
+The version is tools/port/release-version.txt's unless --version gives another: the Linux setup
+(tools/port/linux_setup.sh) reads the same file, so a release's two setups carry one number.
 
 1. Builds the installer build (port/README.md, "Installer build") in tools/local/port/build-d012-installer with
    llvm-mingw (tools/port/pk_cmake_mingw.cmd): the program without the game's code, the Battle BGM Maker
@@ -309,7 +312,8 @@ def keep_symbols(version):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.strip().splitlines()[0])
-    parser.add_argument("--version", required=True, help="the release's version, e.g. 0.3.0")
+    parser.add_argument("--version", default=(ROOT / "tools/port/release-version.txt").read_text().strip(),
+                        help="the release's version, e.g. 0.3.0 (default: tools/port/release-version.txt)")
     parser.add_argument("--portablekit", type=Path, default=ROOT / "tools" / "local" / "port" / "PortableKit",
                         help="the PortableKit checkout of a first configure (later: the build's own)")
     parser.add_argument("--no-build", action="store_true", help="package the build as it is")

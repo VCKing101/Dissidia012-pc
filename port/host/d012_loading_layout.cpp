@@ -6,6 +6,7 @@
 #include "../decomp/bgm_types.h"
 
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <functional>

@@ -7,3 +7,5 @@
 *.s text eol=lf
 *.patch -text
 *.cmd text eol=crlf
+# The Linux setup's files run or are read on Linux as they are.
+tools/port/linux_setup/** text eol=lf

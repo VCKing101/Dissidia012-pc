@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Dissidia 012 (PC port) setup
+Comment=Installs the port from your own disc image
+Exec=AppRun
+Icon=dissidia012-setup
+Terminal=false
+Categories=Game;

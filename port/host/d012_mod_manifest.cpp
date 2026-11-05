@@ -174,8 +174,22 @@ bool read_loop(const Value *loop, Loop &out, Report &report, const std::string &
 // kind host audio reads.
 std::optional<std::filesystem::path> track_file(const Value &value, const std::filesystem::path &folder,
                                                 Report &report, const std::string &path, const std::string &context) {
-    const std::filesystem::path relative = path_from_utf8(value.text);
-    if (relative.empty() || relative.is_absolute() || relative.has_root_name() || relative.has_root_directory()) {
+    // Read as text first, so a manifest means the same on every system: "C:"
+    // is a relative name to Linux's paths, and "\" an ordinary letter.
+    const std::string &text = value.text;
+    const bool drive = text.size() >= 2u && text[1] == ':' &&
+                       ((text[0] >= 'A' && text[0] <= 'Z') || (text[0] >= 'a' && text[0] <= 'z'));
+#if !defined(_WIN32)
+    // Windows takes a \ between folders; here the file is not found
+    // (bgm_maker/checks.cpp says the same for a Windows player).
+    if (!drive && text.find('\\') != std::string::npos) {
+        report.error(&value, path, context + " \"file\" must use / between folders (a \\ only works on Windows)");
+        return std::nullopt;
+    }
+#endif
+    const std::filesystem::path relative = path_from_utf8(text);
+    if (relative.empty() || drive || relative.is_absolute() || relative.has_root_name() ||
+        relative.has_root_directory()) {
         report.error(&value, path, context + " \"file\" must be a path inside the mod's folder");
         return std::nullopt;
     }

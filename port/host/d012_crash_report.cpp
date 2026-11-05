@@ -17,7 +17,21 @@
 // Stack lines carry a function name when the module has symbols DbgHelp reads
 // (D012Native.pdb beside an MSVC build); otherwise module+offset, which
 // llvm-symbolizer turns into a name with the same build's unstripped binary.
-// Windows only: DbgHelp is part of Windows. MIT licence; see port/README.md.
+//
+// On Linux: a fatal signal (SIGSEGV, SIGBUS, SIGILL, SIGFPE) or abort() logs
+// the signal, the address, the thread and the stack, each frame as
+// module+offset (D012Native, game-code/main.so, an overlay library; a name
+// too when the module exports one). The unstripped programs of a release are
+// kept in build/port/installer-linux/symbols/<version> (tools/port/linux_setup.sh):
+//   llvm-symbolizer --obj=<symbols>/D012Native 0x<offset>
+// The game's code is compiled on the player's machine and not stripped, so
+// their own game-code/*.so names its frames. The signal is then raised again
+// with its default action, so the system keeps a core dump as for any crash
+// (SteamOS: `coredumpctl list D012Native`). Only the log is written: the log
+// of a copy started from Steam or a menu is <data>/logs/D012Native.log
+// (host/d012_portable.cpp). D012_TEST_CRASH works as on Windows.
+//
+// MIT licence; see port/README.md.
 
 #if defined(_WIN32)
 
@@ -179,6 +193,159 @@ const bool g_installed = [] {
         CreateDirectoryA(dir, nullptr);
         std::fprintf(stderr, "[crash] unhandled exceptions write a minidump to %s\n", dir);
     }
+    return true;
+}();
+
+} // namespace
+
+#elif defined(__linux__)
+
+#include <dlfcn.h>
+#include <execinfo.h>
+#include <sys/syscall.h>
+#include <ucontext.h>
+#include <unistd.h>
+
+#include <algorithm>
+#include <chrono>
+#include <csignal>
+#include <cstdarg>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <string>
+#include <thread>
+
+namespace {
+
+volatile sig_atomic_t g_entered = 0;
+// The signal handler's own stack, so a stack overflow can still be reported.
+alignas(16) char g_signal_stack[64 * 1024];
+
+// The handler formats into a buffer and writes it straight to stderr: stdio's
+// locks may be held by the thread that crashed.
+void say(const char *format, ...) __attribute__((format(printf, 1, 2)));
+void say(const char *format, ...) {
+    char line[512];
+    va_list args;
+    va_start(args, format);
+    int length = std::vsnprintf(line, sizeof line, format, args);
+    va_end(args);
+    if (length <= 0) return;
+    if (std::size_t(length) >= sizeof line) {  // cut short: still one line
+        length = int(sizeof line) - 1;
+        line[length - 1] = '\n';
+    }
+    (void)!write(STDERR_FILENO, line, std::size_t(length));
+}
+
+// "module+0xoffset", with the module's file name only (it is named in full once, by where()).
+void describe(void *pc, char *out, std::size_t size) {
+    Dl_info info{};
+    if (dladdr(pc, &info) == 0 || info.dli_fbase == nullptr) {
+        std::snprintf(out, size, "%p", pc);
+        return;
+    }
+    const char *slash = info.dli_fname != nullptr ? std::strrchr(info.dli_fname, '/') : nullptr;
+    const char *module = slash != nullptr ? slash + 1 : (info.dli_fname != nullptr ? info.dli_fname : "?");
+    const auto offset = static_cast<unsigned long>(static_cast<char *>(pc) - static_cast<char *>(info.dli_fbase));
+    if (info.dli_sname != nullptr && info.dli_saddr != nullptr)
+        std::snprintf(out, size, "%s+0x%lx (%.160s+0x%lx)", module, offset, info.dli_sname,
+                      static_cast<unsigned long>(static_cast<char *>(pc) - static_cast<char *>(info.dli_saddr)));
+    else
+        std::snprintf(out, size, "%s+0x%lx", module, offset);
+}
+
+void log_stack(void *pc) {
+    void *frames[64];
+    const int count = backtrace(frames, 64);
+    // The frames above the one that faulted are this handler's and the
+    // kernel's signal trampoline: start at the faulting address when found.
+    int first = 0;
+    for (int i = 0; i < count; ++i)
+        if (frames[i] == pc) {
+            first = i;
+            break;
+        }
+    char line[384];
+    for (int i = first, depth = 0; i < count; ++i, ++depth) {
+        describe(frames[i], line, sizeof line);
+        say("  #%02d %s\n", depth, line);
+    }
+    // Where each module of the stack is, for reading the offsets.
+    const char *seen[64]{};
+    int modules = 0;
+    for (int i = first; i < count && modules < 64; ++i) {
+        Dl_info info{};
+        if (dladdr(frames[i], &info) == 0 || info.dli_fname == nullptr) continue;
+        bool known = false;
+        for (int m = 0; m < modules; ++m) known = known || std::strcmp(seen[m], info.dli_fname) == 0;
+        if (known) continue;
+        seen[modules++] = info.dli_fname;
+        say("  module %s at %p\n", info.dli_fname, info.dli_fbase);
+    }
+}
+
+const char *signal_name(int sig) {
+    switch (sig) {
+    case SIGSEGV: return "SIGSEGV, an invalid memory access";
+    case SIGBUS: return "SIGBUS, a bad memory access";
+    case SIGILL: return "SIGILL, an illegal instruction";
+    case SIGFPE: return "SIGFPE, an arithmetic fault";
+    case SIGABRT: return "SIGABRT, abort()";
+    default: return "?";
+    }
+}
+
+void on_signal(int sig, siginfo_t *info, void *context) {
+    if (g_entered == 0) {
+        g_entered = 1;
+        void *pc = nullptr;
+#if defined(__x86_64__)
+        pc = reinterpret_cast<void *>(static_cast<ucontext_t *>(context)->uc_mcontext.gregs[REG_RIP]);
+#elif defined(__aarch64__)
+        pc = reinterpret_cast<void *>(static_cast<ucontext_t *>(context)->uc_mcontext.pc);
+#endif
+        char where[384];
+        describe(pc, where, sizeof where);
+        const long thread = syscall(SYS_gettid);
+        if (sig == SIGABRT)
+            say("[crash] abort() in thread %ld\n", thread);
+        else if (sig == SIGSEGV || sig == SIGBUS)
+            say("[crash] signal %d (%s) at %s in thread %ld (address %p, code %d)\n", sig, signal_name(sig), where,
+                thread, info->si_addr, info->si_code);
+        else
+            say("[crash] signal %d (%s) at %s in thread %ld\n", sig, signal_name(sig), where, thread);
+        // abort() is called, not faulted: its stack starts in this handler.
+        log_stack(sig == SIGABRT ? nullptr : pc);
+        say("[crash] the system may keep a core dump of it (SteamOS: coredumpctl list D012Native)\n");
+    }
+    // The default action now: the process ends as it would have, core dump included.
+    std::signal(sig, SIG_DFL);
+    raise(sig);
+}
+
+void test_crash(std::string text) {
+    std::this_thread::sleep_for(std::chrono::duration<double>(std::atof(text.c_str())));
+    if (text.find("abort") != std::string::npos) std::abort();
+    (void)*static_cast<volatile int *>(nullptr);
+}
+
+const bool g_installed = [] {
+    // backtrace() loads libgcc_s on its first call: done here, not in the handler.
+    void *warm[1];
+    (void)backtrace(warm, 1);
+    stack_t stack{};
+    stack.ss_sp = g_signal_stack;
+    stack.ss_size = sizeof g_signal_stack;
+    sigaltstack(&stack, nullptr);
+    struct sigaction action{};
+    action.sa_sigaction = &on_signal;
+    action.sa_flags = SA_SIGINFO | SA_ONSTACK;
+    sigemptyset(&action.sa_mask);
+    for (const int sig : {SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGABRT}) sigaction(sig, &action, nullptr);
+    if (const char *test = std::getenv("D012_TEST_CRASH"); test != nullptr && *test != '\0')
+        std::thread(test_crash, std::string(test)).detach();
     return true;
 }();
 
