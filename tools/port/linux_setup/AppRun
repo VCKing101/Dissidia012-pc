@@ -1,0 +1,250 @@
+#!/usr/bin/env bash
+# The Linux setup: the AppImage's entry point (tools/port/linux_setup.sh packs
+# it). Like the Windows setup (tools/port/installer/dissidia012.iss) it asks
+# for the player's ISO and an install folder, copies the program there, then
+# sets the game up from the ISO:
+#
+#   D012Native --install <iso> [--in-place]   decrypts the executable into data/
+#   D012Native --compile-game                 makes the game's code into game-code/
+#
+# and adds a menu entry, which the player adds to Steam ("Add to Steam" on the
+# Steam Deck). The questions are zenity dialogs (SteamOS has zenity), or text
+# in a terminal when there is no zenity or no desktop.
+#
+# Unattended, for tests: D012_SETUP_ISO=<iso> D012_SETUP_DIR=<folder> asks
+# nothing; D012_SETUP_COPY_ISO=1 copies the image; D012_SETUP_NO_MENU=1 adds
+# no menu entry; D012_SETUP_JOBS=<n> passes --jobs to the compile.
+#
+# MIT licence; see README.md at the repository root.
+set -uo pipefail
+
+here="$(dirname "$(readlink -f "$0")")"
+payload="$here/payload"
+version="$(cat "$here/VERSION" 2>/dev/null || echo "?")"
+title="Dissidia 012 (PC port) setup"
+app_name="Dissidia 012 (PC port)"
+min_iso_bytes=100000000
+
+unattended=0
+[[ -n "${D012_SETUP_ISO:-}" && -n "${D012_SETUP_DIR:-}" ]] && unattended=1
+gui=0
+if [[ "$unattended" -eq 0 ]] && command -v zenity >/dev/null 2>&1 &&
+    [[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]]; then
+    gui=1
+fi
+if [[ "$unattended" -eq 0 && "$gui" -eq 0 && ! -t 0 ]]; then
+    echo "$title: no desktop and no terminal to ask in. Run it from a terminal, or set D012_SETUP_ISO and D012_SETUP_DIR." >&2
+    exit 1
+fi
+
+say() { echo "$*"; }
+info() {
+    if [[ "$gui" -eq 1 ]]; then zenity --info --title="$title" --width=480 --text="$1" 2>/dev/null
+    else printf '\n%s\n' "$1" >&2; fi
+}
+fail() {
+    if [[ "$gui" -eq 1 ]]; then zenity --error --title="$title" --width=480 --text="$1" 2>/dev/null
+    else printf '\nerror: %s\n' "$1" >&2; fi
+    exit 1
+}
+# ask "<question>" "<yes label>" "<no label>": true for yes.
+ask() {
+    if [[ "$unattended" -eq 1 ]]; then return 0; fi
+    if [[ "$gui" -eq 1 ]]; then
+        zenity --question --title="$title" --width=480 --text="$1" --ok-label="$2" --cancel-label="$3" 2>/dev/null
+        return
+    fi
+    local answer
+    read -r -p "$1 [$2/$3] " answer
+    [[ "${answer,,}" == "${2,,}" || "${answer,,}" == y* ]]
+}
+
+# The disc image, checked as the Windows setup checks it.
+choose_iso() {
+    local iso="${D012_SETUP_ISO:-}"
+    while true; do
+        if [[ -z "$iso" ]]; then
+            if [[ "$gui" -eq 1 ]]; then
+                iso="$(zenity --file-selection --title="Choose your Dissidia 012 disc image (.iso)" \
+                    --filename="$HOME/" --file-filter="Disc images (*.iso) | *.iso *.ISO" \
+                    --file-filter="All files | *" 2>/dev/null)" || exit 1
+            else
+                read -r -e -p "Your Dissidia 012 disc image (.iso): " iso
+                iso="${iso/#\~/$HOME}"
+            fi
+        fi
+        local problem=""
+        if [[ ! -f "$iso" ]]; then problem="The file was not found: $iso"
+        elif [[ "${iso,,}" != *.iso ]]; then problem="The disc image must be an .iso file (CSO and other compressed formats are not read)."
+        elif [[ "$(stat -c %s "$iso")" -lt "$min_iso_bytes" ]]; then problem="That file is too small to be the Dissidia 012 disc image."
+        fi
+        if [[ -z "$problem" ]]; then
+            readlink -f "$iso"
+            return
+        fi
+        [[ "$unattended" -eq 1 ]] && fail "$problem"
+        info "$problem"
+        iso=""
+    done
+}
+
+# The install folder: ~/Games/Dissidia012 unless the player picks another.
+choose_folder() {
+    local dir="${D012_SETUP_DIR:-}"
+    if [[ -z "$dir" ]]; then
+        dir="$HOME/Games/Dissidia012"
+        if [[ "$gui" -eq 1 ]]; then
+            local answer
+            answer="$(zenity --question --title="$title" --width=480 \
+                --text="Install the game in\n\n<b>$dir</b>?" --ok-label="Install here" \
+                --cancel-label="Cancel" --extra-button="Choose another folder" 2>/dev/null)"
+            local code=$?
+            if [[ "$answer" == "Choose another folder" ]]; then
+                mkdir -p "$HOME/Games"
+                dir="$(zenity --file-selection --directory --title="Choose the install folder" \
+                    --filename="$HOME/Games/" 2>/dev/null)" || exit 1
+            elif [[ "$code" -ne 0 ]]; then
+                exit 1
+            fi
+        else
+            local typed
+            read -r -e -p "Install folder [$dir]: " typed
+            [[ -n "$typed" ]] && dir="${typed/#\~/$HOME}"
+        fi
+    fi
+    mkdir -p "$dir" || fail "Cannot make the folder $dir."
+    dir="$(readlink -f "$dir")"
+    if [[ -e "$dir/D012Native.exe" ]]; then
+        fail "$dir holds the Windows version of the port (for Proton). Choose another folder for the Linux version: the two cannot share one."
+    fi
+    if [[ ! -w "$dir" ]]; then fail "Cannot write to $dir."; fi
+    echo "$dir"
+}
+
+# A setting the setup keeps for the next run (an update): setup.ini in the folder.
+setup_value() { sed -n "s/^$1=//p" "$dir/setup.ini" 2>/dev/null | tail -1; }
+
+# "[compile-game] <percent>% <message>" lines as zenity --progress reads them.
+progress_lines() {
+    sed -un 's/^\[compile-game\] \([0-9]*\)% \(.*\)$/\1\n# \2/p'
+}
+
+# run_step "<title>" <args...>: the program with its output in the log, shown
+# as a progress bar (a pulsing one when the program prints no percentages).
+run_step() {
+    local what="$1"
+    shift
+    local log="$dir/setup-install.log"
+    printf '\n$ D012Native %s\n' "$*" >> "$log"
+    if [[ "$gui" -eq 1 ]]; then
+        local fifo pulse=()
+        # --install prints no percentages.
+        [[ "$1" == "--install" ]] && pulse=(--pulsate)
+        fifo="$(mktemp -u)"
+        mkfifo "$fifo"
+        ( D012_KEEP_OUTPUT=1 "$dir/D012Native" "$@" 2>&1; echo "exit=$?" ) | tee -a "$log" > "$fifo" &
+        local runner=$!
+        { echo "# $what"; progress_lines < "$fifo"; } |
+            zenity --progress --title="$title" --width=520 --text="$what" --percentage=0 --auto-close \
+                --no-cancel "${pulse[@]}" 2>/dev/null
+        wait "$runner"
+        rm -f "$fifo"
+    else
+        say "$what"
+        ( D012_KEEP_OUTPUT=1 "$dir/D012Native" "$@" 2>&1; echo "exit=$?" ) | tee -a "$log" | grep -E '^\[compile-game\]|^error|^exit='
+    fi
+    [[ "$(tail -1 "$log")" == "exit=0" ]]
+}
+
+# --- Questions -------------------------------------------------------------
+
+if [[ "$unattended" -eq 0 ]]; then
+    ask "This sets up $app_name $version from your own copy of the game.
+
+You need the .iso of your Dissidia 012 Duodecim Final Fantasy disc (USA ULUS10566, or Europe ULES01505). Setup reads the game from it, decrypts its program and compiles the game's code on this computer, which takes several minutes. Nothing is downloaded, and nothing made from your disc leaves this computer." \
+        "Continue" "Cancel" || exit 0
+fi
+iso="$(choose_iso)" || exit 1
+dir="$(choose_folder)" || exit 1
+copy_iso=0
+if [[ "$unattended" -eq 1 ]]; then
+    copy_iso="${D012_SETUP_COPY_ISO:-0}"
+elif ask "Copy the disc image into the install folder (1.7 GB more)? Then the original can be moved or deleted. Otherwise the game reads it where it is." \
+    "Copy it" "Read it where it is"; then
+    copy_iso=1
+fi
+
+# --- Install ---------------------------------------------------------------
+
+say "Installing to $dir"
+# The program's files over the previous ones; data/ (saves, settings, mods)
+# and game-code/ are not in the payload and are kept.
+cp -a "$payload/." "$dir/" || fail "Copying the program to $dir did not succeed."
+chmod +x "$dir/D012Native" "$dir/psp_recomp"
+mkdir -p "$dir/data/mods"
+: > "$dir/setup-install.log"
+
+if [[ ! -f "$dir/data/EBOOT.ELF" || "$(setup_value iso)" != "$iso" || "$(setup_value copy_iso)" != "$copy_iso" ]]; then
+    args=(--install "$iso")
+    [[ "$copy_iso" -eq 1 ]] || args+=(--in-place)
+    run_step "Reading your disc and decrypting the game's program" "${args[@]}" ||
+        fail "Setting the game up from your disc image did not succeed.
+
+$(grep -vE '^exit=' "$dir/setup-install.log" | tail -3)
+
+The log is $dir/setup-install.log. Run the setup again to retry; your saves are kept."
+fi
+printf 'iso=%s\ncopy_iso=%s\nversion=%s\n' "$iso" "$copy_iso" "$version" > "$dir/setup.ini"
+
+compile=(--compile-game)
+[[ -n "${D012_SETUP_JOBS:-}" ]] && compile+=(--jobs "$D012_SETUP_JOBS")
+run_step "Making the game's code for this computer" "${compile[@]}" ||
+    fail "Compiling the game's code did not succeed.
+
+$(grep -E '^\[compile-game\]' "$dir/setup-install.log" | tail -1)
+
+The logs are in $dir (game-code-build.log and setup-install.log). Run the setup again to retry; your saves are kept."
+
+# --- Menu entry ------------------------------------------------------------
+
+# The menu's icon is the game's own: --compile-game writes the disc's
+# ICON0.PNG as dissidia012.png. The setup carries none of the game's.
+icon_line=""
+[[ -s "$dir/dissidia012.png" ]] && icon_line="Icon=$dir/dissidia012.png"
+
+if [[ "${D012_SETUP_NO_MENU:-0}" -ne 1 ]]; then
+    applications="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
+    mkdir -p "$applications"
+    entry="$applications/dissidia012-pc.desktop"
+    # The desktop entry format quotes a path with spaces in Exec.
+    quoted_exe="\"${dir//\"/\\\"}/D012Native\""
+    cat > "$entry" <<EOF
+[Desktop Entry]
+Type=Application
+Name=$app_name
+Comment=Dissidia 012 Duodecim Final Fantasy, from your own disc
+Exec=$quoted_exe
+Path=$dir
+$icon_line
+Terminal=false
+Categories=Game;
+EOF
+    chmod +x "$entry"
+    command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$applications" >/dev/null 2>&1
+fi
+
+done_text="$app_name is installed in $dir.
+
+It is in the application menu under Games. To play it in Steam (Gaming Mode on the Steam Deck), right-click it in the menu and choose <b>Add to Steam</b>.
+
+Your saves, settings and mods are in $dir/data. To update, run a newer setup and choose the same folder."
+if [[ "$unattended" -eq 1 ]]; then
+    say "Installed in $dir"
+elif [[ "$gui" -eq 1 ]]; then
+    if zenity --question --title="$title" --width=480 --text="$done_text" --ok-label="Play now" \
+        --cancel-label="Close" 2>/dev/null; then
+        (cd "$dir" && setsid "$dir/D012Native" >/dev/null 2>&1 &)
+    fi
+else
+    printf '\n%s\n' "${done_text//<b>/}" | sed 's|</b>||g'
+fi

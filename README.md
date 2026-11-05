@@ -18,9 +18,11 @@ distributed.**
 - **Windows:** plays from New Game through the menus and battles in the recompiled build, with no interpreter
   fallbacks. Message, save-data and keyboard dialogs are drawn by the port. Expect rough edges; see the
   [bring-up log](docs/port/bring-up-log.md).
-- **Steam Deck:** plays through Proton as a non-Steam game, built on a Windows PC (`setup.ps1 -Deck`; see
-  [docs/port/steam-deck.md](docs/port/steam-deck.md)). The Windows setup has not been tried on the Deck.
-- **Linux (native):** untested. PortableKit supports it, but this port has not been built natively there yet.
+- **Linux (native) and Steam Deck:** plays natively with the Linux setup, an AppImage that sets the game up from
+  your ISO on the machine itself ([quick start](#quick-start-linux-and-steam-deck)). Tested on the Steam Deck
+  (SteamOS), with mods, DLC and the Japanese voices. Other x86-64 Linux systems with Vulkan should work but are
+  untested. The Windows build through Proton also still works on the Deck
+  ([docs/port/steam-deck.md](docs/port/steam-deck.md)).
 - **Matching decompilation:** a few hundred functions are matching C; most of the game is still machine code. See the
   [decompilation notes](docs/decomp/README.md) and the [progress report](docs/decomp/progress.md).
 
@@ -191,11 +193,50 @@ same "Dissidia 012 (PC port)" shortcut; saves are in `build/port/data/ms0` and m
 made before 0.5.0 compiles the whole port once with clang ([setup.md](docs/port/setup.md#updating)).
 
 The source build's options, what each step does, and troubleshooting: [docs/port/setup.md](docs/port/setup.md). The manual build steps
-for developers are in [`port/README.md`](port/README.md). For the Steam Deck, see
-[docs/port/steam-deck.md](docs/port/steam-deck.md) (`setup.ps1 -Deck` builds its package).
+for developers are in [`port/README.md`](port/README.md). On a Steam Deck, use the
+[Linux setup](#quick-start-linux-and-steam-deck); [docs/port/steam-deck.md](docs/port/steam-deck.md) covers the
+Windows build through Proton instead (`setup.ps1 -Deck` builds its package).
 
 The matching decompilation has its own toolchain (the historical PSP SNC compiler, a WSL build environment, splat,
 spimdisasm and Ghidra with the Allegrex extension); see [getting started](docs/decomp/getting-started.md).
+
+## Quick start (Linux and Steam Deck)
+
+**1. Download** `Dissidia012-Setup-<version>-x86_64.AppImage` from the
+[latest release](https://github.com/VCKing101/Dissidia012-pc/releases). On a Steam Deck, switch to Desktop Mode
+first (hold the power button, **Switch to Desktop**).
+
+**2. Have your game ready:** your own USA (**ULUS10566**) or European (**ULES01505**) disc image as an `.iso` file,
+anywhere on the machine or its SD card. The Japanese and Asian releases do not work.
+
+**3. Run the setup.** Double-click it in the file manager (Dolphin on the Deck) and choose **Execute** if asked. If
+nothing happens, right-click it, **Properties**, **Permissions**, tick **Is executable**, and try again. It asks for
+your ISO, where to install (`~/Games/Dissidia012` unless you choose another folder) and whether to copy the ISO into
+that folder, then sets the game up from it: it decrypts the game's program and compiles the game's code with the
+compiler that comes with it. That takes a few minutes (about 8 on a Steam Deck). Nothing is downloaded, and nothing
+made from your disc leaves your machine.
+
+**4. Add it to Steam.** The game is now in the application menu under **Games**. Right-click
+**Dissidia 012 (PC port)** and choose **Add to Steam**. It runs natively: leave the game's **Compatibility** setting
+in Steam on **Default**, not a Proton version. On the Deck, go back to Gaming Mode and play it from your library.
+Esc, or L3 + R3 on a controller, opens the port's menu. Your saves are in `data/ms0` in the install folder, and mods
+go in `data/mods`.
+
+**To update:** run the new release's setup and choose the same folder. Your saves, settings and mods stay, and the
+game's code is compiled again only when the new version needs it.
+
+**If it crashes or freezes,** please [open an issue](https://github.com/VCKing101/Dissidia012-pc/issues/new/choose)
+and attach `data/logs/D012Native.log` from the install folder (and `D012Native-previous.log`, the run before it). A
+crash writes where it happened at the end of the log.
+
+You need 64-bit x86 Linux from about 2021 on (glibc 2.34 or newer) with a Vulkan graphics driver, about 1.5 GB of
+free space while it sets up (3.2 GB if the ISO is copied in; the installed game then takes about 600 MB), and FUSE to
+start the AppImage, which most systems have. The setup's windows need `zenity`; without it, start the setup from a
+terminal and it asks there. SteamOS has all of these.
+
+- The Battle BGM Maker is not in the Linux setup yet. Music mods made with it elsewhere play as they do on Windows.
+- Install it in a folder of its own: the setup will not install over the Windows version's folder (a Proton install).
+- The Linux build and setup are made on a Windows PC with WSL; see [docs/port/platforms.md](docs/port/platforms.md).
 
 ## Downloadable content (DLC)
 
@@ -206,8 +247,9 @@ include or link to any. Put the DLC's files in a folder named after your disc in
 | Installed with | Put the files in |
 | --- | --- |
 | The Windows setup | `data\ms0\PSP\GAME\ULUS10566\` in the install folder |
+| The Linux setup (Steam Deck included) | `data/ms0/PSP/GAME/ULUS10566/` in the install folder |
 | `setup.ps1` (from source) | `build\port\data\ms0\PSP\GAME\ULUS10566\` |
-| The Steam Deck package | `data/ms0/PSP/GAME/ULUS10566/` in its folder |
+| The Steam Deck package (Proton) | `data/ms0/PSP/GAME/ULUS10566/` in its folder |
 
 With the European disc, the last folder is `ULES01505` instead. Make the `GAME` folder and that one if they are not
 there. The files go straight in it (`.edat` files with names like `8c0b30f1.edat`, and a `PARAM.PBP`), not in another
@@ -219,7 +261,7 @@ folder inside it.
   the same title as one on the disc shows "(DLC)" after it.
 - **Costumes:** at character select, press Square (Look) to step through a character's costumes. The DLC ones are
   "DLC 1", "DLC 2" and so on.
-- **To check it:** the port's log (`data\logs\D012Native.log` in the Windows install) says at the start
+- **To check it:** the port's log (`data/logs/D012Native.log` in the install folder) says at the start
   `[dlc] 222 files in ...` when the game will find them, or `[dlc] none in ...`, and warns about DLC files in a folder
   with another name.
 - **Tested** with a decrypted copy of the USA DLC (13 music packs, 43 costumes). DLC still encrypted the way a PSP
@@ -236,8 +278,9 @@ inside it:
 | Installed with | Put the pack in |
 | --- | --- |
 | The Windows setup | `data\textures\ULUS10566\` in the install folder |
+| The Linux setup (Steam Deck included) | `data/textures/ULUS10566/` in the install folder |
 | `setup.ps1` (from source) | `build\port\data\textures\ULUS10566\` |
-| The Steam Deck package | `data/textures/ULUS10566/` in its folder |
+| The Steam Deck package (Proton) | `data/textures/ULUS10566/` in its folder |
 
 Or open the menu (Esc, or L3 + R3 on a controller), go to **Video**, and choose **Import texture pack…**: it finds the
 pack in a folder you pick, including PPSSPP's `PSP/TEXTURES/...` layout, checks it, and copies it in or uses it where

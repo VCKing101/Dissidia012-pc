@@ -8,6 +8,8 @@
 //   <folder>/game-code/overlays/*.dll  the overlay libraries, found through
 //                                      D012_OVERLAY_DIR (host/d012_portable.cpp)
 //
+// On Linux they are main.so and overlays/*.so.
+//
 // D012_GAME_CODE_DIR names another folder. PortableKit calls
 // register_generated_functions() where a port's build would have linked the
 // corpus (portablekit_add_game(... NO_CORPUS)).
@@ -49,7 +51,11 @@ void say(const std::string &message) {
 namespace psprecomp {
 
 void register_generated_functions(CorpusRuntime &runtime) {
+#if defined(_WIN32)
     const std::filesystem::path library = d012::game_code::directory() / "main.dll";
+#else
+    const std::filesystem::path library = d012::game_code::directory() / "main.so";
+#endif
     std::error_code ec;
     if (!std::filesystem::is_regular_file(library, ec)) {
         d012::game_code::say("The game's code is not compiled yet (" + library.string() +

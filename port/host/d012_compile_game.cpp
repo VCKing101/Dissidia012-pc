@@ -17,12 +17,16 @@
 //                           and data/settings.ini naming the disc image (or
 //                           game/EBOOT.ELF and game/disc.iso: D012_GAME_DIR)
 //   psp_recomp.exe          the recompiler
-//   toolchain/bin/clang++   llvm-mingw, trimmed (D012_TOOLCHAIN_DIR names
-//                           another; D012_RECOMPILER another recompiler)
+//   toolchain/bin/clang++   llvm-mingw, trimmed; on Linux clang and lld with
+//                           a sysroot that clang++.cfg beside it names
+//                           (D012_TOOLCHAIN_DIR names another;
+//                           D012_RECOMPILER another recompiler)
 //   sdk/                    the three headers the game's code includes, the
 //                           two entry-point templates, dispatch-calls.txt and
 //                           d012_math.cpp
 //   game-code/              the result: main.dll, overlays/*.dll, key.txt
+//                           (main.so, overlays/*.so on Linux)
+//   dissidia012.png         on Linux, the disc's ICON0.PNG, for the menu entry
 //
 // Steps: the three overlays and LIBSUPPREACC.PRX are read from the disc and
 // checked by SHA-256; each overlay's identity (base, size, FNV-1a 64 of its
@@ -98,6 +102,15 @@ namespace fs = std::filesystem;
 constexpr std::uint32_t kMainBase = 0x08804000u;
 constexpr std::uint32_t kPrxBase = 0x09B81000u;  // where host/d012_prx.cpp loads LIBSUPPREACC.PRX
 constexpr std::uint32_t kHashWindow = 4096u;     // overlay_meta.py's default identity window
+
+// The game's code as this system loads it (PortableKit's host/corpus_library.cpp).
+#if defined(_WIN32)
+constexpr const char *kLibrary = ".dll";
+constexpr const char *kRecompiler = "psp_recomp.exe";
+#else
+constexpr const char *kLibrary = ".so";
+constexpr const char *kRecompiler = "psp_recomp";
+#endif
 
 struct DiscFile {
     const char *path;
@@ -372,6 +385,9 @@ unsigned default_jobs() {
     MEMORYSTATUSEX status{};
     status.dwLength = sizeof status;
     if (GlobalMemoryStatusEx(&status)) memory = status.ullTotalPhys;
+#else
+    const long pages = sysconf(_SC_PHYS_PAGES), page = sysconf(_SC_PAGE_SIZE);
+    if (pages > 0 && page > 0) memory = std::uint64_t(pages) * std::uint64_t(page);
 #endif
     // A unit's clang took under 1 GB at -O1; leave room for the rest of the PC.
     const unsigned by_memory = memory == 0 ? cpus : static_cast<unsigned>(std::max<std::uint64_t>(1, memory / (1536ull << 20)));
@@ -398,7 +414,7 @@ Paths find_paths(const Options &options) {
     }
     if (!options.iso.empty()) p.iso = options.iso;
     const char *recompiler = std::getenv("D012_RECOMPILER");
-    p.recompiler = recompiler != nullptr && *recompiler != '\0' ? path_of(recompiler) : p.folder / "psp_recomp.exe";
+    p.recompiler = recompiler != nullptr && *recompiler != '\0' ? path_of(recompiler) : p.folder / kRecompiler;
     const char *toolchain = std::getenv("D012_TOOLCHAIN_DIR");
     const fs::path toolchain_dir = toolchain != nullptr && *toolchain != '\0' ? path_of(toolchain) : p.folder / "toolchain";
 #if defined(_WIN32)
@@ -437,6 +453,11 @@ std::string code_key(const Paths &p, const Options &options, const std::vector<s
     for (const std::string &hash : disc_hashes) key << "disc=" << hash << "\n";
     key << "recompiler=" << psprecomp::sha256_file(p.recompiler) << "\ncompiler=" << psprecomp::sha256_file(p.compiler)
         << "\n";
+    // On Linux the compiler's target and sysroot come from the configuration
+    // file beside it (tools/port/linux_toolchain.sh).
+    std::error_code config_ec;
+    if (const fs::path config = fs::path(p.compiler).concat(".cfg"); fs::is_regular_file(config, config_ec))
+        key << "compiler-config=" << psprecomp::sha256_file(config) << "\n";
     for (const auto &entry : fs::recursive_directory_iterator(p.sdk))
         if (entry.is_regular_file())
             key << "sdk " << text(fs::relative(entry.path(), p.sdk)) << "=" << psprecomp::sha256_file(entry.path())
@@ -446,7 +467,7 @@ std::string code_key(const Paths &p, const Options &options, const std::vector<s
 }
 
 struct Library {
-    std::string name;  // main.dll, or overlays/<prefix>.dll
+    std::string name;  // main.dll, or overlays/<prefix>.dll (.so on Linux)
     fs::path generated;
     std::vector<std::string> include_dirs;
     std::vector<fs::path> objects;
@@ -485,10 +506,21 @@ int run(const Options &options) {
                 disc_paths.push_back(target);
                 progress.advance();
             }
+#if !defined(_WIN32)
+            // The menu entry's icon, the disc's own (the Linux setup carries
+            // none of the game's, tools/port/linux_setup/AppRun); not needed,
+            // so a disc without it is no error.
+            if (const auto icon = disc.find("PSP_GAME/ICON0.PNG"); icon && !icon->directory) {
+                std::vector<std::uint8_t> bytes(icon->size);
+                if (disc.read(std::uint64_t(icon->lba) * portablekit::IsoImage::kSectorSize, bytes) == bytes.size())
+                    write_all(p.folder / "dissidia012.png",
+                              std::string_view(reinterpret_cast<const char *>(bytes.data()), bytes.size()));
+            }
+#endif
         }
 
         const std::string key = code_key(p, options, disc_hashes);
-        if (!options.force && fs::is_regular_file(p.out / "main.dll", ec)) {
+        if (!options.force && fs::is_regular_file(p.out / (std::string("main") + kLibrary), ec)) {
             std::ifstream existing(p.out / "key.txt");
             std::string have;
             std::getline(existing, have);
@@ -506,7 +538,7 @@ int run(const Options &options) {
         std::vector<Library> libraries;
         progress.step("Recompiling the game's code to C++", 1 + std::size(kDiscFiles));
         {
-            Library main{"main.dll", p.work / "generated", {}, {}};
+            Library main{std::string("main") + kLibrary, p.work / "generated", {}, {}};
             std::vector<std::string> args{recompiler, text(p.eboot), "--auto", text(main.generated), hex32(kMainBase)};
             const auto rows = dispatch_calls(dispatch, "main");
             args.insert(args.end(), rows.begin(), rows.end());
@@ -529,7 +561,7 @@ int run(const Options &options) {
                           static_cast<unsigned long long>(hash));
             char hash_text[24];
             std::snprintf(hash_text, sizeof hash_text, "0x%016llX", static_cast<unsigned long long>(hash));
-            Library overlay{std::string("overlays/") + prefix + ".dll", p.work / "overlays" / prefix, {}, {}};
+            Library overlay{std::string("overlays/") + prefix + kLibrary, p.work / "overlays" / prefix, {}, {}};
             std::vector<std::string> args{recompiler, text(disc_paths[i]), "--auto", text(overlay.generated),
                                           hex32(image.base), "--prefix", prefix};
             const auto rows = dispatch_calls(dispatch, kDiscFiles[i].name);
@@ -585,6 +617,9 @@ int run(const Options &options) {
                     std::vector<std::string> args{compiler, "-std=c++20", "-O" + std::to_string(options.opt), "-g0",
                                                   "-fvisibility=hidden", "-fvisibility-inlines-hidden", "-w",
                                                   "-DNDEBUG", "-I", sdk_include, "-I", text(unit.library->generated)};
+#if !defined(_WIN32)
+                    args.push_back("-fPIC");
+#endif
                     args.insert(args.end(), {"-c", text(unit.source), "-o", text(unit.object)});
                     const fs::path unit_log = p.work / "objects" / ("u" + std::to_string(i) + ".log");
                     const int code = run_program(args, unit_log);
@@ -617,9 +652,17 @@ int run(const Options &options) {
                     out << '"' << name << "\"\n";
                 }
             }
+#if defined(_WIN32)
             run_checked({compiler, "-shared", "-static", "-static-libgcc", "-static-libstdc++", "-o",
                          text(p.work / "result" / library.name), "@" + text(rsp)},
                         p, "linking " + library.name);
+#else
+            // Its C++ runtime linked in and kept to itself, as PortableKit
+            // links a release's overlay libraries (cmake/PortableKit.cmake).
+            run_checked({compiler, "-shared", "-fuse-ld=lld", "-static-libgcc", "-static-libstdc++",
+                         "-Wl,--exclude-libs,ALL", "-o", text(p.work / "result" / library.name), "@" + text(rsp)},
+                        p, "linking " + library.name);
+#endif
             progress.advance();
         }
         write_all(p.work / "result" / "key.txt", key + "\n");
