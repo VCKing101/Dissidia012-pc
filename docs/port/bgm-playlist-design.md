@@ -543,7 +543,14 @@ changes the layout as it is in memory, once per screen, from the selector's buil
 and page exists by then and nothing has been drawn): the pages' animations (all their keyframes, the slides
 included), the up arrow's, the page arrows' two anchors and the two frames' lower quads, **436 values**. Every value
 is checked against what it must be before anything is written; on any other value nothing is written and the
-pages stay (logged), and a layout already moved is left alone. Moving keyframes have their cached time set to NaN so
+pages stay (logged), and a layout already moved is left alone. The plan applied is kept by the layout's address:
+between the battles of a continuous fight (Quick Battle (Party), "Proceed to next battle") the game shows the
+screen again with the layout it loaded for the first one, already moved. Until 5 November 2026 a new plan was made
+from those values each time, so the pages went down 42 or 67 pixels more on every screen and their frames folded
+up (a report from a 1440p player: the Equipment frame, heading and arrows gone, its rows beside NEXT). Now a layout
+seen before is checked against its first plan: all moved, it is left as it is; all as loaded, it is moved again;
+anything else is another layout at that address, planned afresh. V: five loading screens of one Quick Battle
+(Party) run, the first moving 436 values and the four after it finding them in place, every screen as in 11.1. Moving keyframes have their cached time set to NaN so
 that the game computes their place again. The pages that scroll get `visible = 6`, and each frame, after the
 pages placed their rows, the selector's update hides the rows below the sixth (main `0x0887B944`), because the
 game's row loop draws ten from the top whatever `visible` says. Equipment has no scrolling in the game (fixed anchors
