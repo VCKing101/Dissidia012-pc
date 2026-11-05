@@ -1,0 +1,125 @@
+From 7a6171f80ef9a74a394460ae3c35caa9870f24c9 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Fri, 6 Nov 2026 06:57:50 +1030
+Subject: [PATCH] Linux: Nintendo stream music, memory stick names in any case,
+ a type fix
+
+Three faults the native Linux build had that the Windows one does not:
+
+- The bundled FFmpeg built on Linux and macOS (--disable-everything and a
+  short list) had no BRSTM or BFSTM demuxer and no DSP-ADPCM decoder, so a
+  port's .brstm/.bcstm/.bfstm music was left out as unreadable. Windows uses
+  a full prebuilt LGPL build. Added brstm, bfstm, adpcm_thp, adpcm_thp_le.
+- ms0: paths were looked up as the game wrote them. A memory stick and
+  Windows match names in any case, and games rely on it: Dissidia 012 asks
+  whether ".../2f356e6c.edat" exists, then opens ".../2F356E6C.EDAT", so its
+  DLC music was silent on Linux. host_path() now matches each part of the
+  path in any ASCII case off Windows; a part not found is kept as written.
+- texture_pack_match.cpp: a {a, b} list mixed unsigned long long and
+  std::uint64_t, which is unsigned long on Linux, and did not compile.
+
+Checked on a Steam Deck (SteamOS, native build): a mod's 31 BRSTM tracks
+are listed and play, and DLC tracks play.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ cmake/FFmpeg.cmake              |  9 +++++---
+ host/gpu/texture_pack_match.cpp |  2 +-
+ host/hle/hle_io.cpp             | 41 ++++++++++++++++++++++++++++++++-
+ 3 files changed, 47 insertions(+), 5 deletions(-)
+
+diff --git a/cmake/FFmpeg.cmake b/cmake/FFmpeg.cmake
+index 5fbfec5..cf3a35b 100644
+--- a/cmake/FFmpeg.cmake
++++ b/cmake/FFmpeg.cmake
+@@ -29,7 +29,10 @@ set(PORTABLEKIT_FFMPEG_SOVERSIONS avcodec 61 avutil 59 avformat 61 swresample 5)
+ # whose movie streams the host splits into access units and whose pixels it
+ # converts itself; and for host audio files the WAV, MP3, Ogg and FLAC
+ # demuxers, their parsers, the MP3, Vorbis, Opus, FLAC and PCM decoders and the
+-# resampler. Host files are read through the host's own I/O, so no protocol is
++# resampler; and the BRSTM and BFSTM demuxers (BFSTM's reads BCSTM too) with
++# their DSP-ADPCM decoders, for Nintendo stream files with their loops (the
++# Windows build's prebuilt FFmpeg has every format). Host files are read
++# through the host's own I/O, so no protocol is
+ # built. No scaler, filter, device or network code. No GPL or non-free parts:
+ # the result is LGPL-2.1-or-later, which the build checks.
+ set(PORTABLEKIT_FFMPEG_CONFIGURE_FLAGS
+@@ -43,8 +46,8 @@ set(PORTABLEKIT_FFMPEG_CONFIGURE_FLAGS
+     --disable-network
+     --disable-autodetect
+     --disable-everything
+-    --enable-decoder=atrac3,atrac3p,h264,mp3float,vorbis,opus,flac,pcm_s16le,pcm_s24le,pcm_s32le,pcm_f32le,pcm_u8
+-    --enable-demuxer=wav,mp3,ogg,flac
++    --enable-decoder=atrac3,atrac3p,h264,mp3float,vorbis,opus,flac,pcm_s16le,pcm_s24le,pcm_s32le,pcm_f32le,pcm_u8,adpcm_thp,adpcm_thp_le
++    --enable-demuxer=wav,mp3,ogg,flac,brstm,bfstm
+     --enable-parser=mpegaudio,vorbis,opus,flac
+     --disable-x86asm
+     --disable-debug)
+diff --git a/host/gpu/texture_pack_match.cpp b/host/gpu/texture_pack_match.cpp
+index 810d087..05363b3 100644
+--- a/host/gpu/texture_pack_match.cpp
++++ b/host/gpu/texture_pack_match.cpp
+@@ -337,7 +337,7 @@ TexturePackMatcher::Known TexturePackMatcher::known(std::uint64_t cache_key, std
+         return Known::Matched;
+     }
+     // Then at any address, then for any palette: the wildcard order of keys.
+-    for (const std::uint64_t wider : {cache_key & 0xFFFFFFFFull, std::uint64_t{0u}}) {
++    for (const std::uint64_t wider : {std::uint64_t{cache_key & 0xFFFFFFFFu}, std::uint64_t{0u}}) {
+         if (const auto found = matches_.find({wider, data_hash}); found != matches_.end()) {
+             file = found->second;
+             return Known::Matched;
+diff --git a/host/hle/hle_io.cpp b/host/hle/hle_io.cpp
+index bbd0c35..6e6d195 100644
+--- a/host/hle/hle_io.cpp
++++ b/host/hle/hle_io.cpp
+@@ -219,7 +219,46 @@ std::optional<std::pair<std::uint64_t, std::uint64_t>> parse_lbn_path(const std:
+     return std::make_pair(*lba, *length);
+ }
+ 
+-std::filesystem::path host_path(const std::string &path) { return io().memory_stick / path; }
++// The memory stick's file for `path`. A PSP's memory stick (FAT) and Windows
++// match names in any case, and games rely on it: Dissidia 012 asks whether
++// "ms0:/PSP/GAME/ULUS10566/2f356e6c.edat" exists, then opens
++// "MS0:/PSP/GAME/ULUS10566/2F356E6C.EDAT". Elsewhere each part of the path is
++// looked up as it is, then in any ASCII case among that folder's entries; a
++// part that is not there (a file about to be made) is kept as the game wrote it.
++std::filesystem::path host_path(const std::string &path) {
++#if defined(_WIN32)
++    return io().memory_stick / path;
++#else
++    std::filesystem::path result = io().memory_stick;
++    bool found = true;  // every part so far is an existing entry
++    std::size_t start = 0;
++    while (start <= path.size()) {
++        std::size_t end = path.find('/', start);
++        if (end == std::string::npos) end = path.size();
++        const std::string part = path.substr(start, end - start);
++        start = end + 1;
++        if (part.empty() || part == ".") continue;
++        std::error_code ec;
++        if (found && !std::filesystem::exists(result / part, ec)) {
++            found = false;
++            for (const auto &entry : std::filesystem::directory_iterator(result, ec)) {
++                const std::string name = entry.path().filename().string();
++                if (name.size() == part.size() &&
++                    std::equal(name.begin(), name.end(), part.begin(), [](unsigned char a, unsigned char b) {
++                        return std::tolower(a) == std::tolower(b);
++                    })) {
++                    result /= name;
++                    found = true;
++                    break;
++                }
++            }
++            if (found) continue;
++        }
++        result /= part;
++    }
++    return result;
++#endif
++}
+ 
+ bool trace_io() {
+     static const bool enabled = portablekit::env("TRACE_IO") != nullptr;
+-- 
+2.53.0.windows.1
+
