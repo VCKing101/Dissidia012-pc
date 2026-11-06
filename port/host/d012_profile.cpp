@@ -13,6 +13,7 @@
 
 #include "gpu/frame_interpolation.hpp"
 
+#include "d012_cheats.hpp"
 #include "d012_hle.hpp"
 #include "d012_version.hpp"
 
@@ -141,6 +142,8 @@ const GameProfile &game() {
         // A USA console: English, confirm on cross.
         .system_language = 1u,
         .confirm_button = 1u,
+
+        .cheats = d012::builtin_cheats(),
     };
     return profile;
 }

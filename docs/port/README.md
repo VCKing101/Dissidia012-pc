@@ -147,6 +147,11 @@ disassembler and the new `tools/port/` scripts cover the analysis.
 - [Native dialogs](native-dialogs.md): the game's message, save-data and keyboard dialogs drawn in its own menu look
   from the game's menu pictures on the player's disc, through PortableKit's dialog skin (patch 0083).
 
+## Cheats (6 November 2026)
+
+- [Cheats](cheats.md): the menu's Cheats page, the port's own money, item and battle cheats, PPSSPP cheat files run
+  as PPSSPP runs them (patch 0085), and how the port's memory compares with PPSSPP's.
+
 ## Next steps
 
 1. ~~Read PortableKit's sources.~~ Done; see above.

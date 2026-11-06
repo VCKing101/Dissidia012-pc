@@ -55,6 +55,8 @@ distributed.**
   System page opens its download page ([below](#updates)).
 - **Save, load and keyboard screens in the game's own style**: the PSP drew these itself; here they are drawn with
   the game's own menu pieces, read from your disc, like its Data Config page, with its menu sounds.
+- **Cheats** on the menu's Cheats page: gil, KP, PP, items and battle cheats, and PPSSPP cheat files
+  ([below](#cheats)).
 
 ## BGM playlist selector
 
@@ -325,6 +327,28 @@ further down it, and a pack needs an image for each key.
 
 The [texture pack guide](docs/port/texture-packs.md) has the details: what `textures.ini` may contain, how keys work,
 an example pack, how to set the trace variable, memory use, and what was tested.
+
+## Cheats
+
+Open the menu (Esc, or L3 + R3 on a controller) and go to **Cheats**:
+
+- **Money and points:** Gil, KP and PP, each at an amount you choose.
+- **Items:** 99 of every piece of equipment and every accessory, 99 of each Mala Bestia accessory, and every
+  summonstone with 10 uses.
+- **Battle:** Infinite HP, Max HP 999,999, Bravery 9,999, Infinite EX, Infinite Assist and Level 100 for you;
+  Bravery 0, Max HP 100, No EX and No Assist for the opponent, and Defeat with Select.
+- **Use cheats** at the top turns them all off at once.
+
+PP shows its new amount after you leave the PP Catalog and open it again. **Level 100** really levels up the
+character you fight with: it stays at level 100 after you turn the cheat off.
+
+**PPSSPP cheat files** work too. Put the file in a `Cheats` folder in your memory stick folder's `PSP` folder,
+named after your disc: `data\ms0\PSP\Cheats\ULUS10566.ini` in the install folder (`data/ms0/PSP/Cheats/` on Linux;
+`ULES01505.ini` with the European disc), then choose **PPSSPP cheat file** on the same page to turn its cheats on and off. A cheat that changes the
+game's code is marked **Changes code**: that part of it does not work yet. The rest of it does.
+
+The [cheats page](docs/port/cheats.md) has the details: the codes, what was tested, and how the port compares with
+PPSSPP.
 
 ## Repository layout
 

@@ -1,0 +1,1548 @@
+From 3a0f4434400f13b12fb354a3513a3c9c9eab9949 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Fri, 6 Nov 2026 21:42:13 +1030
+Subject: [PATCH] Cheats: PPSSPP's CWCheat files, and a port's own on the menu
+
+A player's PPSSPP cheat file, PSP/Cheats/<disc id>.ini on the memory stick,
+is read and run as PPSSPP runs it: every cheat that is on, from its first
+line, every 77 ms of the game's time, from a vblank hook. Every CWCheat code
+type is run with PPSSPP's meaning (host/cheats/cwcheat.cpp: writes, serial
+writes, copies, pointer codes with their extra lines, boolean ops, the
+conditions and the button joker); Action Replay lines are read and not run.
+A write into recompiled code (the executable's code sections, or an
+overlay's header and code: overlay_code_overlaps) is left out, and the
+menu says the cheat changes code.
+
+GameProfile::cheats lists a port's own: a key, a heading, a name, a sentence
+and choices, each a label and CWCheat lines. They run through the same
+engine, before the file's, and are saved in settings.ini's cheats.builtin
+("key=choice,..."; <prefix>_CHEATS sets it for a run).
+
+The menu has a Cheats page, before System: Use cheats (cheats.enabled), the
+port's own under their headings, and a PPSSPP cheat file row that opens a
+page of the file's cheats, which turns them on and off and writes the file
+back. <prefix>_NO_CHEATS=1 turns all of it off; <prefix>_TRACE_CHEATS=1
+logs each pass; <prefix>_CHEAT_INTERVAL_MS sets another interval.
+
+Tested on Windows with Dissidia 012 (USA): tests/cwcheat_tests.cpp (30
+checks of the parser and every code type); a file's code at a heap address
+gave the same result as in PPSSPP 1.20.4, whose memory layout was compared
+at the same screen; the port's own money, item and battle cheats on the
+game's screens; the page, the file page, and saving from the pad. Not
+tested: a Linux build, Android, a code that writes into code, the button
+joker from a real pad.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ CMakeLists.txt             |  10 +
+ README.md                  |   1 +
+ cmake/PortableKit.cmake    |   2 +
+ docs/DESKTOP_APP.md        |   2 +-
+ docs/PROFILE_GUIDE.md      |   2 +
+ host/cheats/cheats.cpp     | 286 ++++++++++++++++++++++++
+ host/cheats/cheats.hpp     |  68 ++++++
+ host/cheats/cwcheat.cpp    | 443 +++++++++++++++++++++++++++++++++++++
+ host/cheats/cwcheat.hpp    |  79 +++++++
+ host/overlays.cpp          |  31 +++
+ host/overlays.hpp          |   9 +
+ host/profile.hpp           |  23 ++
+ host/settings/settings.cpp |   7 +
+ host/settings/settings.hpp |   4 +
+ host/system.cpp            |   2 +
+ host/ui/menu.cpp           | 109 ++++++++-
+ tests/cwcheat_tests.cpp    | 190 ++++++++++++++++
+ 17 files changed, 1263 insertions(+), 5 deletions(-)
+ create mode 100644 host/cheats/cheats.cpp
+ create mode 100644 host/cheats/cheats.hpp
+ create mode 100644 host/cheats/cwcheat.cpp
+ create mode 100644 host/cheats/cwcheat.hpp
+ create mode 100644 tests/cwcheat_tests.cpp
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 46a4107..2c298f1 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -285,6 +285,16 @@ if(PSPRECOMP_BUILD_TESTS)
+     add_test(NAME portablekit_response_file_tests COMMAND portablekit_response_file_tests)
+ endif()
+ 
++# CWCheat files and codes, against a stand-in memory.
++if(PSPRECOMP_BUILD_TESTS)
++    add_executable(portablekit_cwcheat_tests
++        "${PORTABLEKIT_ROOT}/tests/cwcheat_tests.cpp"
++        "${PORTABLEKIT_ROOT}/host/cheats/cwcheat.cpp")
++    target_include_directories(portablekit_cwcheat_tests PRIVATE "${PORTABLEKIT_ROOT}/host")
++    set_target_properties(portablekit_cwcheat_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
++    add_test(NAME portablekit_cwcheat_tests COMMAND portablekit_cwcheat_tests)
++endif()
++
+ # sceRtc's calendar arithmetic.
+ if(PSPRECOMP_BUILD_TESTS)
+     add_executable(portablekit_rtc_tests
+diff --git a/README.md b/README.md
+index 61db963..1240f4f 100644
+--- a/README.md
++++ b/README.md
+@@ -20,6 +20,7 @@ The game's Allegrex (MIPS) code is translated to C++ ahead of time and compiled
+ | Save data | The console's own save format, with import, export and backups |
+ | Networking | Ad hoc multiplayer: matchmaking, a built-in host server that asks the router to open its ports (NAT-PMP or UPnP), and discovery on a LAN |
+ | Interface | Settings menu, on-screen keyboard, and the installer that reads the player's own disc image |
++| Cheats | PPSSPP's CWCheat files, run as PPSSPP runs them, and a port's own cheats on the menu |
+ 
+ A game is a **profile** on top of all of this: its identity, what it needs from the system, and anything specific to it.
+ 
+diff --git a/cmake/PortableKit.cmake b/cmake/PortableKit.cmake
+index 547a5b6..635ded4 100644
+--- a/cmake/PortableKit.cmake
++++ b/cmake/PortableKit.cmake
+@@ -47,6 +47,8 @@ set(PORTABLEKIT_HOST_SOURCES
+     host/gpu/texture_pack_match.cpp
+     host/perf/frame_stats.cpp
+     host/perf/perf_overlay.cpp
++    host/cheats/cheats.cpp
++    host/cheats/cwcheat.cpp
+     host/overlays.cpp
+     host/system.cpp
+     host/kernel/kernel.cpp
+diff --git a/docs/DESKTOP_APP.md b/docs/DESKTOP_APP.md
+index 8fffa3c..6e3a9c2 100644
+--- a/docs/DESKTOP_APP.md
++++ b/docs/DESKTOP_APP.md
+@@ -83,7 +83,7 @@ Today a port is a `GameProfile` written in C++ ([`host/profile.hpp`](../host/pro
+ | `save_game_name`, `save_folders` | the disc id. The game names its folders itself when it saves; the save screen's labels are generic ("Game data") | the main one; the others only by running |
+ | `adhoc_product_code` | the disc id | a guess that holds for most games |
+ | `app_name`, `project_name`, `env_prefix`, data names | the app's own (`portablekit`, `PORTABLEKIT_*`) | — |
+-| `register_extra_hle`, `patch_loaded_image`, `camera`, `view_aspect_frame`, `interpolation_thresholds`, `glyph_cache`, `trigger_profiles`, `other_releases` | none: the framework's defaults | these are what hand profiles are for |
++| `register_extra_hle`, `patch_loaded_image`, `camera`, `view_aspect_frame`, `interpolation_thresholds`, `glyph_cache`, `trigger_profiles`, `other_releases`, `cheats` | none: the framework's defaults | these are what hand profiles are for |
+ 
+ The entry point, the code ranges, the imports and relocations are read from the ELF by the framework already; the recompiler finds the code by its own analysis (`psp_recomp --auto`). Modules the game loads from its disc that the framework implements as HLE (`libfont.prx`, `psmf.prx` and the like) are recognised by name at run time.
+ 
+diff --git a/docs/PROFILE_GUIDE.md b/docs/PROFILE_GUIDE.md
+index 6c3eaa3..9252fbd 100644
+--- a/docs/PROFILE_GUIDE.md
++++ b/docs/PROFILE_GUIDE.md
+@@ -75,6 +75,8 @@ For a picture of the port's own beside one of the game's screens, such as a hint
+ 
+ `glyph_cache` is for changing the font while a game runs. A game that caches the glyphs it has drawn keeps them until its atlas needs the cell, so a new font shows only in text it has not drawn yet. Where the game keeps that atlas, read off its own text code, lets the framework make it draw them again. Null for any game nobody has traced.
+ 
++`cheats` lists cheats the port offers on the menu's Cheats page, beside the player's own PPSSPP cheat file (`PSP/Cheats/<disc id>.ini` on the memory stick, `host/cheats/cheats.hpp`). Each is a `BuiltinCheat`: a key for settings.ini, the heading it goes under, a name, a sentence for the footer, and its choices, each a label and its CWCheat code lines (what a cheat file has after `_L`). One choice makes a switch; several make Off and each. They run through the same engine as the file, before it, every 77 ms of the game's time, so a code written as a player would write it gives the same result. A write into recompiled code is left out, as for the file; such a code needs the interpreter, which cheats do not reach yet. Test each against the game's own screens before listing it: a public list's codes can name an address the game no longer reads. Without any, the page has only the switch and the file.
++
+ `interpolation_thresholds` is for frame interpolation, which blends the game's frames and must not blend across a camera cut. The angles and fractions it uses to tell a cut from motion hold for any game; its distances are in the game's own world units, and the defaults were measured on Monster Hunter Portable 3rd. A game whose world is on a very different scale gives its own; one that does not, gets those defaults.
+ 
+ A driver writes into the game's memory, so check the code it relies on before it writes anything — Yakumo compares every instruction and constant it depends on at start-up, from `patch_loaded_image`, and stays out, saying why, if one differs.
+diff --git a/host/cheats/cheats.cpp b/host/cheats/cheats.cpp
+new file mode 100644
+index 0000000..9e4931f
+--- /dev/null
++++ b/host/cheats/cheats.cpp
+@@ -0,0 +1,286 @@
++#include "cheats/cheats.hpp"
++
++#include "cheats/cwcheat.hpp"
++#include "hle/hle_common.hpp"
++#include "kernel/kernel.hpp"
++#include "overlays.hpp"
++#include "profile.hpp"
++#include "settings/settings.hpp"
++
++#include <cstdlib>
++#include <fstream>
++#include <iostream>
++#include <mutex>
++#include <span>
++#include <sstream>
++#include <utility>
++
++namespace portablekit::cheats {
++namespace {
++
++constexpr std::uint64_t kDefaultIntervalUs = 77'000u;  // PPSSPP's default refresh
++
++struct State {
++    std::mutex lock;
++    psprecomp::Runtime *runtime{};
++    std::vector<std::pair<std::uint32_t, std::uint32_t>> code;  // the executable's code, [start, end)
++    std::filesystem::path memory_stick;
++    std::filesystem::path path;
++    bool loaded{};
++    bool file_found{};
++    std::string problem;
++    CheatFile file;
++    std::vector<bool> changes_code;
++    // The port's own: each one's choices, and the one that is on (0: none).
++    std::vector<std::vector<Cheat>> builtin;
++    std::vector<std::size_t> builtin_choice;
++    std::vector<bool> builtin_changes_code;
++    std::uint64_t interval_us{kDefaultIntervalUs};
++    std::uint64_t next_us{};
++};
++
++State &state() {
++    static State s;
++    return s;
++}
++
++bool trace() {
++    static const bool on = env("TRACE_CHEATS") != nullptr;
++    return on;
++}
++
++// The game's memory as cheats see it.
++class GameMemory final : public Memory {
++public:
++    GameMemory(psprecomp::GuestMemory &memory, const State &s) : memory_(memory), state_(s) {}
++
++    bool valid(std::uint32_t address, std::uint32_t size) const override {
++        return size != 0u && memory_.raw_pointer(address, size) != nullptr;
++    }
++    std::uint8_t read8(std::uint32_t address) const override { return memory_.load8(address); }
++    void write8(std::uint32_t address, std::uint8_t value) override { memory_.store8(address, value); }
++    bool code(std::uint32_t address, std::uint32_t size) const override {
++        const std::uint64_t end = static_cast<std::uint64_t>(address) + size;
++        for (const auto &[from, to] : state_.code)
++            if (address < to && from < end) return true;
++        return overlay_code_overlaps(memory_, address, size);
++    }
++
++private:
++    psprecomp::GuestMemory &memory_;
++    const State &state_;
++};
++
++// One choice of a built-in cheat, read as a file's cheat would be.
++Cheat builtin_cheat(const BuiltinCheat &cheat, const CheatChoice &choice) {
++    std::string text = std::string("_C1 ") + cheat.name + "\n";
++    std::istringstream lines(choice.code != nullptr ? choice.code : "");
++    for (std::string line; std::getline(lines, line);)
++        if (line.find_first_not_of(" \t\r") != std::string::npos) text += "_L " + line + "\n";
++    CheatFile file = parse(text, game().disc_id);
++    if (file.problems != 0u || file.cheats.size() != 1u)
++        std::cerr << "[cheats] the built-in cheat \"" << cheat.name << "\" has lines that cannot be read\n";
++    return file.cheats.empty() ? Cheat{} : std::move(file.cheats.front());
++}
++
++// The built-in cheats that are on, from settings.ini's "key=choice,...".
++// Called with the lock held.
++void read_builtin_choices(State &s) {
++    const std::span<const BuiltinCheat> cheats = game().cheats;
++    s.builtin_choice.assign(cheats.size(), 0u);
++    std::istringstream entries(settings::current().builtin_cheats);
++    for (std::string entry; std::getline(entries, entry, ',');) {
++        const std::size_t equals = entry.find('=');
++        const std::string key = entry.substr(0, equals);
++        const std::size_t choice =
++            equals == std::string::npos ? 1u : static_cast<std::size_t>(std::atoi(entry.c_str() + equals + 1));
++        for (std::size_t i = 0; i < cheats.size(); ++i)
++            if (key == cheats[i].key && choice <= cheats[i].choices.size()) s.builtin_choice[i] = choice;
++    }
++}
++
++void write_builtin_choices(const State &s) {
++    const std::span<const BuiltinCheat> cheats = game().cheats;
++    std::string text;
++    for (std::size_t i = 0; i < cheats.size(); ++i) {
++        if (s.builtin_choice[i] == 0u) continue;
++        if (!text.empty()) text += ",";
++        text += std::string(cheats[i].key) + "=" + std::to_string(s.builtin_choice[i]);
++    }
++    settings::current().builtin_cheats = text;
++    settings::save();
++}
++
++// Reads the file for the disc running now. Called with the lock held.
++void load(State &s) {
++    s.loaded = true;
++    s.file = CheatFile{};
++    s.changes_code.clear();
++    s.problem.clear();
++    const std::string disc_id = active_disc_id();
++    const std::filesystem::path folder = s.memory_stick / "PSP" / "Cheats";
++    s.path = folder / (disc_id + ".ini");
++    // The folder is made so that a player can see where the file goes.
++    std::error_code ec;
++    std::filesystem::create_directories(folder, ec);
++    std::ifstream in(s.path, std::ios::binary);
++    s.file_found = static_cast<bool>(in);
++    if (!s.file_found) {
++        std::cout << "[cheats] no cheat file (" << s.path.string() << ")\n";
++        return;
++    }
++    std::ostringstream text;
++    text << in.rdbuf();
++    s.file = parse(text.str(), disc_id);
++    s.changes_code.assign(s.file.cheats.size(), false);
++    std::size_t on = 0u;
++    for (const Cheat &cheat : s.file.cheats) on += cheat.enabled ? 1u : 0u;
++    std::cout << "[cheats] " << s.file.cheats.size() << " cheats for " << disc_id << " in " << s.path.string() << ", "
++              << on << " on";
++    if (s.file.problems != 0u) std::cout << "; " << s.file.problems << " lines could not be read";
++    std::cout << "\n";
++}
++
++// Writes the file back, as a whole, through a temporary file.
++void save(State &s) {
++    const std::filesystem::path temporary = s.path.string() + ".tmp";
++    {
++        std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
++        out << text_of(s.file);
++        if (!out) {
++            s.problem = "The cheat file could not be saved.";
++            return;
++        }
++    }
++    std::error_code ec;
++    std::filesystem::rename(temporary, s.path, ec);
++    if (ec) {
++        std::filesystem::remove(temporary, ec);
++        s.problem = "The cheat file could not be saved.";
++    }
++}
++
++// Each vblank: a pass when the interval has passed on the game's clock.
++void on_vblank() {
++    State &s = state();
++    const std::uint64_t now = kernel().now_us();
++    if (now < s.next_us) return;
++    s.next_us = now + s.interval_us;
++    if (!settings::current().cheats) return;
++    const std::lock_guard<std::mutex> hold(s.lock);
++    if (!s.loaded) load(s);
++    if (s.runtime == nullptr) return;
++    const std::uint32_t buttons = first_pad_sample_now().buttons;
++    GameMemory memory(s.runtime->memory(), s);
++    for (std::size_t i = 0; i < s.builtin.size(); ++i) {
++        if (s.builtin_choice[i] == 0u) continue;
++        const Cheat &cheat = s.builtin[i][s.builtin_choice[i] - 1u];
++        const RunResult result = run(cheat, memory, buttons);
++        if (result.wrote_code && !s.builtin_changes_code[i]) {
++            s.builtin_changes_code[i] = true;
++            std::cout << "[cheats] \"" << cheat.name
++                      << "\" writes into the game's code, which is not supported yet; its other writes are made\n";
++        }
++        if (trace()) std::cout << "[cheats] ran the built-in \"" << cheat.name << "\"\n";
++    }
++    for (std::size_t i = 0; i < s.file.cheats.size(); ++i) {
++        const Cheat &cheat = s.file.cheats[i];
++        if (!cheat.enabled) continue;
++        const RunResult result = run(cheat, memory, buttons);
++        if (result.wrote_code && !s.changes_code[i]) {
++            s.changes_code[i] = true;
++            std::cout << "[cheats] \"" << cheat.name
++                      << "\" writes into the game's code, which is not supported yet; its other writes are made\n";
++        }
++        if (trace())
++            std::cout << "[cheats] ran \"" << cheat.name << "\"" << (result.wrote_code ? ", code write left out" : "")
++                      << (result.invalid ? ", stopped at a line it cannot run" : "") << "\n";
++    }
++}
++
++} // namespace
++
++void install(psprecomp::Runtime &runtime, const psprecomp::Elf32Image &elf, const std::filesystem::path &memory_stick) {
++    if (env("NO_CHEATS") != nullptr) {
++        std::cout << "[cheats] " << env_name("NO_CHEATS") << ": no cheats\n";
++        return;
++    }
++    State &s = state();
++    s.runtime = &runtime;
++    s.memory_stick = memory_stick;
++    for (const BuiltinCheat &cheat : game().cheats) {
++        std::vector<Cheat> choices;
++        for (const CheatChoice &choice : cheat.choices) choices.push_back(builtin_cheat(cheat, choice));
++        s.builtin.push_back(std::move(choices));
++    }
++    s.builtin_changes_code.assign(s.builtin.size(), false);
++    read_builtin_choices(s);
++    // The executable's code: its code sections, or else its executable
++    // segments.
++    constexpr std::uint32_t kExecutableSection = 0x4u, kExecutableSegment = 0x1u;
++    for (const psprecomp::ElfSection &section : elf.sections())
++        if ((section.flags & kExecutableSection) != 0u && section.size != 0u) {
++            const std::uint32_t start = elf.section_runtime_address(section, game().load_base);
++            s.code.emplace_back(start, start + section.size);
++        }
++    if (s.code.empty())
++        for (std::size_t i = 0; i < elf.segments().size(); ++i)
++            if (const psprecomp::ElfSegment &segment = elf.segments()[i];
++                segment.type == 1u && (segment.flags & kExecutableSegment) != 0u) {
++                const std::uint32_t start = elf.segment_runtime_address(i, game().load_base);
++                s.code.emplace_back(start, start + segment.memory_size);
++            }
++    if (const char *ms = env("CHEAT_INTERVAL_MS"); ms != nullptr && std::atoi(ms) > 0)
++        s.interval_us = static_cast<std::uint64_t>(std::atoi(ms)) * 1000u;
++    kernel().add_vblank_hook(on_vblank);
++}
++
++Overview overview() {
++    State &s = state();
++    const std::lock_guard<std::mutex> hold(s.lock);
++    Overview o;
++    o.available = s.runtime != nullptr;
++    if (!o.available) return o;
++    if (!s.loaded) load(s);
++    o.file = s.path;
++    o.file_found = s.file_found;
++    o.problem = s.problem;
++    o.unreadable_lines = s.file.problems;
++    for (std::size_t i = 0; i < s.file.cheats.size(); ++i) {
++        const Cheat &cheat = s.file.cheats[i];
++        o.cheats.push_back({cheat.name, cheat.enabled, s.changes_code[i], cheat.action_replay});
++    }
++    const std::span<const BuiltinCheat> cheats = game().cheats;
++    for (std::size_t i = 0; i < s.builtin.size(); ++i) {
++        BuiltinRow row{cheats[i].section, cheats[i].name, cheats[i].description ? cheats[i].description : "", {},
++                       s.builtin_choice[i], s.builtin_changes_code[i]};
++        if (cheats[i].choices.size() > 1u)
++            for (const CheatChoice &choice : cheats[i].choices) row.labels.emplace_back(choice.label);
++        o.builtin.push_back(std::move(row));
++    }
++    return o;
++}
++
++void set_enabled(std::size_t index, bool enabled) {
++    State &s = state();
++    const std::lock_guard<std::mutex> hold(s.lock);
++    if (index >= s.file.cheats.size()) return;
++    cheats::set_enabled(s.file, index, enabled);
++    save(s);
++}
++
++void set_builtin(std::size_t index, std::size_t choice) {
++    State &s = state();
++    const std::lock_guard<std::mutex> hold(s.lock);
++    if (index >= s.builtin.size() || choice > s.builtin[index].size()) return;
++    s.builtin_choice[index] = choice;
++    write_builtin_choices(s);
++}
++
++void reload() {
++    State &s = state();
++    const std::lock_guard<std::mutex> hold(s.lock);
++    if (s.runtime != nullptr) load(s);
++}
++
++} // namespace portablekit::cheats
+diff --git a/host/cheats/cheats.hpp b/host/cheats/cheats.hpp
+new file mode 100644
+index 0000000..c7cdf37
+--- /dev/null
++++ b/host/cheats/cheats.hpp
+@@ -0,0 +1,68 @@
++#pragma once
++
++// Cheats: the port's own (GameProfile::cheats, on or off in settings.ini's
++// cheats.builtin) and the player's CWCheat file, PSP/Cheats/<DISCID>.ini on
++// the memory stick as PPSSPP keeps it (cwcheat.hpp), read when the game
++// starts. Both run as PPSSPP runs a file: every cheat that is on, from its
++// first line, every 77 ms of the game's time, on the game's own clock (a
++// vblank hook); the port's own first. The menu's Cheats page turns them on and
++// off, and writes the file's back to the file.
++//
++// Recompiled code does not change when memory does, so a write into the
++// game's code (its executable's code sections, or an overlay's header and
++// code, overlays.hpp) is left out and the page says the cheat changes code.
++// <prefix>_CHEATS="key=choice,...": the port's own that are on, as
++// settings.ini's cheats.builtin. <prefix>_NO_CHEATS=1: no cheats at all. <prefix>_CHEAT_INTERVAL_MS: another
++// interval. <prefix>_TRACE_CHEATS=1: each pass's cheats, with what they did.
++
++#include "psprecomp/elf32.hpp"
++#include "psprecomp/runtime.hpp"
++
++#include <cstddef>
++#include <filesystem>
++#include <string>
++#include <vector>
++
++namespace portablekit::cheats {
++
++// From install_system, once the kernel is installed.
++void install(psprecomp::Runtime &runtime, const psprecomp::Elf32Image &elf, const std::filesystem::path &memory_stick);
++
++// What the menu shows.
++struct CheatRow {
++    std::string name;
++    bool enabled{};
++    bool changes_code{};   // a write of it into code was left out
++    bool action_replay{};  // its codes are Action Replay ones: not run
++};
++
++// One of the port's own cheats.
++struct BuiltinRow {
++    std::string section;
++    std::string name;
++    std::string description;
++    std::vector<std::string> labels;  // its choices; empty: it is a switch
++    std::size_t choice{};             // 0: off; otherwise the choice's number, from 1
++    bool changes_code{};
++};
++
++struct Overview {
++    bool available{};  // installed, and not turned off by the variable
++    std::filesystem::path file;
++    bool file_found{};
++    std::string problem;  // why the file could not be read or saved, if it could not
++    std::size_t unreadable_lines{};
++    std::vector<CheatRow> cheats;
++    std::vector<BuiltinRow> builtin;
++};
++
++[[nodiscard]] Overview overview();
++// Turns a cheat on or off and saves the file.
++void set_enabled(std::size_t index, bool enabled);
++// Sets one of the port's own: 0 off, or a choice's number from 1. Saved in
++// settings.ini.
++void set_builtin(std::size_t index, std::size_t choice);
++// Reads the file again (after the player has changed it).
++void reload();
++
++} // namespace portablekit::cheats
+diff --git a/host/cheats/cwcheat.cpp b/host/cheats/cwcheat.cpp
+new file mode 100644
+index 0000000..c733ae8
+--- /dev/null
++++ b/host/cheats/cwcheat.cpp
+@@ -0,0 +1,443 @@
++#include "cheats/cwcheat.hpp"
++
++#include <algorithm>
++#include <cctype>
++#include <optional>
++
++namespace portablekit::cheats {
++namespace {
++
++// --- Reading the file --------------------------------------------------------
++
++std::string_view trim(std::string_view s) {
++    while (!s.empty() && std::isspace(static_cast<unsigned char>(s.front()))) s.remove_prefix(1);
++    while (!s.empty() && std::isspace(static_cast<unsigned char>(s.back()))) s.remove_suffix(1);
++    return s;
++}
++
++// A disc id as it compares: no dashes, upper case.
++std::string id_key(std::string_view id) {
++    std::string key;
++    for (const char c : id)
++        if (c != '-' && !std::isspace(static_cast<unsigned char>(c)))
++            key.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(c))));
++    return key;
++}
++
++// A hex word, "0x" optional; the rest of `s` after it.
++std::optional<std::uint32_t> hex_word(std::string_view &s) {
++    s = trim(s);
++    if (s.size() >= 2u && s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) s.remove_prefix(2);
++    std::uint32_t value = 0u;
++    std::size_t digits = 0u;
++    while (digits < s.size() && std::isxdigit(static_cast<unsigned char>(s[digits]))) {
++        const char c = static_cast<char>(std::tolower(static_cast<unsigned char>(s[digits])));
++        value = value << 4u | static_cast<std::uint32_t>(c <= '9' ? c - '0' : c - 'a' + 10);
++        ++digits;
++    }
++    if (digits == 0u || digits > 8u) return std::nullopt;
++    s.remove_prefix(digits);
++    return value;
++}
++
++// "_L a b", with an optional comment after it.
++std::optional<CodeLine> code_line(std::string_view rest) {
++    const auto a = hex_word(rest);
++    if (!a) return std::nullopt;
++    const auto b = hex_word(rest);
++    if (!b) return std::nullopt;
++    rest = trim(rest);
++    if (!rest.empty() && rest[0] != '#' && rest.substr(0, 2) != "//") return std::nullopt;
++    return CodeLine{*a, *b};
++}
++
++// --- Running a cheat ---------------------------------------------------------
++
++constexpr std::uint32_t kUserBase = 0x08800000u;
++
++// A code's address field: an offset from the game's memory.
++std::uint32_t address_of(std::uint32_t field) { return (kUserBase + (field & 0x0FFFFFFFu)) & 0x3FFFFFFFu; }
++
++class Pass {
++public:
++    Pass(Memory &memory, RunResult &result) : memory_(memory), result_(result) {}
++
++    [[nodiscard]] bool valid(std::uint32_t address, std::uint32_t size) const {
++        return memory_.valid(address & 0x3FFFFFFFu, size);
++    }
++
++    // Little-endian, byte by byte, so an unaligned address works as on PPSSPP.
++    [[nodiscard]] std::uint32_t read(std::uint32_t address, std::uint32_t size) const {
++        std::uint32_t value = 0u;
++        for (std::uint32_t i = 0; i < size; ++i)
++            value |= static_cast<std::uint32_t>(memory_.read8((address + i) & 0x3FFFFFFFu)) << (8u * i);
++        return value;
++    }
++
++    // Reads `size` bytes when they are valid.
++    [[nodiscard]] std::optional<std::uint32_t> try_read(std::uint32_t address, std::uint32_t size) const {
++        if (!valid(address, size)) return std::nullopt;
++        return read(address, size);
++    }
++
++    void write(std::uint32_t address, std::uint32_t value, std::uint32_t size) {
++        if (!valid(address, size)) return;
++        if (memory_.code(address & 0x3FFFFFFFu, size)) {
++            result_.wrote_code = true;
++            return;
++        }
++        for (std::uint32_t i = 0; i < size; ++i)
++            memory_.write8((address + i) & 0x3FFFFFFFu, static_cast<std::uint8_t>(value >> (8u * i)));
++    }
++
++    void copy(std::uint32_t from, std::uint32_t to, std::uint32_t length) {
++        if (length == 0u || !valid(from, length) || !valid(to, length)) return;
++        if (memory_.code(to & 0x3FFFFFFFu, length)) {
++            result_.wrote_code = true;
++            return;
++        }
++        std::vector<std::uint8_t> bytes(length);
++        for (std::uint32_t i = 0; i < length; ++i) bytes[i] = memory_.read8((from + i) & 0x3FFFFFFFu);
++        for (std::uint32_t i = 0; i < length; ++i) memory_.write8((to + i) & 0x3FFFFFFFu, bytes[i]);
++    }
++
++private:
++    Memory &memory_;
++    RunResult &result_;
++};
++
++// The comparisons: 0 equal, 1 not equal, 2 less, 3 greater, on signed values
++// as PPSSPP compares them (which matters only for 32-bit ones).
++std::optional<bool> compare(std::uint32_t condition, std::int64_t memory, std::int64_t value) {
++    switch (condition) {
++    case 0: return memory == value;
++    case 1: return memory != value;
++    case 2: return memory < value;
++    case 3: return memory > value;
++    default: return std::nullopt;
++    }
++}
++
++std::int64_t signed_value(std::uint32_t value, std::uint32_t size) {
++    return size == 4u ? static_cast<std::int64_t>(static_cast<std::int32_t>(value)) : static_cast<std::int64_t>(value);
++}
++
++std::int32_t sign_extend12(std::uint32_t value) {
++    return static_cast<std::int32_t>(value << 20u) >> 20;
++}
++
++} // namespace
++
++CheatFile parse(std::string_view text, std::string_view disc_id) {
++    CheatFile file;
++    if (text.size() >= 3u && static_cast<unsigned char>(text[0]) == 0xEFu &&
++        static_cast<unsigned char>(text[1]) == 0xBBu && static_cast<unsigned char>(text[2]) == 0xBFu) {
++        file.byte_order_mark = true;
++        text.remove_prefix(3);
++    }
++    file.crlf = text.find("\r\n") != std::string_view::npos;
++    for (std::size_t start = 0u; start <= text.size();) {
++        std::size_t end = text.find('\n', start);
++        if (end == std::string_view::npos) end = text.size();
++        std::string_view line = text.substr(start, end - start);
++        if (!line.empty() && line.back() == '\r') line.remove_suffix(1);
++        file.text.emplace_back(line);
++        start = end + 1u;
++    }
++    if (!file.text.empty() && file.text.back().empty()) file.text.pop_back();
++
++    // Each cheat with the game its section names.
++    struct Found {
++        Cheat cheat;
++        std::string section;
++    };
++    std::vector<Found> found;
++    std::size_t sections = 0u;
++    std::string section;
++    bool in_cheat = false;
++    for (std::size_t i = 0; i < file.text.size(); ++i) {
++        const std::string_view line = trim(file.text[i]);
++        if (line.empty() || line[0] == '#' || line.substr(0, 2) == "//") continue;
++        if (line[0] != '_' || line.size() < 2u) {
++            ++file.problems;
++            continue;
++        }
++        const char kind = static_cast<char>(std::toupper(static_cast<unsigned char>(line[1])));
++        const std::string_view rest = line.substr(2);
++        switch (kind) {
++        case 'S':
++            ++sections;
++            section = id_key(trim(rest));
++            in_cheat = false;
++            break;
++        case 'G': break;
++        case 'C': {
++            if (rest.empty() || !std::isdigit(static_cast<unsigned char>(rest[0]))) {
++                ++file.problems;
++                in_cheat = false;
++                break;
++            }
++            Found f;
++            f.cheat.enabled = rest[0] != '0';
++            f.cheat.name = std::string(trim(rest.substr(1)));
++            f.cheat.header_line = i;
++            f.section = section;
++            found.push_back(std::move(f));
++            in_cheat = true;
++            break;
++        }
++        case 'L':
++            if (!in_cheat) {
++                ++file.problems;
++                break;
++            }
++            if (const auto code = code_line(rest)) found.back().cheat.lines.push_back(*code);
++            else ++file.problems;
++            break;
++        case 'M':
++            if (in_cheat) found.back().cheat.action_replay = true;
++            else ++file.problems;
++            break;
++        default: ++file.problems; break;
++        }
++    }
++    const std::string game = id_key(disc_id);
++    for (Found &f : found)
++        if (sections <= 1u || f.section == game) file.cheats.push_back(std::move(f.cheat));
++    return file;
++}
++
++void set_enabled(CheatFile &file, std::size_t index, bool enabled) {
++    if (index >= file.cheats.size()) return;
++    Cheat &cheat = file.cheats[index];
++    cheat.enabled = enabled;
++    std::string &line = file.text[cheat.header_line];
++    const std::size_t at = line.find_first_not_of(" \t");
++    if (at != std::string::npos && at + 2u < line.size()) line[at + 2u] = enabled ? '1' : '0';
++}
++
++std::string text_of(const CheatFile &file) {
++    std::string out = file.byte_order_mark ? "\xEF\xBB\xBF" : "";
++    for (const std::string &line : file.text) {
++        out += line;
++        out += file.crlf ? "\r\n" : "\n";
++    }
++    return out;
++}
++
++RunResult run(const Cheat &cheat, Memory &memory, std::uint32_t buttons) {
++    RunResult result;
++    if (!cheat.enabled || cheat.action_replay) return result;
++    Pass pass(memory, result);
++    const std::vector<CodeLine> &lines = cheat.lines;
++    const std::size_t n = lines.size();
++    const auto end_invalid = [&result] { result.invalid = true; };
++    std::size_t i = 0u;
++    while (i < n) {
++        const std::uint32_t a = lines[i].a, b = lines[i].b;
++        const CodeLine *next = i + 1u < n ? &lines[i + 1u] : nullptr;
++        switch (a >> 28) {
++        case 0x0: {
++            // Written as wide as the value is.
++            const std::uint32_t size = (b & 0xFFFF0000u) != 0u ? 4u : (b & 0xFF00u) != 0u ? 2u : 1u;
++            pass.write(address_of(a), b, size);
++            i += 1u;
++            break;
++        }
++        case 0x1:
++            pass.write(address_of(a), b & 0xFFFFu, 2u);
++            i += 1u;
++            break;
++        case 0x2:
++            pass.write(address_of(a), b, 4u);
++            i += 1u;
++            break;
++        case 0x3: {
++            // Add or subtract at the address in the second word.
++            const std::uint32_t form = (a >> 20) & 0xFu;
++            const std::uint32_t target = address_of(b);
++            std::uint32_t size = 0u, amount = 0u;
++            bool add = true;
++            switch (form) {
++            case 1: case 2: size = 1u; amount = a & 0xFFu; add = form == 1u; break;
++            case 3: case 4: size = 2u; amount = a & 0xFFFFu; add = form == 3u; break;
++            case 5: case 6:
++                if (next == nullptr) return end_invalid(), result;
++                size = 4u;
++                amount = next->a;
++                add = form == 5u;
++                break;
++            default: return end_invalid(), result;
++            }
++            if (const auto value = pass.try_read(target, size))
++                pass.write(target, add ? *value + amount : *value - amount, size);
++            i += size == 4u ? 2u : 1u;
++            break;
++        }
++        case 0x4:
++        case 0x8: {
++            // A run of writes: count and step on this line, the first value and
++            // how much it grows on the next.
++            if (next == nullptr) return end_invalid(), result;
++            const std::uint32_t start = address_of(a);
++            const std::uint32_t count = b >> 16;
++            std::uint32_t size = 4u, value = next->a;
++            if (a >> 28 == 0x8u) {
++                size = (next->a >> 16) == 0u ? 1u : 2u;
++                value = size == 1u ? next->a & 0xFFu : next->a & 0xFFFFu;
++            }
++            const std::uint64_t step = static_cast<std::uint64_t>(b & 0xFFFFu) * size;
++            const std::uint64_t span = count * step + size;  // as PPSSPP measures it
++            if (count != 0u && span < 24u * 1024u * 1024u && pass.valid(start, static_cast<std::uint32_t>(span)))
++                for (std::uint32_t k = 0; k < count; ++k)
++                    pass.write(start + static_cast<std::uint32_t>(k * step), value + k * next->b, size);
++            i += 2u;
++            break;
++        }
++        case 0x5:
++            if (next == nullptr) return end_invalid(), result;
++            pass.copy(address_of(a), address_of(next->a), b);
++            i += 2u;
++            break;
++        case 0x6: {
++            // Through a pointer: the second line says how far from it, how to
++            // write, and how many more lines of steps follow.
++            if (next == nullptr) return end_invalid(), result;
++            const std::uint32_t location = address_of(a);
++            std::uint32_t value = b;
++            const std::uint32_t c = next->a;
++            const std::int32_t offset = static_cast<std::int32_t>(next->b);
++            const std::uint32_t type = (c >> 16) & 0xFu;
++            const std::uint32_t base_offset = static_cast<std::uint32_t>(sign_extend12(c >> 20) * 4);
++            const std::uint32_t listed = c & 0xFFFFu;
++            const auto first = pass.try_read(location + base_offset, 4u);
++            if (!first) {
++                // The extra lines then run as codes of their own.
++                i += 2u;
++                break;
++            }
++            std::uint32_t base = *first;
++            bool write = true;
++            const std::size_t extras = listed > 0u ? listed - 1u : 0u;
++            for (std::size_t k = 0; k < extras && i + 2u + k < n; ++k) {
++                const CodeLine &e = lines[i + 2u + k];
++                switch (e.a >> 28) {
++                case 0x1: {
++                    const auto from = pass.try_read(location, 4u);
++                    const auto to = pass.try_read(location + base_offset, 4u);
++                    if (from && to)
++                        pass.copy(*from + static_cast<std::uint32_t>(offset), *to + (e.a & 0x0FFFFFFFu), value);
++                    write = false;
++                    break;
++                }
++                case 0x2:
++                case 0x3: {
++                    const auto step = [&pass, &base](std::uint32_t field, bool subtract) {
++                        const std::uint32_t delta = field & 0x0FFFFFFFu;
++                        const std::uint32_t at = subtract ? base - delta : base + delta;
++                        const auto pointer = pass.try_read(at, 4u);
++                        if (pointer) base = *pointer;
++                        return pointer.has_value();
++                    };
++                    if (step(e.a, e.a >> 28 == 0x3u) && (e.b >> 28 == 0x2u || e.b >> 28 == 0x3u))
++                        (void)step(e.b, e.b >> 28 == 0x3u);
++                    break;
++                }
++                case 0x9:
++                    base += e.a & 0x0FFFFFFFu;
++                    value += e.b;
++                    break;
++                default: break;
++                }
++            }
++            if (write && type <= 5u) {
++                const std::uint32_t size = type % 3u == 0u ? 1u : type % 3u == 1u ? 2u : 4u;
++                const std::uint32_t at = type < 3u ? base + static_cast<std::uint32_t>(offset)
++                                                   : base - static_cast<std::uint32_t>(offset);
++                pass.write(at, value, size);
++            }
++            i += std::max<std::size_t>(2u, static_cast<std::size_t>(listed) + 1u);
++            break;
++        }
++        case 0x7: {
++            const std::uint32_t target = address_of(a);
++            const std::uint32_t op = b >> 16;
++            if (op > 5u) return end_invalid(), result;
++            const std::uint32_t size = op % 2u == 0u ? 1u : 2u;
++            const std::uint32_t operand = size == 1u ? b & 0xFFu : b & 0xFFFFu;
++            if (const auto value = pass.try_read(target, size)) {
++                const std::uint32_t v = op < 2u ? *value | operand : op < 4u ? *value & operand : *value ^ operand;
++                pass.write(target, v, size);
++            }
++            i += 1u;
++            break;
++        }
++        case 0xA:  // PPSSPP's own (rumble, shader settings): nothing to do here
++        case 0xB:  // a delay, which PPSSPP does not do either
++            i += 1u;
++            break;
++        case 0xC:
++            // The rest of the cheat runs only while memory holds the value.
++            if (const auto value = pass.try_read(address_of(a), 4u); value && *value != b) return result;
++            i += 1u;
++            break;
++        case 0xD: {
++            const std::uint32_t form = b >> 28;
++            if (form == 0u || form == 2u) {
++                // The next line runs only if the test holds.
++                const std::uint32_t size = form == 0u ? 2u : 1u;
++                const std::uint32_t value = form == 0u ? b & 0xFFFFu : b & 0xFFu;
++                const auto memory_value = pass.try_read(address_of(a), size);
++                const auto holds = compare((b >> 20) & 0xFu, memory_value.value_or(0u), value);
++                if (!holds) return end_invalid(), result;
++                i += 1u;
++                if (!memory_value || !*holds) i += 1u;
++            } else if (form == 1u || form == 3u) {
++                // Buttons: the next lines run only while they are held (1) or
++                // not all held (3).
++                const std::uint32_t mask = b & 0x0FFFFFFFu;
++                const bool held = (buttons & mask) == mask;
++                i += 1u;
++                if (form == 1u ? !held : held) i += (a & 0xFFu) + 1u;
++            } else if (form >= 4u && form <= 7u) {
++                // Two addresses compared; the next line has the size and how
++                // many lines a failed test skips.
++                if (next == nullptr) return end_invalid(), result;
++                const std::uint32_t size_code = next->b & 0xFu;
++                const std::uint32_t size = size_code < 3u ? 1u << size_code : 0u;
++                const std::uint32_t first = address_of(a), second = address_of(b);
++                std::optional<bool> holds;
++                if (size == 0u) {
++                    holds = compare(form - 4u, 0, 0);
++                } else if (const auto x = pass.try_read(first, size), y = pass.try_read(second, size); x && y) {
++                    holds = compare(form - 4u, signed_value(*x, size), signed_value(*y, size));
++                } else {
++                    holds = false;
++                }
++                i += 2u;
++                if (!*holds) i += next->a;
++            } else {
++                return end_invalid(), result;
++            }
++            break;
++        }
++        case 0xE: {
++            // The next lines run only if the test holds: 8-bit for E1, else 16-bit.
++            const bool byte = a >> 24 == 0xE1u;
++            const std::uint32_t size = byte ? 1u : 2u;
++            const std::uint32_t value = byte ? a & 0xFFu : a & 0xFFFFu;
++            const std::uint32_t skip = byte ? (a >> 16) & 0xFFu : (a >> 16) & 0xFFFu;
++            const auto memory_value = pass.try_read(address_of(b), size);
++            const auto holds = compare(b >> 28, memory_value.value_or(0u), value);
++            if (!holds) return end_invalid(), result;
++            i += 1u;
++            if (!memory_value || !*holds) i += skip;
++            break;
++        }
++        default: return end_invalid(), result;
++        }
++    }
++    return result;
++}
++
++} // namespace portablekit::cheats
+diff --git a/host/cheats/cwcheat.hpp b/host/cheats/cwcheat.hpp
+new file mode 100644
+index 0000000..2092846
+--- /dev/null
++++ b/host/cheats/cwcheat.hpp
+@@ -0,0 +1,79 @@
++#pragma once
++
++// CWCheat files and codes, read and run as PPSSPP reads and runs them, so a
++// player's PPSSPP cheat file gives the same results here. Only the format and
++// its meaning follow PPSSPP; the code is this project's own.
++//
++// A file (memory stick PSP/Cheats/<DISCID>.ini) is text: "_S ULUS-10566" names
++// the game, "_G" its title, "_C1 name" starts a cheat that is on ("_C0": off;
++// any digit but 0 is on), and "_L 0x20123456 0x00000063" is one line of a
++// cheat's code. "#" and "//" start comments. "_M" lines are Action Replay
++// codes, which are read but not run.
++//
++// Every cheat that is on runs from its first line each pass; a pass is every
++// 77 ms of the game's time (cheats.cpp). An address in a code is an offset from
++// 0x08800000, the start of the game's memory; pointers read from memory are
++// used as they are.
++
++#include <cstddef>
++#include <cstdint>
++#include <string>
++#include <string_view>
++#include <vector>
++
++namespace portablekit::cheats {
++
++struct CodeLine {
++    std::uint32_t a{};
++    std::uint32_t b{};
++};
++
++struct Cheat {
++    std::string name;
++    bool enabled{};
++    std::size_t header_line{};  // the "_C" line's index in CheatFile::text
++    std::vector<CodeLine> lines;
++    bool action_replay{};  // it has "_M" lines: not run
++};
++
++struct CheatFile {
++    std::vector<std::string> text;  // the file's lines, without their line endings
++    std::vector<Cheat> cheats;      // for this game, in the file's order
++    std::size_t problems{};         // lines that could not be read (skipped, as PPSSPP does)
++    bool byte_order_mark{};
++    bool crlf{};
++};
++
++// Reads a file's text for the game `disc_id` ("ULUS10566"; dashes and case do
++// not matter). A file with one "_S" or none is all this game's, whatever it
++// names; with several, only the sections naming this game are.
++[[nodiscard]] CheatFile parse(std::string_view text, std::string_view disc_id);
++// Turns a cheat on or off in the file's text (its "_C" line), as PPSSPP's
++// cheat screen writes it: "_C1" or "_C0".
++void set_enabled(CheatFile &file, std::size_t index, bool enabled);
++// The file's text again, with its byte order mark and line endings.
++[[nodiscard]] std::string text_of(const CheatFile &file);
++
++// The memory cheats run against: the game's addresses, as a PSP sees them.
++class Memory {
++public:
++    virtual ~Memory() = default;
++    // The whole range is memory a cheat may read and write.
++    [[nodiscard]] virtual bool valid(std::uint32_t address, std::uint32_t size) const = 0;
++    [[nodiscard]] virtual std::uint8_t read8(std::uint32_t address) const = 0;
++    virtual void write8(std::uint32_t address, std::uint8_t value) = 0;
++    // The range holds recompiled code, which a write cannot change here: the
++    // write is left out and the cheat counts as changing code.
++    [[nodiscard]] virtual bool code(std::uint32_t address, std::uint32_t size) const = 0;
++};
++
++struct RunResult {
++    bool wrote_code{};  // a write into code was left out
++    bool invalid{};     // a line it cannot run ended this pass early
++};
++
++// One pass of a cheat. `buttons` are the PSP's pad buttons held now
++// (sceCtrl's bits), for the codes that test them.
++RunResult run(const Cheat &cheat, Memory &memory, std::uint32_t buttons);
++
++} // namespace portablekit::cheats
+diff --git a/host/overlays.cpp b/host/overlays.cpp
+index 4849a65..abf2598 100644
+--- a/host/overlays.cpp
++++ b/host/overlays.cpp
+@@ -399,6 +399,37 @@ void revalidate_overlays(Runtime &runtime) {
+ }
+ 
+ void forget_unmatched_overlays() { unmatched_slots().clear(); }
++
++bool overlay_code_overlaps(const psprecomp::GuestMemory &memory, std::uint32_t address, std::uint32_t size) {
++    const std::uint64_t start = address, end = static_cast<std::uint64_t>(address) + size;
++    const auto overlaps = [&](std::uint64_t from, std::uint64_t to) { return start < to && from < end; };
++    const std::span<const std::uint32_t> slots = active_overlay_slots();
++    for (std::size_t i = 0; i + 1u < slots.size(); ++i) {
++        const std::uint32_t slot = slots[i];
++        // An image no corpus matched runs interpreted: writes change it, as
++        // on a PSP.
++        if (const auto unmatched = unmatched_slots().find(slot);
++            unmatched != unmatched_slots().end() && unmatched->second == header_hash(memory, slot))
++            continue;
++        // The image's own header gives its code's size (a big image runs past
++        // the next slot's base); without one, the largest corpus there.
++        std::uint64_t code_end = 0u;
++        if (memory.raw_pointer(slot, kOverlayHeaderBytes) != nullptr && memory.load8(slot) == 'M' &&
++            memory.load8(slot + 1u) == 'W' && memory.load8(slot + 2u) == 'o' && memory.load8(slot + 3u) == '3' &&
++            memory.load32(slot + 8u) == slot) {
++            code_end = slot + kOverlayHeaderBytes + std::min<std::uint64_t>(memory.load32(slot + 12u), 0x2000000u);
++        } else {
++            for (const OverlayCorpus &corpus : overlay_corpora())
++                if (corpus.base == slot)
++                    code_end = std::max<std::uint64_t>(code_end, slot + kOverlayHeaderBytes + corpus.code_size);
++        }
++        if (overlaps(slot, code_end)) return true;
++    }
++    for (const OverlayCorpus &corpus : overlay_corpora())
++        if (slot_of(corpus.base).first == 0u && overlaps(corpus.base, corpus.base + kOverlayHeaderBytes + corpus.code_size))
++            return true;
++    return false;
++}
+ void set_code_miss_hook(CodeMissHook hook) { g_code_miss_hook = hook; }
+ 
+ void install_overlay_support(Runtime &runtime) {
+diff --git a/host/overlays.hpp b/host/overlays.hpp
+index c59bfc1..4407067 100644
+--- a/host/overlays.hpp
++++ b/host/overlays.hpp
+@@ -22,6 +22,15 @@ void revalidate_overlays(psprecomp::Runtime &runtime);
+ // again at the next call into it.
+ void forget_unmatched_overlays();
+ 
++// True when [address, address + size) overlaps an overlay's header or code
++// that a recompiled corpus runs or will run: the header and code of the image
++// in a slot, unless that image matched no corpus (it runs interpreted, so a
++// write there changes what runs), and of a corpus at a fixed address outside
++// the slots. Writing there would change neither what runs nor, before the
++// image is installed, let it be recognised (cheats, cheats.cpp).
++[[nodiscard]] bool overlay_code_overlaps(const psprecomp::GuestMemory &memory, std::uint32_t address,
++                                         std::uint32_t size);
++
+ // Asked first when dispatch finds no function at an address, before the
+ // overlay corpora. A program that loads the game's main corpus while the game
+ // already runs (the desktop app, which starts under the interpreter and
+diff --git a/host/profile.hpp b/host/profile.hpp
+index 58738f4..f0b7675 100644
+--- a/host/profile.hpp
++++ b/host/profile.hpp
+@@ -77,6 +77,24 @@ struct RegionRelease {
+     std::span<const SaveFolder> save_folders;
+ };
+ 
++// One setting of a built-in cheat: its CWCheat codes, the lines a cheat file
++// gives after "_L", one per line ("0x203BFA00 0x05F5E0FF\n...").
++struct CheatChoice {
++    const char *label; // the menu, e.g. "1,000,000"; a cheat with one choice shows none
++    const char *code;
++};
++
++// A cheat the port offers itself (GameProfile::cheats). It runs as a cheat
++// file's would, before the file's. With one choice it is a switch; with
++// several the menu offers Off and each.
++struct BuiltinCheat {
++    const char *key;         // settings.ini's cheats.builtin, e.g. "gil"; lower case, digits and '_'
++    const char *section;     // the heading it is listed under, e.g. "Money and points"
++    const char *name;        // e.g. "Gil"
++    const char *description; // a whole sentence
++    std::span<const CheatChoice> choices;
++};
++
+ // Another release of the game than the one a port supports, and what the
+ // installer tells a player who hands it that one.
+ struct OtherRelease {
+@@ -315,6 +333,11 @@ struct GameProfile {
+     // Where the game caches the glyphs it has drawn. Null: a font changed while
+     // the game runs applies to text the game has not drawn yet.
+     const GlyphCacheLayout *glyph_cache = nullptr;
++
++    // --- Cheats ----------------------------------------------------------------
++    // The cheats the port offers on the Cheats page, besides the player's own
++    // cheat file (cheats/cheats.hpp). Empty: only the file's.
++    std::span<const BuiltinCheat> cheats = {};
+ };
+ 
+ // Defined by the port, exactly once. Everything under host/ reads the game
+diff --git a/host/settings/settings.cpp b/host/settings/settings.cpp
+index d223255..74e2f02 100644
+--- a/host/settings/settings.cpp
++++ b/host/settings/settings.cpp
+@@ -427,6 +427,13 @@ const std::vector<Field> &fields() {
+          [](Settings &s, const char *t) { s.adhoc_router_ports = variable_flag(t); }},
+         BOOL_FIELD("ui.menu_hint_seen", menu_hint_seen),
+         BOOL_FIELD("saves.backup_timestamp", backup_timestamp),
++        BOOL_FIELD("cheats.enabled", cheats),
++        {"cheats.builtin", "CHEATS",
++         [](Settings &s, const std::string &t) {
++             s.builtin_cheats = t;
++             return true;
++         },
++         [](const Settings &s) { return s.builtin_cheats; }, [](Settings &s, const char *t) { s.builtin_cheats = t; }},
+         {"ui.last_folder", nullptr,
+          [](Settings &s, const std::string &t) {
+              s.last_folder = t;
+diff --git a/host/settings/settings.hpp b/host/settings/settings.hpp
+index 786e888..338e27d 100644
+--- a/host/settings/settings.hpp
++++ b/host/settings/settings.hpp
+@@ -140,6 +140,10 @@ struct Settings {
+ 
+     // Saves
+     bool backup_timestamp{true};       // a backup made from the menu goes to a new folder named by its time
++
++    // Cheats
++    bool cheats{true};                 // run the cheats that are on: the port's own and the cheat file's (cheats/cheats.hpp)
++    std::string builtin_cheats;        // the port's own that are on, "key=choice,...", choice 1 the first; empty: none
+ };
+ 
+ inline constexpr std::uint32_t kMaxInternalScale = 8u;
+diff --git a/host/system.cpp b/host/system.cpp
+index 5c49dbd..0208394 100644
+--- a/host/system.cpp
++++ b/host/system.cpp
+@@ -3,6 +3,7 @@
+ 
+ #include "profile.hpp"
+ 
++#include "cheats/cheats.hpp"
+ #include "hle/hle_common.hpp"
+ #include "hle/hle_extensions.hpp"
+ #include "kernel/kernel.hpp"
+@@ -95,6 +96,7 @@ void install_system(Runtime &runtime, const psprecomp::Elf32Image &elf, const Pr
+     register_font(hle);
+     register_utility(hle, paths.memory_stick);
+     register_adhoc(hle);
++    cheats::install(runtime, elf, paths.memory_stick);
+     if (const ExtraHleHook hook = active_register_extra_hle(); hook != nullptr) hook(hle);
+     // Extension modules the build linked in (docs/HLE_EXTENSIONS.md): after
+     // everything above, so they fill in what it leaves and override only what
+diff --git a/host/ui/menu.cpp b/host/ui/menu.cpp
+index 006db32..0927fa5 100644
+--- a/host/ui/menu.cpp
++++ b/host/ui/menu.cpp
+@@ -20,6 +20,7 @@
+ #include "adhoc/discovery.hpp"
+ #include "adhoc/session.hpp"
+ #include "audio/audio_sink.hpp"
++#include "cheats/cheats.hpp"
+ #include "gpu/frame_pacing.hpp"
+ #include "gpu/vulkan_renderer.hpp"
+ #include "profile.hpp"
+@@ -142,6 +143,8 @@ private:
+     void controls();
+     void tilt_controls();
+     void network();
++    void cheat_page();
++    bool cheat_file_screen();
+     void system();
+     bool confirm_dialog();
+ 
+@@ -157,6 +160,8 @@ private:
+     Confirm confirm_{Confirm::None};
+     bool confirm_opened_{};  // the confirmation was on screen last frame
+     std::optional<input::Action> binding_;  // waiting for a key for this control
++    bool cheat_file_open_{};       // the Cheats page shows the cheat file's cheats
++    bool focus_cheat_file_row_{};  // back from them: the row that opened them
+ };
+ 
+ bool Menu::frame() {
+@@ -177,12 +182,12 @@ bool Menu::frame() {
+     // Back closes the font list, or the save import and export, before it
+     // closes the menu.
+     const bool font_list_was_open = (tab_ == 0 && (font_list_open() || texture_pack_screen_open())) ||
+-                                    (tab_ == 4 && save_screen_open());
++                                    (tab_ == 4 && cheat_file_open_) || (tab_ == 5 && save_screen_open());
+     back_ = back || pad_back;
+ 
+     begin_panel("##menu", portablekit::game().project_name, paused_ ? "Paused" : "Running", true);
+-    static const char *const kTabs[] = {"Video", "Audio", "Controls", "Network", "System"};
+-    const bool switched = tab_bar(kTabs, 5, tab_) || first_frame_;
++    static const char *const kTabs[] = {"Video", "Audio", "Controls", "Network", "Cheats", "System"};
++    const bool switched = tab_bar(kTabs, 6, tab_) || first_frame_;
+     first_frame_ = false;
+     begin_content();
+     if (switched) {
+@@ -194,10 +199,11 @@ bool Menu::frame() {
+     case 1: audio(); break;
+     case 2: controls(); break;
+     case 3: network(); break;
++    case 4: cheat_page(); break;
+     default: system(); break;
+     }
+     begin_footer();
+-    if (tab_ == 4)
++    if (tab_ == 5)
+         hints({{Control::Confirm, "Select"}, {Control::Back, "Back"}, {Control::Tabs, "Section"},
+                {Control::Menu, "Resume"}});
+     else
+@@ -1432,6 +1438,101 @@ void Menu::network() {
+     }
+ }
+ 
++void Menu::cheat_page() {
++    if (cheat_file_screen()) return;
++    settings::Settings &s = settings::current();
++    const cheats::Overview o = cheats::overview();
++    section("Cheats");
++    if (!o.available) {
++        paragraph("Cheats are turned off (" + env_name("NO_CHEATS") + ").", colors::kTextDisabled);
++        return;
++    }
++    if (toggle_row("Use cheats", s.cheats,
++                   options_for("cheats.enabled", "Runs the cheats turned on on this page and in your cheat file."))) {
++        s.cheats = !s.cheats;
++        settings::save();
++    }
++    const std::string builtin_note = settings::overridden_by("cheats.builtin");
++    std::string heading;
++    for (std::size_t i = 0; i < o.builtin.size(); ++i) {
++        const cheats::BuiltinRow &row = o.builtin[i];
++        if (row.section != heading) {
++            heading = row.section;
++            section(heading.c_str());
++        }
++        RowOptions options{!builtin_note.empty(), builtin_note, row.description};
++        if (row.changes_code) {
++            options.note = "Changes code";
++            options.description += " Part of it changes the game's code, which is not supported yet.";
++        }
++        ImGui::PushID(static_cast<int>(i));
++        if (row.labels.empty()) {
++            if (toggle_row(row.name.c_str(), row.choice != 0u, options))
++                cheats::set_builtin(i, row.choice != 0u ? 0u : 1u);
++        } else {
++            const std::string value = row.choice == 0u ? std::string("Off") : row.labels[row.choice - 1u];
++            if (const int delta = choice_row(row.name.c_str(), value, options))
++                cheats::set_builtin(i, static_cast<std::size_t>(cycle(static_cast<int>(row.choice), delta,
++                                                                       static_cast<int>(row.labels.size()) + 1)));
++        }
++        ImGui::PopID();
++    }
++    section("Cheat file");
++    std::size_t on = 0u;
++    for (const cheats::CheatRow &row : o.cheats) on += row.enabled ? 1u : 0u;
++    const std::string summary = !o.file_found ? std::string("None")
++                                              : std::to_string(on) + " of " + std::to_string(o.cheats.size()) + " on";
++    if (focus_cheat_file_row_) {
++        focus_next_row();
++        focus_cheat_file_row_ = false;
++    }
++    if (value_row("PPSSPP cheat file", summary,
++                  {false, {}, "The cheats in a PPSSPP cheat file of your own, " + o.file.filename().string() + "."})) {
++        cheat_file_open_ = true;
++        focus_next_row();
++    }
++}
++
++// The cheat file's cheats, a page of their own.
++bool Menu::cheat_file_screen() {
++    if (!cheat_file_open_) return false;
++    if (back_) {
++        cheat_file_open_ = false;
++        focus_cheat_file_row_ = true;
++        return true;
++    }
++    const cheats::Overview o = cheats::overview();
++    section("PPSSPP cheat file");
++    if (button_row("Read the cheat file again", {false, {}, "After changing the file outside the game."}))
++        cheats::reload();
++    if (!o.problem.empty()) paragraph(o.problem, colors::kTextDisabled);
++    if (!o.file_found) {
++        paragraph("No cheat file. Put a PPSSPP cheat file named " + o.file.filename().string() + " in " +
++                      o.file.parent_path().string() + ", then read it again.",
++                  colors::kTextDisabled);
++        return true;
++    }
++    section(o.file.filename().string().c_str());
++    if (o.cheats.empty()) paragraph("The file has no cheats for this game.", colors::kTextDisabled);
++    for (std::size_t i = 0; i < o.cheats.size(); ++i) {
++        const cheats::CheatRow &row = o.cheats[i];
++        RowOptions options;
++        if (row.action_replay) {
++            options.note = "Not supported";
++            options.description = "Action Replay codes (_M lines) are not run.";
++        } else if (row.changes_code) {
++            options.note = "Changes code";
++            options.description = "Part of this cheat changes the game's code, which is not supported yet. "
++                                  "The rest of it runs.";
++        }
++        ImGui::PushID(static_cast<int>(i));
++        if (toggle_row(row.name.empty() ? "(no name)" : row.name.c_str(), row.enabled, options))
++            cheats::set_enabled(i, !row.enabled);
++        ImGui::PopID();
++    }
++    return true;
++}
++
+ void Menu::system() {
+     if (save_screen(back_)) {
+         if (take_restart_request()) {
+diff --git a/tests/cwcheat_tests.cpp b/tests/cwcheat_tests.cpp
+new file mode 100644
+index 0000000..15058cf
+--- /dev/null
++++ b/tests/cwcheat_tests.cpp
+@@ -0,0 +1,190 @@
++// CWCheat files and codes (host/cheats/cwcheat.hpp) against a stand-in memory:
++// what PPSSPP reads from a file, and what each kind of code writes.
++
++#include "cheats/cwcheat.hpp"
++
++#include <cstdio>
++#include <string>
++#include <vector>
++
++namespace {
++
++using namespace portablekit::cheats;
++
++int g_failures = 0;
++
++void check(bool condition, const char *what) {
++    std::printf("%s %s\n", condition ? "ok  " : "FAIL", what);
++    if (!condition) ++g_failures;
++}
++
++// 1 MiB of memory from 0x08800000; [0x08804000, 0x08804100) is code.
++class TestMemory final : public Memory {
++public:
++    static constexpr std::uint32_t kBase = 0x08800000u;
++    std::vector<std::uint8_t> bytes = std::vector<std::uint8_t>(0x100000u, 0u);
++
++    bool valid(std::uint32_t address, std::uint32_t size) const override {
++        return address >= kBase && size != 0u && address - kBase + size <= bytes.size();
++    }
++    std::uint8_t read8(std::uint32_t address) const override { return bytes[address - kBase]; }
++    void write8(std::uint32_t address, std::uint8_t value) override { bytes[address - kBase] = value; }
++    bool code(std::uint32_t address, std::uint32_t size) const override {
++        return address < 0x08804100u && 0x08804000u < address + size;
++    }
++
++    std::uint32_t get(std::uint32_t address, std::uint32_t size = 4u) const {
++        std::uint32_t v = 0u;
++        for (std::uint32_t i = 0; i < size; ++i) v |= static_cast<std::uint32_t>(read8(address + i)) << (8u * i);
++        return v;
++    }
++    void set(std::uint32_t address, std::uint32_t value, std::uint32_t size = 4u) {
++        for (std::uint32_t i = 0; i < size; ++i) write8(address + i, static_cast<std::uint8_t>(value >> (8u * i)));
++    }
++};
++
++Cheat cheat(std::vector<CodeLine> lines) {
++    Cheat c;
++    c.enabled = true;
++    c.lines = std::move(lines);
++    return c;
++}
++
++void file_tests() {
++    const std::string text = "\xEF\xBB\xBF_S ULUS-10566\r\n_G Dissidia 012\r\n_C0 Gil\r\n_L 0x203BFA00 0x05F5E0FF\r\n"
++                             "# a comment\r\n_C1 KP // note\r\n_L 203EE31C 000F423F # max\r\n_C2 Other\r\n"
++                             "_M 0x00000000 0x00000000\r\nnot a line\r\n";
++    CheatFile file = parse(text, "ULUS10566");
++    check(file.byte_order_mark && file.crlf, "a byte order mark and CRLF are noticed");
++    check(file.cheats.size() == 3u, "three cheats");
++    check(file.cheats[0].name == "Gil" && !file.cheats[0].enabled && file.cheats[0].lines.size() == 1u &&
++              file.cheats[0].lines[0].a == 0x203BFA00u && file.cheats[0].lines[0].b == 0x05F5E0FFu,
++          "_C0 is off, and its _L line is read");
++    check(file.cheats[1].enabled && file.cheats[1].lines.size() == 1u && file.cheats[1].lines[0].b == 0x000F423Fu,
++          "_C1 is on; 0x is optional and a comment may follow a line");
++    check(file.cheats[2].enabled && file.cheats[2].action_replay, "_C2 is on; _M marks Action Replay codes");
++    check(file.problems == 1u, "a line that is not a code is counted and skipped");
++    set_enabled(file, 0u, true);
++    set_enabled(file, 1u, false);
++    const std::string again = text_of(file);
++    check(again.find("_C1 Gil\r\n") != std::string::npos && again.find("_C0 KP // note\r\n") != std::string::npos &&
++              again.rfind("\xEF\xBB\xBF", 0) == 0u,
++          "turning cheats on and off rewrites their _C lines, keeping the BOM and line endings");
++    check(parse(again, "ULUS10566").cheats[0].enabled, "and reads back so");
++
++    const std::string sections = "_S ULES-01505\n_C1 Europe\n_L 0x20000000 1\n_S ULUS-10566\n_C1 USA\n_L 0x20000000 2\n";
++    const CheatFile usa = parse(sections, "ULUS10566");
++    check(usa.cheats.size() == 1u && usa.cheats[0].name == "USA", "with several _S, only this game's section");
++    const CheatFile other = parse("_S ULJM-05800\n_C1 One\n_L 0x20000000 1\n", "ULUS10566");
++    check(other.cheats.size() == 1u, "with one _S, its cheats count whatever it names, as in PPSSPP");
++}
++
++void write_tests() {
++    TestMemory m;
++    run(cheat({{0x00010000u, 0x000000ABu}, {0x00010010u, 0x0000ABCDu}, {0x00010020u, 0x12345678u}}), m, 0u);
++    check(m.get(0x08810000u) == 0xABu && m.get(0x08810010u) == 0xABCDu && m.get(0x08810020u) == 0x12345678u,
++          "0x0 writes as wide as its value: 8, 16 or 32 bits");
++    m.set(0x08810030u, 0xFFFFFFFFu);
++    run(cheat({{0x10010030u, 0x00001234u}, {0x20010040u, 0xDEADBEEFu}}), m, 0u);
++    check(m.get(0x08810030u) == 0xFFFF1234u && m.get(0x08810040u) == 0xDEADBEEFu, "0x1 writes 16 bits, 0x2 32");
++
++    m.set(0x08810050u, 10u, 1u);
++    m.set(0x08810054u, 1000u, 2u);
++    m.set(0x08810058u, 5u);
++    run(cheat({{0x30100005u, 0x00010050u}, {0x30400064u, 0x00010054u}, {0x30600000u, 0x00010058u}, {3u, 0u}}), m,
++        0u);
++    check(m.get(0x08810050u, 1u) == 15u && m.get(0x08810054u, 2u) == 900u && m.get(0x08810058u) == 2u,
++          "0x3 adds and subtracts 8, 16 and 32 bits (the 32-bit amount on the next line)");
++
++    run(cheat({{0x40010100u, 0x00030002u}, {100u, 10u}}), m, 0u);
++    check(m.get(0x08810100u) == 100u && m.get(0x08810108u) == 110u && m.get(0x08810110u) == 120u &&
++              m.get(0x08810104u) == 0u,
++          "0x4 writes a run of 32-bit values, stepping in words and growing by the increment");
++    run(cheat({{0x80010200u, 0x00030001u}, {0x00000007u, 1u}, {0x80010300u, 0x00020002u}, {0x10001234u, 0x10u}}), m,
++        0u);
++    check(m.get(0x08810200u, 1u) == 7u && m.get(0x08810201u, 1u) == 8u && m.get(0x08810202u, 1u) == 9u &&
++              m.get(0x08810300u, 2u) == 0x1234u && m.get(0x08810304u, 2u) == 0x1244u,
++          "0x8 writes runs of 8-bit or 16-bit values");
++
++    m.set(0x08810400u, 0x11223344u);
++    run(cheat({{0x50010400u, 4u}, {0x00010410u, 0u}}), m, 0u);
++    check(m.get(0x08810410u) == 0x11223344u, "0x5 copies bytes");
++
++    m.set(0x08810500u, 0x0Fu, 1u);
++    m.set(0x08810502u, 0xFF00u, 2u);
++    run(cheat({{0x70010500u, 0x000000F0u}, {0x70010502u, 0x00030F0Fu}}), m, 0u);
++    check(m.get(0x08810500u, 1u) == 0xFFu && m.get(0x08810502u, 2u) == 0x0F00u, "0x7 ORs 8 bits and ANDs 16");
++}
++
++void pointer_tests() {
++    TestMemory m;
++    // A pointer at 0x08810000 to a structure at 0x08820000.
++    m.set(0x08810000u, 0x08820000u);
++    run(cheat({{0x60010000u, 0x0000270Fu}, {0x00010001u, 0x00000E4Cu}}), m, 0u);
++    check(m.get(0x08820E4Cu, 2u) == 9999u, "0x6 writes 16 bits through a pointer at an offset");
++    // Two pointers: 0x08810004 -> 0x08830000, and +0x10 there -> 0x08840000.
++    m.set(0x08810004u, 0x08830000u);
++    m.set(0x08830010u, 0x08840000u);
++    run(cheat({{0x60010004u, 0x12345678u}, {0x00020002u, 0x00000020u}, {0x20000010u, 0u}}), m, 0u);
++    check(m.get(0x08840020u) == 0x12345678u, "0x6 follows a further pointer from an extra line");
++    m.set(0x08810008u, 0u);  // not a valid pointer
++    run(cheat({{0x60010008u, 1u}, {0x00000001u, 0u}}), m, 0u);
++    check(m.get(0x08810008u) == 0u, "a pointer that leads nowhere writes nothing");
++}
++
++void condition_tests() {
++    TestMemory m;
++    m.set(0x08810000u, 2u, 2u);
++    run(cheat({{0xD0010000u, 0x00000002u}, {0x20010010u, 1u}, {0xD0010000u, 0x00000003u}, {0x20010014u, 1u},
++               {0x20010018u, 1u}}),
++        m, 0u);
++    check(m.get(0x08810010u) == 1u && m.get(0x08810014u) == 0u && m.get(0x08810018u) == 1u,
++          "0xD 16-bit tests run or skip the next line");
++    run(cheat({{0xE1020002u, 0x00010000u}, {0x20010020u, 1u}, {0x20010024u, 1u}, {0xE1020005u, 0x00010000u},
++               {0x20010028u, 1u}, {0x2001002Cu, 1u}, {0x20010030u, 1u}}),
++        m, 0u);
++    check(m.get(0x08810020u) == 1u && m.get(0x08810024u) == 1u && m.get(0x08810028u) == 0u &&
++              m.get(0x0881002Cu) == 0u && m.get(0x08810030u) == 1u,
++          "0xE runs or skips the given number of lines");
++    run(cheat({{0xE0020002u, 0x10010000u}, {0x20010040u, 1u}, {0x20010044u, 1u}}), m, 0u);
++    check(m.get(0x08810040u) == 0u && m.get(0x08810044u) == 0u, "0xE with a 16-bit not-equal test");
++    // Buttons: L + R (0x300).
++    const Cheat joker = cheat({{0xD0000000u, 0x10000300u}, {0x20010050u, 7u}});
++    run(joker, m, 0x100u);
++    check(m.get(0x08810050u) == 0u, "a button code does nothing while not all its buttons are held");
++    run(joker, m, 0x300u | 0x4000u);
++    check(m.get(0x08810050u) == 7u, "and runs while they are");
++    m.set(0x08810060u, 5u);
++    run(cheat({{0xC0010060u, 6u}, {0x20010064u, 1u}}), m, 0u);
++    check(m.get(0x08810064u) == 0u, "0xC ends the cheat while memory does not hold the value");
++    m.set(0x08810070u, 9u);
++    m.set(0x08810074u, 9u);
++    run(cheat({{0xD0010070u, 0x40010074u}, {1u, 2u}, {0x20010078u, 1u}, {0x2001007Cu, 1u}}), m, 0u);
++    check(m.get(0x08810078u) == 1u, "0xD compares two addresses");
++}
++
++void code_tests() {
++    TestMemory m;
++    m.set(0x08804010u, 0x03E00008u);
++    const RunResult r = run(cheat({{0x20004010u, 0x00000000u}, {0x20010000u, 5u}}), m, 0u);
++    check(r.wrote_code && m.get(0x08804010u) == 0x03E00008u && m.get(0x08810000u) == 5u,
++          "a write into code is left out and reported; the cheat's other writes are made");
++    const RunResult bad = run(cheat({{0xF0000000u, 0u}, {0x20010004u, 1u}}), m, 0u);
++    check(bad.invalid && m.get(0x08810004u) == 0u, "a line it cannot run ends the pass");
++    Cheat off = cheat({{0x20010008u, 1u}});
++    off.enabled = false;
++    run(off, m, 0u);
++    check(m.get(0x08810008u) == 0u, "a cheat that is off does nothing");
++}
++
++} // namespace
++
++int main() {
++    file_tests();
++    write_tests();
++    pointer_tests();
++    condition_tests();
++    code_tests();
++    if (g_failures != 0) std::printf("%d failed\n", g_failures);
++    return g_failures == 0 ? 0 : 1;
++}
+-- 
+2.53.0.windows.1
+
