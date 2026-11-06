@@ -1,0 +1,39 @@
+From 72db9071809b73a9b0f28bb22918695bdb565b78 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Fri, 6 Nov 2026 21:41:50 +1030
+Subject: [PATCH] Interface: room for more than eight textures of its own
+
+The interface's descriptor pool held the minimum, eight sampled images. The
+font atlas takes a new one each time it grows, and a port that draws its own
+pictures (a game's dialogs keep their sheets and up to forty save icons)
+used the rest: the atlas then grew without a descriptor and the whole menu
+drew from it, leaving specks of text and no panels. The pool now holds 256.
+
+Seen on Windows with Dissidia 012's native dialogs: after the load screen,
+every menu page but the first was blank. With 256, all pages draw.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/gpu/vulkan_renderer.cpp | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
+index b0731dc..b7a3a58 100644
+--- a/host/gpu/vulkan_renderer.cpp
++++ b/host/gpu/vulkan_renderer.cpp
+@@ -7641,7 +7641,11 @@ bool VulkanRenderer::initialize_ui(std::string &error) {
+     info.Device = impl.device;
+     info.QueueFamily = impl.queue_family;
+     info.Queue = impl.queue;
+-    info.DescriptorPoolSize = IMGUI_IMPL_VULKAN_MINIMUM_SAMPLED_IMAGE_POOL_SIZE;
++    // One descriptor per texture of the interface: the font atlas (a new one
++    // each time it grows), the font preview, and a port's own (a game's
++    // dialogs keep dozens of pictures). The minimum, 8, ran out: the atlas
++    // then grew without a descriptor and the whole interface drew from it.
++    info.DescriptorPoolSize = 256u;
+     info.MinImageCount = impl.swapchain_min_images;
+     // ImGui keeps this many vertex and index buffers and writes the next one
+     // for each draw of the interface. Two frames in flight and two presents
+-- 
+2.53.0.windows.1
+

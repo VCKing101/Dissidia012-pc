@@ -92,3 +92,13 @@ Driven by input scripts with window captures (`tools/port/gfx_tour.py --script`)
 
 Not verified: clicking with the mouse, a disc whose pictures could not be read (the fallback), deleting from the list
 (LISTDELETE), the symbols page and Shift on the keyboard, the European disc, and the Steam Deck.
+
+## The blank menu (fixed by patch 0084)
+
+As first merged (main `3cfbb32`, not released), the dialogs left the port's menu blank: after the load screen at
+start, every menu page but Video showed only specks of text, with no panels. Each dialog picture and save icon is a
+texture of the interface, and PortableKit's interface had room for eight. The dialogs used them up, so when the font
+atlas grew for the text of another page it had none, and everything drawn from it (the panels too) sampled nothing.
+`D012_NO_NATIVE_DIALOGS=1` made the pages draw again, which is how it was found. Patch 0084 gives the interface room
+for 256; with it every page draws with the dialogs on (Windows, 6 November 2026). The run's own `shot` captures do
+not show the menu, so the menu was checked in captures of the window.
