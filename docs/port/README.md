@@ -142,6 +142,11 @@ disassembler and the new `tools/port/` scripts cover the analysis.
   decoding texture pack images before a texture's first draw. The pop-in measured: one game frame for most images,
   two or three for 2048x2048 ones. Hooks proposed; the prefetch is parked, nothing built.
 
+## Native dialogs (6 November 2026)
+
+- [Native dialogs](native-dialogs.md): the game's message, save-data and keyboard dialogs drawn in its own menu look
+  from the game's menu pictures on the player's disc, through PortableKit's dialog skin (patch 0083).
+
 ## Next steps
 
 1. ~~Read PortableKit's sources.~~ Done; see above.

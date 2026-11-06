@@ -53,6 +53,8 @@ distributed.**
   under Voice ([below](#japanese-voices)).
 - **Update check**: when a new version is out, the title screen says so, and **Check for updates** on the menu's
   System page opens its download page ([below](#updates)).
+- **Save, load and keyboard screens in the game's own style**: the PSP drew these itself; here they are drawn with
+  the game's own menu pieces, read from your disc, like its Data Config page, with its menu sounds.
 
 ## BGM playlist selector
 

@@ -29,6 +29,11 @@
 #include <string>
 #include <vector>
 
+namespace psprecomp {
+class Runtime;
+struct AllegrexContext;
+} // namespace psprecomp
+
 namespace d012::decomp {
 
 // The caller's registers at the call.
@@ -77,6 +82,14 @@ void add_overrides(const Override *overrides, std::size_t count, bool enable);
 // back in `regs` (v0/v1/f0). For an override that changes a function only
 // sometimes (local versus: no rewards in a versus battle).
 void call_original(Guest *g, std::uint32_t address, GuestRegs &regs);
+
+// From a system call the game made (an HLE function bound in its place, on
+// the game's thread): runs the game's function at `address`, below the
+// caller's stack, with the arguments in `regs`; its results come back in
+// `regs`. For a port's own work that needs the game (the native dialogs
+// play the game's menu sounds).
+void call_game(psprecomp::Runtime &rt, const psprecomp::AllegrexContext &caller, std::uint32_t address,
+               GuestRegs &regs);
 
 // Checks the decompiled `run` against the original at `address`, called with
 // the argument registers in `arguments` (a0-a3, t0-t3, f12-f15) and the rest

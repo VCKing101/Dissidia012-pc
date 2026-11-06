@@ -5,6 +5,7 @@
 #include "d012_bloom.hpp"
 #include "d012_camera.hpp"
 #include "d012_comm_battle.hpp"
+#include "d012_dialogs.hpp"
 #include "d012_dlc.hpp"
 #include "d012_hle.hpp"
 #include "d012_input.hpp"
@@ -131,6 +132,7 @@ void register_extra_hle(portablekit::HleRegistrar &hle) {
     test_switches::install(hle);
     // Checking for a newer version (d012_updates.cpp).
     updates::install(hle);
+    dialogs::install(hle);
 }
 
 void patch_loaded_image(psprecomp::Runtime &runtime, const psprecomp::Elf32Image &elf) {
