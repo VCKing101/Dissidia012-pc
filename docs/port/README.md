@@ -152,6 +152,16 @@ disassembler and the new `tools/port/` scripts cover the analysis.
 - [Cheats](cheats.md): the menu's Cheats page, the port's own money, item and battle cheats, PPSSPP cheat files run
   as PPSSPP runs them (patch 0085), and how the port's memory compares with PPSSPP's.
 
+## Pixel art drawn sharp (6 November 2026)
+
+- The chocobo on the white loading screen between battles and menus (with its note, carrot, chest and Zzz bubbles)
+  is a 64x128 pixel-art texture, key `0000000042af9f8c2c87379b` as Dump textures names it. With Texture filter on
+  Smooth it blurred at 4x; the port lists it in `GameProfile::sharp_textures` (`port/host/d012_profile.cpp`, patch
+  0086), so it is drawn sharp whatever the setting. `D012_NO_SHARP_PIXEL_ART=1` draws it smooth again. Found with
+  `D012_TEXTURE_DUMP` after a Quick Battle; the play plan panel in Customization uses another, 128x128 sheet that
+  also holds smooth shapes, and is left to the setting. Verified on Windows after Return to Battle Setup; the EXP
+  multiplier and Chocobo Down scenes, Linux and the Deck were not seen.
+
 ## Next steps
 
 1. ~~Read PortableKit's sources.~~ Done; see above.
