@@ -58,6 +58,9 @@ source "$root/src/PortableKit/packaging/sources.sh"
 step "Building in $SDK_IMAGE"
 mkdir -p "$root/home"
 cp "$repo/tools/port/linux_build_in_sdk.sh" "$repo/LICENSE" "$root/src/"
+# The release number port/CMakeLists.txt compiles in (d012::kVersion).
+mkdir -p "$root/src/tools/port"
+cp "$repo/tools/port/release-version.txt" "$root/src/tools/port/"
 # The launcher icon, if the main checkout's build/port/launcher has it.
 icon="$main_repo/build/port/launcher/dissidia012.ico"
 [[ -f "$icon" ]] && cp "$icon" "$root/src/"

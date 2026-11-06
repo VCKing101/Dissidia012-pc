@@ -12,6 +12,7 @@
 #include "d012_mods.hpp"
 #include "d012_sync.hpp"
 #include "d012_test_switches.hpp"
+#include "d012_updates.hpp"
 #include "d012_versus.hpp"
 #include "d012_voices.hpp"
 
@@ -128,6 +129,8 @@ void register_extra_hle(portablekit::HleRegistrar &hle) {
     sync::install(hle);
     // Test switches, off by default (d012_test_switches.cpp).
     test_switches::install(hle);
+    // Checking for a newer version (d012_updates.cpp).
+    updates::install(hle);
 }
 
 void patch_loaded_image(psprecomp::Runtime &runtime, const psprecomp::Elf32Image &elf) {
