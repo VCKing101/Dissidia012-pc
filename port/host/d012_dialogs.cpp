@@ -1194,9 +1194,26 @@ void install(portablekit::HleRegistrar &hle) {
     ui::set_dialog_skin(skin);
 }
 
+void play_queued_sounds(Guest *g) {
+    std::vector<std::uint32_t> sounds;
+    {
+        SoundQueue &q = sound_queue();
+        const std::lock_guard<std::mutex> hold(q.lock);
+        if (q.sounds.empty() || q.failed) {
+            q.sounds.clear();
+            return;
+        }
+        sounds.swap(q.sounds);
+    }
+    static const bool silent = portablekit::env("NO_DIALOG_SOUNDS") != nullptr;
+    if (silent || g_ld8(g, kSoundReady) == 0u || g_ld32(g, kSoundManager) == 0u) return;
+    for (const std::uint32_t id : sounds) g_call4(g, kPlaySound, 0u, id, 1u, 0u);
+}
+
 #else
 
 void install(portablekit::HleRegistrar &) {}
+void play_queued_sounds(Guest *) {}
 
 #endif
 

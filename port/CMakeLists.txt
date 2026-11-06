@@ -84,6 +84,7 @@ portablekit_add_game(D012Native ${d012_corpus}
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_updates.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_dialogs.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_cheats.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_title_quit.cpp"
             ${d012_game_code})
 target_include_directories(D012Native PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/host")
 # stb_image for the save icons the dialogs draw (host/d012_dialogs.cpp), from PortableKit.

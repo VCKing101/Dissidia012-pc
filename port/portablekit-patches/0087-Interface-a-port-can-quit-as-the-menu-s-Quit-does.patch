@@ -1,0 +1,71 @@
+From c58975f999892beb9b74198db05a6dc94295a045 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Fri, 6 Nov 2026 22:54:57 +1030
+Subject: [PATCH] Interface: a port can quit as the menu's Quit does
+
+ui::request_quit() ends the game at the next flip, the way choosing Quit in
+the menu over the game does, for a port's own way to close it (a question on
+the game's title screen). The request is now an atomic flag, so it may come
+from any thread.
+
+Tested on Windows with Dissidia 012 (USA): its title screen's "Close the
+game?" with Yes stops the runtime with "quit from the menu"; the menu's own
+Quit is unchanged. Not tested: Linux, Android.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/ui/menu.cpp | 9 ++++++---
+ host/ui/ui.hpp   | 3 +++
+ 2 files changed, 9 insertions(+), 3 deletions(-)
+
+diff --git a/host/ui/menu.cpp b/host/ui/menu.cpp
+index 0927fa5..2971aca 100644
+--- a/host/ui/menu.cpp
++++ b/host/ui/menu.cpp
+@@ -43,6 +43,7 @@
+ #include <SDL3/SDL.h>
+ 
+ #include <algorithm>
++#include <atomic>
+ #include <array>
+ #include <cctype>
+ #include <chrono>
+@@ -1733,8 +1734,8 @@ std::optional<Menu> &menu_over_game_state() {
+     static std::optional<Menu> menu;
+     return menu;
+ }
+-bool &quit_requested() {
+-    static bool requested = false;
++std::atomic<bool> &quit_requested() {
++    static std::atomic<bool> requested{false};
+     return requested;
+ }
+ Clock::time_point &menu_opened_at() {
+@@ -1895,7 +1896,9 @@ void open_menu_over_game() {
+ 
+ bool menu_over_game() { return menu_over_game_state().has_value(); }
+ 
+-bool take_quit_request() { return std::exchange(quit_requested(), false); }
++bool take_quit_request() { return quit_requested().exchange(false); }
++
++void request_quit() { quit_requested() = true; }
+ 
+ bool menu_requested() {
+     Layer &layer = Layer::get();
+diff --git a/host/ui/ui.hpp b/host/ui/ui.hpp
+index b2615f2..2746183 100644
+--- a/host/ui/ui.hpp
++++ b/host/ui/ui.hpp
+@@ -93,6 +93,9 @@ void open_menu_over_game();
+ [[nodiscard]] bool menu_over_game();
+ // Once, after the player chose to quit in a menu over the running game.
+ [[nodiscard]] bool take_quit_request();
++// Quits as the menu's Quit does, at the next flip: for a port's own way to
++// close the game (a question on its title screen, say). From any thread.
++void request_quit();
+ 
+ // The setup screens as an installer front end, or null without a window.
+ std::unique_ptr<install::InstallerUi> make_setup_screens();
+-- 
+2.53.0.windows.1
+
