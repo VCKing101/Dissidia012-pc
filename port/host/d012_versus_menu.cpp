@@ -509,6 +509,8 @@ void run_text_hide(Guest *g, const decomp::CallState &in, GuestRegs &) {
 // main 0x088D4BF4 (sound) -> the voice, or 0.
 void run_sound(Guest *g, const decomp::CallState &in, GuestRegs &out) {
     std::uint32_t sound = in.gpr[4];
+    static const bool trace = std::getenv("D012_TRACE_VERSUS_MENU") != nullptr;
+    if (trace) std::printf("[versus-menu] menu sound %u from 0x%08X\n", sound, in.gpr[31]);
     const State &s = state();
     if (sound == kSoundRefused && from(in, kBattleMode, kBattleModeEnd) && in_battle_mode(g) &&
         g_ld32(g, s.menu + kStateRow) == s.row) {

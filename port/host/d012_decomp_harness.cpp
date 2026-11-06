@@ -590,6 +590,13 @@ bool flag(const char *name) {
 
 } // namespace
 
+void call_game(Runtime &rt, const AllegrexContext &caller, std::uint32_t address, GuestRegs &regs) {
+    Machine m{rt, caller, true};
+    // Below the caller's frame, with room for what a system call's stub keeps.
+    Guest g = make_guest(m, (caller.gpr[29] - 0x100u) & ~0xFu);
+    machine_call(&g, address, &regs);
+}
+
 void call_original(Guest *g, std::uint32_t address, GuestRegs &regs) {
     Harness &h = harness();
     const auto found = h.by_address.find(address);

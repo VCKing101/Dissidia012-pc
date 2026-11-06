@@ -1,0 +1,667 @@
+From 76155f39cf669146fcb38445391af0d114e979e3 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Fri, 6 Nov 2026 17:17:54 +1030
+Subject: [PATCH] Interface: a port's own look and sounds for the game's
+ dialogs
+
+ui::set_dialog_skin(DialogSkin) lets a port draw the dialogs the game asks
+the PSP for, the message dialog, the save-data list and the game's keyboard,
+in its own look. PortableKit keeps what they do: the answers, the saves, the
+typing and the controls. The skin gets a view of what the dialog shows each
+frame and says what the pointer is over and what it clicked. A dialog without
+a skin, or whose skin is not available that frame, is drawn as before.
+
+DialogSkin::sound hears what a skinned dialog did (the selection moved,
+something was chosen, the player backed out, a key was refused), for a port
+that plays the game's own sounds.
+
+When skinned, the save list moves with up and down (arrow keys, D-pad, left
+stick, mouse wheel) and stays drawn behind its question. SaveSlot carries the
+save's ICON0.PNG, and disc_image_path() says which disc image is open.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ cmake/PortableKit.cmake      |   1 +
+ host/hle/hle_common.hpp      |   3 +
+ host/hle/hle_io.cpp          |   8 ++-
+ host/hle/hle_savedata.cpp    |   5 +-
+ host/ui/dialog_skin.cpp      |  21 +++++++
+ host/ui/dialog_skin.hpp      | 102 +++++++++++++++++++++++++++++++++
+ host/ui/menu.cpp             |   2 +
+ host/ui/message_dialog.cpp   |  23 ++++++++
+ host/ui/message_dialog.hpp   |   3 +-
+ host/ui/save_list_dialog.cpp |  84 ++++++++++++++++++++++++++-
+ host/ui/save_list_dialog.hpp |   5 +-
+ host/ui/text_input.cpp       | 106 ++++++++++++++++++++++++++++++-----
+ host/ui/text_input.hpp       |   3 +-
+ 13 files changed, 347 insertions(+), 19 deletions(-)
+ create mode 100644 host/ui/dialog_skin.cpp
+ create mode 100644 host/ui/dialog_skin.hpp
+
+diff --git a/cmake/PortableKit.cmake b/cmake/PortableKit.cmake
+index 9ff5769..547a5b6 100644
+--- a/cmake/PortableKit.cmake
++++ b/cmake/PortableKit.cmake
+@@ -111,6 +111,7 @@ set(PORTABLEKIT_RENDERER_SOURCES
+     host/ui/input_script.cpp
+     host/ui/layer.cpp
+     host/ui/menu.cpp
++    host/ui/dialog_skin.cpp
+     host/ui/message_dialog.cpp
+     host/ui/save_list_dialog.cpp
+     host/ui/save_screen.cpp
+diff --git a/host/hle/hle_common.hpp b/host/hle/hle_common.hpp
+index a000d7c..aa0197c 100644
+--- a/host/hle/hle_common.hpp
++++ b/host/hle/hle_common.hpp
+@@ -113,6 +113,9 @@ void log_once(const std::string &key, const std::string &message);
+ void register_threadman(HleRegistrar &hle);
+ void register_sysmem(HleRegistrar &hle);
+ void register_io(HleRegistrar &hle, const std::filesystem::path &disc_image, const std::filesystem::path &memory_stick);
++// The disc image register_io opened as disc0:, empty without one. A port
++// that reads the disc itself opens its own IsoImage on it.
++[[nodiscard]] const std::filesystem::path &disc_image_path();
+ void register_system(HleRegistrar &hle);
+ void register_media(HleRegistrar &hle);
+ void register_atrac(HleRegistrar &hle);
+diff --git a/host/hle/hle_io.cpp b/host/hle/hle_io.cpp
+index 6e6d195..de2d74a 100644
+--- a/host/hle/hle_io.cpp
++++ b/host/hle/hle_io.cpp
+@@ -121,6 +121,7 @@ struct DiscReadAhead {
+ 
+ struct IoState {
+     std::unique_ptr<IsoImage> disc;
++    std::filesystem::path disc_path;
+     std::filesystem::path memory_stick;
+     std::map<std::uint32_t, OpenFile> files;
+     std::uint32_t next_fd{3u};
+@@ -845,8 +846,13 @@ void register_async_io(HleRegistrar &hle) {
+ 
+ } // namespace
+ 
++const std::filesystem::path &disc_image_path() { return io().disc_path; }
++
+ void register_io(HleRegistrar &hle, const std::filesystem::path &disc_image, const std::filesystem::path &memory_stick) {
+-    if (!disc_image.empty()) io().disc = std::make_unique<IsoImage>(disc_image);
++    if (!disc_image.empty()) {
++        io().disc = std::make_unique<IsoImage>(disc_image);
++        io().disc_path = disc_image;
++    }
+     // The image into the file cache while the game boots
+     // (IsoImage::read_through_in_background); <prefix>_NO_DISC_READ_THROUGH
+     // leaves every read to the drive, as before.
+diff --git a/host/hle/hle_savedata.cpp b/host/hle/hle_savedata.cpp
+index 198dfaa..d506e7c 100644
+--- a/host/hle/hle_savedata.cpp
++++ b/host/hle/hle_savedata.cpp
+@@ -542,6 +542,7 @@ struct Slot {
+     std::string title;
+     std::string detail;
+     std::string modified;
++    std::vector<std::uint8_t> icon;  // ICON0.PNG
+ };
+ 
+ std::string format_time(std::filesystem::file_time_type written) {
+@@ -582,6 +583,8 @@ std::vector<Slot> request_slots(const psprecomp::GuestMemory &memory, std::uint3
+                 slot.title = sfo->string("SAVEDATA_TITLE").value_or("");
+                 slot.detail = sfo->string("SAVEDATA_DETAIL").value_or("");
+             }
++            std::ifstream icon(folder / "ICON0.PNG", std::ios::binary);
++            slot.icon.assign(std::istreambuf_iterator<char>(icon), std::istreambuf_iterator<char>());
+         }
+         slots.push_back(std::move(slot));
+     }
+@@ -668,7 +671,7 @@ void start_asking(psprecomp::GuestMemory &memory, std::uint32_t params, std::uin
+     request.single = asking == Asking::Single;
+     request.focus = focused_slot(slots, memory.load32(params + param::kFocus));
+     for (const Slot &slot : slots)
+-        request.slots.push_back(ui::SaveSlot{slot.name, slot.exists, slot.title, slot.detail, slot.modified});
++        request.slots.push_back(ui::SaveSlot{slot.name, slot.exists, slot.title, slot.detail, slot.modified, slot.icon});
+     const unsigned serial = a.serial;
+     std::vector<std::string> names;
+     for (const Slot &slot : slots) names.push_back(slot.name);
+diff --git a/host/ui/dialog_skin.cpp b/host/ui/dialog_skin.cpp
+new file mode 100644
+index 0000000..c921478
+--- /dev/null
++++ b/host/ui/dialog_skin.cpp
+@@ -0,0 +1,21 @@
++#include "ui/dialog_skin.hpp"
++
++namespace portablekit::ui {
++namespace {
++
++DialogSkin &skin() {
++    static DialogSkin value;
++    return value;
++}
++
++} // namespace
++
++void set_dialog_skin(const DialogSkin &value) { skin() = value; }
++
++const DialogSkin &dialog_skin() { return skin(); }
++
++void skin_sound(DialogSound sound) {
++    if (skin().sound != nullptr) skin().sound(sound);
++}
++
++} // namespace portablekit::ui
+diff --git a/host/ui/dialog_skin.hpp b/host/ui/dialog_skin.hpp
+new file mode 100644
+index 0000000..7f6d304
+--- /dev/null
++++ b/host/ui/dialog_skin.hpp
+@@ -0,0 +1,102 @@
++#pragma once
++
++#include "ui/save_list_dialog.hpp"
++
++#include <cstddef>
++#include <string>
++#include <vector>
++
++// A port's own look for the dialogs the game asks the PSP for: the message
++// dialog, the save-data list and the keyboard. PortableKit keeps what they do
++// (the answers, the saves, the typing, and the gamepad and keyboard controls
++// their headers describe); a skin only draws them, inside the interface frame
++// that draws them now, and says what the pointer is over. A dialog without a
++// skin is drawn by PortableKit, as before.
++//
++// Each view is everything the dialog shows this frame. The skin draws it
++// where it likes (usually over the game's picture, ui::game_picture()) and
++// fills the pointer: the choice the mouse is over and the one it clicked.
++namespace portablekit::ui {
++
++// What the pointer did this frame. Indexes are the view's: a message's
++// choices (0 OK or Yes, 1 No), a save list's slots, a keyboard's keys
++// (row * 100 + column). -1: none.
++struct SkinPointer {
++    int hovered{-1};
++    int clicked{-1};
++};
++
++struct MessageSkinView {
++    std::string text;      // UTF-8; '\n' breaks lines
++    bool question{};       // Yes and No; otherwise OK
++    bool no_selected{};    // a question: No is selected
++    bool allow_back{};     // back answers a question
++    bool confirm_south{};  // confirm is the south face button (the menu's "Confirm button")
++};
++
++struct SaveListSkinView {
++    SaveAction action{SaveAction::Load};
++    const std::vector<SaveSlot> *slots{};  // the request's slots
++    std::vector<std::size_t> shown;        // the slots listed, in order: loading and deleting list saves only
++    std::size_t selected{};                // the selected slot, an index into slots
++    bool confirm_south{};
++};
++
++struct KeyboardSkinKey {
++    std::string label;    // UTF-8: the character, or the action's name
++    bool character{};     // a character key rather than an action
++    bool enabled{true};   // it can be typed
++    bool lit{};           // Shift or the symbols page when on, and OK
++    bool selected{};
++    float left{};         // where the key starts and how wide it is, in tenths of the row
++    float width{};
++};
++
++struct KeyboardSkinView {
++    std::string title;           // what is being entered
++    std::string prompt;          // a line under it; may be empty
++    std::string text;            // UTF-8
++    std::size_t cursor_byte{};   // the text cursor, as a byte offset into text
++    std::size_t length{};        // characters in text
++    std::size_t max_length{};
++    bool full{};                 // no more characters fit
++    bool refused{};              // a key could not be typed a moment ago
++    bool caret_on{};             // the blinking cursor is showing this frame
++    bool gamepad{};              // the player is using a gamepad
++    bool confirm_south{};
++    std::vector<std::vector<KeyboardSkinKey>> rows;
++};
++
++// What a skinned dialog did this frame, for a skin that plays the game's own
++// sounds: the selection moved, something was chosen (an answer, a slot, a key
++// typed), the player backed out, or a key could not be typed.
++enum class DialogSound { Move, Confirm, Back, Refused };
++
++struct DialogSkin {
++    // Asked before a skin draws: false keeps PortableKit's look for that
++    // frame (the port's pictures could not be read, say). Null: always ready.
++    bool (*available)() = nullptr;
++    // Called from the interface frame when a dialog the skin draws does one
++    // of the things above. Null: silent, as before.
++    void (*sound)(DialogSound sound) = nullptr;
++    void (*message)(const MessageSkinView &view, SkinPointer &pointer) = nullptr;
++    void (*save_list)(const SaveListSkinView &view, SkinPointer &pointer) = nullptr;
++    // Only the game's keyboard requests (open_game_text_input), not keyboards
++    // opened inside PortableKit's own screens.
++    void (*keyboard)(const KeyboardSkinView &view, SkinPointer &pointer) = nullptr;
++};
++
++// Sets the skin; a member left null keeps PortableKit's look for that dialog.
++void set_dialog_skin(const DialogSkin &skin);
++[[nodiscard]] const DialogSkin &dialog_skin();
++// The skin's draw function for one dialog when the skin has one and is
++// available this frame; null otherwise.
++template <typename Draw> [[nodiscard]] Draw skin_ready(Draw draw) {
++    if (draw == nullptr) return nullptr;
++    const DialogSkin &skin = dialog_skin();
++    return skin.available == nullptr || skin.available() ? draw : nullptr;
++}
++// Tells the skin's sound function, when it has one.
++void skin_sound(DialogSound sound);
++
++} // namespace portablekit::ui
+diff --git a/host/ui/menu.cpp b/host/ui/menu.cpp
+index 626dc43..006db32 100644
+--- a/host/ui/menu.cpp
++++ b/host/ui/menu.cpp
+@@ -1732,6 +1732,8 @@ void draw_over_game() {
+     // dialog asks its questions as message dialogs.
+     if ((game_message_open() || game_save_list_open()) && !menu) {
+         layer.begin_frame();
++        // A skinned list stays drawn behind its own question.
++        if (game_message_open() && game_save_list_open()) game_save_list_frame();
+         if (game_message_open()) game_message_frame();
+         else game_save_list_frame();
+         layer.end_frame();
+diff --git a/host/ui/message_dialog.cpp b/host/ui/message_dialog.cpp
+index 36de528..1429701 100644
+--- a/host/ui/message_dialog.cpp
++++ b/host/ui/message_dialog.cpp
+@@ -1,5 +1,6 @@
+ #include "ui/message_dialog.hpp"
+ 
++#include "ui/dialog_skin.hpp"
+ #include "ui/layer.hpp"
+ #include "ui/widgets.hpp"
+ 
+@@ -30,6 +31,7 @@ struct Dialog {
+     MessageRequest request;
+     MessageDone on_done;
+     bool no_selected{};  // a question: which button is selected
++    bool skinned{};      // a skin draws it this frame, and so hears its sounds
+ };
+ 
+ Dialog &dialog() {
+@@ -51,6 +53,7 @@ void answer(MessageAnswer value) {
+     if (!d.open) return;
+     d.open = false;
+     release_game();
++    if (d.skinned) skin_sound(value == MessageAnswer::Back ? DialogSound::Back : DialogSound::Confirm);
+     MessageDone done = std::move(d.on_done);
+     d.on_done = nullptr;
+     if (done) done(value);
+@@ -310,10 +313,30 @@ void close_game_message() {
+ void game_message_frame() {
+     Dialog &d = dialog();
+     if (!d.open) return;
++    const auto draw_skin = skin_ready(dialog_skin().message);
++    d.skinned = draw_skin != nullptr;
++    const bool was_no = d.no_selected;
+     handle_input();
+     if (!d.open) return;
+ 
+     const ImGuiIO &io = ImGui::GetIO();
++    if (draw_skin) {
++        MessageSkinView view;
++        view.text = d.request.text;
++        view.question = d.request.question;
++        view.no_selected = d.no_selected;
++        view.allow_back = d.request.allow_back;
++        view.confirm_south = Layer::get().confirm_south();
++        SkinPointer pointer;
++        draw_skin(view, pointer);
++        const bool moved = io.MouseDelta.x * io.MouseDelta.x + io.MouseDelta.y * io.MouseDelta.y > 0.0f;
++        if (d.request.question && moved && pointer.hovered >= 0) d.no_selected = pointer.hovered == 1;
++        if (d.no_selected != was_no) skin_sound(DialogSound::Move);
++        if (pointer.clicked == 0) answer(MessageAnswer::Yes);
++        else if (pointer.clicked == 1 && d.request.question) answer(MessageAnswer::No);
++        return;
++    }
++
+     ImGui::GetBackgroundDrawList()->AddRectFilled({0, 0}, io.DisplaySize, band::kDim);
+     ImGui::SetNextWindowPos({0, 0}, ImGuiCond_Always);
+     ImGui::SetNextWindowSize(io.DisplaySize, ImGuiCond_Always);
+diff --git a/host/ui/message_dialog.hpp b/host/ui/message_dialog.hpp
+index 591d692..74f2d33 100644
+--- a/host/ui/message_dialog.hpp
++++ b/host/ui/message_dialog.hpp
+@@ -15,7 +15,8 @@
+ // closes only with confirm.
+ //
+ // The game keeps running behind it, as it does behind the PSP's dialog, but
+-// reads a neutral pad until the dialog closes.
++// reads a neutral pad until the dialog closes. A port can draw it in a look
++// of its own (dialog_skin.hpp).
+ namespace portablekit::ui {
+ 
+ struct MessageRequest {
+diff --git a/host/ui/save_list_dialog.cpp b/host/ui/save_list_dialog.cpp
+index e2fbbfe..db49bc0 100644
+--- a/host/ui/save_list_dialog.cpp
++++ b/host/ui/save_list_dialog.cpp
+@@ -1,5 +1,6 @@
+ #include "ui/save_list_dialog.hpp"
+ 
++#include "ui/dialog_skin.hpp"
+ #include "ui/layer.hpp"
+ #include "ui/message_dialog.hpp"
+ #include "ui/widgets.hpp"
+@@ -109,6 +110,76 @@ void ask(std::size_t index) {
+     });
+ }
+ 
++// A frame of the list as a skin draws it (dialog_skin.hpp); without
++// `controls`, only drawn (behind its question). Up and down move
++// over the listed slots (the arrow keys, the D-pad, the left stick, the mouse
++// wheel), confirm asks about the selected one, and the pointer selects and
++// clicks.
++void skinned_frame(void (*draw_skin)(const SaveListSkinView &, SkinPointer &), bool controls = true) {
++    Dialog &d = dialog();
++    Layer &layer = Layer::get();
++    SaveListSkinView view;
++    view.action = d.request.action;
++    view.slots = &d.request.slots;
++    for (std::size_t i = 0; i < d.request.slots.size(); ++i)
++        if (usable(d.request.slots[i], d.request.action)) view.shown.push_back(i);
++    auto at = std::find(view.shown.begin(), view.shown.end(), d.selected);
++    if (at == view.shown.end()) at = view.shown.begin();
++    auto position = static_cast<long>(at - view.shown.begin());
++
++    const auto pressed = [](std::initializer_list<ImGuiKey> keys) {
++        for (const ImGuiKey key : keys)
++            if (ImGui::IsKeyPressed(key, true)) return true;
++        return false;
++    };
++    long step = 0;
++    if (!controls) {
++        view.selected = d.selected;
++        view.confirm_south = layer.confirm_south();
++        SkinPointer ignored;
++        draw_skin(view, ignored);
++        return;
++    }
++    if (pressed({ImGuiKey_UpArrow})) step = -1;
++    if (pressed({ImGuiKey_DownArrow})) step = 1;
++    bool confirm = ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false);
++    // A button held when the list opened, such as the one that led to it,
++    // does nothing until it is released.
++    if (layer.gamepad_armed()) {
++        if (pressed({ImGuiKey_GamepadDpadUp, ImGuiKey_GamepadLStickUp})) step = -1;
++        if (pressed({ImGuiKey_GamepadDpadDown, ImGuiKey_GamepadLStickDown})) step = 1;
++        const ImGuiKey key = layer.confirm_south() ? ImGuiKey_GamepadFaceDown : ImGuiKey_GamepadFaceRight;
++        confirm = confirm || ImGui::IsKeyPressed(key, false);
++    }
++    const ImGuiIO &io = ImGui::GetIO();
++    if (io.MouseWheel > 0.0f) step = -1;
++    if (io.MouseWheel < 0.0f) step = 1;
++    const std::size_t was = d.selected;
++    position = std::clamp(position + step, 0L, static_cast<long>(view.shown.size()) - 1);
++    d.selected = view.shown[static_cast<std::size_t>(position)];
++
++    view.selected = d.selected;
++    view.confirm_south = layer.confirm_south();
++    SkinPointer pointer;
++    draw_skin(view, pointer);
++    const auto listed = [&](int index) {
++        return index >= 0 && static_cast<std::size_t>(index) < d.request.slots.size() &&
++               usable(d.request.slots[static_cast<std::size_t>(index)], d.request.action);
++    };
++    const bool moved = io.MouseDelta.x * io.MouseDelta.x + io.MouseDelta.y * io.MouseDelta.y > 0.0f;
++    if (moved && listed(pointer.hovered)) d.selected = static_cast<std::size_t>(pointer.hovered);
++    if (d.selected != was) skin_sound(DialogSound::Move);
++    if (listed(pointer.clicked)) {
++        skin_sound(DialogSound::Confirm);
++        ask(static_cast<std::size_t>(pointer.clicked));
++        return;
++    }
++    if (confirm) {
++        skin_sound(DialogSound::Confirm);
++        ask(d.selected);
++    }
++}
++
+ } // namespace
+ 
+ bool open_game_save_list(SaveListRequest request, SaveListDone on_done) {
+@@ -149,7 +220,12 @@ void close_game_save_list() {
+ 
+ void game_save_list_frame() {
+     Dialog &d = dialog();
+-    if (!d.open || d.asking) return;
++    if (!d.open) return;
++    if (d.asking) {
++        // Its question is up: a skin keeps the list in view behind it, still.
++        if (const auto draw_skin = skin_ready(dialog_skin().save_list)) skinned_frame(draw_skin, false);
++        return;
++    }
+     Layer &layer = Layer::get();
+     (void)layer.take_menu_toggle();
+ 
+@@ -166,10 +242,16 @@ void game_save_list_frame() {
+ 
+     const bool back = layer.take_back();
+     const ImGuiKey cancel = layer.confirm_south() ? ImGuiKey_GamepadFaceRight : ImGuiKey_GamepadFaceDown;
++    const auto draw_skin = skin_ready(dialog_skin().save_list);
+     if (back || (layer.gamepad_armed() && ImGui::IsKeyPressed(cancel, false))) {
++        if (draw_skin) skin_sound(DialogSound::Back);
+         finish(std::nullopt);
+         return;
+     }
++    if (draw_skin) {
++        skinned_frame(draw_skin);
++        return;
++    }
+ 
+     // The band across the screen (widgets.hpp, band::): the action at the
+     // top, the slots down the left, the selected save's title, detail and
+diff --git a/host/ui/save_list_dialog.hpp b/host/ui/save_list_dialog.hpp
+index f863adf..6af23cc 100644
+--- a/host/ui/save_list_dialog.hpp
++++ b/host/ui/save_list_dialog.hpp
+@@ -1,6 +1,7 @@
+ #pragma once
+ 
+ #include <cstddef>
++#include <cstdint>
+ #include <functional>
+ #include <optional>
+ #include <string>
+@@ -19,7 +20,8 @@
+ // deleting list only the slots that hold a save.
+ //
+ // The game keeps running behind it, as it does behind the PSP's dialog, but
+-// reads a neutral pad until the dialog closes.
++// reads a neutral pad until the dialog closes. A port can draw it in a look
++// of its own (dialog_skin.hpp); the list then moves with up and down.
+ namespace portablekit::ui {
+ 
+ struct SaveSlot {
+@@ -28,6 +30,7 @@ struct SaveSlot {
+     std::string title;     // the save's own title and detail, when it exists
+     std::string detail;
+     std::string modified;  // when it was last written, already formatted
++    std::vector<std::uint8_t> icon;  // the save's ICON0.PNG, when it has one
+ };
+ 
+ enum class SaveAction { Load, Save, Delete };
+diff --git a/host/ui/text_input.cpp b/host/ui/text_input.cpp
+index e47b6f7..8f6ce2c 100644
+--- a/host/ui/text_input.cpp
++++ b/host/ui/text_input.cpp
+@@ -1,5 +1,6 @@
+ #include "ui/text_input.hpp"
+ 
++#include "ui/dialog_skin.hpp"
+ #include "ui/layer.hpp"
+ #include "ui/widgets.hpp"
+ 
+@@ -117,6 +118,7 @@ enum class ShiftState { Off, Once, Locked };
+ struct Keyboard {
+     bool open{};
+     bool over_game{};
++    bool confirmed{};  // how it last closed: OK rather than cancelled
+     TextInputRequest request;
+     TextInputDone on_done;
+     std::u32string text;
+@@ -206,6 +208,7 @@ void finish(bool confirmed) {
+     Keyboard &k = keyboard();
+     if (!k.open) return;
+     k.open = false;
++    k.confirmed = confirmed;
+     stop_system_text_input();
+     if (k.over_game) {
+         Layer &layer = Layer::get();
+@@ -321,6 +324,30 @@ const char *action_label(KeyKind kind) {
+     return "";
+ }
+ 
++// What a key shows: its label, whether it can be typed, whether it is lit
++// (Shift or the symbols page when on, Steam's keyboard when up, and OK).
++struct KeyLook {
++    std::string label;
++    bool enabled{true};
++    bool lit{};
++};
++
++KeyLook look_of(const Key &key) {
++    const Keyboard &k = keyboard();
++    KeyLook look;
++    if (key.kind == KeyKind::Char) {
++        const char32_t ch = key_char(key);
++        look.label = encode_utf8(std::u32string(1, ch));
++        look.enabled = allowed(ch);
++    } else {
++        look.label = action_label(key.kind);
++        if (key.kind == KeyKind::Space) look.enabled = allowed(U' ');
++    }
++    look.lit = (key.kind == KeyKind::Shift && k.shift != ShiftState::Off) || (key.kind == KeyKind::Symbols && k.symbols) ||
++               (key.kind == KeyKind::SteamKeyboard && k.steam_keyboard) || key.kind == KeyKind::Ok;
++    return look;
++}
++
+ void handle_keys(const std::vector<Row> &rows) {
+     Keyboard &k = keyboard();
+     Layer &layer = Layer::get();
+@@ -432,19 +459,10 @@ void draw_grid(ImDrawList *draw, const std::vector<Row> &rows, float width) {
+             ImGui::PopID();
+             const bool selected = static_cast<int>(r) == k.row && static_cast<int>(c) == k.column;
+ 
+-            std::string label;
+-            bool enabled = true;
+-            if (key.kind == KeyKind::Char) {
+-                const char32_t ch = key_char(key);
+-                label = encode_utf8(std::u32string(1, ch));
+-                enabled = allowed(ch);
+-            } else {
+-                label = action_label(key.kind);
+-                if (key.kind == KeyKind::Space) enabled = allowed(U' ');
+-            }
+-            const bool lit = (key.kind == KeyKind::Shift && k.shift != ShiftState::Off) ||
+-                             (key.kind == KeyKind::Symbols && k.symbols) ||
+-                             (key.kind == KeyKind::SteamKeyboard && k.steam_keyboard) || key.kind == KeyKind::Ok;
++            const KeyLook look = look_of(key);
++            const std::string &label = look.label;
++            const bool enabled = look.enabled;
++            const bool lit = look.lit;
+             ImU32 fill = key.kind == KeyKind::Char ? colors::kRow : colors::kTrack;
+             ImU32 ink = enabled ? colors::kText : colors::kTextDisabled;
+             if (lit) {
+@@ -477,6 +495,51 @@ void draw_grid(ImDrawList *draw, const std::vector<Row> &rows, float width) {
+     ImGui::Dummy({width, 0.0f});
+ }
+ 
++// A frame of the keyboard as a skin draws it (dialog_skin.hpp): the controls
++// are handle_keys()'s, and a clicked key is pressed.
++void skinned_frame(void (*draw_skin)(const KeyboardSkinView &, SkinPointer &), const std::vector<Row> &rows) {
++    Keyboard &k = keyboard();
++    const Layer &layer = Layer::get();
++    KeyboardSkinView view;
++    view.title = k.request.title;
++    view.prompt = k.request.prompt;
++    view.text = encode_utf8(k.text);
++    view.cursor_byte = encode_utf8(k.text.substr(0, k.cursor)).size();
++    view.length = k.text.size();
++    view.max_length = k.request.max_length;
++    view.full = k.text.size() >= k.request.max_length;
++    view.refused = Clock::now() - k.refused < kRefusedTime;
++    view.caret_on = std::fmod(std::chrono::duration<double>(Clock::now() - k.opened).count(), 1.0) < 0.6;
++    view.gamepad = layer.input_device() == InputDevice::Gamepad;
++    view.confirm_south = layer.confirm_south();
++    for (std::size_t r = 0; r < rows.size(); ++r) {
++        const auto layout = spans(rows[r]);
++        std::vector<KeyboardSkinKey> keys;
++        for (std::size_t c = 0; c < rows[r].size(); ++c) {
++            KeyLook look = look_of(rows[r][c]);
++            KeyboardSkinKey key;
++            key.label = std::move(look.label);
++            key.character = rows[r][c].kind == KeyKind::Char;
++            key.enabled = look.enabled;
++            key.lit = look.lit;
++            key.selected = static_cast<int>(r) == k.row && static_cast<int>(c) == k.column;
++            key.left = layout[c].first;
++            key.width = layout[c].second;
++            keys.push_back(std::move(key));
++        }
++        view.rows.push_back(std::move(keys));
++    }
++    SkinPointer pointer;
++    draw_skin(view, pointer);
++    if (pointer.clicked < 0) return;
++    const auto r = static_cast<std::size_t>(pointer.clicked / 100);
++    const auto c = static_cast<std::size_t>(pointer.clicked % 100);
++    if (r >= rows.size() || c >= rows[r].size()) return;
++    k.row = static_cast<int>(r);
++    k.column = static_cast<int>(c);
++    press(rows[r][c]);
++}
++
+ } // namespace
+ 
+ bool printable_ascii(char32_t c) { return c >= 0x20u && c < 0x7Fu; }
+@@ -517,6 +580,23 @@ void text_input_frame() {
+     (void)layer.take_menu_toggle();
+ 
+     const std::vector<Row> rows = grid();
++    const auto draw_skin = k.over_game ? skin_ready(dialog_skin().keyboard) : nullptr;
++    if (draw_skin) {
++        // The frame's sounds, from what it changed: the selection moved, a
++        // key was typed or toggled, one was refused, or the keyboard closed.
++        const int row = k.row, column = k.column;
++        const std::u32string text = k.text;
++        const ShiftState shift = k.shift;
++        const bool symbols = k.symbols;
++        const Clock::time_point refused = k.refused;
++        handle_keys(rows);
++        if (k.open) skinned_frame(draw_skin, rows);
++        if (!k.open) skin_sound(k.confirmed ? DialogSound::Confirm : DialogSound::Back);
++        else if (k.refused != refused) skin_sound(DialogSound::Refused);
++        else if (k.text != text || k.shift != shift || k.symbols != symbols) skin_sound(DialogSound::Confirm);
++        else if (k.row != row || k.column != column) skin_sound(DialogSound::Move);
++        return;
++    }
+     handle_keys(rows);
+     if (!k.open) return;
+ 
+diff --git a/host/ui/text_input.hpp b/host/ui/text_input.hpp
+index 8b85905..e17a9c0 100644
+--- a/host/ui/text_input.hpp
++++ b/host/ui/text_input.hpp
+@@ -22,7 +22,8 @@
+ // the in-game menu: open it, then call text_input_frame() from the screen's
+ // frame in place of drawing the screen until it closes. Over the running game,
+ // for the game's own keyboard requests: open_game_text_input() takes the pad
+-// from the game and draws the keyboard with every presented game frame.
++// from the game and draws the keyboard with every presented game frame. A port
++// can draw that one in a look of its own (dialog_skin.hpp).
+ namespace portablekit::ui {
+ 
+ struct TextInputRequest {
+-- 
+2.53.0.windows.1
+

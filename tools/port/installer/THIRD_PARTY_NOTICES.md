@@ -38,6 +38,11 @@ dedication they offer as an alternative to the MIT License. <https://github.com/
 Texture hashes. Copyright (c) 2012-2021 Yann Collet. BSD 2-Clause License: `xxHash-LICENSE.txt`.
 <https://github.com/Cyan4973/xxHash>
 
+### Goudy Bookletter 1911
+
+The serif of the titles on the save, load and keyboard screens. Copyright (c) 2010 Barry Schwartz. SIL Open Font
+License 1.1: `GoudyBookletter1911-OFL.txt`. <https://fonts.google.com/specimen/Goudy+Bookletter+1911>
+
 ## Shipped as separate libraries and programs
 
 Dynamically linked and unmodified: you may replace them with your own builds of the same or a compatible version.
