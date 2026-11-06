@@ -9,6 +9,7 @@
 #include "checks.hpp"
 #include "d012_json.hpp"
 #include "d012_mod_manifest.hpp"
+#include "d012_update_rules.hpp"
 #include "model.hpp"
 #include "names.hpp"
 #include "psp_iso.hpp"
@@ -807,6 +808,47 @@ void test_psp_iso() {
     std::filesystem::remove_all(root, ec);
 }
 
+// The update check's version order and its reading of GitHub's answer
+// (host/d012_update_rules.cpp).
+void test_update_rules() {
+    namespace rules = d012::update_rules;
+    expect(rules::is_version("0.5.4") && rules::is_version("10.0.12") && rules::is_version("0.6.0-rc.1"),
+           "versions are read");
+    expect(!rules::is_version("0.5") && !rules::is_version("v0.5.4") && !rules::is_version("0.5.4-") &&
+               !rules::is_version("0.5.4 ") && !rules::is_version("0.5.x") && !rules::is_version("0.5.4-RC"),
+           "what is not a version is refused");
+    expect(rules::compare_versions("0.5.5", "0.5.4") > 0, "0.5.5 is newer than 0.5.4");
+    expect(rules::compare_versions("0.5.10", "0.5.9") > 0, "versions compare by number, not by text");
+    expect(rules::compare_versions("1.0.0", "0.9.9") > 0, "the first number counts most");
+    expect(rules::compare_versions("0.5.4", "0.5.4") == 0, "a version is the same as itself");
+    expect(rules::compare_versions("0.6.0-rc.1", "0.6.0") < 0, "a test build is older than its release");
+    expect(rules::compare_versions("0.6.0-rc.1", "0.5.4") > 0, "a test build is newer than an older release");
+    expect(rules::compare_versions("0.6.0-rc.2", "0.6.0-rc.1") > 0, "test builds compare by their suffix");
+
+    const std::string page = std::string(rules::kReleasePages) + "tag/v0.5.5";
+    const auto answer = [&](const std::string &fields) { return "{\"url\": \"x\", " + fields + "}"; };
+    std::string error;
+    auto release = rules::parse_release(
+        answer("\"tag_name\": \"v0.5.5\", \"html_url\": \"" + page + "\", \"draft\": false, \"prerelease\": false"),
+        error);
+    expect(release && release->version == "0.5.5" && release->page == page, "a release is read: " + error);
+    release = rules::parse_release(answer("\"tag_name\": \"0.5.5\", \"html_url\": \"" + page + "\""), error);
+    expect(release && release->version == "0.5.5", "a tag without its v is read: " + error);
+    expect(!rules::parse_release(answer("\"tag_name\": \"v0.5.5\", \"html_url\": \"" + page + "\", \"prerelease\": true"),
+                                 error),
+           "a pre-release is not offered");
+    expect(!rules::parse_release(answer("\"tag_name\": \"v0.5.5\", \"html_url\": \"" + page + "\", \"draft\": true"),
+                                 error),
+           "a draft is not offered");
+    expect(!rules::parse_release(answer("\"tag_name\": \"latest\", \"html_url\": \"" + page + "\""), error),
+           "a tag that is not a version is refused");
+    expect(!rules::parse_release(answer("\"tag_name\": \"v0.5.5\", \"html_url\": \"https://example.com/v0.5.5\""), error),
+           "a page elsewhere is not opened");
+    expect(!rules::parse_release(answer("\"message\": \"Not Found\""), error), "an answer without a release is refused");
+    expect(!rules::parse_release("<html>", error), "an answer that is not JSON is refused");
+}
+
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -824,6 +866,7 @@ int main(int argc, char **argv) {
     test_suggest();
     test_undo();
     test_psp_iso();
+    test_update_rules();
     if (g_failures == 0) std::cout << "all passed\n";
     return g_failures == 0 ? 0 : 1;
 }

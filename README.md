@@ -51,6 +51,8 @@ distributed.**
   full analog and each player's right-stick camera ([guide](docs/port/play-online.md)).
 - **Japanese voices** from your own Japanese disc image, with English text: choose the disc in the game's Options,
   under Voice ([below](#japanese-voices)).
+- **Update check**: when a new version is out, the title screen says so, and **Check for updates** on the menu's
+  System page opens its download page ([below](#updates)).
 
 ## BGM playlist selector
 
@@ -155,7 +157,8 @@ or L3 + R3 on a controller, opens the port's menu. Your saves are in `data\ms0` 
 `data\mods` (the Start menu has a shortcut to it).
 
 **To update:** run the new release's setup and install into the same folder. Your saves, settings and mods stay, and
-the game's code is compiled again only when the new version needs it.
+the game's code is compiled again only when the new version needs it. The game tells you when there is one
+([Updates](#updates)).
 
 **If it crashes or freezes,** please [open an issue](https://github.com/VCKing101/Dissidia012-pc/issues/new/choose)
 and attach the log, `data\logs\D012Native.log` in the install folder. Starting the game again renames it to
@@ -223,7 +226,8 @@ Esc, or L3 + R3 on a controller, opens the port's menu. Your saves are in `data/
 go in `data/mods`.
 
 **To update:** run the new release's setup and choose the same folder. Your saves, settings and mods stay, and the
-game's code is compiled again only when the new version needs it.
+game's code is compiled again only when the new version needs it. The game tells you when there is one
+([Updates](#updates)).
 
 **If it crashes or freezes,** please [open an issue](https://github.com/VCKing101/Dissidia012-pc/issues/new/choose)
 and attach `data/logs/D012Native.log` from the install folder (and `D012Native-previous.log`, the run before it). A
@@ -237,6 +241,17 @@ terminal and it asks there. SteamOS has all of these.
 - The Battle BGM Maker is not in the Linux setup yet. Music mods made with it elsewhere play as they do on Windows.
 - Install it in a folder of its own: the setup will not install over the Windows version's folder (a Proton install).
 - The Linux build and setup are made on a Windows PC with WSL; see [docs/port/platforms.md](docs/port/platforms.md).
+
+## Updates
+
+When the game starts, it asks GitHub whether a newer version is out. If one is, a notice on the title screen says so
+until you press a button.
+
+- **Check for updates** on the System page of the port's menu (Esc, or L3 + R3) asks again. When a newer version is
+  out, **Open the download page** opens its release in your browser. Install it as above, into the same folder.
+- **Check when the game starts**, on the same page, turns the check at start off. The button still works.
+- The check sends GitHub only its request, which names the port's version. It never downloads or installs anything.
+- A copy built from source (`setup.ps1`) does not check by itself: update it with `git pull` and `setup.ps1`.
 
 ## Downloadable content (DLC)
 

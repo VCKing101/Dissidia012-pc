@@ -14,6 +14,7 @@
 #include "gpu/frame_interpolation.hpp"
 
 #include "d012_hle.hpp"
+#include "d012_version.hpp"
 
 namespace portablekit {
 namespace {
@@ -86,6 +87,7 @@ const GameProfile &game() {
     static const GameProfile profile{
         .app_name = "D012Native",
         .project_name = "Dissidia 012 Native",
+        .project_version = d012::kVersion,
         .env_prefix = "D012",
         .data_organization = "Decomp-Dissidia",
         .data_application = "D012Native",

@@ -1109,10 +1109,17 @@ bool open(int player, std::uint32_t tag) {
     l.unit = "frame";
     l.tag = tag & kTagMask;
     if (!connect(l, listen, address, where, 30u)) {
-        if (l.refused)
+        if (l.refused) {
             failure = "This battle cannot start: the other player's game differs in " + l.refusal +
                       ". Both players need the same version of the port, the same mods that change the game, and "
                       "the same settings.";
+            // What a player can do about the two likeliest differences.
+            if (l.refusal.find("the port's version") != std::string::npos)
+                failure += " To see whether a newer version is out, choose Check for updates on the menu's "
+                           "System page.";
+            if (l.refusal.find("the compiler") != std::string::npos)
+                failure += " A Windows copy and a Linux copy cannot battle each other.";
+        }
         else if (!l.leaving && listen)
             failure = "The other player's game did not connect for this battle.";
         else if (!l.leaving)
