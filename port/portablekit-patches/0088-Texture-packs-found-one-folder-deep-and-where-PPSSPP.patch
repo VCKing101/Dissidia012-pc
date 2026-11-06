@@ -1,0 +1,235 @@
+From e5a3fe855c0884b141140b3db123720ec09341cd Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Sat, 7 Nov 2026 08:50:57 +1030
+Subject: [PATCH] Texture packs: found one folder deep, and where PPSSPP keeps
+ them
+
+With no pack directly in textures/<id>, the pack is read from its only
+subfolder holding textures.ini (a downloaded zip's own folder, copied in as
+it is), and else from the memory stick's PSP/TEXTURES/<id> or one folder
+deeper, where PPSSPP keeps packs and where a pack's own instructions put
+it. Such a pack is read where it is (TexturePackLocation::Source::Found),
+like one used in place; a pack in textures/<id> itself always comes first,
+and an import still copies there. Two packs one folder deep are not guessed
+between; hidden folders are skipped. memory_stick_path() gives the host
+folder behind ms0:.
+
+Tested on Windows with Dissidia 012 (USA): portablekit_texture_pack_tests
+(74 checks, five new for these places); a community pack (1,041 textures)
+loaded and drawn from PSP/TEXTURES/ULUS10566 and from a nested folder in
+textures/ULUS10566. Not tested: the import screen's review of a pack found
+these ways, Linux, Android.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/gpu/texture_pack_import.cpp | 28 ++++++++++++++++++++++++++--
+ host/gpu/texture_pack_import.hpp | 11 ++++++++---
+ host/gpu/vulkan_renderer.cpp     |  6 ++++--
+ host/hle/hle_common.hpp          |  2 ++
+ host/hle/hle_io.cpp              |  1 +
+ host/ui/texture_pack_screen.cpp  |  5 +++--
+ tests/texture_pack_tests.cpp     | 28 ++++++++++++++++++++++++++++
+ 7 files changed, 72 insertions(+), 9 deletions(-)
+
+diff --git a/host/gpu/texture_pack_import.cpp b/host/gpu/texture_pack_import.cpp
+index b105f1c..1b602d9 100644
+--- a/host/gpu/texture_pack_import.cpp
++++ b/host/gpu/texture_pack_import.cpp
+@@ -70,6 +70,21 @@ bool holds_pack(const fs::path &folder) {
+     return !folder.empty() && (is_file(folder / "textures.ini") || is_file(folder / "textures.zip"));
+ }
+ 
++// The one folder in `folder` that holds a pack, when exactly one does and
++// `folder` itself holds none; empty otherwise.
++fs::path only_pack_inside(const fs::path &folder) {
++    if (!is_folder(folder) || holds_pack(folder)) return {};
++    fs::path found;
++    std::error_code ec;
++    for (fs::directory_iterator it(folder, fs::directory_options::skip_permission_denied, ec);
++         !ec && it != fs::directory_iterator(); it.increment(ec)) {
++        if (name_of(it->path()).rfind('.', 0) == 0 || !is_folder(it->path()) || !holds_pack(it->path())) continue;
++        if (!found.empty()) return {};
++        found = it->path();
++    }
++    return found;
++}
++
+ bool lists(const std::vector<std::string> &games, const std::string &game_id) {
+     const std::string wanted = lower(game_id);
+     return std::any_of(games.begin(), games.end(), [&](const std::string &game) { return lower(game) == wanted; });
+@@ -198,7 +213,7 @@ std::string friendly(const std::string &error) {
+ } // namespace
+ 
+ TexturePackLocation texture_pack_location(const fs::path &textures_root, const std::string &game_id,
+-                                          const std::string &in_place) {
++                                          const std::string &in_place, const fs::path &memory_stick) {
+     if (const char *variable = portablekit::env("TEXTURE_PACK"); variable != nullptr) {
+         const std::string value = variable;
+         const std::string l = lower(value);
+@@ -208,7 +223,16 @@ TexturePackLocation texture_pack_location(const fs::path &textures_root, const s
+     }
+     if (!in_place.empty())
+         return {fs::path(std::u8string(in_place.begin(), in_place.end())), TexturePackLocation::Source::InPlace};
+-    return {textures_root / game_id, TexturePackLocation::Source::Installed};
++    const fs::path installed = textures_root / game_id;
++    if (holds_pack(installed)) return {installed, TexturePackLocation::Source::Installed};
++    if (const fs::path nested = only_pack_inside(installed); !nested.empty())
++        return {nested, TexturePackLocation::Source::Found};
++    if (const fs::path ppsspp = child(child(child(memory_stick, "PSP"), "TEXTURES"), game_id); !ppsspp.empty()) {
++        if (holds_pack(ppsspp)) return {ppsspp, TexturePackLocation::Source::Found};
++        if (const fs::path nested = only_pack_inside(ppsspp); !nested.empty())
++            return {nested, TexturePackLocation::Source::Found};
++    }
++    return {installed, TexturePackLocation::Source::Installed};
+ }
+ 
+ TexturePackCheck check_texture_pack(const fs::path &chosen, const std::string &game_id) {
+diff --git a/host/gpu/texture_pack_import.hpp b/host/gpu/texture_pack_import.hpp
+index bd59b27..1feef2f 100644
+--- a/host/gpu/texture_pack_import.hpp
++++ b/host/gpu/texture_pack_import.hpp
+@@ -33,14 +33,19 @@ namespace portablekit::gpu {
+ // Where the pack is read from: the folder <prefix>_TEXTURE_PACK names, when it
+ // names one; else the folder a pack used in place was left in (the
+ // video.texture_pack_folder setting, `in_place`); else <textures_root>/<id>,
+-// where an import copies packs.
++// where an import copies packs. A pack put there by hand one folder too deep
++// (a zip's own folder, textures/<id>/<name>/textures.ini) is read from that
++// folder, when it is the only one; and with none in <textures_root>/<id> at
++// all, a pack where PPSSPP keeps them, <memory_stick>/PSP/TEXTURES/<id>
++// (or one folder deeper), is read where it is (Source::Found).
+ struct TexturePackLocation {
+-    enum class Source : std::uint8_t { Installed, InPlace, Variable };
++    enum class Source : std::uint8_t { Installed, InPlace, Variable, Found };
+     std::filesystem::path folder;
+     Source source{Source::Installed};
+ };
+ [[nodiscard]] TexturePackLocation texture_pack_location(const std::filesystem::path &textures_root,
+-                                                        const std::string &game_id, const std::string &in_place);
++                                                        const std::string &game_id, const std::string &in_place,
++                                                        const std::filesystem::path &memory_stick = {});
+ 
+ struct TexturePackCheck {
+     std::filesystem::path chosen;  // what the player picked
+diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
+index e39775c..e8bf9e5 100644
+--- a/host/gpu/vulkan_renderer.cpp
++++ b/host/gpu/vulkan_renderer.cpp
+@@ -1,5 +1,6 @@
+ #include "../profile.hpp"
+ #include "portablekit_build_label.hpp"
++#include "hle/hle_common.hpp"
+ #include "ui/input_script.hpp"
+ #include "vulkan_renderer.hpp"
+ 
+@@ -5282,7 +5283,7 @@ void VulkanRenderer::Impl::apply_texture_pack() {
+     // where it is; otherwise the pack lives in textures/<disc id>/ in the
+     // per-user data directory (texture_pack_import.hpp).
+     pack_location = texture_pack_location(VulkanRenderer::textures_root(), portablekit::game().disc_id,
+-                                          settings::current().texture_pack_folder);
++                                          settings::current().texture_pack_folder, memory_stick_path());
+     const std::filesystem::path &folder = pack_location.folder;
+     std::string error;
+     // A quick pack's matches are kept beside the installed packs, whichever
+@@ -7569,7 +7570,8 @@ std::string VulkanRenderer::texture_dump_status() const {
+ 
+ std::string VulkanRenderer::texture_pack_folder() const {
+     const std::string in_place = settings::current().texture_pack_folder;
+-    return install::path_to_utf8(texture_pack_location(textures_root(), portablekit::game().disc_id, in_place).folder);
++    return install::path_to_utf8(
++        texture_pack_location(textures_root(), portablekit::game().disc_id, in_place, memory_stick_path()).folder);
+ }
+ 
+ void VulkanRenderer::set_sharp_textures(bool sharp) {
+diff --git a/host/hle/hle_common.hpp b/host/hle/hle_common.hpp
+index aa0197c..d5d1fa4 100644
+--- a/host/hle/hle_common.hpp
++++ b/host/hle/hle_common.hpp
+@@ -116,6 +116,8 @@ void register_io(HleRegistrar &hle, const std::filesystem::path &disc_image, con
+ // The disc image register_io opened as disc0:, empty without one. A port
+ // that reads the disc itself opens its own IsoImage on it.
+ [[nodiscard]] const std::filesystem::path &disc_image_path();
++// The host folder register_io backs ms0: with; empty before it runs.
++[[nodiscard]] const std::filesystem::path &memory_stick_path();
+ void register_system(HleRegistrar &hle);
+ void register_media(HleRegistrar &hle);
+ void register_atrac(HleRegistrar &hle);
+diff --git a/host/hle/hle_io.cpp b/host/hle/hle_io.cpp
+index de2d74a..76b41f2 100644
+--- a/host/hle/hle_io.cpp
++++ b/host/hle/hle_io.cpp
+@@ -847,6 +847,7 @@ void register_async_io(HleRegistrar &hle) {
+ } // namespace
+ 
+ const std::filesystem::path &disc_image_path() { return io().disc_path; }
++const std::filesystem::path &memory_stick_path() { return io().memory_stick; }
+ 
+ void register_io(HleRegistrar &hle, const std::filesystem::path &disc_image, const std::filesystem::path &memory_stick) {
+     if (!disc_image.empty()) {
+diff --git a/host/ui/texture_pack_screen.cpp b/host/ui/texture_pack_screen.cpp
+index 8882dcf..a871f10 100644
+--- a/host/ui/texture_pack_screen.cpp
++++ b/host/ui/texture_pack_screen.cpp
+@@ -7,6 +7,7 @@
+ 
+ #include "gpu/texture_pack_import.hpp"
+ #include "gpu/vulkan_renderer.hpp"
++#include "hle/hle_common.hpp"
+ #include "profile.hpp"
+ #include "install/user_data.hpp"
+ #include "settings/settings.hpp"
+@@ -145,10 +146,10 @@ void start_check(const fs::path &chosen) {
+     // Reading a large pack's folder and textures.ini takes a moment on a slow
+     // card; the menu keeps drawing meanwhile.
+     s.checking_folder = chosen;
+-    s.checking = std::async(std::launch::async, [chosen, in_place, root = textures_root()] {
++    s.checking = std::async(std::launch::async, [chosen, in_place, root = textures_root(), ms0 = memory_stick_path()] {
+         Review review;
+         review.check = gpu::check_texture_pack(chosen, portablekit::game().disc_id);
+-        review.current = gpu::texture_pack_location(root, portablekit::game().disc_id, in_place);
++        review.current = gpu::texture_pack_location(root, portablekit::game().disc_id, in_place, ms0);
+         review.current_pack = gpu::summarize_texture_pack(review.current.folder, portablekit::game().disc_id);
+         review.free_space = gpu::texture_pack_free_space(root);
+         std::error_code ec;
+diff --git a/tests/texture_pack_tests.cpp b/tests/texture_pack_tests.cpp
+index bff62c0..b140bca 100644
+--- a/tests/texture_pack_tests.cpp
++++ b/tests/texture_pack_tests.cpp
+@@ -273,6 +273,34 @@ void test_location(const fs::path &root) {
+     l = texture_pack_location(textures, kGame, "/somewhere/pack");
+     check(l.source == TexturePackLocation::Source::InPlace && l.folder == fs::path("/somewhere/pack"),
+           "a pack used in place is read from its folder");
++
++    // Packs put in by hand where the player expected them.
++    const fs::path places = root / "places";
++    const fs::path ms0 = places / "ms0";
++    const fs::path ppsspp = ms0 / "PSP" / "TEXTURES" / kGame;
++    const fs::path mine = places / "textures";
++    make_pack(ppsspp);
++    l = texture_pack_location(mine, kGame, "", ms0);
++    check(l.source == TexturePackLocation::Source::Found && l.folder == ppsspp,
++          "with none installed, a pack in the memory stick's PSP/TEXTURES is read where it is");
++    make_pack(mine / kGame / "Pack-main");
++    l = texture_pack_location(mine, kGame, "", ms0);
++    check(l.source == TexturePackLocation::Source::Found && l.folder == mine / kGame / "Pack-main",
++          "a pack one folder too deep in textures/<id> is read from that folder");
++    make_pack(mine / kGame / "Another");
++    l = texture_pack_location(mine, kGame, "", ms0);
++    check(l.source == TexturePackLocation::Source::Found && l.folder == ppsspp,
++          "two packs one folder deep are not guessed between");
++    make_pack(mine / kGame);
++    l = texture_pack_location(mine, kGame, "", ms0);
++    check(l.source == TexturePackLocation::Source::Installed && l.folder == mine / kGame,
++          "the installed pack wins over both");
++    fs::remove_all(mine);
++    make_pack(ms0 / "PSP" / "TEXTURES" / kGame / "Nested");
++    fs::remove(ppsspp / "textures.ini");
++    l = texture_pack_location(mine, kGame, "", ms0);
++    check(l.source == TexturePackLocation::Source::Found && l.folder == ppsspp / "Nested",
++          "a pack one folder deep in PSP/TEXTURES/<id> is read from there");
+ #if !defined(_WIN32)
+     setenv(variable.c_str(), "1", 1);
+     l = texture_pack_location(textures, kGame, "/somewhere/pack");
+-- 
+2.53.0.windows.1
+

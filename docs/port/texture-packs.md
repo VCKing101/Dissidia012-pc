@@ -18,6 +18,17 @@ same.
 | `setup.ps1` (from source) | `build\port\data\textures\ULUS10566\` |
 | The Steam Deck package | `data/textures/ULUS10566/` in its folder |
 
+Two other places work without importing (PortableKit patch 0088):
+
+- **One folder deeper**, the way a downloaded zip unpacks (`textures/ULUS10566/D012FFRT-main/textures.ini`): the
+  pack is read from that folder, as long as it is the only one there holding a `textures.ini`.
+- **Where PPSSPP keeps packs**, in the memory stick folder: `data/ms0/PSP/TEXTURES/ULUS10566/` (or one folder deeper),
+  for a pack copied in by a pack's own instructions for PPSSPP. It is read only while `textures/ULUS10566` holds no
+  pack.
+
+Either is read where it is, like a pack used in place. A pack copied into `textures/ULUS10566` itself always comes
+first.
+
 Or import it from the menu: open it (Esc, or L3 + R3 on a controller), go to **Video**, and choose **Import texture
 pack…**. Pick a folder and the port finds the pack in it, in any of these layouts:
 
@@ -196,3 +207,10 @@ four times the size, replaced the whole title screen; a pack of four-times image
 Old Chaos Shrine loads (135 images, text lines left out) was drawn through the battle without slowing it; the menu's
 **Dump textures** wrote both of the title picture's keys and turned off cleanly. Not tried: a community pack, story
 mode, the world map, and the Steam Deck.
+
+On Windows, with the clang build (7 November 2026), the community pack
+[D012FFRT](https://github.com/Niosa/D012FFRT) (1,041 textures, xxh64) loaded from `textures/ULUS10566`, from the
+memory stick's `PSP/TEXTURES/ULUS10566`, and from `textures/ULUS10566/D012FFRT-main`; its button icons and character
+art were drawn in the menus and a Quick Battle, with a build of 6 November too. About 220 of its entries name images
+the pack does not have yet (Old Chaos Shrine's textures among them); those textures keep the game's own pictures, as
+in PPSSPP. Not tried: the import screen's review of a pack found these ways, the Linux build and the Steam Deck.

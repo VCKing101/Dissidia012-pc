@@ -302,6 +302,9 @@ inside it:
 | `setup.ps1` (from source) | `build\port\data\textures\ULUS10566\` |
 | The Steam Deck package (Proton) | `data/textures/ULUS10566/` in its folder |
 
+A pack copied where PPSSPP keeps packs works too: `data/ms0/PSP/TEXTURES/ULUS10566/` in the install folder. So does
+a pack one folder too deep, as a downloaded zip unpacks (`data/textures/ULUS10566/<pack name>/textures.ini`).
+
 Or open the menu (Esc, or L3 + R3 on a controller), go to **Video**, and choose **Import texture pack…**: it finds the
 pack in a folder you pick, including PPSSPP's `PSP/TEXTURES/...` layout, checks it, and copies it in or uses it where
 it is. The **Texture pack** row turns packs on and off and says how many textures loaded.
