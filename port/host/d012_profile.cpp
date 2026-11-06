@@ -82,6 +82,14 @@ constexpr gpu::interpolation::CutThresholds kInterpolationThresholds{
     .max_own_motion = 4.0f,
 };
 
+// Pixel art drawn sharp whatever the Texture filter setting says. The chocobo
+// on the white loading screen between battles and menus, with its note,
+// carrot, chest and Zzz bubbles: a 64x128 texture whose key is as Dump
+// textures names it. Smoothed at a higher resolution, it blurred.
+constexpr SharpTexture kSharpTextures[] = {
+    {"0000000042af9f8c2c87379b", 64u, 128u},
+};
+
 } // namespace
 
 const GameProfile &game() {
@@ -142,6 +150,8 @@ const GameProfile &game() {
         // A USA console: English, confirm on cross.
         .system_language = 1u,
         .confirm_button = 1u,
+
+        .sharp_textures = kSharpTextures,
 
         .cheats = d012::builtin_cheats(),
     };

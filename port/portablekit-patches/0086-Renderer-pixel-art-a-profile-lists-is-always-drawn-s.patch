@@ -1,0 +1,185 @@
+From 02ebc93d2e17379e91cee332b1ca04927ed862be Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Fri, 6 Nov 2026 22:31:07 +1030
+Subject: [PATCH] Renderer: pixel art a profile lists is always drawn sharp
+
+GameProfile::sharp_textures lists textures to draw with nearest filtering
+whatever the Texture filter setting says: sprites that smoothing blurs at a
+higher resolution. Each is named by its key as Dump textures names the file,
+with its size; only a texture of a listed size is hashed, once, when it is
+uploaded. Such a texture keeps the sharp sampler when the setting changes.
+<prefix>_NO_SHARP_PIXEL_ART=1 draws them as the setting says.
+
+Tested on Windows with Dissidia 012 (USA): the chocobo on the loading screen
+after a Quick Battle is drawn sharp with Texture filter on Smooth, and smooth
+again with the switch. Not tested: Linux, Android, a listed texture that a
+texture pack replaces.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ docs/DESKTOP_APP.md          |  2 +-
+ docs/PROFILE_GUIDE.md        |  2 ++
+ host/gpu/vulkan_renderer.cpp | 61 +++++++++++++++++++++++++++++-------
+ host/profile.hpp             | 13 ++++++++
+ 4 files changed, 65 insertions(+), 13 deletions(-)
+
+diff --git a/docs/DESKTOP_APP.md b/docs/DESKTOP_APP.md
+index 6e3a9c2..d8fc79f 100644
+--- a/docs/DESKTOP_APP.md
++++ b/docs/DESKTOP_APP.md
+@@ -83,7 +83,7 @@ Today a port is a `GameProfile` written in C++ ([`host/profile.hpp`](../host/pro
+ | `save_game_name`, `save_folders` | the disc id. The game names its folders itself when it saves; the save screen's labels are generic ("Game data") | the main one; the others only by running |
+ | `adhoc_product_code` | the disc id | a guess that holds for most games |
+ | `app_name`, `project_name`, `env_prefix`, data names | the app's own (`portablekit`, `PORTABLEKIT_*`) | — |
+-| `register_extra_hle`, `patch_loaded_image`, `camera`, `view_aspect_frame`, `interpolation_thresholds`, `glyph_cache`, `trigger_profiles`, `other_releases`, `cheats` | none: the framework's defaults | these are what hand profiles are for |
++| `register_extra_hle`, `patch_loaded_image`, `camera`, `view_aspect_frame`, `interpolation_thresholds`, `glyph_cache`, `trigger_profiles`, `other_releases`, `sharp_textures`, `cheats` | none: the framework's defaults | these are what hand profiles are for |
+ 
+ The entry point, the code ranges, the imports and relocations are read from the ELF by the framework already; the recompiler finds the code by its own analysis (`psp_recomp --auto`). Modules the game loads from its disc that the framework implements as HLE (`libfont.prx`, `psmf.prx` and the like) are recognised by name at run time.
+ 
+diff --git a/docs/PROFILE_GUIDE.md b/docs/PROFILE_GUIDE.md
+index 9252fbd..19d29dd 100644
+--- a/docs/PROFILE_GUIDE.md
++++ b/docs/PROFILE_GUIDE.md
+@@ -75,6 +75,8 @@ For a picture of the port's own beside one of the game's screens, such as a hint
+ 
+ `glyph_cache` is for changing the font while a game runs. A game that caches the glyphs it has drawn keeps them until its atlas needs the cell, so a new font shows only in text it has not drawn yet. Where the game keeps that atlas, read off its own text code, lets the framework make it draw them again. Null for any game nobody has traced.
+ 
++`sharp_textures` lists pixel art to draw with nearest filtering whatever the Texture filter setting says, for a sprite that smoothing blurs at a higher resolution. Each is a `SharpTexture`: its key as **Dump textures** names the file (the address ignored, xxh64), and its width and height. Only a texture of a listed size is hashed, when it is uploaded, so the list costs nothing for the others. A key covers one texture with one palette, so a sprite sheet loaded with another palette, or as a different part of its picture, has a key of its own: dump each scene it appears in. `<prefix>_NO_SHARP_PIXEL_ART=1` draws them as the setting says, for a comparison. A texture pack's image for a listed texture keeps the pack's own filtering. Without any, the setting decides for every texture.
++
+ `cheats` lists cheats the port offers on the menu's Cheats page, beside the player's own PPSSPP cheat file (`PSP/Cheats/<disc id>.ini` on the memory stick, `host/cheats/cheats.hpp`). Each is a `BuiltinCheat`: a key for settings.ini, the heading it goes under, a name, a sentence for the footer, and its choices, each a label and its CWCheat code lines (what a cheat file has after `_L`). One choice makes a switch; several make Off and each. They run through the same engine as the file, before it, every 77 ms of the game's time, so a code written as a player would write it gives the same result. A write into recompiled code is left out, as for the file; such a code needs the interpreter, which cheats do not reach yet. Test each against the game's own screens before listing it: a public list's codes can name an address the game no longer reads. Without any, the page has only the switch and the file.
+ 
+ `interpolation_thresholds` is for frame interpolation, which blends the game's frames and must not blend across a camera cut. The angles and fractions it uses to tell a cut from motion hold for any game; its distances are in the game's own world units, and the defaults were measured on Monster Hunter Portable 3rd. A game whose world is on a very different scale gives its own; one that does not, gets those defaults.
+diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
+index b7a3a58..e39775c 100644
+--- a/host/gpu/vulkan_renderer.cpp
++++ b/host/gpu/vulkan_renderer.cpp
+@@ -938,6 +938,9 @@ struct VulkanRenderer::Impl {
+         // How far down a 512-tall texture has been drawn, which decides how
+         // much of it the pack's hash covers; see texture_pack.hpp.
+         std::uint16_t max_seen_v{};
++        // Pixel art the profile lists (GameProfile::sharp_textures): drawn
++        // with nearest filtering whatever the Texture filter setting says.
++        bool always_sharp{};
+     };
+ 
+     RendererConfig config;
+@@ -2529,6 +2532,20 @@ struct VulkanRenderer::Impl {
+     }
+ 
+     [[nodiscard]] VkSampler texture_sampler() const { return sharp_textures ? sharp_sampler : sampler; }
++    [[nodiscard]] VkSampler sampler_for(const Texture &texture) const {
++        return texture.always_sharp ? sharp_sampler : texture_sampler();
++    }
++    // Points a texture's descriptor at the sampler it is drawn with now.
++    void write_texture_sampler(const Texture &texture) {
++        if (texture.descriptor == VK_NULL_HANDLE) return;
++        VkDescriptorImageInfo image_info{sampler_for(texture), texture.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
++        VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
++        write.dstSet = texture.descriptor;
++        write.descriptorCount = 1u;
++        write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
++        write.pImageInfo = &image_info;
++        vkUpdateDescriptorSets(device, 1u, &write, 0u, nullptr);
++    }
+     [[nodiscard]] VkSampler framebuffer_sampler() const {
+         static const bool sharp_targets = portablekit::env_set("SHARP_RENDER_TARGETS");
+         return sharp_textures && sharp_targets ? clamp_sharp_sampler : clamp_sampler;
+@@ -5043,6 +5060,32 @@ std::uint16_t update_max_seen_v(std::uint16_t seen, std::uint16_t drawn, bool th
+     return drawn > seen ? 512u : seen;
+ }
+ 
++// Whether the profile lists this texture as pixel art to draw sharp
++// (GameProfile::sharp_textures), by its key as a dump names it. Only a
++// texture of a listed size is hashed. <prefix>_NO_SHARP_PIXEL_ART=1: none is.
++bool listed_pixel_art(const GuestMemory &memory, const TextureState &texture, std::uint16_t max_seen_v,
++                      const TexturePackOptions &options) {
++    static const bool off = portablekit::env_set("NO_SHARP_PIXEL_ART");
++    const std::span<const SharpTexture> listed = portablekit::game().sharp_textures;
++    if (off || listed.empty()) return false;
++    const auto sized = [&](const SharpTexture &entry) {
++        return entry.width == texture.width && entry.height == texture.height;
++    };
++    if (std::none_of(listed.begin(), listed.end(), sized)) return false;
++    TexturePackKey key;
++    std::uint32_t covered_width = 0u, covered_height = 0u;
++    if (!compute_texture_pack_key(memory, texture, max_seen_v, options, key, covered_width, covered_height))
++        return false;
++    const std::string name = format_texture_pack_key(key);
++    for (const SharpTexture &entry : listed) {
++        if (!sized(entry) || name != entry.key) continue;
++        static std::set<std::string> reported;
++        if (reported.insert(name).second) std::cout << "[render] pixel art " << name << " is drawn sharp\n";
++        return true;
++    }
++    return false;
++}
++
+ } // namespace
+ 
+ VulkanRenderer::Impl::Texture &VulkanRenderer::Impl::texture_for(const GuestMemory &memory, const DrawCall &call) {
+@@ -5174,6 +5217,10 @@ VulkanRenderer::Impl::Texture &VulkanRenderer::Impl::texture_for(const GuestMemo
+     Texture texture = job ? create_texture_image(state.width, state.height)
+                           : create_texture(state.width, state.height, pixels.data());
+     if (texture.descriptor == VK_NULL_HANDLE) return white_texture;
++    if (listed_pixel_art(memory, state, max_seen_v, kDumpOptions)) {
++        texture.always_sharp = true;
++        write_texture_sampler(texture);
++    }
+     if (job) {
+         if (!decode_pool) {
+             const std::uint32_t cores = std::max(1u, std::thread::hardware_concurrency());
+@@ -7532,18 +7579,8 @@ void VulkanRenderer::set_sharp_textures(bool sharp) {
+     impl.sharp_textures = sharp;
+     // The sampler is part of each texture's descriptor; rewrite them all.
+     impl.device_wait_idle();
+-    const auto rewrite = [&](Impl::Texture &texture) {
+-        if (texture.descriptor == VK_NULL_HANDLE) return;
+-        VkDescriptorImageInfo image_info{impl.texture_sampler(), texture.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+-        VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+-        write.dstSet = texture.descriptor;
+-        write.descriptorCount = 1u;
+-        write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+-        write.pImageInfo = &image_info;
+-        vkUpdateDescriptorSets(impl.device, 1u, &write, 0u, nullptr);
+-    };
+-    rewrite(impl.white_texture);
+-    for (auto &[key, texture] : impl.textures) rewrite(texture);
++    impl.write_texture_sampler(impl.white_texture);
++    for (auto &[key, texture] : impl.textures) impl.write_texture_sampler(texture);
+     for (Impl::PaletteView &view : impl.palette_views) {
+         if (view.descriptor == VK_NULL_HANDLE) continue;
+         VkDescriptorImageInfo image_info{impl.framebuffer_sampler(), view.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+diff --git a/host/profile.hpp b/host/profile.hpp
+index f0b7675..6ee4bef 100644
+--- a/host/profile.hpp
++++ b/host/profile.hpp
+@@ -77,6 +77,13 @@ struct RegionRelease {
+     std::span<const SaveFolder> save_folders;
+ };
+ 
++// A texture of the game's that is always drawn sharp (GameProfile::sharp_textures).
++struct SharpTexture {
++    const char *key;      // as Dump textures names it, e.g. "0000000042af9f8c2c87379b"
++    std::uint16_t width;  // its size: only textures of this size are hashed to find it
++    std::uint16_t height;
++};
++
+ // One setting of a built-in cheat: its CWCheat codes, the lines a cheat file
+ // gives after "_L", one per line ("0x203BFA00 0x05F5E0FF\n...").
+ struct CheatChoice {
+@@ -334,6 +341,12 @@ struct GameProfile {
+     // the game runs applies to text the game has not drawn yet.
+     const GlyphCacheLayout *glyph_cache = nullptr;
+ 
++    // --- Pixel art -------------------------------------------------------------
++    // Textures drawn with nearest filtering whatever the Texture filter setting
++    // says: pixel art that smoothing blurs at a higher resolution. Empty: the
++    // setting decides for every texture.
++    std::span<const SharpTexture> sharp_textures = {};
++
+     // --- Cheats ----------------------------------------------------------------
+     // The cheats the port offers on the Cheats page, besides the player's own
+     // cheat file (cheats/cheats.hpp). Empty: only the file's.
+-- 
+2.53.0.windows.1
+
