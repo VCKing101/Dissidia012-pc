@@ -48,15 +48,17 @@ used or shipped.
 | Row | Choices | Writes | Seen in the game |
 | --- | --- | --- | --- |
 | Gil | 1,000,000 / 99,999,999 | `0x08BBFA00` | both, in Customization and on the world map |
-| KP | 250 / 1,000,000 / 99,999,999 | `0x08BEE31C` (1,000,000 also `0x09692D14`) | 1,000,000 on the world map |
-| PP | 20,000 / 9,999,999 | `0x096B2DC0` | 20,000 in the PP Catalog |
+| KP | 250 / 1,000,000 / 99,999,999 | `0x08BEE31C` (1,000,000 also `0x09692D14`) | all three, on the world map |
+| PP | 20,000 / 9,999,999 | `0x096B2DC0` | both, in the PP Catalog |
 | All equipment ×99 | on | a count of 99 every 4 bytes from `0x08BBE41A`, 677 of them | the Equip list, every item ×99 |
 | All accessories ×99 | on | the same from `0x08BBEEC6`, 589 | the accessory list, every item ×99 |
-| Mala Bestia accessories ×99 | on | 9 of those counts | no |
+| Mala Bestia accessories ×99 | on | 9 of those counts | Growth Egg, Valor Resin, Chocobo Down, Wing and Feather, Supershine, Mog's Amulet, Qu'Bia Tail ×99 |
 | All summons | on | 61 summonstones from `0x08BBF8BD`: 10 uses and a 3 | every summonstone, 10 uses left |
-| Infinite HP, Max HP 999,999, Bravery 9,999, Infinite EX, Infinite Assist, Level 100 | on | 32 bits at the word at `0x08B633B0` minus `0xE58`, `0xE54`, `0xE4C`, `0xE48`, `0xE44`, `0xE60` | Bravery 9999; Enter EX Mode offered; Lv100 in battle and in Battle Setup |
-| Opponent: Bravery 0, Max HP 100, No EX, No Assist | on | the same minus `0x2C`, `0x34`, `0x28`, `0x24` | Bravery 0 and a Break; max HP 100 |
+| Infinite HP, Max HP 999,999, Bravery 9,999, Infinite EX, Infinite Assist, Level 100 | on | 32 bits at the word at `0x08B633B0` minus `0xE58`, `0xE54`, `0xE4C`, `0xE48`, `0xE44`, `0xE60` | HP stayed at 1242 through a 755-damage HP attack (0 without the cheat); HP 999999; Bravery 9999; Enter EX Mode offered; the Assist gauge full with Use Assist offered; Lv100 |
+| Opponent: Bravery 0, Max HP 100, No EX, No Assist | on | the same minus `0x2C`, `0x34`, `0x28`, `0x24` | Bravery 0 and a Break; max HP 100; against a Very High CPU, its EX and Assist gauges stayed empty (without the cheats it filled both and entered EX Mode) |
 | Opponent: Defeat with Select | on | `0x38` = 999,999 while Select is held (a joker line) | the opponent falls at once |
+
+**Level 100 is a real level-up.** It sets the level of the fighter in battle, and the game makes that the character's level: after the cheat is turned off, Customization still shows Lv100 with 1,969,359 EXP and HP 6,999, and the game keeps it when it saves.
 
 The list's codes were changed in three places:
 
@@ -88,6 +90,5 @@ and the **AP after battle** codes (`0x09AEA568`): with 255 chosen, a Quick Battl
 - The page: its headings and rows, the cheat file page and back, and a change made with the pad saved to
   `settings.ini`.
 
-Not verified: KP 250 and 99,999,999, PP 9,999,999, Mala Bestia, Infinite HP under real damage (the CPU barely
-attacked), Max HP 999,999, Infinite Assist, the opponent's No EX and No Assist, whether Level 100 stays after the
-cheat is turned off and the game saves, a cheat that writes code, the European disc, Linux and the Steam Deck.
+Not verified: a cheat that writes code, the European disc, Linux and the Steam Deck. The battle cheats were tried
+in Quick Battle only, against Lightning.

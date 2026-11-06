@@ -94,7 +94,7 @@ constexpr BuiltinCheat kCheats[] = {
     {"bravery", kBattle, "Bravery 9,999", "Your Bravery stays at 9,999.", kBravery},
     {"infinite_ex", kBattle, "Infinite EX", "Your EX gauge stays full.", kInfiniteEx},
     {"infinite_assist", kBattle, "Infinite Assist", "Your Assist gauge stays full.", kInfiniteAssist},
-    {"level_100", kBattle, "Level 100", "Your fighter is level 100.", kLevel100},
+    {"level_100", kBattle, "Level 100", "Raises the fighter you battle with to level 100. It stays at level 100 when the cheat is off.", kLevel100},
     {"enemy_bravery", kOpponent, "Bravery 0", "The opponent's Bravery stays at 0.", kEnemyBravery},
     {"enemy_max_hp", kOpponent, "Max HP 100", "The opponent's maximum HP is 100.", kEnemyMaxHp},
     {"enemy_no_ex", kOpponent, "No EX", "The opponent's EX gauge stays empty.", kEnemyNoEx},

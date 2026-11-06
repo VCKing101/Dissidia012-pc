@@ -339,7 +339,8 @@ Open the menu (Esc, or L3 + R3 on a controller) and go to **Cheats**:
   Bravery 0, Max HP 100, No EX and No Assist for the opponent, and Defeat with Select.
 - **Use cheats** at the top turns them all off at once.
 
-PP shows its new amount after you leave the PP Catalog and open it again.
+PP shows its new amount after you leave the PP Catalog and open it again. **Level 100** really levels up the
+character you fight with: it stays at level 100 after you turn the cheat off.
 
 **PPSSPP cheat files** work too. Put the file in a `Cheats` folder in your memory stick folder's `PSP` folder,
 named after your disc: `data\ms0\PSP\Cheats\ULUS10566.ini` in the install folder (`data/ms0/PSP/Cheats/` on Linux;
