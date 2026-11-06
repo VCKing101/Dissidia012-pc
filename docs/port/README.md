@@ -162,6 +162,11 @@ disassembler and the new `tools/port/` scripts cover the analysis.
   also holds smooth shapes, and is left to the setting. Verified on Windows after Return to Battle Setup; the EXP
   multiplier and Chocobo Down scenes, Linux and the Deck were not seen.
 
+## Closing the game from the title screen (6 November 2026)
+
+- [Title quit](title-quit.md): circle on the title screen's menu asks "Close the game?"; how the port tells the title
+  screen apart (its handler's pad call, `menu:0x089DF330`), and PortableKit's `ui::request_quit()` (patch 0087).
+
 ## Next steps
 
 1. ~~Read PortableKit's sources.~~ Done; see above.

@@ -6,6 +6,8 @@
 // game's own menu sounds. D012_NO_NATIVE_DIALOGS=1 keeps PortableKit's look;
 // D012_NO_DIALOG_SOUNDS=1 keeps them silent.
 
+#include "../decomp/guest.h"
+
 namespace portablekit {
 class HleRegistrar;
 }
@@ -13,5 +15,9 @@ class HleRegistrar;
 namespace d012::dialogs {
 
 void install(portablekit::HleRegistrar &hle);
+// From an override on the game's thread: plays the sounds a dialog asked for
+// since the game last polled one of its own (a port's own question over a
+// game screen, which the game does not poll).
+void play_queued_sounds(Guest *g);
 
 } // namespace d012::dialogs

@@ -55,6 +55,7 @@ distributed.**
   System page opens its download page ([below](#updates)).
 - **Save, load and keyboard screens in the game's own style**: the PSP drew these itself; here they are drawn with
   the game's own menu pieces, read from your disc, like its Data Config page, with its menu sounds.
+- **Close the game from the title screen**: press circle there, then choose Yes.
 - **Cheats** on the menu's Cheats page: gil, KP, PP, items and battle cheats, and PPSSPP cheat files
   ([below](#cheats)).
 
