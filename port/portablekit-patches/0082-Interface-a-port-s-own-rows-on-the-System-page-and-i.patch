@@ -1,0 +1,97 @@
+From 565753834855708dae71ecea28e210cc29c2028a Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Fri, 6 Nov 2026 11:42:34 +1030
+Subject: [PATCH] Interface: a port's own rows on the System page, and its own
+ version in About
+
+ui::add_system_rows(rows) adds a port's rows to the System page, after Saves
+and before About, as add_menu_rows and add_network_rows do for their pages.
+
+GameProfile::project_version is the port's own version ("1.2.0"). When set,
+About shows it beside project_name and lists PortableKit's version on a row
+of its own; when null, About shows PortableKit's version beside
+project_name, as before.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/profile.hpp |  4 ++++
+ host/ui/menu.cpp | 19 ++++++++++++++++++-
+ host/ui/ui.hpp   |  2 ++
+ 3 files changed, 24 insertions(+), 1 deletion(-)
+
+diff --git a/host/profile.hpp b/host/profile.hpp
+index 38782dc..58738f4 100644
+--- a/host/profile.hpp
++++ b/host/profile.hpp
+@@ -153,6 +153,10 @@ struct GameProfile {
+     // --- What the port is called -------------------------------------------
+     const char *app_name;          // the executable: "MHP3rdNative"
+     const char *project_name;      // what the player sees: "Yakumo"
++    // The port's own version ("1.2.0"), shown beside project_name in the
++    // menu's About section, which then lists PortableKit's version on a row of
++    // its own. Null: About shows PortableKit's version beside project_name.
++    const char *project_version = nullptr;
+     // Environment variables are read as "<env_prefix>_NAME", so every port has
+     // its own set and two of them can run side by side without sharing state.
+     const char *env_prefix;        // "MHP3RD"
+diff --git a/host/ui/menu.cpp b/host/ui/menu.cpp
+index e806d89..626dc43 100644
+--- a/host/ui/menu.cpp
++++ b/host/ui/menu.cpp
+@@ -102,6 +102,12 @@ std::vector<void (*)()> &port_network_rows() {
+     return list;
+ }
+ 
++// And on the System page (add_system_rows).
++std::vector<void (*)()> &port_system_rows() {
++    static std::vector<void (*)()> list;
++    return list;
++}
++
+ int cycle(int value, int delta, int count) { return ((value + delta) % count + count) % count; }
+ 
+ // Percent-encodes a path for a file:// URL.
+@@ -1503,8 +1509,15 @@ void Menu::system() {
+     section("Saves");
+     save_rows();
+ 
++    for (void (*rows)() : port_system_rows()) rows();
++
+     section("About");
+-    info_row(portablekit::game().project_name, std::string(kBuildVersion));
++    if (const char *version = portablekit::game().project_version; version != nullptr) {
++        info_row(portablekit::game().project_name, version);
++        info_row("PortableKit", std::string(kBuildVersion));
++    } else {
++        info_row(portablekit::game().project_name, std::string(kBuildVersion));
++    }
+     if (*kBuildLabel != '\0') info_row("Build", kBuildLabel);
+     info_row("Game", std::string(portablekit::game().game_title) + " (" + portablekit::active_disc_id_display() + ")");
+     info_row("Data folder", data_dir);
+@@ -1698,6 +1711,10 @@ void add_network_rows(void (*rows)()) {
+     if (rows != nullptr) port_network_rows().push_back(rows);
+ }
+ 
++void add_system_rows(void (*rows)()) {
++    if (rows != nullptr) port_system_rows().push_back(rows);
++}
++
+ void draw_over_game() {
+     Layer &layer = Layer::get();
+     if (!layer.attached()) return;
+diff --git a/host/ui/ui.hpp b/host/ui/ui.hpp
+index d5be2f1..b2615f2 100644
+--- a/host/ui/ui.hpp
++++ b/host/ui/ui.hpp
+@@ -55,6 +55,8 @@ void open_panel_over_game(bool (*frame)());
+ void add_menu_rows(void (*rows)());
+ // The same on the Network page, after Ad hoc play's rows and before Status.
+ void add_network_rows(void (*rows)());
++// And on the System page, after Saves and before About.
++void add_system_rows(void (*rows)());
+ // Where the game's 480x272 picture was last drawn, in ImGui's coordinates
+ // (window coordinates): a point (x, y) of the PSP's screen is at
+ // (left + x * width / 480, top + y * height / 272). The whole PSP screen
+-- 
+2.53.0.windows.1
+
