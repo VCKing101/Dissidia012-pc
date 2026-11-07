@@ -1,8 +1,9 @@
 # Playing online
 
 Two players, each with their own copy of the port, fight a 1-on-1 battle over the internet through the game's
-Communications Mode. **Experimental:** it has been played between Windows and a Steam Deck, and the details may change.
-How it works and how it was tested: [Communication Mode](communication-mode.md), sections 11 to 15.
+Communications Mode. **Experimental:** it has been played between Windows and a Steam Deck, and
+between Windows and Linux, and the details may change. How it works and how it was tested:
+[Communication Mode](communication-mode.md), sections 11 to 16.
 
 Both players need the same version of the port, the same mods that change the game (music mods may differ) and the
 same test settings. The game checks as the battle starts and says what differs. Saves and official DLC may differ.
