@@ -94,6 +94,18 @@ session group's name and creator are not known yet (I). The fighters for each fi
 | 4 | The spectator stream and the spectator handler's override; drop step 1's fallback | medium-large (600-900 lines) | Spectator check values agree every 10 frames; a lagging and a quitting spectator |
 | 5 | PortableKit: listen backlog 16 (5 today, `client.cpp:874`), matching unit tests | small | `tools/port/pk_ctest.cmd` |
 
+**Step 4, the spectator stream, as now understood** (8 November; not built). The game's spectator handler
+(0x0890DF58) is not a mirror of the fighters': it keeps a history of each player's 16-bit words per member (records
+of 0xF4 bytes from `net+0x35C`, the words at +4, a count at +0xCC, a checksum over 100 words), unpacks them into
+the raw pads (0x0890D090) and checks the battle (0x0890CBD4). Replacing it means: (1) the leading fighter streams
+both players' full pads and the check values of frames whose inputs are certain, through the session host's relay,
+to every copy that watches (a WATCH packet subscribes a copy to a battle's tag; the relay fans the stream out); (2)
+an override of 0x0890DF58 that waits for a frame's pads, injects both, runs the check step every tenth frame and
+compares, and never returns 1; (3) the battle's tag counted on every copy in every role, so watchers find it; (4)
+`comm_battle::active()` and the camera code for the watcher's role, with both fighters' camera settings in the
+stream. The fields the spectator handler advances besides the raw pads are the open question: a trace of one
+watched fight's `net` before and after each handler call settles it.
+
 Steps 0 to 2 give Group Battle as the PSP had it. Steps 3 and 4 give it the port's netcode. Step 3 also fixes the
 Online Lobby gap above, so it is worth doing whichever way Group Battle goes. Every step with three copies needs
 the owner present (ad hoc tests and the firewall), and three copies on one PC need `D012_NET_BATTLE=PORT`, since each

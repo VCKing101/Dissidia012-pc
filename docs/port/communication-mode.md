@@ -765,3 +765,21 @@ to each fighter); a party battle of more than one fight (the per-battle tag coun
 whenever the same two copies fight every battle in a group, as they do without watchers); Round-Robin; a watcher on a
 slow connection; a server run on its own (`--adhoc-server`, as on a VPS), which has no relay: its battles still need
 `online.battle_link`.
+
+### 18.4 Party battles of several fights (7 and 8 November 2026)
+
+Three copies on this PC, the copy hosting the session as its server (`D012_HOST_SESSION=1`), driven live
+(`D012_INPUT_LIVE`) through the menus with screenshots at each step, and the fighters on random or attack-spam
+input. V:
+
+| Run | Parties | Format | What happened |
+| --- | --- | --- | --- |
+| `gp1` | Party A: copy 1 (the room's and session's host) and copy 3; Party B: copy 2 | Tournament | Fight 1, copy 1 (Lightning) against copy 2 (Lightning), with copy 3 watching; copy 1 lost. Fight 2, copy 3 (Vaan) against copy 2, with copy 1 now watching. Copy 2 won both: 0 - 2 DEFEATED on copies 1 and 3, 2 - 0 VICTORY on copy 2. Brave and HP agreed on all three at every look |
+| `gr4` | Party A: copy 2; Party B: copy 3; copy 1 (the host) watched | Round-Robin (3 Rounds), three characters a party | Rounds 1 and 2 (Lightning, then Vaan, against their counterparts) were fought to their end, and round 3 (Laguna against Laguna) began on all three copies, the watcher following each. Round 3 was stopped after 15 minutes with neither fighter hit (the attack-spam input's shots missed), so the final result was not reached; all three copies agreed at every look |
+
+- Every fight had a watcher, so each ran on the game's own exchange (18.2); the log says so at each fight's start
+  on both fighters.
+- A party's members each press Enter Battle; one player's press does not start the battle. In Round-Robin each
+  fighter fills one slot a round. A slot's "Random" column opens the round's stage and rules.
+- A note for tests: two test benches must not run at once on one PC. A second bench's copy with the same address
+  joined the first bench's session, pushed its player 2 out and broke the room (`gr2`).
