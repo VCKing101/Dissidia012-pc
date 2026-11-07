@@ -676,3 +676,22 @@ Communications, Send Friend Card, the two notes, YES):
 **Not verified.** Sending an Original Quest, Import a Friend Card, three or more players, two machines, and whether
 the received card is kept after saving. The new unit test is one of the ad hoc tests, which need someone at the PC
 (they raise the firewall prompt) and were not run.
+
+### 17.3 Windows against Linux
+
+The Windows build against the Linux build in WSL (the Linux copy hosting the session, so the Windows copy only
+connects out; router ports off), both from this change, as in section 16.
+
+- **A battle** (`xb2`, both copies holding packets 50 ± 10 ms with 1% loss): linked with 2 frames and stayed in step
+  to the run's time limit (frame 6,300). The first try (`xb1`) was refused on "the port's version": the Windows
+  program had been built before the two new patch files were added, and they are part of the fingerprint.
+- **The balance does not settle there, because WSL's clock is slow.** Over a minute, WSL's monotonic clock counted
+  60.0 s while Windows counted 63.6 s: 94.35% of the rate. A Linux copy in WSL paces itself to that clock, so it
+  plays about 5.7% slower in real time. The Windows copy held itself back by the most the balance allows
+  (about 0.8 s per 30 s) and still waited for the Linux copy on most frames, as it would have without the balance.
+  The battle still kept in step; only the waiting was not shared. Two real machines' clocks differ by parts per
+  million, which the balance takes up easily, so WSL cannot test this part; a real Linux machine or the Deck can.
+- **Communications** (`xc1`, the Linux copy on another save): both joined `DISCOVER`, found each other and traded
+  their 27,416-byte datagrams every second through the Linux copy's server. The Windows copy listed the Linux
+  copy's card under Received Friend Card and then in its Friend Card list, marked NEW. The Linux copy showed
+  "Receiving data from 1 players" (its circle press missed, as in the runs on one PC).
