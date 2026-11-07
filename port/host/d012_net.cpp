@@ -25,6 +25,16 @@
 //   its clock in ms; PROBE ECHO (6) sends the same u32 straight back. With
 //   the input delay on auto (online.input_delay empty or "auto"), a few round
 //   trips timed so decide the delay the WELCOME gives.
+// - WATCH (9), a watching copy to the relay, which passes it to both fighters:
+//   u32 the watcher's id, u64 how many of the battle's frames it holds (all
+//   frames below it).
+// - STREAM (10), the leading fighter to the relay, which passes it to the
+//   battle's watchers: u64 the first frame carried, u16 their count, u8 1 once
+//   the battle has ended for the leader, u8 the check values carried, u32 the
+//   frame it ended at, u32 a hash of the must-match list, both players'
+//   camera settings (as in ABOUT, 9 bytes each), the check values (u32 frame,
+//   u32 value each), then 32 bytes a frame: player 0's pad and player 1's, as
+//   INPUT's 16 bytes with dialog and save 0.
 // Each INPUT carries every frame the other copy has not confirmed (up to 64),
 // so a lost packet costs only the wait for the next one. The first `delay`
 // frames carry nobody's input on either copy.
@@ -118,7 +128,9 @@ constexpr std::uint8_t kProbe = 5u;
 constexpr std::uint8_t kProbeEcho = 6u;
 constexpr std::uint8_t kRefuse = 7u;
 constexpr std::uint8_t kHere = 8u;  // the leading copy, to the relay: "I am here"
-constexpr std::uint32_t kVersion = 7u;
+constexpr std::uint8_t kWatch = 9u;
+constexpr std::uint8_t kStream = 10u;
+constexpr std::uint32_t kVersion = 8u;
 constexpr std::size_t kHead = 8u;
 constexpr std::size_t kInputHead = kHead + 52u;
 constexpr std::size_t kLocalSize = 16u;
@@ -145,6 +157,23 @@ constexpr std::size_t kSlackFrames = 16u;
 constexpr double kSlackMargin = 2.0;  // ms
 constexpr auto kMostHold = std::chrono::microseconds(1000);
 constexpr std::int16_t kNoSlack = INT16_MIN;
+// The watchers' stream: the most frames a STREAM carries (it stays under a
+// path's usual 1,500-byte limit), the check values it carries, how often it
+// goes when there is nothing new, and how long the leading copy keeps
+// sending as its battle ends until every watcher holds it all.
+constexpr std::size_t kStreamHead = kHead + 38u;
+constexpr std::uint64_t kStreamMost = 36u;
+constexpr std::size_t kStreamChecks = 4u;
+constexpr auto kStreamKeep = std::chrono::milliseconds(100);
+constexpr auto kStreamFlush = std::chrono::milliseconds(1500);
+// A watcher: how often it says what it holds, the frames it keeps in hand
+// before it starts (so a late packet does not stop its battle), and how long
+// it waits for a battle's first frames (the fighters may take 30 s to link).
+constexpr auto kWatchEvery = std::chrono::milliseconds(30);
+constexpr std::uint64_t kWatchBuffer = 6u;
+constexpr std::uint64_t kWatchRefill = 3u;  // frames more a wait gathers
+constexpr auto kWatchHold = std::chrono::microseconds(2000);  // a frame's hold while fewer are in hand
+constexpr auto kWatchFirst = std::chrono::seconds(40);
 
 // Takes the link's datagrams as they come, on a thread of its own, with the
 // moment each came: the game's thread reads the socket only once a frame, and
@@ -254,6 +283,17 @@ struct Link {
     Clock::duration held{};  // held back since the last report
     std::uint64_t their_count = 0;          // the other copy's frames held: all below this one
     std::uint64_t confirmed = 0;            // this copy's frames the other copy holds
+    // The watchers' stream (the leading copy of a relayed battle): both
+    // players' pads of every certain frame from the battle's first, by frame;
+    // the check values sent; and the copies watching, by id.
+    struct Watcher {
+        std::uint64_t holds = 0;
+        Clock::time_point heard{};
+    };
+    std::vector<std::pair<input::Pad, input::Pad>> stream;
+    std::map<std::uint64_t, std::uint32_t> stream_checks;
+    std::map<std::uint32_t, Watcher> watchers;
+    Clock::time_point streamed{};
     std::map<std::uint64_t, std::uint64_t> my_hashes;
     std::map<std::uint64_t, std::uint64_t> their_hashes;
     std::uint64_t hash_read = kNoRead;  // the latest checked frame, sent with every INPUT
@@ -572,6 +612,122 @@ void send_input(Link &l) {
     l.sent = Clock::now();
 }
 
+// A pad in INPUT's 16 bytes, dialog and save 0 (the watchers' stream).
+void put_pad(std::vector<std::uint8_t> &out, std::size_t at, const input::Pad &pad) {
+    out[at + 2u] = pad.connected ? 1u : 0u;
+    out[at + 3u] = pad.lx;
+    out[at + 4u] = pad.ly;
+    out[at + 5u] = pad.rx;
+    out[at + 6u] = pad.ry;
+    out[at + 7u] = static_cast<std::uint8_t>(pad.mouse_pitch);
+    put32(out, at + 8u, pad.buttons);
+    put32(out, at + 12u,
+          (pad.extra & 0xFFFFu) | static_cast<std::uint32_t>(static_cast<std::uint16_t>(pad.mouse_yaw)) << 16u);
+}
+
+input::Pad take_pad(const std::uint8_t *in) {
+    input::Pad pad;
+    pad.connected = in[2] != 0u;
+    pad.lx = in[3];
+    pad.ly = in[4];
+    pad.rx = in[5];
+    pad.ry = in[6];
+    pad.mouse_pitch = static_cast<std::int8_t>(in[7]);
+    pad.buttons = get<std::uint32_t>(in + 8u);
+    const std::uint32_t extra = get<std::uint32_t>(in + 12u);
+    pad.extra = extra & 0xFFFFu;
+    pad.mouse_yaw = static_cast<std::int16_t>(static_cast<std::uint16_t>(extra >> 16u));
+    return pad;
+}
+
+void put_camera(std::vector<std::uint8_t> &out, std::size_t at, const battle::Camera &camera) {
+    std::uint32_t bits = 0;
+    std::memcpy(&bits, &camera.dead_zone, 4u);
+    put32(out, at, bits);
+    std::memcpy(&bits, &camera.sensitivity, 4u);
+    put32(out, at + 4u, bits);
+    out[at + 8u] = static_cast<std::uint8_t>((camera.invert_x ? 1u : 0u) | (camera.invert_y ? 2u : 0u));
+}
+
+battle::Camera take_camera(const std::uint8_t *in) {
+    battle::Camera camera;
+    float values[2] = {};
+    for (int i = 0; i < 2; ++i) {
+        const std::uint32_t bits = get<std::uint32_t>(in + 4u * static_cast<std::size_t>(i));
+        std::memcpy(&values[i], &bits, 4u);
+    }
+    camera.dead_zone = std::isfinite(values[0]) ? std::clamp(values[0], 0.0f, 0.9f) : 0.18f;
+    camera.sensitivity = std::isfinite(values[1]) ? std::clamp(values[1], 0.05f, 4.0f) : 1.0f;
+    camera.invert_x = (in[8] & 1u) != 0u;
+    camera.invert_y = (in[8] & 2u) != 0u;
+    return camera;
+}
+
+// The must-match list in 32 bits: a watcher whose list differs from the
+// fighters' would watch another battle.
+std::uint32_t matched_hash() {
+    std::uint32_t hash = 2166136261u;
+    const auto mix = [&](const std::string &text) {
+        for (const char c : text) hash = (hash ^ static_cast<std::uint8_t>(c)) * 16777619u;
+        hash = (hash ^ 0xFFu) * 16777619u;
+    };
+    for (const auto &[what, value] : matched()) {
+        mix(what);
+        mix(value);
+    }
+    return hash;
+}
+
+// The leading copy: the stream to the watchers heard from in the last
+// kLost, from the first frame any of them lacks. Every frame while one lacks
+// some; otherwise every kStreamKeep, for the check values and so the watchers
+// know the battle goes on. `end`: the battle has ended for this copy there.
+void send_stream(Link &l, std::optional<std::uint64_t> end = std::nullopt) {
+    if (!l.player1 || !l.relay || l.socket == kNoSocket) return;
+    const auto now = Clock::now();
+    std::uint64_t first = l.stream.size();
+    bool any = false;
+    for (auto it = l.watchers.begin(); it != l.watchers.end();) {
+        if (now - it->second.heard > kLost) {
+            it = l.watchers.erase(it);
+            continue;
+        }
+        any = true;
+        first = std::min(first, it->second.holds);
+        ++it;
+    }
+    if (!any) return;
+    const std::uint64_t count = std::min<std::uint64_t>(l.stream.size() - first, kStreamMost);
+    if (count == 0u && !end && now - l.streamed < kStreamKeep) return;
+    std::vector<std::pair<std::uint64_t, std::uint32_t>> checks;
+    for (auto it = l.stream_checks.rbegin(); it != l.stream_checks.rend() && checks.size() < kStreamChecks; ++it)
+        checks.emplace_back(it->first, it->second);
+    std::vector<std::uint8_t> out = packet(l, kStream, kStreamHead + checks.size() * 8u + count * 2u * kLocalSize);
+    put64(out, kHead, first);
+    put16(out, kHead + 8u, static_cast<std::uint16_t>(count));
+    out[kHead + 10u] = end ? 1u : 0u;
+    out[kHead + 11u] = static_cast<std::uint8_t>(checks.size());
+    put32(out, kHead + 12u, static_cast<std::uint32_t>(end.value_or(0u)));
+    put32(out, kHead + 16u, matched_hash());
+    // The leading copy is the game's player 0.
+    put_camera(out, kHead + 20u, my_camera());
+    put_camera(out, kHead + 29u, l.their_camera);
+    std::size_t at = kStreamHead;
+    for (const auto &[frame, value] : checks) {
+        put32(out, at, static_cast<std::uint32_t>(frame));
+        put32(out, at + 4u, value);
+        at += 8u;
+    }
+    for (std::uint64_t i = 0; i < count; ++i) {
+        const auto &[zero, one] = l.stream[first + i];
+        put_pad(out, at, zero);
+        put_pad(out, at + kLocalSize, one);
+        at += 2u * kLocalSize;
+    }
+    send(l, out);
+    l.streamed = now;
+}
+
 // Both copies' hashes of the same frame, once both are in.
 void compare_hashes(Link &l) {
     while (!l.my_hashes.empty() && !l.their_hashes.empty()) {
@@ -686,6 +842,15 @@ void handle(Link &l, const std::uint8_t *data, std::size_t size, const sockaddr_
             l.their_fixed = std::min<std::uint32_t>(get<std::uint32_t>(data + kHead + 4u), 30u);
         }
         if (same_address(from, l.peer) && l.decided) send_welcome(l);
+        return;
+    }
+    if (kind == kWatch && l.player1 && l.relay && same_address(from, *l.relay) && size >= kHead + 12u) {
+        Link::Watcher &w = l.watchers[get<std::uint32_t>(data + kHead)];
+        if (w.heard == Clock::time_point{})
+            std::cout << "[" << l.name << "] a copy watches this battle (" << l.watchers.size() << " in all)"
+                      << std::endl;
+        w.holds = std::max(w.holds, get<std::uint64_t>(data + kHead + 4u));
+        w.heard = at;
         return;
     }
     if (!l.peer_known || !same_address(from, l.peer)) return;
@@ -821,7 +986,7 @@ std::uint32_t delay_for(std::uint32_t trip, bool balanced) {
 // goes on) runs as it is for half a second, then on a screen that tells the
 // player and lets them leave by holding back. False when they left (or closed
 // the window).
-bool wait_for(const std::function<bool()> &turn) {
+bool wait_for(const std::function<bool()> &turn, const char *text = "Waiting for the other player\xE2\x80\xA6 ") {
     const auto began = Clock::now();
     while (Clock::now() - began < kQuietWait)
         if (!turn()) return true;
@@ -830,7 +995,7 @@ bool wait_for(const std::function<bool()> &turn) {
     const ui::WaitEnd end = ui::wait_over_game([&](ui::WaitView &view) {
         if (!turn()) return false;
         const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(Clock::now() - began).count();
-        view.text = "Waiting for the other player\xE2\x80\xA6 " + std::to_string(seconds) + " s";
+        view.text = text + std::to_string(seconds) + " s";
         return true;
     });
     return end != ui::WaitEnd::Left && end != ui::WaitEnd::WindowClosed;
@@ -1260,6 +1425,8 @@ namespace {
 // that passes each link's datagrams between its two copies, told apart by the
 // link's tag. So the two fighters need not be the host, and only the host's
 // router needs the port open. The host's own fighter reaches it on loopback.
+// Copies watching a battle (WATCH) are kept apart from its two fighters: their
+// WATCH goes to both fighters, and the leading fighter's STREAM to them.
 class Relay {
 public:
     static Relay &get() {
@@ -1279,10 +1446,22 @@ private:
         sockaddr_in address;
         Clock::time_point heard;
     };
+    static constexpr std::size_t kMostWatchers = 16u;  // the game has at most 8
     void run() {
         Socket socket = kNoSocket;
         auto checked = Clock::time_point{};
-        std::map<std::uint32_t, std::vector<End>> ends;  // by tag, at most two
+        std::map<std::uint32_t, std::vector<End>> ends;      // by tag, at most two
+        std::map<std::uint32_t, std::vector<End>> watchers;  // by tag, the copies watching that battle
+        const auto forget = [](std::map<std::uint32_t, std::vector<End>> &by_tag, Clock::time_point now,
+                               Clock::duration quiet) {
+            for (auto it = by_tag.begin(); it != by_tag.end();) {
+                auto &list = it->second;
+                list.erase(std::remove_if(list.begin(), list.end(),
+                                          [&](const End &e) { return now - e.heard > quiet; }),
+                           list.end());
+                it = list.empty() ? by_tag.erase(it) : std::next(it);
+            }
+        };
         for (;;) {
             const auto now = Clock::now();
             if (now - checked >= std::chrono::milliseconds(500)) {
@@ -1293,15 +1472,11 @@ private:
                     close_socket(socket);
                     socket = kNoSocket;
                     ends.clear();
+                    watchers.clear();
                     std::cout << "[battle-relay] closed" << std::endl;
                 }
-                for (auto it = ends.begin(); it != ends.end();) {
-                    auto &list = it->second;
-                    list.erase(std::remove_if(list.begin(), list.end(),
-                                              [&](const End &e) { return now - e.heard > std::chrono::seconds(60); }),
-                               list.end());
-                    it = list.empty() ? ends.erase(it) : std::next(it);
-                }
+                forget(ends, now, std::chrono::seconds(60));
+                forget(watchers, now, std::chrono::seconds(10));
             }
             if (socket == kNoSocket) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(200));
@@ -1320,7 +1495,30 @@ private:
                                                           reinterpret_cast<sockaddr *>(&from), &from_size));
                 if (got < 0) break;
                 if (static_cast<std::size_t>(got) < kHead || std::memcmp(data, kMagic, 4u) != 0) continue;
-                auto &list = ends[tag_of(data)];
+                const std::uint32_t tag = tag_of(data);
+                const auto pass = [&](const std::vector<End> &to) {
+                    for (const End &e : to)
+                        if (!same_address(e.address, from))
+                            sendto(socket, reinterpret_cast<const char *>(data), got, 0,
+                                   reinterpret_cast<const sockaddr *>(&e.address), sizeof e.address);
+                };
+                if (data[4] == kWatch) {
+                    // A watcher: kept apart from the two fighters, its WATCH
+                    // passed to both (the leading one streams from it).
+                    auto &list = watchers[tag];
+                    const auto me = std::find_if(list.begin(), list.end(),
+                                                 [&](const End &e) { return same_address(e.address, from); });
+                    if (me != list.end()) me->heard = Clock::now();
+                    else if (list.size() < kMostWatchers) list.push_back(End{from, Clock::now()});
+                    else continue;
+                    if (const auto found = ends.find(tag); found != ends.end()) pass(found->second);
+                    continue;
+                }
+                if (data[4] == kStream) {
+                    if (const auto found = watchers.find(tag); found != watchers.end()) pass(found->second);
+                    continue;
+                }
+                auto &list = ends[tag];
                 const auto me = std::find_if(list.begin(), list.end(),
                                              [&](const End &e) { return same_address(e.address, from); });
                 if (me != list.end()) {
@@ -1336,10 +1534,7 @@ private:
                     if (Clock::now() - quiet->heard < std::chrono::seconds(5)) continue;
                     *quiet = End{from, Clock::now()};
                 }
-                for (const End &e : list)
-                    if (!same_address(e.address, from))
-                        sendto(socket, reinterpret_cast<const char *>(data), got, 0,
-                               reinterpret_cast<const sockaddr *>(&e.address), sizeof e.address);
+                pass(list);
             }
         }
     }
@@ -1377,6 +1572,134 @@ private:
 
 int local_player = 0;  // this copy's fighter in the game: 0 or 1
 std::string failure;   // why the last open() failed, for the player
+
+// Rollback's leading copy: the frames below `upto` whose inputs are both
+// certain (the other's in, below their_count) go into the watchers' stream,
+// with the inputs the frames run again used, not the guesses.
+void stream_certain(Link &l, std::uint64_t upto) {
+    if (!l.player1 || !l.relay || l.lost) return;
+    while (l.stream.size() < std::min(upto, l.their_count)) {
+        const std::uint64_t frame = l.stream.size();
+        Local me = idle(), them = idle();
+        if (frame >= l.delay) {
+            if (const auto at = l.history.find(frame); at != l.history.end()) me = at->second;
+            if (const auto at = l.theirs.find(frame); at != l.theirs.end()) them = at->second;
+        }
+        l.stream.emplace_back(me.pad, them.pad);  // the leading copy is player 0
+    }
+    send_stream(l);
+}
+
+// A watching copy's end of the stream (watch()).
+struct Watch {
+    bool active = false;
+    std::uint32_t tag = 0;
+    std::uint32_t id = 0;
+    Socket socket = kNoSocket;
+    std::shared_ptr<Receiver> receiver;
+    sockaddr_in relay{};
+    std::vector<std::pair<input::Pad, input::Pad>> frames;  // from the battle's first, as they came
+    std::map<std::uint64_t, std::uint32_t> mine, theirs;    // check values not yet compared
+    Camera cameras[2];
+    std::optional<std::uint64_t> end;  // the leader's battle ended there
+    bool heard_any = false;
+    bool differs = false;  // the leader's must-match list is not this copy's
+    bool apart = false;
+    bool lost = false;
+    bool leaving = false;
+    std::uint64_t checks = 0;
+    Clock::time_point began{}, heard{}, said{};
+    // The waits since the last report.
+    std::uint64_t report_from = 0;
+    Clock::time_point report_began{};
+    std::uint64_t waits = 0;
+    Clock::duration waited{};
+    Clock::duration held{};
+};
+
+Watch &watch_state() {
+    static Watch w;
+    return w;
+}
+
+void compare_watch_checks(Watch &w) {
+    for (auto it = w.mine.begin(); it != w.mine.end();) {
+        const auto theirs = w.theirs.find(it->first);
+        if (theirs == w.theirs.end()) {
+            ++it;
+            continue;
+        }
+        if (theirs->second != it->second && !w.apart) {
+            w.apart = true;
+            std::cerr << "[battle-watch] this copy's battle differs from the fighters' at frame " << it->first
+                      << std::endl;
+        } else if (!w.apart && (w.checks++ % 64u) == 0u) {
+            std::cout << "[battle-watch] in step with the fighters at frame " << it->first << std::endl;
+        }
+        w.theirs.erase(theirs);
+        it = w.mine.erase(it);
+    }
+    while (w.mine.size() > 256u) w.mine.erase(w.mine.begin());
+    while (w.theirs.size() > 256u) w.theirs.erase(w.theirs.begin());
+}
+
+void take_stream(Watch &w, const std::uint8_t *data, std::size_t size) {
+    if (size < kStreamHead) return;
+    const std::uint64_t first = get<std::uint64_t>(data + kHead);
+    const std::uint64_t count = get<std::uint16_t>(data + kHead + 8u);
+    const std::size_t check_count = data[kHead + 11u];
+    if (size < kStreamHead + check_count * 8u + count * 2u * kLocalSize) return;
+    w.heard = Clock::now();
+    if (!w.heard_any) {
+        w.heard_any = true;
+        std::cout << "[battle-watch] the fighters' stream came" << std::endl;
+    }
+    if (get<std::uint32_t>(data + kHead + 16u) != matched_hash() && !w.differs) {
+        w.differs = true;
+        std::cerr << "[battle-watch] the fighters' games differ from this one (the port's version, mods or settings)"
+                  << std::endl;
+    }
+    if (data[kHead + 10u] != 0u && !w.end) {
+        w.end = get<std::uint32_t>(data + kHead + 12u);
+        std::cout << "[battle-watch] the fighters' battle ended at frame " << *w.end << std::endl;
+    }
+    w.cameras[0] = take_camera(data + kHead + 20u);
+    w.cameras[1] = take_camera(data + kHead + 29u);
+    std::size_t at = kStreamHead;
+    for (std::size_t i = 0; i < check_count; ++i, at += 8u)
+        w.theirs[get<std::uint32_t>(data + at)] = get<std::uint32_t>(data + at + 4u);
+    for (std::uint64_t i = 0; i < count; ++i, at += 2u * kLocalSize) {
+        if (first + i != w.frames.size()) continue;  // held already, or after a gap
+        w.frames.emplace_back(take_pad(data + at), take_pad(data + at + kLocalSize));
+    }
+    compare_watch_checks(w);
+}
+
+void say_watching(Watch &w) {
+    std::vector<std::uint8_t> out(kHead + 12u, 0u);
+    std::memcpy(out.data(), kMagic, 4u);
+    out[4] = kWatch;
+    out[5] = static_cast<std::uint8_t>(w.tag & 0xFFu);
+    out[6] = static_cast<std::uint8_t>((w.tag >> 8u) & 0xFFu);
+    out[7] = static_cast<std::uint8_t>((w.tag >> 16u) & 0xFFu);
+    put32(out, kHead, w.id);
+    put64(out, kHead + 4u, w.frames.size());
+    Simulated &sim = Simulated::get();
+    if (sim.on()) sim.send(w.socket, w.relay, out);
+    else send_now(w.socket, w.relay, out);
+    w.said = Clock::now();
+}
+
+void watch_receive(Watch &w, std::chrono::milliseconds wait) {
+    if (!w.receiver) return;
+    for (const Receiver::Datagram &d : w.receiver->take(wait)) {
+        if (d.bytes.size() < kHead || std::memcmp(d.bytes.data(), kMagic, 4u) != 0 || tag_of(d.bytes.data()) != w.tag ||
+            d.bytes[4] != kStream || !same_address(d.from, w.relay))
+            continue;
+        take_stream(w, d.bytes.data(), d.bytes.size());
+    }
+    if (Clock::now() - w.said >= kWatchEvery) say_watching(w);
+}
 
 bool on(const std::string &value) { return value == "1" || value == "true" || value == "on" || value == "yes"; }
 
@@ -1435,7 +1758,10 @@ std::vector<std::pair<std::string, std::string>> must_match_items() { return mat
 
 void set_camera(const Camera &mine) { my_camera() = mine; }
 
-Camera camera(int player) { return player == local_player ? my_camera() : battle_link().their_camera; }
+Camera camera(int player) {
+    if (watch_state().active) return watch_state().cameras[player == 0 ? 0 : 1];
+    return player == local_player ? my_camera() : battle_link().their_camera;
+}
 
 std::string why_not() { return failure; }
 
@@ -1508,6 +1834,11 @@ Pads exchange(std::uint64_t frame, const input::Pad &mine) {
     pads.player[1 - local_player] = them.pad;
     pads.lost = l.lost;
     pads.left = l.leaving;
+    // The lockstep's frames are certain as they come back.
+    if (l.player1 && l.relay && !l.lost && frame == l.stream.size()) {
+        l.stream.emplace_back(pads.player[0], pads.player[1]);
+        send_stream(l);
+    }
     return pads;
 }
 
@@ -1530,6 +1861,7 @@ Pads exchange_ahead(std::uint64_t frame, const input::Pad &mine, bool rerun, boo
     pads.player[1 - local_player] = them.pad;
     pads.lost = l.lost;
     pads.left = l.leaving;
+    if (!rerun) stream_certain(l, frame + 1u);
     return pads;
 }
 
@@ -1546,10 +1878,16 @@ std::uint64_t confirmed() { return battle_link().their_count; }
 bool check(std::uint64_t frame, std::uint64_t hash) {
     Link &l = battle_link();
     note_hash(l, frame, hash);
+    // Only certain frames come here (rollback compares no other), so the
+    // watchers may compare them too.
+    if (l.player1 && l.relay) {
+        l.stream_checks[frame] = static_cast<std::uint32_t>(hash);
+        while (l.stream_checks.size() > 64u) l.stream_checks.erase(l.stream_checks.begin());
+    }
     return !l.apart;
 }
 
-void close() {
+void close(std::uint64_t reached) {
     Link &l = battle_link();
     if (l.active && !l.lost && !l.left) {
         // A battle that ends normally ends on the same frame on both copies,
@@ -1559,7 +1897,160 @@ void close() {
         const std::vector<std::uint8_t> out = packet(l, kBye, kHead);
         for (int i = 0; i < 3; ++i) send(l, out);
     }
+    if (l.active && l.player1 && l.relay && !l.watchers.empty()) {
+        // The watchers: every frame of the battle, and where it ended, until
+        // each holds them all (or kStreamFlush). With rollback the other's
+        // last inputs may still be on their way (it sends them as it closes).
+        // A watcher's battle ends where the stream does: a battle that ends by
+        // itself does so on that frame on every copy, and one that was left
+        // ends there with the game's error.
+        const auto began = Clock::now();
+        for (;;) {
+            receive(l, std::chrono::milliseconds(10));
+            if (rollback_frames() != 0u) stream_certain(l, reached);
+            send_stream(l, l.stream.size());
+            const auto now = Clock::now();
+            const bool all = std::all_of(l.watchers.begin(), l.watchers.end(), [&](const auto &w) {
+                return w.second.holds >= l.stream.size() || now - w.second.heard > kLost;
+            });
+            if ((all && l.stream.size() >= reached) || now - began >= kStreamFlush) break;
+        }
+        if (!l.watchers.empty())
+            std::cout << "[" << l.name << "] the battle's " << l.stream.size() << " frames streamed to "
+                      << l.watchers.size() << (l.watchers.size() == 1u ? " watcher" : " watchers") << std::endl;
+    }
     shut(l);
+}
+
+bool can_stream() { return setting("D012_NET_BATTLE", "online.battle_link").empty(); }
+
+bool watch(std::uint32_t tag) {
+    Watch &w = watch_state();
+    unwatch();
+    failure.clear();
+    sockaddr_in relay{};
+    std::string where;
+    if (!from_session(relay, where)) {
+        std::cerr << "[battle-watch] no session address to watch the battle through" << std::endl;
+        return false;
+    }
+    w = Watch{};
+    w.tag = tag & kTagMask;
+    w.relay = relay;
+    w.id = static_cast<std::uint32_t>(std::random_device{}()) ^
+           static_cast<std::uint32_t>(Clock::now().time_since_epoch().count());
+    if (!sockets_ready()) return false;
+    w.socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (w.socket == kNoSocket) return false;
+#if defined(_WIN32)
+    u_long on = 1u;
+    ioctlsocket(w.socket, FIONBIO, &on);
+    constexpr DWORD kUdpConnReset = 0x9800000Cu;  // SIO_UDP_CONNRESET
+    BOOL report = FALSE;
+    DWORD bytes = 0;
+    WSAIoctl(w.socket, kUdpConnReset, &report, sizeof report, nullptr, 0, &bytes, nullptr, nullptr);
+#else
+    fcntl(w.socket, F_SETFL, fcntl(w.socket, F_GETFL, 0) | O_NONBLOCK);
+#endif
+    sockaddr_in bound{};
+    bound.sin_family = AF_INET;
+    const bool loopback = (ntohl(relay.sin_addr.s_addr) >> 24) == 127u;
+    bound.sin_addr.s_addr = htonl(loopback ? INADDR_LOOPBACK : INADDR_ANY);
+    if (bind(w.socket, reinterpret_cast<const sockaddr *>(&bound), sizeof bound) != 0) {
+        close_socket(w.socket);
+        w.socket = kNoSocket;
+        return false;
+    }
+    w.receiver = std::make_shared<Receiver>(w.socket);
+    w.active = true;
+    w.began = w.heard = Clock::now();
+    say_watching(w);
+    std::cout << "[battle-watch] watching battle " << w.tag << " through " << where << std::endl;
+    return true;
+}
+
+bool watching() { return watch_state().active; }
+
+Pads watch_frame(std::uint64_t frame) {
+    Watch &w = watch_state();
+    Pads pads;
+    watch_receive(w, std::chrono::milliseconds(0));
+    // At the start, a few frames in hand. After it, a frame that has not
+    // come waits for a few more, so one late packet costs one wait and not a
+    // short one on each of the frames after it.
+    const std::uint64_t want = frame == 0u ? kWatchBuffer : frame < w.frames.size() ? frame + 1u : frame + 1u + kWatchRefill;
+    const auto ready = [&] {
+        if (w.end && w.frames.size() >= *w.end) return true;
+        return w.frames.size() >= want;
+    };
+    if (!ready() && !w.lost && !w.differs) {
+        const auto began = Clock::now();
+        const auto turn = [&]() -> bool {
+            watch_receive(w, std::chrono::milliseconds(2));
+            const auto now = Clock::now();
+            if ((w.heard_any && now - w.heard >= kLost) || (!w.heard_any && now - w.began >= kWatchFirst)) {
+                w.lost = true;
+                std::cerr << "[battle-watch] the fighters' stream stopped at frame " << frame << std::endl;
+            }
+            return !ready() && !w.lost && !w.differs;
+        };
+        if (!wait_for(turn, "Waiting for the fighters\xE2\x80\xA6 ")) {
+            w.lost = true;
+            w.leaving = true;
+            std::cout << "[battle-watch] this copy's player left while waiting at frame " << frame << std::endl;
+        }
+        ++w.waits;
+        w.waited += Clock::now() - began;
+    }
+    if (w.differs && failure.empty())
+        failure = "This battle cannot be watched: this game differs from the fighters' games. Everyone needs the "
+                  "same version of the port, the same mods that change the game, and the same settings.";
+    if (frame >= w.frames.size() || w.differs) {
+        // The leader's battle ended before this frame, or it cannot be had.
+        if (!w.lost && w.end) std::cout << "[battle-watch] the fighters' battle was left at frame " << *w.end << std::endl;
+        pads.lost = true;
+        pads.left = w.leaving;
+        return pads;
+    }
+    pads.player[0] = w.frames[frame].first;
+    pads.player[1] = w.frames[frame].second;
+    // Fewer than kWatchBuffer frames in hand (the fighters stalled, or this
+    // copy's frames run a little fast): a little slower until they are back.
+    if (!w.end && w.frames.size() < frame + 1u + kWatchBuffer) {
+        portablekit::hle_extension::hold_back(kWatchHold);
+        w.held += kWatchHold;
+    }
+    if (w.report_from == 0u && frame == 0u) w.report_began = Clock::now();
+    if (frame + 1u - w.report_from >= kReportEvery) {
+        const auto ms = [](Clock::duration d) { return std::chrono::duration_cast<std::chrono::milliseconds>(d).count(); };
+        const auto now = Clock::now();
+        std::cout << "[battle-watch] frames " << w.report_from << "-" << frame << " in " << ms(now - w.report_began)
+                  << " ms: waited on " << w.waits << ", " << ms(w.waited) << " ms in all; held back "
+                  << ms(w.held) << " ms; " << (w.frames.size() - frame - 1u) << " frames in hand" << std::endl;
+        w.report_began = now;
+        w.report_from = frame + 1u;
+        w.waits = 0u;
+        w.waited = {};
+        w.held = {};
+    }
+    return pads;
+}
+
+bool watch_check(std::uint64_t frame, std::uint32_t value) {
+    Watch &w = watch_state();
+    w.mine[frame] = value;
+    compare_watch_checks(w);
+    return !w.apart;
+}
+
+void unwatch() {
+    Watch &w = watch_state();
+    if (!w.active) return;
+    w.receiver.reset();  // its thread stops before the socket goes
+    if (w.socket != kNoSocket) close_socket(w.socket);
+    w.socket = kNoSocket;
+    w.active = false;
+    std::cout << "[battle-watch] stopped watching at frame " << w.frames.size() << " of the stream" << std::endl;
 }
 
 } // namespace battle

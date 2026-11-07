@@ -28,13 +28,15 @@ void install(portablekit::HleRegistrar &hle);
 // game's own exchange even then.
 [[nodiscard]] bool enabled();
 
-// A battle is running on the port's link: linked, and the game's session
-// still running it (a battle the game ends by itself, such as on a lost
-// session, may never say so to the port). Each fighter's camera then takes
-// its own player's right stick, from the bytes 10 and 11 of that player's
-// injected sample (d012_camera.cpp), the same on both copies.
+// A battle is running on the port's link, or watched on its stream (Group
+// Battle's members who are not fighting): linked or watching, and the game's
+// session still running it (a battle the game ends by itself, such as on a
+// lost session, may never say so to the port). Each fighter's camera then
+// takes its own player's right stick, from the bytes 10 and 11 of that
+// player's injected sample (d012_camera.cpp), the same on every copy.
 [[nodiscard]] bool active(Guest *g);
-// This copy's player, 0 or 1, while active(); -1 otherwise.
+// This copy's player, 0 or 1, while fighting on the link; -1 otherwise (a
+// watcher has none).
 [[nodiscard]] int local_player(Guest *g);
 
 // Rollback's two points between dispatches: a battle frame's state saved as

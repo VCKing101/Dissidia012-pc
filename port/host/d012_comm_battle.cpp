@@ -20,10 +20,18 @@
 // other copy gone, ends the battle with the game's own error (quit flag,
 // return 3).
 //
-// Anything but a running battle, and a spectator (role 1, Group Battle), stays
-// the game's. When the game takes this PSP out of a battle (main 0x089072AC:
-// the quit combo, a lost session), the link says so to the other copy, whose
-// battle then ends with the game's error at once instead of after 10 s.
+// A spectator's handler (role 1, Group Battle's members who are not
+// fighting: main 0x0890DF58) is the port's too: it takes both players' pads
+// for the frame from the leading fighter's stream (d012_net.hpp, watch()),
+// injects both as the fighters do, and compares its check value with theirs.
+// The game's own spectator relay is not used. With no relay to stream through
+// (online.battle_link set), a battle others watch stays on the game's own
+// exchange, on every copy alike.
+//
+// Anything but a running battle stays the game's. When the game takes this
+// PSP out of a battle (main 0x089072AC: the quit combo, a lost session), the
+// link says so to the other copy, whose battle then ends with the game's error
+// at once instead of after 10 s.
 //
 // MIT licence; see port/README.md.
 
@@ -68,6 +76,7 @@ namespace {
 namespace ext = portablekit::hle_extension;
 
 constexpr std::uint32_t kHandler = 0x0890D664u;   // role 0's per-frame exchange (net)
+constexpr std::uint32_t kWatchHandler = 0x0890DF58u;  // role 1's (a spectator's) per-frame handler (net)
 constexpr std::uint32_t kCheckStep = 0x0890CD90u; // the check value of every tenth frame (net)
 constexpr std::uint32_t kLeaveBattle = 0x089072ACu; // (session, flag): the raw pads back to this PSP's
 constexpr std::uint32_t kSession = 0x089D8364u;   // -> the lobby session; net is at +0x10D8
@@ -119,6 +128,7 @@ Rollback &rollback() {
 
 struct State {
     bool linked = false;
+    bool watching = false;  // a spectator on the leading fighter's stream
     bool decided = false;  // this battle's first frame chose the port's link or the game's exchange
     std::uint32_t frame = 0;  // the frame this link reached
     std::map<std::string, std::uint32_t> battles;  // battles per group, for the link's tag
@@ -134,8 +144,9 @@ bool flag(const char *name) {
     return value != nullptr && *value != '\0' && std::strcmp(value, "0") != 0;
 }
 
-// The same 24 bits on both copies: the battle group's name, and how many
-// battles this copy has begun in that group.
+// The same 24 bits on every copy: the battle group's name, and how many
+// battles this copy has begun in that group, fighting or watching (a party
+// battle's fighters change from fight to fight, and every member runs each).
 std::uint32_t tag_for(Guest *g) {
     const gaddr session = g_ld32(g, kSession);
     std::string group;
@@ -155,9 +166,18 @@ std::uint32_t tag_for(Guest *g) {
 void quit(Guest *g, gaddr net, std::uint32_t frame, GuestRegs &out) {
     g_st32(g, net + kFlags, g_ld32(g, net + kFlags) | kQuit);
     g_st32(g, net + kQuitFrame, frame);
-    net::battle::close();
+    if (state().watching) net::battle::unwatch();
+    else net::battle::close(frame);
     state().linked = false;
+    state().watching = false;
     out.v0 = 3u;
+}
+
+void call_game(Guest *g, std::uint32_t handler, gaddr net, GuestRegs &out) {
+    GuestRegs regs{};
+    regs.a[0] = net;
+    decomp::call_original(g, handler, regs);
+    out.v0 = regs.v0;
 }
 
 void inject(Guest *g, int player, const input::Pad &pad) {
@@ -301,25 +321,28 @@ void run_handler(Guest *g, const decomp::CallState &in, GuestRegs &out) {
     if (frame != 0u) s.decided = false;
     if (ours && frame == 0u && !s.decided) {
         s.decided = true;
+        s.watching = false;
+        const std::uint32_t tag = tag_for(g);
         // A battle others watch (Group Battle's members who are not fighting)
-        // stays on the game's own exchange: it relays the fighters' pads to
-        // the watchers, and the port's link has no watchers yet
-        // (docs/port/online-next.md, section 2). Both fighters see the same
-        // watchers, so both choose alike.
+        // goes to them on the leading fighter's stream, through the session
+        // host's relay. Without one (online.battle_link) it stays on the game's
+        // own exchange, which relays the fighters' pads to the watchers. Every
+        // copy sees the same watchers and settings, so all choose alike.
         if (const std::uint32_t watching = g_ld32(g, net + kSpectators); watching != 0u) {
             std::cout << "[comm-battle] " << watching << (watching == 1u ? " copy watches" : " copies watch")
-                      << " this battle: it runs on the game's own exchange" << std::endl;
-            s.linked = false;
-            GuestRegs regs{};
-            regs.a[0] = net;
-            decomp::call_original(g, kHandler, regs);
-            out.v0 = regs.v0;
-            return;
+                      << " this battle"
+                      << (net::battle::can_stream() ? ": they get the fighters' stream"
+                                                     : ": it runs on the game's own exchange (no relay to stream through)")
+                      << std::endl;
+            if (!net::battle::can_stream()) {
+                s.linked = false;
+                return call_game(g, kHandler, net, out);
+            }
         }
         // A new battle: its own link.
         rollback() = Rollback{};
         const int player = static_cast<int>(g_ld32(g, net + kLocal));
-        s.linked = net::battle::open(player, tag_for(g));
+        s.linked = net::battle::open(player, tag);
         s.frame = 0u;
         camera::clear_linked_mouse();
         if (!s.linked) {
@@ -380,12 +403,75 @@ void run_handler(Guest *g, const decomp::CallState &in, GuestRegs &out) {
     out.v0 = 0u;
 }
 
+// A spectator's frame on the port's stream: both pads as the leading fighter
+// used them, the check value every tenth frame compared with theirs, and never
+// the game's wait. The stream ending before this frame (a fighter left, or
+// the stream stopped) ends the battle with the game's error, as the fighters'.
+void run_watch(Guest *g, const decomp::CallState &in, GuestRegs &out) {
+    const gaddr net = in.gpr[4];
+    const std::uint32_t flags = g_ld32(g, net + kFlags);
+    State &s = state();
+    const bool ours = (flags & (kOpen | kRunning)) == (kOpen | kRunning) && (flags & kQuit) == 0u &&
+                      g_ld32(g, net + kRole) == 1u;
+    const std::uint32_t frame = g_ld32(g, net + kFrame);
+    if (!enabled()) return call_game(g, kWatchHandler, net, out);
+    if (frame != 0u) s.decided = false;
+    if (ours && frame == 0u && !s.decided) {
+        s.decided = true;
+        const std::uint32_t tag = tag_for(g);
+        s.watching = false;
+        s.linked = false;
+        if (net::battle::can_stream()) {
+            s.watching = net::battle::watch(tag);
+            s.frame = 0u;
+            camera::clear_linked_mouse();
+            if (!s.watching) {
+                std::cerr << "[comm-battle] cannot watch this battle; it ends" << std::endl;
+                return quit(g, net, 0u, out);
+            }
+            std::cout << "[comm-battle] this copy watches the battle on the fighters' stream" << std::endl;
+        } else {
+            std::cout << "[comm-battle] this copy watches the battle on the game's own exchange" << std::endl;
+        }
+    }
+    if (!ours || !s.watching || frame != s.frame) return call_game(g, kWatchHandler, net, out);
+    const net::battle::Pads pads = net::battle::watch_frame(frame);
+    if (pads.lost) {
+        if (pads.left) std::cout << "[comm-battle] this copy's player stopped watching at frame " << frame << std::endl;
+        else std::cout << "[comm-battle] the watched battle ends at frame " << frame << std::endl;
+        if (const std::string why = net::battle::why_not(); !why.empty()) net::battle::notice(why);
+        return quit(g, net, frame, out);
+    }
+    if (frame > 0u && frame % 10u == 0u) {
+        g_call1(g, kCheckStep, net);
+        const std::uint32_t count = g_ld32(g, net + kCheckCount);
+        const gaddr newest = net + kChecks + (count - 1u) * 8u;
+        if (count != 0u && g_ld32(g, newest) == frame && !net::battle::watch_check(frame, g_ld32(g, newest + 4u))) {
+            std::cerr << "[comm-battle] this copy's battle differs from the fighters'; it ends at frame " << frame
+                      << std::endl;
+            return quit(g, net, frame, out);
+        }
+    }
+    for (int player = 0; player < 2; ++player) {
+        inject(g, player, pads.player[player]);
+        camera::linked_mouse(player, pads.player[player]);
+    }
+    s.frame = frame + 1u;
+    g_st32(g, net + kFrame, frame + 1u);
+    out.v0 = 0u;
+}
+
 void run_leave_battle(Guest *g, const decomp::CallState &in, GuestRegs &out) {
     State &s = state();
     if (s.linked) {
         std::cout << "[comm-battle] this copy leaves the battle at frame " << s.frame << std::endl;
-        net::battle::close();
+        net::battle::close(s.frame);
         s.linked = false;
+    }
+    if (s.watching) {
+        std::cout << "[comm-battle] this copy leaves the watched battle at frame " << s.frame << std::endl;
+        net::battle::unwatch();
+        s.watching = false;
     }
     GuestRegs regs{};
     regs.a[0] = in.gpr[4];
@@ -519,6 +605,7 @@ struct Install {
     Install() {
         static const decomp::Override overrides[] = {
             {kHandler, "comm_battle_exchange", decomp::Module::Main, decomp::Returns::Integer, &run_handler},
+            {kWatchHandler, "comm_battle_watch", decomp::Module::Main, decomp::Returns::Integer, &run_watch},
             {kLeaveBattle, "comm_battle_leave", decomp::Module::Main, decomp::Returns::Nothing, &run_leave_battle},
         };
         // Always in place: whether to use them is read when the game first
@@ -657,16 +744,18 @@ void after_dispatch(psprecomp::Runtime &rt) {
 }
 
 bool active(Guest *g) {
-    if (!state().linked || !net::battle::open_now()) return false;
+    const State &s = state();
+    if (!(s.linked && net::battle::open_now()) && !(s.watching && net::battle::watching())) return false;
     const gaddr session = g_ld32(g, kSession);
     if (session == 0u) return false;
     const gaddr net = session + kSessionNet;
     const std::uint32_t flags = g_ld32(g, net + kFlags);
-    return (flags & (kOpen | kRunning)) == (kOpen | kRunning) && (flags & kQuit) == 0u && g_ld32(g, net + kRole) == 0u;
+    return (flags & (kOpen | kRunning)) == (kOpen | kRunning) && (flags & kQuit) == 0u &&
+           g_ld32(g, net + kRole) == (s.watching ? 1u : 0u);
 }
 
 int local_player(Guest *g) {
-    if (!active(g)) return -1;
+    if (state().watching || !active(g)) return -1;
     return static_cast<int>(g_ld32(g, g_ld32(g, kSession) + kSessionNet + kLocal));
 }
 

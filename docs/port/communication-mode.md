@@ -725,6 +725,8 @@ the same save (so every card reads "PortableKit"), driven partly by input routes
 
 ### 18.2 Battles with watchers stay on the game's exchange (step 1)
 
+Since section 19 this holds only with no relay to stream through (`online.battle_link` set).
+
 The port's link carries two fighters' pads and nothing to watchers, so a watcher heard nothing, gave up after 30 s and
 took the session down with it. Now, at a battle's first frame, if the game lists watchers (`net+0x358`) both fighters
 leave that battle to the game's own exchange, as with `D012_NO_NET_BATTLE=1` (both see the same watchers, so both
@@ -783,3 +785,87 @@ input. V:
   fighter fills one slot a round. A slot's "Random" column opens the round's stage and rules.
 - A note for tests: two test benches must not run at once on one PC. A second bench's copy with the same address
   joined the first bench's session, pushed its player 2 out and broke the room (`gr2`).
+
+## 19. Watched fights on the port's netcode: the spectator stream (8 November 2026)
+
+Group Battle step 4 ([online next](online-next.md), section 2.4). Until now a fight others watched ran on the game's
+own exchange (18.2), as on a PSP. Now it runs on the port's link like any other, and the watchers get it from the
+leading fighter.
+
+### 19.1 The game's spectator handler
+
+Disassembled from main 0x0890DF58 (V). Each call it:
+
+- takes one relay packet of 0x1B8 bytes (two records of 0xDC, one per player: a checksum, 100 pad words, the newest
+  frame at +0xCC, a check value pair at +0xD0 and +0xD4, the frames the record covers at +0xD8), checks each record's
+  sum, and pushes the new words into that player's history at `net+0x35C + player * 0xF4` (count and newest frame
+  at +0xF0, room for 0x76 words, 0x0890D5B4); the check value pairs go to the player's list at `net+0x78 + player *
+  0x54` (up to 4);
+- passes the packet on to the next spectator down the chain (0x0890C930) or acks it upstream (0x0890CB48), and
+  passes acks of 0x10 bytes from downstream on up; an 8-byte quit notice sets the quit flag and frame;
+- once running, compares its own check values with the fighters' (0x0890CBD4; a difference ends the battle with
+  return 3), then looks up the frame `net+0x48` in both players' histories (0x0890D638), unpacks both words into the
+  raw pads' injected samples (0x0890D090, then raw pad i + 0x40), runs the check step (0x0890CD90) and advances
+  `net+0x48`; with either word missing it returns 1, the game's wait.
+
+So besides the raw pads it advances only `net+0x48` and its own check list (`net+0x1C`, which the check step keeps
+on every role). The histories, the per-player check lists and the chain are its own bookkeeping, which nothing else
+reads (I: no other reader was found; the battle has run on without them on the fighters since section 11).
+
+### 19.2 What the port does
+
+- **The tag.** Every copy counts the battles it begins in a battle group, fighting or watching, as the handler of
+  either role first runs (`tag_for`). The fighters of a party battle change from fight to fight, so a count of only
+  the battles fought gave two fighters different tags from the second fight on.
+- **The leading fighter** (the game's player 0) keeps both players' pads of every certain frame from the battle's
+  first: in the lockstep each frame as the exchange returns it; with rollback (5.8 in online next) each frame once the
+  other's real input for it is in, with the inputs the frames run again used. It keeps the check values of the
+  frames whose inputs are certain. A STREAM packet carries up to 36 frames (32 bytes each) from the first frame any
+  watcher lacks, the 4 newest check values, both players' camera settings and a hash of the must-match list
+  (d012_net.cpp's header). It goes every frame while a watcher lacks frames, else every 100 ms.
+- **Watchers** send WATCH (an id and how many frames they hold) every 30 ms through the session host's relay. The
+  relay keeps them apart from the two fighters (up to 16 a battle, forgotten after 10 s unheard), passes their WATCH
+  to both fighters and every STREAM to them. Each frame sent once reaches each watcher at the latest when its next
+  WATCH says it lacks it.
+- **A watcher's frame** (the override of 0x0890DF58): both pads for the frame from the stream, injected as the
+  fighters inject them; the check step every tenth frame, compared with the leader's whenever both are in; never the
+  game's wait. It starts with 6 frames in hand, and a frame that has not come waits for 3 more, so a late packet
+  costs one wait rather than one on each frame after it; while fewer than 6 are in hand each frame is held back 2 ms.
+  The wait is the fighters' screen, "Waiting for the fighters…"; holding B leaves.
+- **The camera.** `comm_battle::active()` holds for a watcher too, and `net::battle::camera()` gives both fighters'
+  camera settings from the stream, so the watcher turns each fighter's camera with that player's right stick and
+  mouse exactly as the fighters do. A watcher has no local player: its own sticks do nothing in the fight.
+- **The end.** As the leader's battle ends (the game's leave, 0x089072AC, or a quit), it keeps sending for up to
+  1.5 s until every watcher holds the whole battle, then marks the stream ended at its last frame. A battle that ends
+  by itself ends on that frame on every copy, the watcher's included. If the watcher's handler is called for a frame
+  past the stream's end, the battle was left there, and the watcher's ends with the game's error too.
+- **No relay.** With `online.battle_link` set (a direct link, or a server run on its own) there is nothing to stream
+  through, and a watched fight stays on the game's exchange on every copy, as in 18.2.
+- **What must match.** A watcher whose must-match list differs from the leader's is told "This battle cannot be
+  watched" and its battle ends.
+- Link version 8 (WATCH and STREAM are new).
+
+### 19.3 Results (V)
+
+Three copies on this PC, the build of the rollback branch, copy 1 hosting the session as its server with its relay
+(`D012_HOST_SESSION=1`), driven live through the menus as in 18.4, the fighters on random fight input:
+
+| Run | What | What happened |
+| --- | --- | --- |
+| `gw1` | The 2-against-1 Tournament of `gp1` (18.4): fight 1 copy 1 (Lightning, leading) against copy 2 (Lightning) with copy 3 watching; fight 2 copy 3 (Vaan, leading) against copy 2 with copy 1, the session host, watching through its own relay on loopback | Fight 1 ran 11,330 frames to its end by itself; the watcher played all of them and left at frame 11,330 with both fighters, through the game's own end. Fight 2: the tag agreed on all three (copy 3 had only watched before); copy 2 forfeited from the pause menu at frame 12,742, and all three left at 12,742. Result 1 - 1 by rounds, then VICTORY on copies 1 and 3, DEFEATED on copy 2. Every check value the watchers compared agreed, and every screenshot showed the same Brave, HP and camera on all three, the watcher a few frames behind |
+| `gw2` | As `gw1`, with the refill and the hold back below, copy 1 fighting too, and copy 3 sending over a simulated path of 60 ± 20 ms each way losing 2% (`D012_NET_SIM`): in fight 1 its WATCH went that way, in fight 2 (copy 3 leading) the stream itself | Fight 1 ran 13,803 frames to its end by itself, all three leaving at 13,803. Fight 2: copy 3, the game's player 0, forfeited from the pause menu at frame 4,745, and all three left at 4,745. Result 0 - 2: DEFEATED on copies 1 and 3, VICTORY on copy 2. Over the 18,548 frames watched, 10 waits (3.6 s in all, at the fights' starts and the fighters' own stalls), 1.8 s held back, 6 or 7 frames in hand at every report, and no difference |
+
+- In `gw1` the watcher ran at the leader's pace (900 frames in 30.0 to 31.0 s) but at the head of the stream,
+  waiting a little on most frames (239 to 900 a report): its frames took less than a frame's time, and the waits
+  stood in for its own pacing. On loopback that looks the same; over a real path each late packet would show. The
+  refill of 3 frames and the hold back to 6 in hand came from it; in `gw2` a report had 0 to 3 waits.
+- The game shows a watcher the pause menu of player 0 (not player 1's), and the menu follows player 0's inputs on
+  the watcher as on player 0's own copy. It is drawn only: player 0's Forfeit ended the battle on the same frame on
+  every copy, the watcher's by the game's own end. The game's own spectator handler injects the same pads, so a PSP
+  spectator saw the same (I).
+- The quit combo (L + R + START + SELECT) from the test input did not end the fight; the pause menu's Forfeit did.
+- The pause menu does not stop an online battle: the other copies played on while copy 2's was open.
+
+**Not verified.** Watchers on other machines; more than one watcher at once (the room had three members); a watcher
+that leaves mid-fight (the session then, as on a PSP: I); rollback fighters with a watcher; the Steam Deck or Linux
+as a watcher (GCC 13 compiles the changed files); a watcher whose game differs; Round-Robin with the stream.

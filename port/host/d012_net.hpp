@@ -94,7 +94,7 @@ struct Camera {
     bool invert_y = false;
 };
 void set_camera(const Camera &mine);
-// The game's player 0 or 1's, while a battle is linked.
+// The game's player 0 or 1's, while a battle is linked or watched.
 [[nodiscard]] Camera camera(int player);
 
 // Links this copy, the game's `player` 0 or 1, for the battle `tag` (24 bits;
@@ -137,7 +137,30 @@ Pads exchange_ahead(std::uint64_t frame, const input::Pad &mine, bool rerun, boo
 // False once the two have differed for some frame.
 bool check(std::uint64_t frame, std::uint64_t hash);
 
-void close();
+// Ends the battle's link, `reached` the frame this copy's battle had reached.
+// The leading copy first gives its watchers the rest of the battle.
+void close(std::uint64_t reached);
+
+// Watching a battle (Group Battle's members who are not fighting,
+// docs/port/communication-mode.md section 19). The leading fighter's copy
+// streams both players' certain pads, both camera settings and its check
+// values through the session host's relay to every copy that watches the
+// battle's tag, from the first frame each watcher lacks. Only through a relay:
+// with online.battle_link set there is none, and watched battles stay on the
+// game's own exchange.
+[[nodiscard]] bool can_stream();
+// Starts watching the battle `tag`; false when no socket or relay address.
+bool watch(std::uint32_t tag);
+[[nodiscard]] bool watching();
+// Both players' pads for `frame`, once the stream has brought them (waiting
+// with a screen after half a second, as a fighter does). `lost` when the
+// stream ended before `frame` (the battle was quit there), stopped coming, or
+// the player chose to leave (`left`).
+Pads watch_frame(std::uint64_t frame);
+// This copy's check value for `frame`, compared with the leading fighter's
+// whenever both are in. False once they have differed.
+bool watch_check(std::uint64_t frame, std::uint32_t value);
+void unwatch();
 
 } // namespace battle
 

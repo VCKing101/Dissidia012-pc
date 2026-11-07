@@ -9,8 +9,7 @@ Both players need the same version of the port, the same mods that change the ga
 same test settings. The game checks as the battle starts and says what differs. Saves and official DLC may differ.
 
 The Online Lobby's 1-on-1 battles, Group Battle's party battles and Communications (trading Friend Cards and quests)
-work online. A fight that others watch plays as on a PSP: the stick in eight directions, no right-stick camera, and
-the battle pauses when the connection is slow.
+work online. In Group Battle, players who are not fighting watch the fight as the fighters play it.
 
 One player **hosts** a session and the other **joins** it, both on the port's Network page. Then both go online in
 the game as they would on a PSP. The host should be the player on a home connection: mobile data cannot host (see
@@ -124,6 +123,10 @@ player picks Party A, Party B, or **Watch match** (SELECT). The creator picks th
 character on their slot, and both parties press **Enter Battle**. Anyone in the session can host the session, fighting
 or not.
 
+Players who are not fighting watch each fight a few frames behind the fighters. Their own controls do nothing in the
+fight. If the fight stops coming, a band says "Waiting for the fighters"; holding B (or Esc) stops watching, which
+ends the battle for that player.
+
 ## Trade Friend Cards and quests
 
 Both players host or join a session as above. Then, in the game:
@@ -182,7 +185,7 @@ allowed.
 
 ## Not tested yet
 
-- Group Battle between machines (three copies on one PC were).
+- Group Battle between machines (three copies on one PC were), and more than one player watching at once.
 - Communications between two machines (two copies on one PC, and Windows against Linux in WSL, were).
 - Two Windows PCs on separate machines (Windows against the Steam Deck, and two copies on one PC, were).
 - The Steam Deck hosting: let the PC host.

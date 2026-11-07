@@ -10,7 +10,7 @@ sections 3 to 5 for the rows below) and [online play](online-play.md) (the netco
 | Row | Works online today? | What it takes |
 | --- | --- | --- |
 | Online Lobby (1-on-1) | Yes; **since 7 November also when the host is not a fighter** (the relay, [Communication Mode](communication-mode.md) 18.3) | - |
-| Group Battle | **Works since 7 November** (18): fights others watch on the game's own netcode, others on the port's | The spectator stream, for the port's netcode in watched fights (step 4) |
+| Group Battle | **Works since 7 November** (18); **since 8 November every fight on the port's netcode**, watchers on the leading fighter's stream ([Communication Mode](communication-mode.md) 19) | Two machines |
 | Communications | **Done on 7 November** (patch 0090, [Communication Mode](communication-mode.md) 17.2) | Was: Discover a stub, datagrams capped at 10 KiB (section 3) |
 | Friend Cards | Local (ghost battles); nothing to do | One check run (section 4) |
 | Artifacts | Local | Nothing |
@@ -94,7 +94,7 @@ session group's name and creator are not known yet (I). The fighters for each fi
 | 4 | The spectator stream and the spectator handler's override; drop step 1's fallback | medium-large (600-900 lines) | Spectator check values agree every 10 frames; a lagging and a quitting spectator |
 | 5 | PortableKit: listen backlog 16 (5 today, `client.cpp:874`), matching unit tests | small | `tools/port/pk_ctest.cmd` |
 
-**Step 4, the spectator stream, as now understood** (8 November; not built). The game's spectator handler
+**Step 4, the spectator stream** (8 November; **built and tested on one PC**, [Communication Mode](communication-mode.md) 19, which also gives the handler's disassembly; the plan as written before it follows). The game's spectator handler
 (0x0890DF58) is not a mirror of the fighters': it keeps a history of each player's 16-bit words per member (records
 of 0xF4 bytes from `net+0x35C`, the words at +4, a count at +0xCC, a checksum over 100 words), unpacks them into
 the raw pads (0x0890D090) and checks the battle (0x0890CBD4). Replacing it means: (1) the leading fighter streams
@@ -320,7 +320,8 @@ holding packets 50 ± 10 ms with 1% loss (`D012_NET_SIM`):
 **Not verified.** Two machines; a real path's jitter; the Steam Deck's time for a save and for frames run again
 (5.3); how a correction looks and sounds to a player (a sound the corrected frames start joins part-way, and a
 mispredicted one already played); a rollback longer than the window (the copy waits, as the lockstep does); Group
-Battle (watched fights stay on the game's exchange); Windows against Linux with rollback.
+Battle with rollback (a watched fight streams the certain frames, Communication Mode 19); Windows against Linux
+with rollback.
 
 **Next.** Fewer wrong guesses (a stick held within a small step counts as the same); the Network page row for the
 setting; dirty-page saves; the Deck's numbers before it is on by default.
@@ -329,9 +330,9 @@ setting; dirty-page saves; the Deck's numbers before it is on by default.
 
 1. ~~Frame-advantage balancing in the lockstep~~: done 7 November ([Communication Mode](communication-mode.md) 17.1).
 2. ~~Communications~~: done 7 November (17.2).
-3. ~~Group Battle steps 0 to 3~~: steps 0, 1 and 3 done 7 November (Communication Mode 18). Step 2 (the tag) is not
-   needed while watched fights stay on the game's exchange: the port's link only carries battles whose two copies
-   fight every battle in their group.
+3. ~~Group Battle steps 0 to 3~~: steps 0, 1 and 3 done 7 November (Communication Mode 18); step 2 (the tag
+   counted in every role) with step 4.
 4. Rollback's first experiment: done and passed 7 November (5.7). Pieces 2, 5 and 6: done 8 November, off by
    default (5.8). Measure the Deck before promising a window.
-5. The spectator stream (Group Battle step 4), which can reuse rollback's input history.
+5. ~~The spectator stream (Group Battle step 4)~~: done 8 November (Communication Mode 19). It takes rollback's
+   certain frames when the fighters use rollback (not tested with a watcher yet).
