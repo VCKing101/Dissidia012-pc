@@ -695,3 +695,73 @@ connects out; router ports off), both from this change, as in section 16.
   their 27,416-byte datagrams every second through the Linux copy's server. The Windows copy listed the Linux
   copy's card under Received Friend Card and then in its Friend Card list, marked NEW. The Linux copy showed
   "Receiving data from 1 players" (its circle press missed, as in the runs on one PC).
+
+## 18. Group Battle (7 November 2026)
+
+Steps 0, 1 and 3 of [what comes next](online-next.md) section 2.4. Three copies on this PC, each with its own copy of
+the same save (so every card reads "PortableKit"), driven partly by input routes and partly live
+(`D012_INPUT_LIVE`): the Group Battle menus wait on one another, and fixed frame numbers drifted between runs.
+
+### 18.1 The game's own netcode, with a watcher (step 0)
+
+`D012_NO_NET_BATTLE=1` on all three, the loopback server, ad hoc tracing on (runs `gb1` to `gb7`, `gl1`). V:
+
+- **The room.** Copy 1 chose Group Battle, Create Room (Preset), Lv 20: `Connect("MLOBBY")`, matching as parent (mode
+  1), 10 members, port 104, hello 0x970 bytes, `SetHelloOpt` each time the room changed. Copies 2 and 3 chose Search
+  for a Room, saw "PortableKit Lv 20 1" and asked to enter (REQUEST with 240 bytes each). The host accepted both
+  (`SelectTarget`, ESTABLISHED), sent each an 8-byte `SendData` and got its DATA_ACK, then all left `MLOBBY`.
+- **The battle group.** The room's host created the 8-digit group (`Create("86274407")`), listened on the three
+  streams (ports 100 to 102) and opened the pads' datagram socket (103); the others scanned and joined it.
+- **Party Select.** Each member picks Party A or B, or Watch match (SELECT): copy 1 Party A, copy 2 Party B, copy 3
+  watched. After a countdown the host picks the format (Tournament, Round-Robin 3 or 5); each fighter presses on its
+  own slot, picks a character and answers YES; then both parties press Enter Battle. A slot left empty gives "A
+  character has not been set. Each player must have a character set to a slot."
+- **The fight.** All three showed Round 1, the opponents' info and the fight; the watcher showed the same fight
+  from player 1's side, a few frames behind (the game relays the pads to it every 30 frames, 440 bytes, and it acks
+  each with 16). Brave and HP matched on all three at every look, through EX Mode to the final blow, and the result
+  (Tournament 1 - 0: VICTORY on Party A and the watcher, DEFEATED on Party B). Then all went back to the Tournament
+  screen for the next match in the same room.
+- A first reading that the fight had frozen was the two fighters standing idle once their routes ended.
+
+### 18.2 Battles with watchers stay on the game's exchange (step 1)
+
+The port's link carries two fighters' pads and nothing to watchers, so a watcher heard nothing, gave up after 30 s and
+took the session down with it. Now, at a battle's first frame, if the game lists watchers (`net+0x358`) both fighters
+leave that battle to the game's own exchange, as with `D012_NO_NET_BATTLE=1` (both see the same watchers, so both
+choose alike). The log says "1 copy watches this battle: it runs on the game's own exchange". Such a battle plays as
+on a PSP: the stick in eight directions, no right-stick camera, and stalls beyond a round trip of about 100 ms.
+Battles without watchers (a room of two, and the Online Lobby) keep the port's link.
+
+`gl2`: the same party battle as 18.1 with the port's link on: both fighters chose the game's exchange, and the watcher
+followed the fight in step.
+
+### 18.3 The session host's relay (step 3)
+
+The copy that listened for the battle link was the one hosting the session. When the host was not one of the two
+fighters, both fighters sent to an address where nothing listened, and the battle ended after 30 s with "did not
+answer": a Group Battle the host sat out, and the Online Lobby whenever two players other than the host fought.
+
+Now the copy hosting the session runs a relay on the battle port (UDP 27420, the port its router already forwards)
+while it hosts: it passes each link's datagrams between the two copies that send that link's tag, at most two per
+tag, and forgets an address unheard for 60 s. Both fighters send to it, at the session's address (the host's own
+fighter on loopback). The game's player 0 leads the link (times the round trip, sets the delay, sends WELCOME), and
+while it waits it tells the relay it is there (HERE), so the other's HELLO can reach it. Link version 7.
+
+The input delay used to be the listening copy's setting. Now each copy sends its own (a number, or auto), and the
+higher counts, auto as the round trip needs.
+
+Results (V), the hosting copy (`D012_HOST_SESSION=1`) as the session's server, router ports off:
+
+| Run | Who | What happened |
+| --- | --- | --- |
+| `rl1` | Copy 1 hosts and stays at the menu; copies 2 and 3 fight in the Online Lobby | Both linked through copy 1's relay, 2 frames; in step to the run's end (frame 5,781) |
+| `rl2` | Copy 1 hosts and fights copy 2 | Copy 1 linked through its own relay on loopback; in step to the end |
+| `gl3` | A Group Battle room of two, copy 1 hosting | No watchers, so the port's link, through the relay; in step to the run's end |
+| `rl3` | As `rl1`, copy 3 with input delay 5, copy 2 auto | 5 frames ("this copy's setting auto, the other's 5"); in step |
+| `xr1` | The Linux build in WSL hosts and fights the Windows build in the Online Lobby | The Windows copy joined through the Linux copy's relay, 2 frames; in step to the run's end (the Windows copy waited on the slower WSL clock, as in 17.3) |
+
+**Not verified.** Any of this on two machines; the relay over the internet (the extra hop adds the path from the host
+to each fighter); a party battle of more than one fight (the per-battle tag counts battles per copy, which agrees
+whenever the same two copies fight every battle in a group, as they do without watchers); Round-Robin; a watcher on a
+slow connection; a server run on its own (`--adhoc-server`, as on a VPS), which has no relay: its battles still need
+`online.battle_link`.

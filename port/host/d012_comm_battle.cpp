@@ -81,6 +81,7 @@ constexpr std::uint32_t kLocal = 0x44u;      // this PSP's player
 constexpr std::uint32_t kFrame = 0x48u;      // the frame applied next
 constexpr std::uint32_t kPeerConfirmed = 0x4Cu + 0x50u;
 constexpr std::uint32_t kSampled = 0x568u;
+constexpr std::uint32_t kSpectators = 0x358u;  // the PSPs watching (Group Battle), fed by the game's relay
 constexpr std::uint32_t kOpen = 1u;
 constexpr std::uint32_t kRunning = 2u;
 constexpr std::uint32_t kQuit = 4u;
@@ -89,6 +90,7 @@ constexpr std::uint32_t kSelect = 0x0001u;
 
 struct State {
     bool linked = false;
+    bool decided = false;  // this battle's first frame chose the port's link or the game's exchange
     std::uint32_t frame = 0;  // the frame this link reached
     std::map<std::string, std::uint32_t> battles;  // battles per group, for the link's tag
 };
@@ -177,7 +179,24 @@ void run_handler(Guest *g, const decomp::CallState &in, GuestRegs &out) {
         out.v0 = regs.v0;
         return;
     }
-    if (ours && frame == 0u) {
+    if (frame != 0u) s.decided = false;
+    if (ours && frame == 0u && !s.decided) {
+        s.decided = true;
+        // A battle others watch (Group Battle's members who are not fighting)
+        // stays on the game's own exchange: it relays the fighters' pads to
+        // the watchers, and the port's link has no watchers yet
+        // (docs/port/online-next.md, section 2). Both fighters see the same
+        // watchers, so both choose alike.
+        if (const std::uint32_t watching = g_ld32(g, net + kSpectators); watching != 0u) {
+            std::cout << "[comm-battle] " << watching << (watching == 1u ? " copy watches" : " copies watch")
+                      << " this battle: it runs on the game's own exchange" << std::endl;
+            s.linked = false;
+            GuestRegs regs{};
+            regs.a[0] = net;
+            decomp::call_original(g, kHandler, regs);
+            out.v0 = regs.v0;
+            return;
+        }
         // A new battle: its own link.
         const int player = static_cast<int>(g_ld32(g, net + kLocal));
         s.linked = net::battle::open(player, tag_for(g));
@@ -337,9 +356,10 @@ void network_rows() {
     }();
     ui::section("Online battles");
     ui::RowOptions options;
-    options.description = "How many frames pass between a button and the fighter acting, in online battles you "
-                          "host. Auto sets it from the connection as the battle starts: 2 up to a round trip of "
-                          "about 100 ms, more beyond. More smooths a poor connection; fewer responds sooner.";
+    options.description = "How many frames pass between a button and the fighter acting, in online battles. Auto "
+                          "sets it from the connection as the battle starts: 2 up to a round trip of about 100 ms, "
+                          "more beyond. More smooths a poor connection; fewer responds sooner. When the two players' "
+                          "settings differ, the higher counts.";
     if (const char *text = std::getenv("D012_NET_DELAY"); text != nullptr && *text != '\0') {
         options.disabled = true;
         options.note = "Set by D012_NET_DELAY";
@@ -437,9 +457,10 @@ void install(portablekit::HleRegistrar &hle) {
     // a game closed from the system loses what is still buffered: unbuffered
     // whenever this copy is set up for network battles.
     if (net::battle::configured()) std::setvbuf(stdout, nullptr, _IONBF, 0);
-    // A copy that hosts the session listens for the other fighter's: its
-    // router forwards the battle port along with the server's.
+    // A copy that hosts the session relays its battles: its router forwards
+    // the battle port along with the server's.
     portablekit::adhoc_host_forward_also({true, net::battle::port()});
+    net::battle::serve();
     // What both fighters' copies must share, or their battles part: the
     // program, mods that change the game (none yet: the mods folder holds music
     // only, which may differ; a kind of mod that changes the game sets this

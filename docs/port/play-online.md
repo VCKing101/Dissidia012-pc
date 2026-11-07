@@ -8,8 +8,9 @@ between Windows and Linux, and the details may change. How it works and how it w
 Both players need the same version of the port, the same mods that change the game (music mods may differ) and the
 same test settings. The game checks as the battle starts and says what differs. Saves and official DLC may differ.
 
-The Online Lobby's 1-on-1 battles and Communications (trading Friend Cards and quests) work online. Group Battle
-does not work online yet.
+The Online Lobby's 1-on-1 battles, Group Battle's party battles and Communications (trading Friend Cards and quests)
+work online. A fight that others watch plays as on a PSP: the stick in eight directions, no right-stick camera, and
+the battle pauses when the connection is slow.
 
 One player **hosts** a session and the other **joins** it, both on the port's Network page. Then both go online in
 the game as they would on a PSP. The host should be the player on a home connection: mobile data cannot host (see
@@ -99,8 +100,8 @@ Battle starts a rematch.
 
 ## During a battle
 
-**Input delay** (Network page, Online battles): the frames between pressing a button and the fighter acting. The
-host's setting counts. **Auto**, the default, sets it from the connection as the battle starts: 2 frames up to a
+**Input delay** (Network page, Online battles): the frames between pressing a button and the fighter acting. When
+the two players' settings differ, the higher counts. **Auto**, the default, sets it from the connection as the battle starts: 2 frames up to a
 round trip of about 100 ms, more when it is longer. A fixed number smooths a poor connection
 (higher) or responds sooner (lower).
 
@@ -114,6 +115,14 @@ After 30 seconds the game gives up by itself.
 
 **Each player keeps their own camera settings.** The right-stick camera's dead zone, sensitivity and inverted axes
 are sent across, so the other game turns your camera the way you set it.
+
+## Group Battle
+
+Everyone hosts or joins one session as above. Then one player chooses **Communications Mode**, **Group Battle**,
+**Create Room**, and the others **Search for a Room** and enter it. The room's creator starts the Group Battle; each
+player picks Party A, Party B, or **Watch match** (SELECT). The creator picks the format, each fighter sets a
+character on their slot, and both parties press **Enter Battle**. Anyone in the session can host the session, fighting
+or not.
 
 ## Trade Friend Cards and quests
 
@@ -173,6 +182,7 @@ allowed.
 
 ## Not tested yet
 
+- Group Battle between machines (three copies on one PC were).
 - Communications between two machines (two copies on one PC, and Windows against Linux in WSL, were).
 - Two Windows PCs on separate machines (Windows against the Steam Deck, and two copies on one PC, were).
 - The Steam Deck hosting: let the PC host.

@@ -61,9 +61,9 @@ namespace battle {
 // On with ad hoc play (network.adhoc), or with D012_NET_BATTLE=PORT or
 // ADDRESS:PORT (settings.ini's online.battle_link), a test switch: where
 // player 0's copy listens for player 1's (127.0.0.1 without an address).
-// Without it, the copy that hosts the game's session listens on every network
-// at port() (which Windows asks the player to allow), and the other joins the
-// session's address there. The listening copy's D012_NET_DELAY or
+// Without it, both fighters' copies go through the relay of the copy that
+// hosts the game's session (serve()), at port() of the session's address, and
+// player 0's copy leads the link. The leading copy's D012_NET_DELAY or
 // online.input_delay sets the input delay: a number of frames, or by default
 // "auto", from the round trip timed as the two link.
 [[nodiscard]] bool configured();
@@ -71,6 +71,9 @@ namespace battle {
 // The battle link's UDP port: D012_NET_BATTLE_PORT or online.battle_port,
 // 27420 by default. A hosting copy asks the router to forward it.
 [[nodiscard]] std::uint16_t port();
+// While this copy hosts the session, relay its battles on port() (none with
+// online.battle_link set): the two fighters need not be this copy.
+void serve();
 
 // What must be the same on both copies for their battles to stay in step: the
 // program, mods that change the game, settings that change the fight. `what`

@@ -9,8 +9,8 @@ sections 3 to 5 for the rows below) and [online play](online-play.md) (the netco
 
 | Row | Works online today? | What it takes |
 | --- | --- | --- |
-| Online Lobby (1-on-1) | Yes (v0.5.0 on), **if the session host is one of the two fighters** | A small fix for sessions of three or more (2.2) |
-| Group Battle | The room very likely works; **the fights do not** | Small to play it the PSP's way; large to play it on the port's netcode with spectators (section 2) |
+| Online Lobby (1-on-1) | Yes; **since 7 November also when the host is not a fighter** (the relay, [Communication Mode](communication-mode.md) 18.3) | - |
+| Group Battle | **Works since 7 November** (18): fights others watch on the game's own netcode, others on the port's | The spectator stream, for the port's netcode in watched fights (step 4) |
 | Communications | **Done on 7 November** (patch 0090, [Communication Mode](communication-mode.md) 17.2) | Was: Discover a stub, datagrams capped at 10 KiB (section 3) |
 | Friend Cards | Local (ghost battles); nothing to do | One check run (section 4) |
 | Artifacts | Local | Nothing |
@@ -222,7 +222,8 @@ copy waiting most frames" is the symptom. Small.
 
 1. ~~Frame-advantage balancing in the lockstep~~: done 7 November ([Communication Mode](communication-mode.md) 17.1).
 2. ~~Communications~~: done 7 November (17.2).
-3. Group Battle steps 0 to 3: the PSP's way for fights with spectators, the tag fix, the relay (which also fixes the
-   Online Lobby's three-player gap).
+3. ~~Group Battle steps 0 to 3~~: steps 0, 1 and 3 done 7 November (Communication Mode 18). Step 2 (the tag) is not
+   needed while watched fights stay on the game's exchange: the port's link only carries battles whose two copies
+   fight every battle in their group.
 4. Rollback's first experiment, then pieces 1 to 6 if it passes. Measure the Deck before promising a window.
 5. The spectator stream (Group Battle step 4), which can reuse rollback's input history.
