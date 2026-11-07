@@ -39,6 +39,7 @@
 #include "hle/hle_common.hpp"
 #include "install/user_data.hpp"
 #include "portablekit/hle_extension.hpp"
+#include "snapshot.hpp"
 #if defined(PORTABLEKIT_HAS_RENDERER)
 #include "ui/ui.hpp"
 #include "ui/widgets.hpp"
@@ -47,6 +48,11 @@
 #include "psprecomp/runtime.hpp"
 
 #include <algorithm>
+#include <any>
+#include <chrono>
+#include <memory>
+#include <optional>
+#include <vector>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -87,6 +93,29 @@ constexpr std::uint32_t kRunning = 2u;
 constexpr std::uint32_t kQuit = 4u;
 
 constexpr std::uint32_t kSelect = 0x0001u;
+
+// Rollback (net::battle::rollback_frames): a state saved as each battle
+// frame's handler is about to run, so the game can go back to a frame whose
+// guessed input was wrong and run on from it again, showing nothing until it
+// is back where it was (ext::set_simulate_only).
+struct Rollback {
+    struct Saved {
+        std::uint32_t frame = ~0u;
+        std::shared_ptr<portablekit::snapshot::State> state;
+    };
+    std::vector<Saved> ring;
+    std::optional<std::uint32_t> restore_to;  // asked for by the handler, done after it returns
+    std::uint32_t rerun_until = 0;            // the live frame the frames run again lead back to
+    std::map<std::uint32_t, std::uint32_t> checks;  // check values by frame, sent once the frame is certain
+    std::uint64_t rollbacks = 0, rerun = 0, longest = 0, reported = 0;
+    std::chrono::steady_clock::time_point reported_at{};
+    std::chrono::steady_clock::duration restore_time{}, save_time{};
+};
+
+Rollback &rollback() {
+    static Rollback r;
+    return r;
+}
 
 struct State {
     bool linked = false;
@@ -165,6 +194,96 @@ void note_frame_step(Guest *g, std::uint32_t frame) {
               << taken << " vblanks taken of " << target << ", step " << step << std::endl;
 }
 
+input::Pad sample_mine() {
+    const ext::SecondPad now = ext::first_pad_now();
+    input::Pad mine;
+    mine.connected = now.connected;
+    mine.buttons = now.buttons;
+    mine.extra = now.extra;
+    mine.lx = now.analog_x;
+    mine.ly = now.analog_y;
+    mine.rx = now.right_x;
+    mine.ry = now.right_y;
+    camera::send_mouse(mine);
+    if ((mine.extra & ext::kExtraR3) != 0u) mine.buttons |= kSelect;
+    return mine;
+}
+
+// A battle frame with rollback: both pads at once, the other's guessed when it
+// has not come, and back to the earliest frame whose guess turned out wrong.
+void run_ahead(Guest *g, gaddr net, std::uint32_t frame, GuestRegs &out) {
+    State &s = state();
+    Rollback &r = rollback();
+    const bool rerun = r.rerun_until != 0u && frame < r.rerun_until;
+    if (!rerun && r.rerun_until != 0u) {
+        // Back at the frame the game had reached: shown and heard again.
+        r.rerun_until = 0u;
+        ext::set_simulate_only(false);
+    }
+    std::uint64_t certain = 0;
+    if (!rerun) {
+        if (const std::optional<std::uint64_t> wrong = net::battle::take_wrong_guess(); wrong && *wrong < frame) {
+            // Back to it once this call returns (after_dispatch): nothing of
+            // this frame has run yet.
+            r.restore_to = static_cast<std::uint32_t>(*wrong);
+            r.rerun_until = frame;
+            out.v0 = 0u;
+            return;
+        }
+        certain = net::battle::confirmed();
+    }
+    bool guessed = false;
+    const net::battle::Pads pads = net::battle::exchange_ahead(frame, rerun ? input::Pad{} : sample_mine(), rerun, guessed);
+    if (pads.lost) {
+        if (pads.left) std::cout << "[comm-battle] this copy's player left the battle at frame " << frame << std::endl;
+        else std::cerr << "[comm-battle] the other fighter's copy is gone at frame " << frame << std::endl;
+        ext::set_simulate_only(false);
+        return quit(g, net, frame, out);
+    }
+    if (frame > 0u && frame % 10u == 0u) {
+        g_call1(g, kCheckStep, net);
+        const std::uint32_t count = g_ld32(g, net + kCheckCount);
+        const gaddr newest = net + kChecks + (count - 1u) * 8u;
+        if (count != 0u && g_ld32(g, newest) == frame) r.checks[frame] = g_ld32(g, newest + 4u);
+    }
+    // The check values of frames whose inputs are all certain: run with the
+    // real inputs, so the two copies' must agree.
+    for (auto it = r.checks.begin(); !rerun && it != r.checks.end() && it->first < certain;) {
+        if (!net::battle::check(it->first, it->second)) {
+            std::cerr << "[comm-battle] the two battles differ; it ends at frame " << frame << std::endl;
+            ext::set_simulate_only(false);
+            return quit(g, net, frame, out);
+        }
+        it = r.checks.erase(it);
+    }
+    for (int player = 0; player < 2; ++player) {
+        inject(g, player, pads.player[player]);
+        camera::linked_mouse(player, pads.player[player]);
+    }
+    if (!rerun) note_frame_step(g, frame);
+    s.frame = frame + 1u;
+    g_st32(g, net + kFrame, frame + 1u);
+    g_st32(g, net + kSampled, frame + 1u);
+    g_st32(g, net + kPeerConfirmed, frame);
+    if (!rerun && frame >= r.reported + 900u) {
+        const auto ms = [](std::chrono::steady_clock::duration d, std::uint64_t n) {
+            return n == 0u ? 0.0 : std::chrono::duration<double, std::milli>(d).count() / static_cast<double>(n);
+        };
+        const auto now = std::chrono::steady_clock::now();
+        if (r.reported_at != std::chrono::steady_clock::time_point{})
+            std::cout << "[comm-battle] frames " << r.reported << "-" << frame << " in "
+                      << std::chrono::duration_cast<std::chrono::milliseconds>(now - r.reported_at).count() << " ms"
+                      << std::endl;
+        r.reported_at = now;
+        std::cout << "[comm-battle] rollback to frame " << frame << ": went back " << r.rollbacks << " times, "
+                  << r.rerun << " frames run again, the most at once " << r.longest << "; a save "
+                  << ms(r.save_time, frame) << " ms, a restore " << ms(r.restore_time, r.rollbacks) << " ms"
+                  << std::endl;
+        r.reported = frame;
+    }
+    out.v0 = 0u;
+}
+
 void run_handler(Guest *g, const decomp::CallState &in, GuestRegs &out) {
     const gaddr net = in.gpr[4];
     const std::uint32_t flags = g_ld32(g, net + kFlags);
@@ -198,6 +317,7 @@ void run_handler(Guest *g, const decomp::CallState &in, GuestRegs &out) {
             return;
         }
         // A new battle: its own link.
+        rollback() = Rollback{};
         const int player = static_cast<int>(g_ld32(g, net + kLocal));
         s.linked = net::battle::open(player, tag_for(g));
         s.frame = 0u;
@@ -217,6 +337,7 @@ void run_handler(Guest *g, const decomp::CallState &in, GuestRegs &out) {
         out.v0 = regs.v0;
         return;
     }
+    if (net::battle::rollback_frames() != 0u) return run_ahead(g, net, frame, out);
     const ext::SecondPad now = ext::first_pad_now();
     input::Pad mine;
     mine.connected = now.connected;
@@ -451,6 +572,14 @@ void wrap_peer_times(portablekit::HleRegistrar &hle) {
 }
 
 void install(portablekit::HleRegistrar &hle) {
+    // The handler's own count of the battle's frames goes back with the game.
+    portablekit::snapshot::add(
+        "comm battle", [] { return std::any(state().frame); },
+        [](const std::any &any) { state().frame = std::any_cast<std::uint32_t>(any); });
+    psprecomp::set_runtime_pre_dispatch_hook(
+        [](psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx, std::uint32_t pc, std::int32_t) {
+            before_dispatch(rt, pc, ctx);
+        });
     for (const ClockImport &clock : kClocks) wrap_clock(hle, clock);
     if (clock_offset_us() != 0u) wrap_peer_times(hle);
     // The release build's log is a file under Proton and Windows alike, and
@@ -490,6 +619,41 @@ void install(portablekit::HleRegistrar &hle) {
     portablekit::ui::add_network_rows(&network_rows);
     portablekit::ui::add_network_log_lines(&network_log_lines);
 #endif
+}
+
+void before_dispatch(psprecomp::Runtime &rt, std::uint32_t pc, const psprecomp::AllegrexContext &ctx) {
+    if (pc != kHandler || !state().linked || net::battle::rollback_frames() == 0u) return;
+    const std::uint32_t frame = rt.memory().load32(ctx.gpr[4] + kFrame);
+    if (frame != state().frame) return;
+    Rollback &r = rollback();
+    const std::size_t size = net::battle::rollback_frames() + 4u;
+    if (r.ring.size() != size) r.ring.resize(size);
+    Rollback::Saved &slot = r.ring[frame % size];
+    const auto began = std::chrono::steady_clock::now();
+    portablekit::snapshot::save_into(rt, slot.state);
+    r.save_time += std::chrono::steady_clock::now() - began;
+    slot.frame = frame;
+}
+
+void after_dispatch(psprecomp::Runtime &rt) {
+    Rollback &r = rollback();
+    if (!r.restore_to) return;
+    const std::uint32_t to = *r.restore_to;
+    r.restore_to.reset();
+    const auto slot = std::find_if(r.ring.begin(), r.ring.end(), [&](const Rollback::Saved &x) { return x.frame == to; });
+    if (slot == r.ring.end() || !slot->state) {
+        std::cerr << "[comm-battle] frame " << to << " is too far back to run again; the battles may part"
+                  << std::endl;
+        r.rerun_until = 0u;
+        return;
+    }
+    const auto began = std::chrono::steady_clock::now();
+    portablekit::snapshot::restore(rt, *slot->state, true);
+    r.restore_time += std::chrono::steady_clock::now() - began;
+    ext::set_simulate_only(true);
+    ++r.rollbacks;
+    r.rerun += r.rerun_until - to;
+    r.longest = std::max<std::uint64_t>(r.longest, r.rerun_until - to);
 }
 
 bool active(Guest *g) {

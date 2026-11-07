@@ -235,6 +235,12 @@ struct Link {
     std::map<std::uint64_t, Local> mine;    // by frame, from the oldest the other copy may still need
     std::map<std::uint64_t, Local> theirs;  // by frame, received and not yet used
     std::map<std::uint64_t, Clock::time_point> arrived;  // when each of `theirs` first came
+    // Rollback (battle::exchange_ahead): this copy's input by frame, kept for
+    // frames run again; the other's input this copy guessed, by frame, until
+    // the real one comes; and the earliest frame whose guess was wrong.
+    std::map<std::uint64_t, Local> history;
+    std::map<std::uint64_t, Local> guessed;
+    std::optional<std::uint64_t> wrong_from;
     // The frames' balance. A copy's slack on a frame is how long before it
     // needed the other copy's input for that frame the input came (less than
     // 0: it waited). The copy with less is ahead of the other, and holds its
@@ -592,6 +598,8 @@ void compare_hashes(Link &l) {
     }
 }
 
+bool same_input(const Local &a, const Local &b);
+
 void take_input(Link &l, const std::uint8_t *data, std::size_t size, Clock::time_point at) {
     if (size < kInputHead) return;
     const std::uint64_t holds = get<std::uint64_t>(data + kHead);
@@ -631,12 +639,23 @@ void take_input(Link &l, const std::uint8_t *data, std::size_t size, Clock::time
         m.pad.mouse_yaw = static_cast<std::int16_t>(static_cast<std::uint16_t>(extra >> 16u));
         l.theirs[frame] = m;
         l.arrived.emplace(frame, at);
+        if (const auto guess = l.guessed.find(frame); guess != l.guessed.end()) {
+            if (!same_input(guess->second, m)) l.wrong_from = std::min(l.wrong_from.value_or(frame), frame);
+            l.guessed.erase(guess);
+        }
     }
     while (l.theirs.count(l.their_count) != 0u) ++l.their_count;
     if (hash_read != kNoRead) {
         l.their_hashes[hash_read] = get<std::uint64_t>(data + kHead + 32u);
         compare_hashes(l);
     }
+}
+
+bool same_input(const Local &a, const Local &b) {
+    return a.dialog == b.dialog && a.save == b.save && a.pad.connected == b.pad.connected &&
+           a.pad.buttons == b.pad.buttons && a.pad.extra == b.pad.extra && a.pad.lx == b.pad.lx &&
+           a.pad.ly == b.pad.ly && a.pad.rx == b.pad.rx && a.pad.ry == b.pad.ry && a.pad.mouse_yaw == b.pad.mouse_yaw &&
+           a.pad.mouse_pitch == b.pad.mouse_pitch;
 }
 
 bool same_address(const sockaddr_in &a, const sockaddr_in &b) {
@@ -844,6 +863,10 @@ void settle_delay(Link &l) {
         timed = ", for a round trip of " + std::to_string(median) + " ms (" + std::to_string(trips.size()) +
                 " timed, " + std::to_string(trips.front()) + " to " + std::to_string(trips.back()) + ")";
     }
+    // With rollback the frames a guess may cover come off the delay the
+    // connection needs, down to 1.
+    if (const std::uint32_t ahead = battle::rollback_frames(); ahead != 0u && l.name == std::string("battle-net"))
+        needed = std::max<std::uint32_t>(1u, needed > ahead ? needed - ahead : 1u);
     l.delay = std::max(l.fixed != 0u ? l.fixed : needed, l.their_fixed != 0u ? l.their_fixed : needed);
     std::cout << "[" << l.name << "] input delay " << l.delay << " frames" << timed << settings << std::endl;
 }
@@ -1079,6 +1102,71 @@ std::pair<Local, Local> trade(Link &l, std::uint64_t frame, const Local &local) 
         l.longest = {};
         l.held = {};
     }
+    return {me, them};
+}
+
+// Rollback's trade: this copy's input for `frame` goes out for frame + delay
+// (once: a frame run again keeps the input it sent), and both inputs for
+// `frame` come back without waiting, the other's guessed as its latest when it
+// has not come; `guessed` says so. Waits only while `frame` is `window` or more
+// frames past the other's latest input, as the lockstep does.
+std::pair<Local, Local> trade_ahead(Link &l, std::uint64_t frame, const Local &local, std::uint32_t window,
+                                    bool rerun, bool &guessed) {
+    guessed = false;
+    if (l.history.count(frame + l.delay) == 0u) {
+        l.mine[frame + l.delay] = local;
+        l.history[frame + l.delay] = local;
+    }
+    if (!rerun) send_input(l);
+    receive(l, std::chrono::milliseconds(0));
+    const Clock::time_point needed = Clock::now();
+    if (!rerun && frame >= l.delay && !l.lost && frame >= l.their_count + window) {
+        const auto began = Clock::now();
+        const auto turn = [&]() -> bool {
+            receive(l, std::chrono::milliseconds(2));
+            const auto now = Clock::now();
+            if (now - l.sent >= kResend) send_input(l);
+            if ((l.left && now - l.left_at >= kLastFrames) || now - l.heard >= kLost || now - began >= kGiveUp) {
+                l.lost = true;
+                std::cerr << "[" << l.name << "] lost the other copy at " << l.unit << " " << frame << std::endl;
+            }
+            return frame >= l.their_count + window && !l.lost;
+        };
+        if (!wait_for(turn)) {
+            l.lost = true;
+            l.leaving = true;
+            const std::vector<std::uint8_t> out = packet(l, kBye, kHead);
+            for (int i = 0; i < 3; ++i) send(l, out);
+        }
+        ++l.waits;
+        l.waited += Clock::now() - began;
+        l.longest = std::max(l.longest, Clock::now() - began);
+    }
+    if (!rerun) {
+        if (const auto came = l.arrived.find(frame); came != l.arrived.end() && !l.lost)
+            note_slack(l, needed - came->second);
+        l.arrived.erase(l.arrived.begin(), l.arrived.upper_bound(frame));
+    }
+    const Local me = frame < l.delay ? idle() : l.history.at(frame);
+    Local them = idle();
+    if (frame >= l.delay) {
+        if (const auto at = l.theirs.find(frame); at != l.theirs.end()) {
+            them = at->second;
+        } else if (l.lost) {
+            them.pad.connected = false;
+        } else {
+            // The guess: their latest input, held.
+            if (const auto latest = l.theirs.lower_bound(frame); latest != l.theirs.begin())
+                them = std::prev(latest)->second;
+            guessed = true;
+            l.guessed[frame] = them;
+        }
+    }
+    // What can no longer be run again.
+    const std::uint64_t keep = l.their_count > 64u + window ? l.their_count - 64u - window : 0u;
+    l.theirs.erase(l.theirs.begin(), l.theirs.lower_bound(keep));
+    l.history.erase(l.history.begin(), l.history.lower_bound(keep));
+    l.mine.erase(l.mine.begin(), l.mine.lower_bound(std::min(l.confirmed, frame + 1u)));
     return {me, them};
 }
 
@@ -1422,6 +1510,38 @@ Pads exchange(std::uint64_t frame, const input::Pad &mine) {
     pads.left = l.leaving;
     return pads;
 }
+
+std::uint32_t rollback_frames() {
+    static const std::uint32_t frames = [] {
+        const std::string text = setting("D012_NET_ROLLBACK", "online.rollback");
+        if (text.empty() || text == "off" || text == "0") return 0u;
+        return static_cast<std::uint32_t>(std::clamp<unsigned long>(std::strtoul(text.c_str(), nullptr, 10), 1u, 12u));
+    }();
+    return frames;
+}
+
+Pads exchange_ahead(std::uint64_t frame, const input::Pad &mine, bool rerun, bool &guessed) {
+    Link &l = battle_link();
+    Local local;
+    local.pad = mine;
+    const auto [me, them] = trade_ahead(l, frame, local, rollback_frames(), rerun, guessed);
+    Pads pads;
+    pads.player[local_player] = me.pad;
+    pads.player[1 - local_player] = them.pad;
+    pads.lost = l.lost;
+    pads.left = l.leaving;
+    return pads;
+}
+
+std::optional<std::uint64_t> take_wrong_guess() {
+    Link &l = battle_link();
+    receive(l, std::chrono::milliseconds(0));
+    const std::optional<std::uint64_t> wrong = l.wrong_from;
+    l.wrong_from.reset();
+    return wrong;
+}
+
+std::uint64_t confirmed() { return battle_link().their_count; }
 
 bool check(std::uint64_t frame, std::uint64_t hash) {
     Link &l = battle_link();

@@ -267,6 +267,52 @@ come back; none happened in a battle). Re-running a frame's cost was not measure
 restore and re-run on a misprediction, with frames that are re-run drawing and mixing nothing (piece 2). Dirty-page
 saves (piece 8) would take most of the 5 ms save away.
 
+### 5.8 Rollback in online battles (8 November 2026)
+
+Pieces 2, 5 and 6 of 5.6, on by a setting: `online.rollback` in settings.ini, or `D012_NET_ROLLBACK`, the frames a
+copy may run past the other's input (1 to 12; empty or `off`, the default, keeps the lockstep).
+
+**How it works.**
+- **The link** (`net::battle::exchange_ahead`): this copy's input for a frame goes out as before; both inputs come
+  back at once, the other's guessed as its latest when it has not come. A copy waits only once it is the rollback
+  window past the other's latest input. When the real input for a guessed frame arrives and differs, the link notes
+  the earliest such frame. The automatic delay takes the window off what the connection needs, down to 1 frame.
+- **The ring** (`comm_battle::before_dispatch`): as the battle handler (`0x0890D664`) is about to run each frame, the
+  whole state is saved into a ring of window + 4 states (PortableKit's runtime pre-dispatch hook), whose buffers are
+  used again.
+- **Going back** (`comm_battle::after_dispatch`): a live frame that finds a wrong guess asks for the frame to go
+  back to and returns at once; right after it returns, before any more game code, that frame's state is restored
+  (the hold to real time kept) and simulate-only turns on (PortableKit patch 0092). The game runs those frames
+  again, each with this copy's input as it was sent and the other's as it is now known or guessed again, drawing
+  and sounding nothing and waiting for nothing, until it is back at the frame it had reached, which runs live.
+- **Checks**: the game's check value of every tenth frame is kept and compared with the other copy's only once
+  every input up to that frame is certain.
+- The port's own state goes back too: the handler's frame count, the camera's linked mouse degrees, and the rest of
+  5.7's list.
+
+**Results (V).** Two copies on this PC through the Online Lobby (the routes of section 18.3, copy 1 hosting), both
+holding packets 50 ± 10 ms with 1% loss (`D012_NET_SIM`):
+
+| Run | Netcode | Delay | 900 frames took | Went back (copy 1, copy 2) | Frames run again | In step |
+| --- | --- | --- | --- | --- | --- | --- |
+| `rb2` | rollback, 7 frames | 1 (auto) | | 285, 62 | 1,492, 80; at most 8 at once | yes, to the end |
+| `rb3` | rollback, 7 frames | 1 (auto) | 30.0 to 31.0 s | 211, 58 (to frame 4,500) | 920, 69 | yes, to the end |
+| `ls1` | lockstep (the same build) | 2 (auto) | 30.0 to 31.0 s | | | yes, to the end |
+
+- **One frame of input delay instead of two** at 100 ms, at full speed. The windows of 30.4 to 31.0 s are the routes'
+  screenshots, in both netcodes.
+- A save takes 2.6 to 3.9 ms a frame on this PC (with the frames run again), a restore 2.2 to 2.5 ms.
+- Copy 1 went back more: copy 2's route changes its stick more often. Every guess is "the same as last frame", so a
+  moving stick is a wrong guess nearly every time it moves.
+
+**Not verified.** Two machines; a real path's jitter; the Steam Deck's time for a save and for frames run again
+(5.3); how a correction looks and sounds to a player (a sound the corrected frames start joins part-way, and a
+mispredicted one already played); a rollback longer than the window (the copy waits, as the lockstep does); Group
+Battle (watched fights stay on the game's exchange); Windows against Linux with rollback.
+
+**Next.** Fewer wrong guesses (a stick held within a small step counts as the same); the Network page row for the
+setting; dirty-page saves; the Deck's numbers before it is on by default.
+
 ## 6. Suggested order for the next update
 
 1. ~~Frame-advantage balancing in the lockstep~~: done 7 November ([Communication Mode](communication-mode.md) 17.1).
@@ -274,6 +320,6 @@ saves (piece 8) would take most of the 5 ms save away.
 3. ~~Group Battle steps 0 to 3~~: steps 0, 1 and 3 done 7 November (Communication Mode 18). Step 2 (the tag) is not
    needed while watched fights stay on the game's exchange: the port's link only carries battles whose two copies
    fight every battle in their group.
-4. Rollback's first experiment: done and passed 7 November (5.7). Then pieces 2, 5 and 6. Measure the Deck before
-   promising a window.
+4. Rollback's first experiment: done and passed 7 November (5.7). Pieces 2, 5 and 6: done 8 November, off by
+   default (5.8). Measure the Deck before promising a window.
 5. The spectator stream (Group Battle step 4), which can reuse rollback's input history.

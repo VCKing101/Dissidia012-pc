@@ -7,6 +7,7 @@
 
 #include "d012_input.hpp"
 
+#include <optional>
 #include <cstdint>
 #include <string>
 #include <utility>
@@ -117,6 +118,20 @@ struct Pads {
 };
 // As exchange() above, for the battle's frame `frame`.
 Pads exchange(std::uint64_t frame, const input::Pad &mine);
+
+// Rollback (D012_NET_ROLLBACK or online.rollback): how many frames this copy
+// may run past the other's latest input, guessing it; 0, the default, keeps
+// the lockstep. The guessed frames come off the automatic input delay.
+[[nodiscard]] std::uint32_t rollback_frames();
+// Rollback's exchange: both pads for `frame` without waiting for the other's,
+// guessed (`guessed`) when it has not come. A frame run again (`rerun`) keeps
+// the input this copy sent for it, sends nothing and never waits.
+Pads exchange_ahead(std::uint64_t frame, const input::Pad &mine, bool rerun, bool &guessed);
+// The earliest frame whose guess the other's real input has shown wrong since
+// the last call, if any: the game goes back to it and runs on from there.
+[[nodiscard]] std::optional<std::uint64_t> take_wrong_guess();
+// The other copy's frames held: every frame below this one is certain.
+[[nodiscard]] std::uint64_t confirmed();
 
 // The game's own check value for `frame`, compared with the other copy's.
 // False once the two have differed for some frame.

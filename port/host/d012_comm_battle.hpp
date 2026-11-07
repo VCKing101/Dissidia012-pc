@@ -7,6 +7,7 @@
 // with its input delay, instead of the game's 16-bit word over PSP ad hoc.
 // MIT licence; see port/README.md.
 
+#include "psprecomp/runtime.hpp"
 #include "../decomp/guest.h"
 
 #include <cstdint>
@@ -35,5 +36,11 @@ void install(portablekit::HleRegistrar &hle);
 [[nodiscard]] bool active(Guest *g);
 // This copy's player, 0 or 1, while active(); -1 otherwise.
 [[nodiscard]] int local_player(Guest *g);
+
+// Rollback's two points between dispatches: a battle frame's state saved as
+// its handler is about to run, and the restore a wrong guess asked for, done
+// once the handler has returned (the harness's post-dispatch hook).
+void before_dispatch(psprecomp::Runtime &rt, std::uint32_t pc, const psprecomp::AllegrexContext &ctx);
+void after_dispatch(psprecomp::Runtime &rt);
 
 } // namespace d012::comm_battle
