@@ -34,8 +34,10 @@
 // MIT licence; see port/README.md.
 
 #include "d012_versus.hpp"
+#include "snapshot.hpp"
 #include "d012_decomp_harness.hpp"
 #include "d012_input.hpp"
+#include "d012_rollback.hpp"
 #include "d012_sync.hpp"
 
 #include "hle/hle_common.hpp"
@@ -50,6 +52,7 @@
 #include "ui/widgets.hpp"
 #endif
 
+#include <any>
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -149,6 +152,13 @@ State &state() {
     static State s;
     return s;
 }
+
+void add_state_to_snapshots() {
+    portablekit::snapshot::add(
+        "versus", [] { return std::any(state()); },
+        [](const std::any &any) { state() = std::any_cast<const State &>(any); });
+}
+const bool added_to_snapshots = (add_state_to_snapshots(), true);
 
 // The split task runs every battle frame; a split frame drawn within this
 // long is a split battle on screen.
@@ -956,6 +966,7 @@ void install(portablekit::HleRegistrar &hle) {
     hle.bind("sceCtrl", kSceCtrlReadBufferPositive, [previous](psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
         read_pads(previous, rt, ctx);
         sync::after_pad_read(rt.memory(), ctx.gpr[4], battle_resident(rt.memory()), active());
+        rollback::note_pad_read(sync::reads() - 1u, battle_resident(rt.memory()) && active());
     });
 }
 

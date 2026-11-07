@@ -54,4 +54,8 @@ struct Frame {
 // game as before and the record only mirrors them.
 void install(portablekit::HleRegistrar &hle);
 
+// Adds the input record's place (the read count, the frame, the dialogs'
+// answers) to save states (portablekit snapshot).
+void add_to_snapshots();
+
 } // namespace d012::input

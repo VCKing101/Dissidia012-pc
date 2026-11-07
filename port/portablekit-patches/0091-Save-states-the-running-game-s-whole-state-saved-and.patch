@@ -1,0 +1,809 @@
+From 1d7d65a38188b493ec7bd1ea43ef2d7cc4022a94 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Sat, 7 Nov 2026 23:51:22 +1030
+Subject: [PATCH] Save states: the running game's whole state, saved and put
+ back
+
+host/snapshot.hpp saves and restores a run between two dispatches, for
+rollback netplay: guest RAM and VRAM (copied back in place, since generated
+code points into them), the running thread's context, the runtime's
+starvation phase and thread identity, the kernel's threads, objects, waits,
+clock, vblank schedule, memory blocks, guest calls and interrupts
+(Kernel::save_state), and what participants add (snapshot::add). The HLE
+modules add their own: the display, controller latch, GE lists and state,
+audio channels (not the device's cursor) and SAS voices; threadman's pools,
+pipes and lightweight mutexes; open files' positions and pending results;
+and ATRAC contexts. An ATRAC decoder is not copied: it stays where it is,
+and after a restore the frames it made since the save are handed out again
+in the order it made them, since a seek's warm-up is close to straight
+decoding but not the same to the bit. Restoring restarts the hold to real
+time.
+
+Tested with Dissidia 012 on Windows (clang): a recorded versus battle
+replayed headless with a restore 8 pad reads back at every 9th read (17,800
+reads run twice) and at every 60th, and with player 2's input wrong on each
+first run, matched a plain replay in all of guest RAM at every read. A save
+took about 5 to 6 ms and a restore about 2.3 ms on this PC. Not tested:
+other games, Linux, with drawing on, a state saved during a load or a
+dialog, a host file closed after a save (its handle does not come back).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ cmake/PortableKit.cmake            |   1 +
+ host/audio/sas_core.cpp            |   6 +-
+ host/audio/sas_core.hpp            |   3 +
+ host/hle/hle_atrac.cpp             | 134 +++++++++++++++++++++++++++++
+ host/hle/hle_io.cpp                |  88 +++++++++++++++++++
+ host/hle/hle_media.cpp             |  51 +++++++++++
+ host/hle/hle_threadman.cpp         |  25 ++++++
+ host/kernel/kernel.cpp             | 107 +++++++++++++++++++++++
+ host/kernel/kernel.hpp             |   7 ++
+ host/snapshot.cpp                  |  65 ++++++++++++++
+ host/snapshot.hpp                  |  42 +++++++++
+ include/psprecomp/guest_memory.hpp |   4 +
+ include/psprecomp/runtime.hpp      |   4 +
+ src/guest_memory.cpp               |   7 ++
+ 14 files changed, 542 insertions(+), 2 deletions(-)
+ create mode 100644 host/snapshot.cpp
+ create mode 100644 host/snapshot.hpp
+
+diff --git a/cmake/PortableKit.cmake b/cmake/PortableKit.cmake
+index 635ded4..9b045a2 100644
+--- a/cmake/PortableKit.cmake
++++ b/cmake/PortableKit.cmake
+@@ -50,6 +50,7 @@ set(PORTABLEKIT_HOST_SOURCES
+     host/cheats/cheats.cpp
+     host/cheats/cwcheat.cpp
+     host/overlays.cpp
++    host/snapshot.cpp
+     host/system.cpp
+     host/kernel/kernel.cpp
+     host/kernel/fixed_pool.cpp
+diff --git a/host/audio/sas_core.cpp b/host/audio/sas_core.cpp
+index 4f61b3b..ce1871b 100644
+--- a/host/audio/sas_core.cpp
++++ b/host/audio/sas_core.cpp
+@@ -607,9 +607,11 @@ void SasCore::render(const psprecomp::GuestMemory &memory, std::int16_t *output,
+     }
+ }
+ 
+-SasCore &sas_core(std::uint32_t handle) {
++std::map<std::uint32_t, SasCore> &sas_cores() {
+     static std::map<std::uint32_t, SasCore> cores;
+-    return cores[handle];
++    return cores;
+ }
+ 
++SasCore &sas_core(std::uint32_t handle) { return sas_cores()[handle]; }
++
+ } // namespace portablekit::audio
+diff --git a/host/audio/sas_core.hpp b/host/audio/sas_core.hpp
+index 99acf07..bdccc14 100644
+--- a/host/audio/sas_core.hpp
++++ b/host/audio/sas_core.hpp
+@@ -2,6 +2,7 @@
+ 
+ #include "psprecomp/guest_memory.hpp"
+ 
++#include <map>
+ #include <array>
+ #include <cstdint>
+ #include <vector>
+@@ -130,5 +131,7 @@ private:
+ // One core per guest SAS handle. Games usually open one, but the handle is an
+ // argument to every call, so it is keyed rather than assumed.
+ [[nodiscard]] SasCore &sas_core(std::uint32_t handle);
++// Every core, by handle: a save state copies them (host/snapshot.hpp).
++[[nodiscard]] std::map<std::uint32_t, SasCore> &sas_cores();
+ 
+ } // namespace portablekit::audio
+diff --git a/host/hle/hle_atrac.cpp b/host/hle/hle_atrac.cpp
+index ae62e5b..084608d 100644
+--- a/host/hle/hle_atrac.cpp
++++ b/host/hle/hle_atrac.cpp
+@@ -17,6 +17,7 @@
+ // frame comes from the decoded host file instead of the ATRAC decoder, at the
+ // same positions. Everything else is the same.
+ #include "../profile.hpp"
++#include "snapshot.hpp"
+ #include "hle_common.hpp"
+ 
+ #include "audio/atrac_decoder.hpp"
+@@ -28,6 +29,8 @@
+ #include <array>
+ #include <cstdlib>
+ #include <iostream>
++#include <deque>
++#include <map>
+ #include <memory>
+ #include <optional>
+ #include <span>
+@@ -103,6 +106,19 @@ struct AtracContext {
+     std::int64_t next_frame{};
+     std::int64_t cached_frame{-1};
+     std::vector<std::int16_t> cached;
++    // The latest frames the decoder made, in the order it made them, and how
++    // many it has made. After a save state is restored, the ones it made
++    // since the save are handed out again in that order while the game asks
++    // for the same frames, since a seek's warm-up is close to decoding
++    // straight through but not the same to the bit (add_atrac_to_snapshots).
++    struct Made {
++        std::uint64_t serial{};
++        std::int64_t frame{};
++        std::vector<std::int16_t> samples;
++    };
++    std::deque<Made> recent;
++    std::uint64_t made{};
++    std::deque<Made> replay;
+ 
+     // Streaming: the buffer holds only part of the file, and the game adds
+     // the rest as it plays. Every byte it adds is copied here when it is
+@@ -253,6 +269,17 @@ std::uint64_t play_order(const AtracContext &context, std::uint32_t offset, std:
+ // request is not the frame that follows the last one it decoded.
+ bool load_frame(const psprecomp::GuestMemory &memory, AtracContext &context, std::int64_t frame) {
+     if (frame == context.cached_frame) return true;
++    if (!context.replay.empty()) {
++        if (context.replay.front().frame == frame) {
++            context.cached = context.replay.front().samples;
++            context.cached_frame = frame;
++            context.replay.pop_front();
++            return true;
++        }
++        // The game went another way: the decoder seeks.
++        context.replay.clear();
++        context.next_frame = -1;
++    }
+     const TrackInfo &track = context.track;
+     const std::size_t frame_samples = audio::atrac_frame_samples(track.codec);
+     context.cached.assign(frame_samples * 2u, 0);
+@@ -300,6 +327,9 @@ bool load_frame(const psprecomp::GuestMemory &memory, AtracContext &context, std
+     if (!decoded) std::fill(context.cached.begin(), context.cached.end(), std::int16_t{0});
+     context.next_frame = frame + 1;
+     context.cached_frame = frame;
++    constexpr std::size_t kRecentFrames = 32u;  // more than a rollback goes back, in frames of music
++    context.recent.push_back(AtracContext::Made{context.made++, frame, context.cached});
++    while (context.recent.size() > kRecentFrames) context.recent.pop_front();
+     return decoded;
+ }
+ 
+@@ -946,9 +976,113 @@ void register_atrac_functions(HleRegistrar &hle) {
+     });
+ }
+ 
++// A context as a save state keeps it (host/snapshot.hpp): everything but the
++// decoder, which stays where it is. A restored context takes the frames the
++// decoder already made from `recent` until it is back at its next frame, so
++// the music comes out as it did. A context made since the save gets a fresh
++// decoder, and its first frame is decoded as after a seek.
++struct ContextSaved {
++    bool loaded{};
++    TrackInfo track;
++    std::uint32_t buffer{};
++    std::uint32_t buffer_size{};
++    std::int32_t loop_num{};
++    std::int32_t position{};
++    std::shared_ptr<const audio::HostPcm> host;
++    std::int64_t cached_frame{};
++    std::vector<std::int16_t> cached;
++    bool streaming{};
++    std::uint32_t written{};
++    std::uint32_t cursor{};
++    std::uint32_t wraps{};
++    std::uint32_t loops_done{};
++    std::uint32_t stored_from{};
++    std::vector<std::uint8_t> stored;
++    std::uint32_t codec_type{};
++    bool low_level{};
++    std::uint32_t low_level_frame_bytes{};
++    std::uint32_t low_level_out_channels{};
++    std::uint64_t made{};  // frames the decoder had made
++};
++
++void add_atrac_to_snapshots() {
++    using Saved = std::array<std::optional<ContextSaved>, kMaxAtracIds>;
++    snapshot::add(
++        "atrac",
++        [] {
++            Saved saved;
++            for (std::size_t id = 0; id < kMaxAtracIds; ++id) {
++                const AtracContext *c = contexts()[id].get();
++                if (c == nullptr) continue;
++                saved[id] = ContextSaved{c->loaded, c->track, c->buffer, c->buffer_size, c->loop_num, c->position,
++                                         c->host, c->cached_frame, c->cached, c->streaming, c->written, c->cursor,
++                                         c->wraps, c->loops_done, c->stored_from, c->stored, c->codec_type,
++                                         c->low_level, c->low_level_frame_bytes, c->low_level_out_channels,
++                                         c->made};
++            }
++            return std::any(saved);
++        },
++        [](const std::any &any) {
++            const Saved &saved = std::any_cast<const Saved &>(any);
++            for (std::size_t id = 0; id < kMaxAtracIds; ++id) {
++                std::unique_ptr<AtracContext> &slot = contexts()[id];
++                if (!saved[id]) {
++                    slot.reset();
++                    continue;
++                }
++                const ContextSaved &c = *saved[id];
++                // A context made since the save, or one whose track changed,
++                // needs its decoder opened for the saved track.
++                const bool reopen = !slot || slot->track.codec != c.track.codec ||
++                                    slot->track.channels != c.track.channels ||
++                                    slot->track.block_align != c.track.block_align ||
++                                    slot->track.extradata != c.track.extradata;
++                if (!slot) slot = std::make_unique<AtracContext>();
++                AtracContext &live = *slot;
++                if (reopen && c.loaded && !c.host)
++                    live.decoder.open(c.track.codec, c.track.channels, c.track.block_align, c.track.extradata);
++                live.loaded = c.loaded;
++                live.track = c.track;
++                live.buffer = c.buffer;
++                live.buffer_size = c.buffer_size;
++                live.loop_num = c.loop_num;
++                live.position = c.position;
++                live.host = c.host;
++                live.replay.clear();
++                if (reopen) {
++                    live.next_frame = -1;
++                    live.recent.clear();
++                } else {
++                    for (const AtracContext::Made &m : live.recent)
++                        if (m.serial >= c.made) live.replay.push_back(m);
++                    // Older than the frames kept: nothing to hand out, so a seek.
++                    if (live.made > c.made && (live.recent.empty() || live.recent.front().serial > c.made)) {
++                        live.replay.clear();
++                        live.next_frame = -1;
++                    }
++                }
++                live.cached_frame = c.cached_frame;
++                live.cached = c.cached;
++                live.streaming = c.streaming;
++                live.written = c.written;
++                live.cursor = c.cursor;
++                live.wraps = c.wraps;
++                live.loops_done = c.loops_done;
++                live.stored_from = c.stored_from;
++                live.stored = c.stored;
++                live.codec_type = c.codec_type;
++                live.low_level = c.low_level;
++                live.low_level_frame_bytes = c.low_level_frame_bytes;
++                live.low_level_out_channels = c.low_level_out_channels;
++            }
++        });
++}
++
+ } // namespace
+ 
+ void register_atrac(HleRegistrar &hle) {
++    static const bool added = (add_atrac_to_snapshots(), true);
++    (void)added;
+     if (!audio::AtracDecoder::available()) {
+         std::cout << "Audio: built without FFmpeg; streamed music is silent\n";
+         return;
+diff --git a/host/hle/hle_io.cpp b/host/hle/hle_io.cpp
+index 76b41f2..304b0f4 100644
+--- a/host/hle/hle_io.cpp
++++ b/host/hle/hle_io.cpp
+@@ -1,5 +1,6 @@
+ // IoFileMgrForUser and sceUmdUser: UMD access straight from the disc image
+ // (including raw "sce_lbn" sector files) and a host directory for ms0:.
++#include "snapshot.hpp"
+ #include "../profile.hpp"
+ #include "hle_common.hpp"
+ 
+@@ -849,7 +850,94 @@ void register_async_io(HleRegistrar &hle) {
+ const std::filesystem::path &disc_image_path() { return io().disc_path; }
+ const std::filesystem::path &memory_stick_path() { return io().memory_stick; }
+ 
++// The open files as a save state keeps them (host/snapshot.hpp): every
++// handle's position and pending result, not the host's own streams. A handle
++// to a host file that was closed after the save cannot come back, and says so.
++struct FileSaved {
++    OpenFile::Kind kind{};
++    std::string path;
++    std::uint64_t disc_offset{};
++    std::uint64_t size{};
++    std::uint64_t position{};
++    bool sector_units{};
++    std::shared_ptr<hle_extension::FileFilter> filter;
++    std::uint64_t unfiltered_size{};
++    std::vector<OpenFile::DirectoryEntry> entries;
++    std::size_t next_entry{};
++    std::optional<std::int64_t> async_result;
++    bool release_after_async{};
++    SceUID async_callback{};
++    std::uint32_t async_callback_argument{};
++};
++
++struct IoSaved {
++    std::map<std::uint32_t, FileSaved> files;
++    std::uint32_t next_fd{};
++    std::map<std::uint32_t, DiscReadAhead> read_ahead;
++    std::uint32_t next_read_ahead{};
++    std::string current_directory;
++};
++
++void put_back(OpenFile &live, const FileSaved &f) {
++    live.kind = f.kind;
++    live.path = f.path;
++    live.disc_offset = f.disc_offset;
++    live.size = f.size;
++    live.position = f.position;
++    live.sector_units = f.sector_units;
++    live.filter = f.filter;
++    live.unfiltered_size = f.unfiltered_size;
++    live.entries = f.entries;
++    live.next_entry = f.next_entry;
++    live.async_result = f.async_result;
++    live.release_after_async = f.release_after_async;
++    live.async_callback = f.async_callback;
++    live.async_callback_argument = f.async_callback_argument;
++}
++
++void add_io_to_snapshots() {
++    snapshot::add(
++        "io",
++        [] {
++            const IoState &state = io();
++            IoSaved saved{{}, state.next_fd, state.read_ahead, state.next_read_ahead, state.current_directory};
++            for (const auto &[fd, f] : state.files)
++                saved.files.emplace(fd, FileSaved{f.kind, f.path, f.disc_offset, f.size, f.position, f.sector_units,
++                                                  f.filter, f.unfiltered_size, f.entries, f.next_entry,
++                                                  f.async_result, f.release_after_async, f.async_callback,
++                                                  f.async_callback_argument});
++            return std::any(saved);
++        },
++        [](const std::any &any) {
++            const IoSaved &saved = std::any_cast<const IoSaved &>(any);
++            IoState &state = io();
++            for (auto it = state.files.begin(); it != state.files.end();)
++                it = saved.files.count(it->first) == 0u ? state.files.erase(it) : std::next(it);
++            for (const auto &[fd, f] : saved.files) {
++                const auto live = state.files.find(fd);
++                if (live != state.files.end() && live->second.path == f.path && live->second.kind == f.kind) {
++                    put_back(live->second, f);
++                    continue;
++                }
++                if (f.kind == OpenFile::Kind::Host) {
++                    std::cerr << "[snapshot] " << f.path << " was closed after the save; its handle " << fd
++                              << " does not come back" << std::endl;
++                    continue;
++                }
++                OpenFile &made = state.files[fd];
++                made.host.reset();
++                put_back(made, f);
++            }
++            state.next_fd = saved.next_fd;
++            state.read_ahead = saved.read_ahead;
++            state.next_read_ahead = saved.next_read_ahead;
++            state.current_directory = saved.current_directory;
++        });
++}
++
+ void register_io(HleRegistrar &hle, const std::filesystem::path &disc_image, const std::filesystem::path &memory_stick) {
++    static const bool added = (add_io_to_snapshots(), true);
++    (void)added;
+     if (!disc_image.empty()) {
+         io().disc = std::make_unique<IsoImage>(disc_image);
+         io().disc_path = disc_image;
+diff --git a/host/hle/hle_media.cpp b/host/hle/hle_media.cpp
+index 42eb873..4379198 100644
+--- a/host/hle/hle_media.cpp
++++ b/host/hle/hle_media.cpp
+@@ -2,6 +2,7 @@
+ // timing and callbacks behaving like hardware (vblank-paced input reads, GE
+ // list completion callbacks, blocking audio output); the drawing and the
+ // mixing themselves live under gpu/ and audio/.
++#include "snapshot.hpp"
+ #include "../profile.hpp"
+ #include "hle_common.hpp"
+ #include "kernel/stall_watchdog.hpp"
+@@ -1234,7 +1235,57 @@ void stop_presenting() {
+ #endif
+ }
+ 
++// The media modules' share of a save state: what the game set and queued,
++// not the renderer or how far the sound device has played.
++struct MediaSaved {
++    DisplayState display;
++    std::uint32_t ctrl_cycle{};
++    std::uint32_t ctrl_mode{};
++    std::map<std::int32_t, GeCallback> ge_callbacks;
++    std::int32_t next_ge_callback{};
++    std::map<std::uint32_t, GeList> ge_lists;
++    std::uint32_t next_ge_list{};
++    std::array<AudioChannel, 8> audio{};
++    std::int32_t output2_channel{};
++    gpu::GeState ge;
++    CtrlLatch latch;
++    std::map<std::uint32_t, audio::SasCore> sas;
++};
++
++void add_media_to_snapshots() {
++    snapshot::add(
++        "media",
++        [] {
++            const MediaState &m = media();
++            return std::any(MediaSaved{m.display, m.ctrl_cycle, m.ctrl_mode, m.ge_callbacks, m.next_ge_callback,
++                                       m.ge_lists, m.next_ge_list, m.audio, m.output2_channel, m.ge, ctrl_latch(),
++                                       audio::sas_cores()});
++        },
++        [](const std::any &any) {
++            const MediaSaved &saved = std::any_cast<const MediaSaved &>(any);
++            MediaState &m = media();
++            m.display = saved.display;
++            m.ctrl_cycle = saved.ctrl_cycle;
++            m.ctrl_mode = saved.ctrl_mode;
++            m.ge_callbacks = saved.ge_callbacks;
++            m.next_ge_callback = saved.next_ge_callback;
++            m.ge_lists = saved.ge_lists;
++            m.next_ge_list = saved.next_ge_list;
++            for (std::size_t i = 0; i < m.audio.size(); ++i) {
++                const std::uint64_t cursor = m.audio[i].cursor;  // the sound device's, not the game's
++                m.audio[i] = saved.audio[i];
++                m.audio[i].cursor = cursor;
++            }
++            m.output2_channel = saved.output2_channel;
++            m.ge = saved.ge;
++            ctrl_latch() = saved.latch;
++            audio::sas_cores() = saved.sas;
++        });
++}
++
+ void register_media(HleRegistrar &hle) {
++    static const bool added = (add_media_to_snapshots(), true);
++    (void)added;
+     initialize_renderer();
+     register_display_ctrl(hle);
+     register_vblank_waits(hle);
+diff --git a/host/hle/hle_threadman.cpp b/host/hle/hle_threadman.cpp
+index a65b56c..0a6392f 100644
+--- a/host/hle/hle_threadman.cpp
++++ b/host/hle/hle_threadman.cpp
+@@ -1,5 +1,6 @@
+ // ThreadManForUser and Kernel_Library: threads, time, semaphores, event flags,
+ // mutexes, callbacks, VTimers and interrupt masking.
++#include "snapshot.hpp"
+ #include "../profile.hpp"
+ #include "hle_common.hpp"
+ 
+@@ -1703,9 +1704,33 @@ void register_msg_pipes(HleRegistrar &hle) {
+         kernel().finish(ctx, 0u);
+     });
+ }
++// The pools, pipes and lightweight mutexes threadman keeps outside the
++// kernel's own tables, for a save state (host/snapshot.hpp).
++struct ThreadmanSaved {
++    std::map<SceUID, Vpl> vpls;
++    std::map<SceUID, Fpl> fpls;
++    std::map<SceUID, MsgPipe> pipes;
++    std::map<std::uint32_t, SceUID> lightweight_mutexes;
++};
++
++void add_threadman_to_snapshots() {
++    snapshot::add(
++        "threadman",
++        [] { return std::any(ThreadmanSaved{vpls(), fpls(), msg_pipes(), lwmutex::by_work_area()}); },
++        [](const std::any &any) {
++            const ThreadmanSaved &saved = std::any_cast<const ThreadmanSaved &>(any);
++            vpls() = saved.vpls;
++            fpls() = saved.fpls;
++            msg_pipes() = saved.pipes;
++            lwmutex::by_work_area() = saved.lightweight_mutexes;
++        });
++}
++
+ } // namespace
+ 
+ void register_threadman(HleRegistrar &hle) {
++    static const bool added = (add_threadman_to_snapshots(), true);
++    (void)added;
+     register_threads(hle);
+     register_time(hle);
+     register_semaphores(hle);
+diff --git a/host/kernel/kernel.cpp b/host/kernel/kernel.cpp
+index c7cbbfa..ff4ef96 100644
+--- a/host/kernel/kernel.cpp
++++ b/host/kernel/kernel.cpp
+@@ -81,6 +81,113 @@ const char *wait_name(WaitType type) {
+ 
+ } // namespace
+ 
++struct Kernel::Saved {
++    std::map<SceUID, Thread> threads;
++    SceUID next_uid{};
++    SceUID current_uid{};
++    std::uint64_t next_ready_sequence{};
++    std::uint64_t now_us{};
++    std::uint64_t waits_begun{};
++    SceUID busy_thread{};
++    std::uint64_t busy_waits{};
++    std::uint64_t idle_vblanks{};
++    std::uint64_t next_vblank_us{};
++    std::uint64_t vblank_count{};
++    bool dispatch_enabled{};
++    bool interrupts_enabled{};
++    std::map<SceUID, MemoryBlock> blocks;
++    std::vector<FreeRange> free_ranges;
++    std::map<SceUID, std::vector<GuestCall>> guest_calls;
++    std::deque<InterruptCall> pending_interrupts;
++    bool interrupt_active{};
++    bool interrupted_idle{};
++    AllegrexContext interrupted_context{};
++    std::function<void(std::uint32_t)> interrupt_on_return;
++    std::map<SceUID, Semaphore> semaphores;
++    std::map<SceUID, EventFlag> event_flags;
++    std::map<SceUID, Mutex> mutexes;
++    std::map<SceUID, Mailbox> mailboxes;
++    std::map<SceUID, Callback> callbacks;
++    std::map<SceUID, VTimer> vtimers;
++    std::map<std::uint32_t, std::map<std::uint32_t, SubInterruptHandler>> sub_interrupts;
++};
++
++std::shared_ptr<const Kernel::Saved> Kernel::save_state() const {
++    auto saved = std::make_shared<Saved>();
++    for (const auto &[uid, thread] : threads_) saved->threads.emplace(uid, *thread);
++    saved->next_uid = next_uid_;
++    saved->current_uid = current_uid_;
++    saved->next_ready_sequence = next_ready_sequence_;
++    saved->now_us = now_us_;
++    saved->waits_begun = waits_begun_;
++    saved->busy_thread = busy_thread_;
++    saved->busy_waits = busy_waits_;
++    saved->idle_vblanks = idle_vblanks_;
++    saved->next_vblank_us = next_vblank_us_;
++    saved->vblank_count = vblank_count_;
++    saved->dispatch_enabled = dispatch_enabled_;
++    saved->interrupts_enabled = interrupts_enabled_;
++    saved->blocks = blocks_;
++    saved->free_ranges = free_ranges_;
++    saved->guest_calls = guest_calls_;
++    saved->pending_interrupts = pending_interrupts_;
++    saved->interrupt_active = interrupt_active_;
++    saved->interrupted_idle = interrupted_idle_;
++    saved->interrupted_context = interrupted_context_;
++    saved->interrupt_on_return = interrupt_on_return_;
++    saved->semaphores = semaphores;
++    saved->event_flags = event_flags;
++    saved->mutexes = mutexes;
++    saved->mailboxes = mailboxes;
++    saved->callbacks = callbacks;
++    saved->vtimers = vtimers;
++    saved->sub_interrupts = sub_interrupts;
++    return saved;
++}
++
++void Kernel::restore_state(const Saved &saved) {
++    // Threads in place where they exist, so a Thread a caller still points
++    // at stays the same object.
++    for (auto it = threads_.begin(); it != threads_.end();)
++        it = saved.threads.count(it->first) == 0u ? threads_.erase(it) : std::next(it);
++    for (const auto &[uid, thread] : saved.threads) {
++        auto &slot = threads_[uid];
++        if (slot) *slot = thread;
++        else slot = std::make_unique<Thread>(thread);
++    }
++    next_uid_ = saved.next_uid;
++    current_uid_ = saved.current_uid;
++    next_ready_sequence_ = saved.next_ready_sequence;
++    now_us_ = saved.now_us;
++    waits_begun_ = saved.waits_begun;
++    busy_thread_ = saved.busy_thread;
++    busy_waits_ = saved.busy_waits;
++    busy_since_ = std::chrono::steady_clock::now();
++    idle_vblanks_ = saved.idle_vblanks;
++    next_vblank_us_ = saved.next_vblank_us;
++    vblank_count_ = saved.vblank_count;
++    dispatch_enabled_ = saved.dispatch_enabled;
++    interrupts_enabled_ = saved.interrupts_enabled;
++    blocks_ = saved.blocks;
++    free_ranges_ = saved.free_ranges;
++    guest_calls_ = saved.guest_calls;
++    pending_interrupts_ = saved.pending_interrupts;
++    interrupt_active_ = saved.interrupt_active;
++    interrupted_idle_ = saved.interrupted_idle;
++    interrupted_context_ = saved.interrupted_context;
++    interrupt_on_return_ = saved.interrupt_on_return;
++    semaphores = saved.semaphores;
++    event_flags = saved.event_flags;
++    mutexes = saved.mutexes;
++    mailboxes = saved.mailboxes;
++    callbacks = saved.callbacks;
++    vtimers = saved.vtimers;
++    sub_interrupts = saved.sub_interrupts;
++    // Emulated time went back: the hold to real time starts again from here,
++    // or the next frames would race to make up the frames undone.
++    pacing_started_ = false;
++}
++
+ Kernel &kernel() {
+     static Kernel instance;
+     return instance;
+diff --git a/host/kernel/kernel.hpp b/host/kernel/kernel.hpp
+index a2f3616..2749b19 100644
+--- a/host/kernel/kernel.hpp
++++ b/host/kernel/kernel.hpp
+@@ -249,6 +249,13 @@ public:
+     // after the game was paused, so it resumes at normal speed rather than
+     // racing to make up the pause.
+     void resync_real_time() noexcept { pacing_started_ = false; }
++    // A save state's share of the kernel (host/snapshot.hpp): threads, every
++    // object and wait, the clock and vblank schedule, the scheduler's order,
++    // memory blocks, guest calls and interrupts in progress. Not the hold to
++    // real time, the busy clock's real-time start or the hooks.
++    struct Saved;
++    [[nodiscard]] std::shared_ptr<const Saved> save_state() const;
++    void restore_state(const Saved &saved);
+     // Holds emulated time back by `by` of real time: from now on each frame
+     // comes that much later than it would have. Nothing while emulated time
+     // is not held to real time.
+diff --git a/host/snapshot.cpp b/host/snapshot.cpp
+new file mode 100644
+index 0000000..3175bc6
+--- /dev/null
++++ b/host/snapshot.cpp
+@@ -0,0 +1,65 @@
++#include "snapshot.hpp"
++
++#include "kernel/kernel.hpp"
++
++#include <utility>
++
++namespace portablekit::snapshot {
++
++namespace {
++
++struct Participant {
++    std::string name;
++    std::function<std::any()> save;
++    std::function<void(const std::any &)> restore;
++};
++
++std::vector<Participant> &participants() {
++    static std::vector<Participant> list;
++    return list;
++}
++
++} // namespace
++
++struct State {
++    std::vector<std::uint8_t> ram;
++    std::vector<std::uint8_t> vram;
++    psprecomp::AllegrexContext cpu;
++    std::uint64_t starvation_phase{};
++    std::int32_t thread_uid{};
++    std::string thread_name;
++    std::shared_ptr<const Kernel::Saved> kernel;
++    std::vector<std::any> parts;
++};
++
++void add(std::string name, std::function<std::any()> save, std::function<void(const std::any &)> restore) {
++    participants().push_back(Participant{std::move(name), std::move(save), std::move(restore)});
++}
++
++std::shared_ptr<const State> save(psprecomp::Runtime &runtime) {
++    auto state = std::make_shared<State>();
++    state->ram = runtime.memory().bytes();
++    state->vram = runtime.memory().vram_bytes();
++    state->cpu = runtime.cpu();
++    state->starvation_phase = runtime.starvation_phase();
++    state->thread_uid = psprecomp::runtime_thread_uid();
++    state->thread_name = psprecomp::runtime_thread_name();
++    state->kernel = kernel().save_state();
++    state->parts.reserve(participants().size());
++    for (const Participant &p : participants()) state->parts.push_back(p.save());
++    return state;
++}
++
++void restore(psprecomp::Runtime &runtime, const State &state) {
++    runtime.memory().restore_bytes(state.ram, state.vram);
++    runtime.cpu() = state.cpu;
++    runtime.set_starvation_phase(state.starvation_phase);
++    psprecomp::set_runtime_thread_identity(state.thread_uid, state.thread_name);
++    kernel().restore_state(*state.kernel);
++    const std::vector<Participant> &list = participants();
++    for (std::size_t i = 0; i < list.size() && i < state.parts.size(); ++i) list[i].restore(state.parts[i]);
++}
++
++std::size_t size(const State &state) { return state.ram.size() + state.vram.size(); }
++
++} // namespace portablekit::snapshot
+diff --git a/host/snapshot.hpp b/host/snapshot.hpp
+new file mode 100644
+index 0000000..dd3fd92
+--- /dev/null
++++ b/host/snapshot.hpp
+@@ -0,0 +1,42 @@
++#pragma once
++
++// Save states of the running game, for rollback netplay: everything a run
++// depends on, taken between two dispatches (the runtime's post-dispatch hook),
++// when no recompiled frame is live and every guest thread's registers are in
++// its context. A state holds guest RAM and VRAM, the running thread's
++// context, the runtime's starvation phase, the kernel's objects and clock, and
++// what each participant adds: the HLE modules' own state (display, controller
++// latch, audio channels, SAS voices, threadman pools, open files) and anything
++// a port keeps that the game's run reads back.
++//
++// Not in a state, on purpose: the host's renderer and the frames it holds,
++// what the sound device has already played, the network, real-time pacing,
++// and logs. Restoring a state does not undo them.
++
++#include "psprecomp/runtime.hpp"
++
++#include <any>
++#include <cstdint>
++#include <functional>
++#include <memory>
++#include <string>
++#include <vector>
++
++namespace portablekit::snapshot {
++
++// Something outside guest memory and the kernel that a game's run depends on:
++// `save` copies it out, `restore` puts a copy back. Add participants before
++// the first save; the name is for messages.
++void add(std::string name, std::function<std::any()> save, std::function<void(const std::any &)> restore);
++
++struct State;
++
++// The whole state now. Call only between dispatches.
++[[nodiscard]] std::shared_ptr<const State> save(psprecomp::Runtime &runtime);
++// Puts `state` back: the next dispatch runs where it was taken.
++void restore(psprecomp::Runtime &runtime, const State &state);
++
++// The bytes a state keeps, for logs.
++[[nodiscard]] std::size_t size(const State &state);
++
++} // namespace portablekit::snapshot
+diff --git a/include/psprecomp/guest_memory.hpp b/include/psprecomp/guest_memory.hpp
+index 0e05650..e0b23cb 100644
+--- a/include/psprecomp/guest_memory.hpp
++++ b/include/psprecomp/guest_memory.hpp
+@@ -169,6 +169,10 @@ public:
+     [[nodiscard]] std::string read_c_string(std::uint32_t address, std::size_t max_length = 256u) const;
+     [[nodiscard]] const std::vector<std::uint8_t> &bytes() const noexcept;
+     [[nodiscard]] const std::vector<std::uint8_t> &vram_bytes() const noexcept;
++    // Puts back RAM and VRAM as bytes() and vram_bytes() held them (a save
++    // state, host/snapshot.hpp): copied in place, since recompiled code holds
++    // pointers into them. The sizes must match.
++    void restore_bytes(const std::vector<std::uint8_t> &ram, const std::vector<std::uint8_t> &vram);
+ 
+ private:
+     enum class Region { Vram, Ram };
+diff --git a/include/psprecomp/runtime.hpp b/include/psprecomp/runtime.hpp
+index e425bd1..0090100 100644
+--- a/include/psprecomp/runtime.hpp
++++ b/include/psprecomp/runtime.hpp
+@@ -171,6 +171,10 @@ public:
+ 
+     AllegrexContext &cpu() noexcept;
+     const AllegrexContext &cpu() const noexcept;
++    // Dispatches since the last import, the phase of the starvation boundary
++    // that moves emulated time on: part of a save state (host/snapshot.hpp).
++    [[nodiscard]] std::uint64_t starvation_phase() const noexcept { return dispatches_since_import_; }
++    void set_starvation_phase(std::uint64_t phase) noexcept { dispatches_since_import_ = phase; }
+ 
+     // Ordered "library:nid -> call count" snapshot, empty unless
+     // PSPRECOMP_HLE_HISTOGRAM is set.  Used to tell a synchronous compute phase
+diff --git a/src/guest_memory.cpp b/src/guest_memory.cpp
+index b758f10..4bfdc7a 100644
+--- a/src/guest_memory.cpp
++++ b/src/guest_memory.cpp
+@@ -502,6 +502,13 @@ std::string GuestMemory::read_c_string(std::uint32_t address, std::size_t max_le
+ const std::vector<std::uint8_t> &GuestMemory::bytes() const noexcept { return bytes_; }
+ const std::vector<std::uint8_t> &GuestMemory::vram_bytes() const noexcept { return vram_; }
+ 
++void GuestMemory::restore_bytes(const std::vector<std::uint8_t> &ram, const std::vector<std::uint8_t> &vram) {
++    if (ram.size() != bytes_.size() || vram.size() != vram_.size())
++        throw Error("a save state's memory does not match this guest's");
++    std::memcpy(bytes_.data(), ram.data(), ram.size());
++    std::memcpy(vram_.data(), vram.data(), vram.size());
++}
++
+ // The slow paths of AotFastView, reached from generated code through a table
+ // so that the corpus references no symbol of the runtime.
+ const AotSlowPaths GuestMemory::kAotSlowPaths{
+-- 
+2.53.0.windows.1
+

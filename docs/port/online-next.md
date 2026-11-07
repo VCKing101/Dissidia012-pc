@@ -218,6 +218,55 @@ frame for the time an input waits before it is sent (`d012_net.cpp:706-712`). Wi
 aligned, as GGPO's time sync does, that frame may not be needed: 2 frames instead of 3 at 100 ms. Section 14's "one
 copy waiting most frames" is the symptom. Small.
 
+### 5.7 The first experiment (7 November 2026)
+
+Save states exist (PortableKit patch 0091, `host/snapshot.hpp`; the port's `d012_rollback.cpp`) and the first
+experiment above passed.
+
+**The test.** `D012_ROLLBACK_TEST=K[,EVERY[,wrong]]`: in a battle, at every EVERY-th pad read save the whole state
+(between two dispatches, after the read), run K more reads, restore, run those K again. With `wrong`, player 2's
+input on the first run is wrong (stick mirrored, cross flipped), as a misprediction would be, and only the second
+run gets the right input. Run on the recorded versus battle (`build/port/online/rec.inp`) replayed headless with the
+clocks pinned, and `D012_SYNC_TRACE` compared with a plain replay read for read (the last run of a read counts).
+
+**What a save holds.** Guest RAM and VRAM (copied back in place); the running thread's context, the runtime's
+starvation phase and thread identity; the kernel (threads, objects, waits, clock and vblank schedule, memory blocks,
+guest calls, interrupts); and participants: the display, controller latch, GE lists and state, audio channels and
+SAS voices; threadman's pools and pipes; open files' positions; ATRAC contexts; and the port's input record, sync
+trace counter, versus state, camera, split view and its popups. A restore restarts the hold to real time.
+
+**What each run found** (V), in the order fixed:
+
+| Run | Missing from the state | What showed it |
+| --- | --- | --- |
+| `test1` | The ATRAC music decoder | The music's buffers differed from the first restore on, then the game's own data |
+| `test2` | The decoder's state after a seek: a warm-up is close to straight decoding but not to the bit, and the game's mixer keeps the difference | The music differed for 3 reads after each restore; later for good |
+| `test4` | Open files' positions | The music stream's buffer (refilled from the disc) differed |
+| `test5` | The decoder replay by frame number broke where the track loops | Short music differences after some restores |
+| `test7` | The camera's and versus code's read counters | A HUD position for two reads after one restore |
+| `soak2` | The split view's state (its "set up" flags) and its damage-number popups | The game's data parted for good: player 2's lock-on cursor was not set up again in the run after a restore |
+
+The decoder is not copied (FFmpeg's state cannot be): it stays where it is, and after a restore the frames it made
+since the save are handed out again in the order it made them, until it is back where it was.
+
+**Results** (V), all against the same plain replay, every page of guest RAM at every pad read:
+
+| Run | Test | Reads run twice | Reads that differ |
+| --- | --- | --- | --- |
+| `test10` | back 8 at every 60th read | 2,797 | 0 of 27,309 |
+| `soak4` | back 8 at every 9th read (nearly the whole battle twice) | 17,800 | 0 of 26,356 |
+| `wrong1` | as `soak4`, player 2's input wrong on each first run | 14,168 | 0 of 22,275 (3,976 reads differed on their wrong first run, by up to 29 pages) |
+
+A save took 5.1 to 6.0 ms and a restore 2.2 to 2.4 ms on this PC (34 MiB copied each way, most of the save's time).
+
+**Not verified.** Drawing on (the runs were headless, `D012_NO_RENDER=1`), sound on, a real two-copy link, the
+Steam Deck's times, a state saved during a load or a dialog, a host file closed after a save (its handle does not
+come back; none happened in a battle). Re-running a frame's cost was not measured (the runs were unthrottled).
+
+**Next.** The rollback driver and the link (pieces 5 and 6 of 5.6): predict the other player's input, run ahead,
+restore and re-run on a misprediction, with frames that are re-run drawing and mixing nothing (piece 2). Dirty-page
+saves (piece 8) would take most of the 5 ms save away.
+
 ## 6. Suggested order for the next update
 
 1. ~~Frame-advantage balancing in the lockstep~~: done 7 November ([Communication Mode](communication-mode.md) 17.1).
@@ -225,5 +274,6 @@ copy waiting most frames" is the symptom. Small.
 3. ~~Group Battle steps 0 to 3~~: steps 0, 1 and 3 done 7 November (Communication Mode 18). Step 2 (the tag) is not
    needed while watched fights stay on the game's exchange: the port's link only carries battles whose two copies
    fight every battle in their group.
-4. Rollback's first experiment, then pieces 1 to 6 if it passes. Measure the Deck before promising a window.
+4. Rollback's first experiment: done and passed 7 November (5.7). Then pieces 2, 5 and 6. Measure the Deck before
+   promising a window.
 5. The spectator stream (Group Battle step 4), which can reuse rollback's input history.

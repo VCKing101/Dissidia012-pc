@@ -11,6 +11,7 @@
 #include "d012_input.hpp"
 #include "d012_math_check.hpp"
 #include "d012_mods.hpp"
+#include "d012_rollback.hpp"
 #include "d012_sync.hpp"
 #include "d012_test_switches.hpp"
 #include "d012_updates.hpp"
@@ -108,6 +109,10 @@ void register_extra_hle(portablekit::HleRegistrar &hle) {
     // Online play: the log unbuffered and the clock reads traced in network
     // battles (d012_comm_battle.cpp), and the library maths' fingerprint.
     comm_battle::install(hle);
+    // Save states and their test (d012_rollback.cpp).
+    input::add_to_snapshots();
+    sync::add_to_snapshots();
+    rollback::install();
     math_check::run_if_asked();
     // The frame's input record (d012_input.cpp): the innermost pad-read
     // wrapper, so it goes before every other.

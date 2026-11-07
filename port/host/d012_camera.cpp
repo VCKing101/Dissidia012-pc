@@ -25,6 +25,7 @@
 // MIT licence; see port/README.md.
 
 #include "d012_camera.hpp"
+#include "snapshot.hpp"
 #include "d012_comm_battle.hpp"
 #include "d012_decomp_harness.hpp"
 #include "d012_decomp_pad.hpp"
@@ -40,6 +41,7 @@
 
 #include "psprecomp/runtime.hpp"
 
+#include <any>
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -205,6 +207,25 @@ Mouse &mouse() {
     static Mouse m;
     return m;
 }
+
+struct CameraSaved {
+    Pad pad;
+    Mouse mouse;
+    Linked linked[2];
+};
+
+void add_state_to_snapshots() {
+    portablekit::snapshot::add(
+        "camera", [] { return std::any(CameraSaved{pad(), mouse(), {linked[0], linked[1]}}); },
+        [](const std::any &any) {
+            const CameraSaved &saved = std::any_cast<const CameraSaved &>(any);
+            pad() = saved.pad;
+            mouse() = saved.mouse;
+            linked[0] = saved.linked[0];
+            linked[1] = saved.linked[1];
+        });
+}
+const bool added_to_snapshots = (add_state_to_snapshots(), true);
 
 // The local player's camera with manual input on, while the game takes
 // input: the gates of the game's own pad accessors (input muted, a replay

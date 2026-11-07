@@ -21,6 +21,13 @@ namespace d012::sync {
 // page of guest RAM. tools/port/sync_compare.py compares two such files.
 void after_pad_read(psprecomp::GuestMemory &memory, std::uint32_t buffer, bool battle, bool versus);
 
+// Pad reads traced so far (the next read's number).
+[[nodiscard]] std::uint64_t reads();
+
+// Adds the trace's read count to save states (portablekit snapshot), so a
+// restored state's reads keep their numbers.
+void add_to_snapshots();
+
 // D012_SYNC_EPOCH=SECONDS: the PSP clock's wall time starts at that Unix time
 // instead of the host's clock at boot, in UTC rather than the host's time
 // zone (sceRtcGetCurrentClockLocalTime, sceRtcGetCurrentTick; the game reads
