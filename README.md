@@ -109,7 +109,7 @@ without the row; set it back to `1` to bring it back. `D012_LOCAL_VERSUS=0` does
 ## Online play (experimental)
 
 Two players fight a 1-on-1 battle over the internet in the game's own **Communications Mode**, each on their own PC
-or Steam Deck. The battle runs on the port's own netcode: full analog, each player's right-stick camera and an input
+or Steam Deck. Windows and Linux copies play each other. The battle runs on the port's own netcode: full analog, each player's right-stick camera and an input
 delay set from the connection.
 
 1. **Host:** open the menu (Esc, or L3 + R3), go to the **Network** page and choose **Host a session**. The game

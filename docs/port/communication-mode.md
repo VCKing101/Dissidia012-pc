@@ -557,3 +557,39 @@ said so.
 
 **Not verified.** A router that reports a shared address, the band and notices on the Deck, PC against PC on two
 machines, the Deck hosting, Group Battle.
+
+## 16. Windows against Linux (7 November 2026)
+
+A Windows copy and a native Linux copy now battle each other. Before, the must-match list (section 15) refused every
+such pair on "the compiler the port was built with", for two reasons. The Windows build is clang (llvm-mingw 23.1.2).
+The Linux program is built in the Steam Runtime SDK with **GCC 14**, which set no compiler item at all, while its
+game code (`game-code/main.so`, compiled by the Linux setup) is clang 23.1.4. What the item guards is the game's
+maths, and `d012_math.cpp` gives clang and GCC builds alike the port's own `sinf`, `cosf`, `asinf`, `log2f` and
+`exp2f` (it is left out only under MSVC). So the item is now "clang or GCC, with the port's own maths" on both, and
+an MSVC build's version for MSVC. The refusal no longer says that Windows and Linux cannot battle.
+
+**Without the network (V).** One recorded run (boot, menus, a save, a versus battle with a Bravery transfer)
+replayed on the Windows build and on the Linux build in WSL (`D012_INPUT_REPLAY`, `D012_SYNC_TRACE`,
+`D012_NO_BUSY_CLOCK=1`, `D012_SYNC_EPOCH`, the same data with its file times):
+- With the same font file (`text.font`): only the decoded music differs, by one step in some samples (the two
+  FFmpeg builds); the game reads none of it back.
+- With each system's default font (MS Gothic, Noto Sans CJK JP): text layout and some heap block sizes differ too,
+  and stop growing early in the battle. The fighters' records were the same at every point compared.
+
+**Online, on one PC (V).** The Windows build against Linux copies in WSL, each copy with its own address (WSL's
+network is a separate one behind this PC), through the Online Lobby with the routes of section 11. Router ports off.
+
+| Run | Hosting | Linux copy | What happened |
+| --- | --- | --- | --- |
+| `x1` | Linux | the GCC build | Lobby, challenge, streams and battle link worked; refused on the compiler item (the old list) |
+| `x2` | Linux | the GCC build | Linked with 2 frames; in step to the run's time limit (frame 6,410) |
+| `x3` | Windows | the GCC build | The same |
+| `x4` | Linux | installed by the Linux setup (game code clang 23.1.4) | The same |
+| `x5` | Windows | installed by the Linux setup | Longer routes: the battle ran to its end; both left on frame 15,805 and saved |
+| `x6` | Linux | the GCC build | This change, nothing else altered: linked with 2 frames; in step to the time limit (frame 6,410) |
+
+The copies used different fonts throughout (MS Gothic and the setup's Noto Sans CJK JP). In `x2` to `x5` the
+compiler item was made the same by hand; `x6` is the change above.
+
+**Not verified.** Two machines (WSL shares this PC), the Windows setup's copy against Linux (the Windows build here
+compiles like setup.exe, with llvm-mingw), the Steam Deck on the native Linux build, Group Battle.
