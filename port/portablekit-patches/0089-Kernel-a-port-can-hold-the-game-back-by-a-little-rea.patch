@@ -1,0 +1,79 @@
+From 6e83b1e223268a0bca516db13e3f486110eae925 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Sat, 7 Nov 2026 17:45:47 +1030
+Subject: [PATCH 89/90] Kernel: a port can hold the game back by a little real
+ time
+
+hle_extension::hold_back(by) and Kernel::hold_back_real_time(by) move the
+hold to real time later by `by`: from then on each frame comes that much
+later, at the same rate. Nothing while emulated time is not held to real
+time (unthrottled, or a load running fast). For a netplay port that keeps
+its frames in step with another copy's, which runs on another clock.
+Tested: Dissidia 012 online battles on Windows, two copies on one PC with
+simulated lag. Not tested: other games, Linux.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/hle/hle_extension_host.cpp       | 2 ++
+ host/kernel/kernel.hpp                | 6 ++++++
+ include/portablekit/hle_extension.hpp | 7 +++++++
+ 3 files changed, 15 insertions(+)
+
+diff --git a/host/hle/hle_extension_host.cpp b/host/hle/hle_extension_host.cpp
+index 2829f65..01d6da1 100644
+--- a/host/hle/hle_extension_host.cpp
++++ b/host/hle/hle_extension_host.cpp
+@@ -131,6 +131,8 @@ SecondPad first_pad_now() {
+                      sample.analog_y,  sample.right_x, sample.right_y};
+ }
+ 
++void hold_back(std::chrono::microseconds by) { kernel().hold_back_real_time(by); }
++
+ } // namespace hle_extension
+ 
+ HleExtensionReport install_linked_hle_extensions(Runtime &runtime, HleRegistrar &hle) {
+diff --git a/host/kernel/kernel.hpp b/host/kernel/kernel.hpp
+index d542b73..a2f3616 100644
+--- a/host/kernel/kernel.hpp
++++ b/host/kernel/kernel.hpp
+@@ -249,6 +249,12 @@ public:
+     // after the game was paused, so it resumes at normal speed rather than
+     // racing to make up the pause.
+     void resync_real_time() noexcept { pacing_started_ = false; }
++    // Holds emulated time back by `by` of real time: from now on each frame
++    // comes that much later than it would have. Nothing while emulated time
++    // is not held to real time.
++    void hold_back_real_time(std::chrono::microseconds by) noexcept {
++        if (pacing_started_ && by.count() > 0) pacing_real_base_ += by;
++    }
+     // Every thread, what it waits for and where, the objects waited on, the
+     // clock and the pacing, one line each (kernel/stall_watchdog.hpp).
+     void dump_state(std::ostream &out) const;
+diff --git a/include/portablekit/hle_extension.hpp b/include/portablekit/hle_extension.hpp
+index ce8dbd9..a8bf6b7 100644
+--- a/include/portablekit/hle_extension.hpp
++++ b/include/portablekit/hle_extension.hpp
+@@ -23,6 +23,7 @@
+ #include "psprecomp/runtime.hpp"
+ 
+ #include <array>
++#include <chrono>
+ #include <cstddef>
+ #include <cstdint>
+ #include <functional>
+@@ -317,6 +318,12 @@ void want_second_pad(bool wanted);
+ // input from code that cannot wait, such as a native override.
+ [[nodiscard]] SecondPad first_pad_now();
+ 
++// Holds the game back by `by` of real time: its frames come that much later
++// from now on, at the same rate. For a netplay port that keeps its frames in
++// step with another copy's, which runs on another clock. Nothing while the
++// game is not held to real time (unthrottled, or a load running fast).
++void hold_back(std::chrono::microseconds by);
++
+ } // namespace portablekit::hle_extension
+ 
+ // Defines a module's entry function. `name` is the module's name as its
+-- 
+2.53.0.windows.1
+

@@ -1,0 +1,191 @@
+From c1ca1989696f05a636a97117c691c40de1cd6aad Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Sat, 7 Nov 2026 17:45:48 +1030
+Subject: [PATCH 90/90] Ad hoc: Discover joins its group, and datagrams of up
+ to 32 KiB
+
+sceNetAdhocDiscoverInitStart joins the group its parameters name (+4, 8
+bytes) on the session's server, and the search ends as soon as another
+player is in the group, with result 0 (+0x10). With nobody there in the
+time it gives (+0xC, seconds) it ends with 2, and Stop ends it with 3. The
+meanings are read from how a game acts on them (0 starts its exchange, 2
+searches again, 3 closes it). The group stays joined for the exchange.
+
+The relay forwards datagrams of up to 32 KiB (was 10 KiB): a pass-by
+exchange sends 27,416 bytes. A test sends one each way through the relay.
+
+Tested: Dissidia 012's Communications, two copies on one PC on a loopback
+server (Discover, the exchange, a received Friend Card). Not tested: the
+new unit test (the ad hoc tests raise a firewall prompt), other games,
+Linux, two machines.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/adhoc/protocol.hpp |  5 ++-
+ host/hle/hle_adhoc.cpp  | 81 +++++++++++++++++++++++++++++++++--------
+ tests/adhoc_tests.cpp   | 21 +++++++++++
+ 3 files changed, 90 insertions(+), 17 deletions(-)
+
+diff --git a/host/adhoc/protocol.hpp b/host/adhoc/protocol.hpp
+index 40178d7..314395d 100644
+--- a/host/adhoc/protocol.hpp
++++ b/host/adhoc/protocol.hpp
+@@ -198,8 +198,9 @@ enum InitType : std::uint32_t {
+     kInitPtpAccept = 3,
+ };
+ 
+-// Largest datagram and stream block the relay forwards.
+-inline constexpr std::size_t kPdpBlockMax = 10u * 1024u;
++// Largest datagram and stream block the relay forwards. A pass-by exchange
++// sends datagrams of 27 KB (sceNetAdhocDiscover).
++inline constexpr std::size_t kPdpBlockMax = 32u * 1024u;
+ inline constexpr std::size_t kPtpBlockMax = 50u * 1024u;
+ 
+ // Address fields are 8 bytes wide with the MAC in the first 6.
+diff --git a/host/hle/hle_adhoc.cpp b/host/hle/hle_adhoc.cpp
+index b71adb5..9759a8f 100644
+--- a/host/hle/hle_adhoc.cpp
++++ b/host/hle/hle_adhoc.cpp
+@@ -29,6 +29,7 @@
+ #include "psprecomp/common.hpp"
+ 
+ #include <algorithm>
++#include <chrono>
+ #include <cstdio>
+ #include <cstdlib>
+ #include <iostream>
+@@ -1141,27 +1142,77 @@ void register_matching(HleRegistrar &hle) {
+ 
+ // sceNetAdhocDiscover ----------------------------------------------------------
+ //
+-// Discovery finds a nearby console for a one-to-one session with no group; it
+-// is not part of joining a gathering hall. Starting it succeeds, and it ends at
+-// once with nothing found.
++// Discovery is a PSP's pass-by search: while it sleeps it looks for consoles
++// in the group the game names, and wakes when it finds one. Here InitStart
++// joins that group on the server (the parameters: +4 the group's name, 8
++// bytes; +0xC a time in seconds; +0x10 the result, written when it ends), and
++// the search ends as soon as another player is in the group, with result 0.
++// With nobody there in the time given it ends with 2, and Stop ends it with 3.
++// What those results mean is read from how a game acts on them (0 starts its
++// exchange with the group's players, 2 starts the search again, 3 closes it);
++// the PSP's own names for them are not known. The status is 0 idle, 1
++// searching, 2 ended. The group stays joined after the search, for the
++// exchange.
+ void register_discover(HleRegistrar &hle) {
+     constexpr std::uint32_t kDiscoverNone = 0u;
+-    constexpr std::uint32_t kDiscoverCompleted = 2u;
+-    static std::uint32_t status = kDiscoverNone;
+-    hle.add("sceNetAdhocDiscover", "sceNetAdhocDiscoverInitStart", [](Runtime &, AllegrexContext &ctx) {
+-        status = kDiscoverCompleted;
+-        done(ctx, "sceNetAdhocDiscoverInitStart", 1, 0u);
++    constexpr std::uint32_t kDiscoverSearching = 1u;
++    constexpr std::uint32_t kDiscoverEnded = 2u;
++    constexpr std::uint32_t kFound = 0u;
++    constexpr std::uint32_t kNobody = 2u;
++    constexpr std::uint32_t kStopped = 3u;
++    struct Search {
++        std::uint32_t status = kDiscoverNone;
++        std::uint32_t param = 0u;
++        std::string group;
++        std::chrono::steady_clock::time_point until{};
++    };
++    static Search search;
++    const auto finish = [](psprecomp::GuestMemory &memory, std::uint32_t result) {
++        memory.store32(search.param + 0x10u, result);
++        search.status = kDiscoverEnded;
++        trace_line("discover ended, result " + std::to_string(result));
++    };
++    // Ends a running search once someone else is in the group, or its time is up.
++    const auto check = [finish](psprecomp::GuestMemory &memory) {
++        if (search.status != kDiscoverSearching) return;
++        pump_events();
++        const auto group = Client::get().group();
++        if (group && group->name == search.group && !Client::get().peers().empty()) finish(memory, kFound);
++        else if (std::chrono::steady_clock::now() >= search.until) finish(memory, kNobody);
++    };
++    hle.add("sceNetAdhocDiscover", "sceNetAdhocDiscoverInitStart", [](Runtime &rt, AllegrexContext &ctx) {
++        constexpr const char *kName = "sceNetAdhocDiscoverInitStart";
++        if (!state().ctl_initialized) return done(ctx, kName, 1, err::kCtlNotInitialized);
++        if (arg(ctx, 0) == 0u) return done(ctx, kName, 1, err::kCtlInvalidArg);
++        if (!settings::current().adhoc || adhoc_server_address().empty()) {
++            Client::log("[adhoc] no server is set up (menu: Network); the search fails", true);
++            return done(ctx, kName, 1, err::kCtlTimeout, "no server");
++        }
++        search.param = arg(ctx, 0);
++        search.group = read_cstring(rt.memory(), search.param + 4u, 8u);
++        const std::uint32_t seconds = std::clamp<std::uint32_t>(rt.memory().load32(search.param + 0xCu), 1u, 600u);
++        search.until = std::chrono::steady_clock::now() + std::chrono::seconds(seconds);
++        search.status = kDiscoverSearching;
++        start_client();
++        if (const auto group = Client::get().group(); !group || group->name != search.group)
++            Client::get().join(search.group);
++        done(ctx, kName, 1, 0u, "group \"" + search.group + "\", " + std::to_string(seconds) + " s");
++    });
++    hle.add("sceNetAdhocDiscover", "sceNetAdhocDiscoverUpdate", [check](Runtime &rt, AllegrexContext &ctx) {
++        check(rt.memory());
++        done(ctx, "sceNetAdhocDiscoverUpdate", 0, 0u);
++    });
++    hle.add("sceNetAdhocDiscover", "sceNetAdhocDiscoverGetStatus", [check](Runtime &rt, AllegrexContext &ctx) {
++        check(rt.memory());
++        done(ctx, "sceNetAdhocDiscoverGetStatus", 0, search.status);
+     });
+-    hle.add("sceNetAdhocDiscover", "sceNetAdhocDiscoverUpdate",
+-            [](Runtime &, AllegrexContext &ctx) { done(ctx, "sceNetAdhocDiscoverUpdate", 0, 0u); });
+-    hle.add("sceNetAdhocDiscover", "sceNetAdhocDiscoverGetStatus",
+-            [](Runtime &, AllegrexContext &ctx) { done(ctx, "sceNetAdhocDiscoverGetStatus", 0, status); });
+-    hle.add("sceNetAdhocDiscover", "sceNetAdhocDiscoverStop", [](Runtime &, AllegrexContext &ctx) {
+-        status = kDiscoverNone;
++    hle.add("sceNetAdhocDiscover", "sceNetAdhocDiscoverStop", [finish](Runtime &rt, AllegrexContext &ctx) {
++        if (search.status == kDiscoverSearching) finish(rt.memory(), kStopped);
++        search.status = kDiscoverNone;
+         done(ctx, "sceNetAdhocDiscoverStop", 0, 0u);
+     });
+     hle.add("sceNetAdhocDiscover", "sceNetAdhocDiscoverTerm", [](Runtime &, AllegrexContext &ctx) {
+-        status = kDiscoverNone;
++        search.status = kDiscoverNone;
+         done(ctx, "sceNetAdhocDiscoverTerm", 0, 0u);
+     });
+ }
+diff --git a/tests/adhoc_tests.cpp b/tests/adhoc_tests.cpp
+index e712b1f..40bdc9f 100644
+--- a/tests/adhoc_tests.cpp
++++ b/tests/adhoc_tests.cpp
+@@ -10,6 +10,7 @@
+ #include "adhoc/server.hpp"
+ #include "adhoc/sockets.hpp"
+ 
++#include <algorithm>
+ #include <chrono>
+ #include <cstdlib>
+ #include <cstdio>
+@@ -180,6 +181,26 @@ void server_and_client() {
+           "B's datagram reaches A");
+     b_pdp.send(relay::pdp_header(Mac{0x02, 9, 9, 9, 9, 9}, 10000, 3) + "xyz");
+ 
++    // A pass-by exchange's datagrams are 27,416 bytes, whole both ways.
++    constexpr std::size_t kExchange = 0x6B18u;
++    const int big = a.pdp_open(1000, kExchange);
++    Raw b_big(relay_port);
++    b_big.send(relay::init(relay::kInitPdp, kMacB, 1000, Mac{}, 0));
++    check(wait_until([&] { return a.diagnostics().relay_links_up == 2u; }), "A's second datagram socket links");
++    std::this_thread::sleep_for(std::chrono::milliseconds(100));
++    std::string card(kExchange, '\0');
++    for (std::size_t i = 0; i < card.size(); ++i) card[i] = static_cast<char>(i * 7u);
++    check(a.pdp_send(big, kMacB, 1000, card.data(), card.size()), "A sends a 27,416-byte datagram");
++    const auto big_header = b_big.read(relay::kPdpHeaderSize);
++    const auto big_body = big_header ? b_big.read(wire::get32(big_header->data() + 10)) : std::nullopt;
++    check(big_body && *big_body == card, "it reaches B whole");
++    std::reverse(card.begin(), card.end());
++    b_big.send(relay::pdp_header(kMacA, 1000, static_cast<std::uint32_t>(card.size())) + card);
++    check(wait_until([&] { return (got = a.pdp_receive(big)).has_value(); }) && got->data == card,
++          "B's 27,416-byte datagram reaches A whole");
++    a.pdp_close(big);
++    check(wait_until([&] { return a.diagnostics().relay_links_up == 1u; }), "the second datagram socket closes");
++
+     // A stream from B to A's listening socket.
+     const int listener = a.ptp_listen(20001, 8192, 1);
+     check(wait_until([&] {
+-- 
+2.53.0.windows.1
+

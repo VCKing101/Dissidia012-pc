@@ -338,8 +338,8 @@ void network_rows() {
     ui::section("Online battles");
     ui::RowOptions options;
     options.description = "How many frames pass between a button and the fighter acting, in online battles you "
-                          "host. Auto sets it from the connection as the battle starts: 2 on a home network, 3 at "
-                          "about 75 to 100 ms. More smooths a poor connection; fewer responds sooner.";
+                          "host. Auto sets it from the connection as the battle starts: 2 up to a round trip of "
+                          "about 100 ms, more beyond. More smooths a poor connection; fewer responds sooner.";
     if (const char *text = std::getenv("D012_NET_DELAY"); text != nullptr && *text != '\0') {
         options.disabled = true;
         options.note = "Set by D012_NET_DELAY";

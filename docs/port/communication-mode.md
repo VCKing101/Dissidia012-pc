@@ -593,3 +593,86 @@ compiler item was made the same by hand; `x6` is the change above.
 
 **Not verified.** Two machines (WSL shares this PC), the Windows setup's copy against Linux (the Windows build here
 compiles like setup.exe, with llvm-mingw), the Steam Deck on the native Linux build, Group Battle.
+
+## 17. The frames in balance, and Communications (7 November 2026)
+
+Two pieces from [what comes next](online-next.md): the battle link keeps the two copies' frames in step with each
+other, which saves a frame of input delay, and Communications (section 5) works over PortableKit's server.
+
+### 17.1 The frames in balance
+
+**Why a frame was spent.** Each copy holds its own frames to its own clock, and drops what it owes when it falls
+more than 100 ms behind (PortableKit `Kernel::pace_to_real_time`). So where the two copies' frames fall against each
+other is set by when each started and by every stall since, not by the link. A copy's slack on a frame is how long
+before it needed the other's input for that frame the input came. The two slacks add up to twice (delay - one way): 29 + 30 ms at 2 frames and 37 ms each way,
+but nothing shared them out: one copy usually had nearly all of it and the other none, and the one with none
+waited on almost every frame. The auto delay paid for that with a frame (section 14's "+ 33 ms").
+
+**What changed.**
+- The link reads its socket on a thread of its own and stamps each datagram with when it came, so a copy knows the
+  slack it had on every frame. (The game's thread reads only once a frame, which hid when an input arrived; the
+  round-trip figures were a frame high for the same reason, and are now taken from the arrival too.)
+- Each INPUT carries the sender's average slack over its latest 16 frames (link version 6). The copy with less,
+  by more than 2 ms, holds its game back by a sixty-fourth of the difference each frame, at most 1 ms
+  (`hle_extension::hold_back`, PortableKit patch 0089, which moves the kernel's hold to real time). The two meet in
+  the middle within a second or two, and stay there unless a stall moves one.
+- They start in balance: the listening copy waits half the timed round trip after its WELCOME, the time the WELCOME
+  takes to reach the other copy, which starts its frames when it comes.
+- The auto delay drops the frame: ceil((round trip / 2 + 15 ms) / 33 ms), from 2 to 10. That is 2 frames up to a
+  round trip of about 100 ms, where it was 3 from 75 ms.
+- Every 900 frames the link reports both slacks and how long this copy was held back.
+- `D012_NO_NET_BALANCE=1` turns it off (and puts the frame back into the auto delay).
+
+**Results (V).** Two copies on this PC through the Online Lobby with the routes of section 12 (random busy input
+from both players), the battle link through `D012_NET_SIM`. Per 900 frames (30 s at full speed):
+
+| Run | Path (each way) | Balance | Delay | Slack, the two copies | Waited, the worse copy | 900 frames took |
+| --- | --- | --- | --- | --- | --- | --- |
+| `bal1` | 37 ± 4 ms | on, no start offset | 2 (auto) | 28 to 30 ms each | 0.6 s in the first 30 s, then 2 to 36 ms | 30.0 s |
+| `bal2off` | 50 ± 10 ms, 1% loss | off | 2 (fixed) | about 31 and -1 ms | 2.0 to 3.5 s, waits up to 65 ms | 29.9 to 30.0 s |
+| `bal3` | 50 ± 10 ms, 1% loss | on, no start offset | 2 (auto) | 14 to 18 ms each | 1.4 s in the first 30 s, then 0.13 to 0.30 s, waits up to 47 ms | 30.0 s |
+| `bal4` | 50 ± 10 ms, 1% loss | on | 2 (auto) | 14 to 19 ms each | 0.07 to 0.31 s, waits up to 47 ms | 30.0 s |
+| `bal5` | 37 ± 4 ms | on | 2 (auto) | 28 to 31 ms each | 1 to 2 ms | 30.0 s |
+
+- With the balance on, the two slacks stay within 3 ms of each other, and the copies hold themselves back by 0 to
+  35 ms per 30 s. Without the start offset (`bal1`, `bal3`) the first 30 s went on settling: the copy that started
+  ahead waited until it had held itself back enough.
+- With it off, one copy kept nearly all the slack and the other waited on 890 of 900 frames. The battle kept its
+  speed (the waits came out of the time the copy would have slept), but every frame of that copy came late by up to
+  65 ms, and any spike in the other copy's direction stalled it.
+- Every check value agreed in every run. Windows of 30.5 to 31 s are the routes' screenshots (both copies stall);
+  the longest waits of 430 to 510 ms come from them too.
+- The round trip read 74 and 100 ms in `bal4` and `bal5`, as simulated; `bal1` to `bal3` read it a frame high
+  (the fix above came after them).
+- One `bal2` run (the same as `bal3`) lost 3.3 s in its first 30 s on both copies at once, with neither waiting on
+  the link and 49 ms held back; its rerun `bal3` did not. I: this PC (its slow disk); not looked into further.
+
+**Not verified.** Two machines, a real path's jitter, the Deck, a delay of 2 over the internet at about 100 ms.
+
+### 17.2 Communications
+
+**What changed** (PortableKit patch 0090).
+- `sceNetAdhocDiscoverInitStart` joins the group its parameters name (`DISCOVER`) on the session's server, and the
+  search ends with result 0 once another player is in the group. With nobody there in its time (the game gives
+  20 s) it ends with 2, which makes the game search again; Stop ends it with 3. What the game does with each
+  result is in main 0x089034D0 (result 0 -> 1, 1 -> 0, 2 -> 2, 3 -> 3) and 0x08908E20 (1: the exchange; 2: search
+  again; 3: close; 4: an error). The group stays joined for the exchange.
+- The relay forwards datagrams of up to 32 KiB (it was 10 KiB): the exchange's are 27,416 bytes. A unit test sends
+  one each way.
+
+**Results (V).** Two copies on this PC on the loopback server, routes `xchg3` to `xchg5` (Communications Mode,
+Communications, Send Friend Card, the two notes, YES):
+- Each copy joined `DISCOVER`, saw the other, and ended the search with result 0 within 35 ms. Both then opened
+  their exchange socket on port 1000 and sent their 27,416 bytes to the other once a second; every datagram came
+  whole.
+- Both showed "Searching for players to exchange with... Receiving data from 1 players".
+- `xchg5`, player 2 on another save (`data-versus-user`): player 1 pressed circle, "Data received: 1. Continue data
+  transfer?", NO. It listed the other's card under Received Friend Card and nothing under Received Original Quest
+  (player 2 has none), and its Friend Card list then had the new card marked NEW beside its own. Player 2's circle
+  presses fell outside the screen's window in every run (the route's timing), so its side was seen only up to
+  "Receiving data".
+- Closing the exchange deleted the socket and left `DISCOVER`.
+
+**Not verified.** Sending an Original Quest, Import a Friend Card, three or more players, two machines, and whether
+the received card is kept after saving. The new unit test is one of the ad hoc tests, which need someone at the PC
+(they raise the firewall prompt) and were not run.

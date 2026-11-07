@@ -52,6 +52,7 @@
 #include "adhoc/session.hpp"
 
 #include "install/user_data.hpp"
+#include "portablekit/hle_extension.hpp"
 #if defined(PORTABLEKIT_HAS_RENDERER)
 #include "ui/message_dialog.hpp"
 #endif
@@ -70,6 +71,7 @@
 #endif
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
@@ -81,6 +83,7 @@
 #include <functional>
 #include <iostream>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <random>
@@ -114,9 +117,9 @@ constexpr std::uint8_t kBye = 4u;
 constexpr std::uint8_t kProbe = 5u;
 constexpr std::uint8_t kProbeEcho = 6u;
 constexpr std::uint8_t kRefuse = 7u;
-constexpr std::uint32_t kVersion = 5u;
+constexpr std::uint32_t kVersion = 6u;
 constexpr std::size_t kHead = 8u;
-constexpr std::size_t kInputHead = kHead + 48u;
+constexpr std::size_t kInputHead = kHead + 52u;
 constexpr std::size_t kLocalSize = 16u;
 constexpr std::uint64_t kMaxCarried = 64u;
 constexpr std::uint64_t kNoRead = ~0ull;
@@ -134,6 +137,69 @@ constexpr std::size_t kProbes = 8u;           // round trips timed for an automa
 constexpr auto kProbeEvery = std::chrono::milliseconds(40);
 constexpr auto kProbeFor = std::chrono::seconds(2);
 constexpr std::uint16_t kBattlePort = 27420;  // the battle link's UDP port by default
+// Keeping the two copies' frames in step (Link::slacks): how many frames the
+// slack is averaged over, the least difference acted on, and the most a
+// frame is held back.
+constexpr std::size_t kSlackFrames = 16u;
+constexpr double kSlackMargin = 2.0;  // ms
+constexpr auto kMostHold = std::chrono::microseconds(1000);
+constexpr std::int16_t kNoSlack = INT16_MIN;
+
+// Takes the link's datagrams as they come, on a thread of its own, with the
+// moment each came: the game's thread reads the socket only once a frame, and
+// the frames' balance (Link::slacks) needs when an input really arrived.
+class Receiver {
+public:
+    struct Datagram {
+        std::vector<std::uint8_t> bytes;
+        sockaddr_in from;
+        Clock::time_point at;
+    };
+    explicit Receiver(Socket socket) : socket_(socket), thread_([this] { run(); }) {}
+    ~Receiver() {
+        stop_ = true;
+        thread_.join();
+    }
+    Receiver(const Receiver &) = delete;
+    Receiver &operator=(const Receiver &) = delete;
+    // Every datagram that came, after waiting up to `wait` for the first.
+    std::vector<Datagram> take(std::chrono::milliseconds wait) {
+        std::unique_lock lock(mutex_);
+        if (queue_.empty() && wait.count() > 0) came_.wait_for(lock, wait, [this] { return !queue_.empty(); });
+        std::vector<Datagram> out;
+        out.swap(queue_);
+        return out;
+    }
+
+private:
+    void run() {
+        while (!stop_) {
+            fd_set set;
+            FD_ZERO(&set);
+            FD_SET(socket_, &set);
+            timeval time{0, 5000};
+            if (select(static_cast<int>(socket_ + 1), &set, nullptr, nullptr, &time) <= 0) continue;
+            for (;;) {
+                std::uint8_t data[2048];
+                sockaddr_in from{};
+                AddressSize from_size = sizeof from;
+                const int got = static_cast<int>(recvfrom(socket_, reinterpret_cast<char *>(data), sizeof data, 0,
+                                                          reinterpret_cast<sockaddr *>(&from), &from_size));
+                if (got < 0) break;  // nothing more waiting (or an error a later read will meet again)
+                const Clock::time_point at = Clock::now();
+                std::lock_guard lock(mutex_);
+                queue_.push_back(Datagram{std::vector<std::uint8_t>(data, data + got), from, at});
+                came_.notify_one();
+            }
+        }
+    }
+    Socket socket_;
+    std::atomic<bool> stop_{false};
+    std::mutex mutex_;
+    std::condition_variable came_;
+    std::vector<Datagram> queue_;
+    std::thread thread_;
+};
 
 struct Link {
     const char *name = "net";  // the log's prefix
@@ -144,6 +210,7 @@ struct Link {
     bool welcomed = false;
     bool decided = false;  // the listening copy: the delay is settled, so HELLOs get a WELCOME
     std::vector<std::uint32_t> probe_trips;
+    std::uint32_t probe_median = 0;  // ms, once settle_delay has timed some
     bool lost = false;
     bool leaving = false;  // this copy's player chose to leave while it waited
     bool refused = false;  // the other copy differs (REFUSE), or this one refused it
@@ -157,9 +224,22 @@ struct Link {
     std::uint64_t epoch = 0;
     std::string answers;
     Socket socket = kNoSocket;
+    std::shared_ptr<Receiver> receiver;
     sockaddr_in peer{};
     std::map<std::uint64_t, Local> mine;    // by frame, from the oldest the other copy may still need
     std::map<std::uint64_t, Local> theirs;  // by frame, received and not yet used
+    std::map<std::uint64_t, Clock::time_point> arrived;  // when each of `theirs` first came
+    // The frames' balance. A copy's slack on a frame is how long before it
+    // needed the other copy's input for that frame the input came (less than
+    // 0: it waited). The copy with less is ahead of the other, and holds its
+    // frames back a little until both have the same: then neither waits until
+    // a delay spike eats all of it (docs/port/online-next.md).
+    bool balance = true;
+    std::vector<double> slacks;  // ms, the latest kSlackFrames frames'
+    double slack = 0.0;          // their average, once there are kSlackFrames
+    bool slack_known = false;
+    std::int16_t their_slack = kNoSlack;
+    Clock::duration held{};  // held back since the last report
     std::uint64_t their_count = 0;          // the other copy's frames held: all below this one
     std::uint64_t confirmed = 0;            // this copy's frames the other copy holds
     std::map<std::uint64_t, std::uint64_t> my_hashes;
@@ -305,10 +385,10 @@ std::string differences(const std::vector<std::pair<std::string, std::string>> &
     return text;
 }
 
-std::uint32_t clock_ms() {
+// Milliseconds on this copy's clock, now or at `at`.
+std::uint32_t clock_ms(Clock::time_point at = Clock::now()) {
     static const Clock::time_point start = Clock::now();
-    return static_cast<std::uint32_t>(
-        std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - start).count());
+    return static_cast<std::uint32_t>(std::chrono::duration_cast<std::chrono::milliseconds>(at - start).count());
 }
 
 std::vector<std::uint8_t> packet(const Link &l, std::uint8_t kind, std::size_t size) {
@@ -457,6 +537,9 @@ void send_input(Link &l) {
                                   std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - l.their_time_at)
                                       .count());
     put32(out, kHead + 44u, echo);
+    put16(out, kHead + 48u,
+          static_cast<std::uint16_t>(l.slack_known ? static_cast<std::int16_t>(std::clamp(l.slack, -30000.0, 30000.0))
+                                                   : kNoSlack));
     for (std::uint64_t i = 0; i < count; ++i) {
         const Local &m = l.mine.at(first + i);
         const std::size_t at = kInputHead + i * kLocalSize;
@@ -502,7 +585,7 @@ void compare_hashes(Link &l) {
     }
 }
 
-void take_input(Link &l, const std::uint8_t *data, std::size_t size) {
+void take_input(Link &l, const std::uint8_t *data, std::size_t size, Clock::time_point at) {
     if (size < kInputHead) return;
     const std::uint64_t holds = get<std::uint64_t>(data + kHead);
     const std::uint64_t first = get<std::uint64_t>(data + kHead + 8u);
@@ -511,9 +594,10 @@ void take_input(Link &l, const std::uint8_t *data, std::size_t size) {
     if (size < kInputHead + count * kLocalSize) return;
     l.confirmed = std::max(l.confirmed, holds);
     l.their_time = get<std::uint32_t>(data + kHead + 40u);
-    l.their_time_at = Clock::now();
+    l.their_time_at = at;
+    l.their_slack = static_cast<std::int16_t>(get<std::uint16_t>(data + kHead + 48u));
     if (const std::uint32_t echo = get<std::uint32_t>(data + kHead + 44u); echo != kNoTime) {
-        const std::uint32_t trip = clock_ms() - echo;
+        const std::uint32_t trip = clock_ms(at) - echo;
         if (trip < 10000u) {
             ++l.trips;
             l.trip_total += trip;
@@ -539,6 +623,7 @@ void take_input(Link &l, const std::uint8_t *data, std::size_t size) {
         m.pad.extra = extra & 0xFFFFu;
         m.pad.mouse_yaw = static_cast<std::int16_t>(static_cast<std::uint16_t>(extra >> 16u));
         l.theirs[frame] = m;
+        l.arrived.emplace(frame, at);
     }
     while (l.theirs.count(l.their_count) != 0u) ++l.their_count;
     if (hash_read != kNoRead) {
@@ -551,7 +636,7 @@ bool same_address(const sockaddr_in &a, const sockaddr_in &b) {
     return a.sin_addr.s_addr == b.sin_addr.s_addr && a.sin_port == b.sin_port;
 }
 
-void handle(Link &l, const std::uint8_t *data, std::size_t size, const sockaddr_in &from) {
+void handle(Link &l, const std::uint8_t *data, std::size_t size, const sockaddr_in &from, Clock::time_point at) {
     if (size < kHead || std::memcmp(data, kMagic, 4u) != 0 || tag_of(data) != l.tag) return;
     const std::uint8_t kind = data[4];
     if (kind == kHello && l.player1 && size >= kHead + 4u) {
@@ -595,7 +680,7 @@ void handle(Link &l, const std::uint8_t *data, std::size_t size, const sockaddr_
         return;
     }
     if (kind == kProbeEcho && l.player1 && size >= kHead + 4u) {
-        const std::uint32_t trip = clock_ms() - get<std::uint32_t>(data + kHead);
+        const std::uint32_t trip = clock_ms(at) - get<std::uint32_t>(data + kHead);
         if (trip < 10000u) l.probe_trips.push_back(trip);
         return;
     }
@@ -610,7 +695,7 @@ void handle(Link &l, const std::uint8_t *data, std::size_t size, const sockaddr_
         l.welcomed = true;
         return;
     }
-    if (kind == kInput) take_input(l, data, size);
+    if (kind == kInput) take_input(l, data, size, at);
     if (kind == kBye && !l.left) {
         l.left = true;
         l.left_at = Clock::now();
@@ -618,24 +703,16 @@ void handle(Link &l, const std::uint8_t *data, std::size_t size, const sockaddr_
     }
 }
 
-// Takes in every packet waiting, after waiting up to `wait` for the first.
+// Takes in every packet that came, after waiting up to `wait` for the first.
 void receive(Link &l, std::chrono::milliseconds wait) {
-    fd_set set;
-    FD_ZERO(&set);
-    FD_SET(l.socket, &set);
-    timeval time{};
-    time.tv_sec = static_cast<long>(wait.count() / 1000);
-    time.tv_usec = static_cast<long>((wait.count() % 1000) * 1000);
-    if (select(static_cast<int>(l.socket + 1), &set, nullptr, nullptr, &time) <= 0) return;
-    for (;;) {
-        std::uint8_t data[2048];
-        sockaddr_in from{};
-        AddressSize from_size = sizeof from;
-        const int got = static_cast<int>(recvfrom(l.socket, reinterpret_cast<char *>(data), sizeof data, 0,
-                                                  reinterpret_cast<sockaddr *>(&from), &from_size));
-        if (got < 0) return;  // nothing more waiting (or an error a later read will meet again)
-        handle(l, data, static_cast<std::size_t>(got), from);
-    }
+    if (!l.receiver) return;
+    for (const Receiver::Datagram &d : l.receiver->take(wait)) handle(l, d.bytes.data(), d.bytes.size(), d.from, d.at);
+}
+
+void close_link_socket(Link &l) {
+    l.receiver.reset();  // its thread stops before the socket goes
+    if (l.socket != kNoSocket) close_socket(l.socket);
+    l.socket = kNoSocket;
 }
 
 void set_env(const char *name, const std::string &value) {
@@ -691,6 +768,7 @@ bool open_socket(Link &l, const sockaddr_in &bound) {
         l.socket = kNoSocket;
         return false;
     }
+    l.receiver = std::make_shared<Receiver>(l.socket);
     return true;
 }
 
@@ -702,12 +780,13 @@ std::uint32_t env_number(const char *name, std::uint32_t fallback, std::uint32_t
 
 // The input delay for a round trip of `trip` ms: a frame's input goes out
 // `delay` frames (of 33 ms) before it is needed, so they must cover half the
-// trip, the frame it can wait before it is sent (INPUT goes once a frame) and
-// some jitter (docs/port/communication-mode.md, sections 12 to 14). 2 frames
-// at 75 ms waited on nearly every frame; 3 at 100 ms never did.
-std::uint32_t delay_for(std::uint32_t trip) {
+// trip and some jitter. With the frames out of balance (Link::slacks) one copy
+// has all the slack and the other none, which took a frame more: 2 frames at
+// 75 ms waited on nearly every frame; 3 at 100 ms never did
+// (docs/port/communication-mode.md, sections 12 to 14).
+std::uint32_t delay_for(std::uint32_t trip, bool balanced) {
     constexpr double frame = 1000.0 / 30.0;
-    const double frames = (trip / 2.0 + frame + 15.0) / frame;
+    const double frames = (trip / 2.0 + (balanced ? 0.0 : frame) + 15.0) / frame;
     return std::clamp<std::uint32_t>(static_cast<std::uint32_t>(std::ceil(frames)), 2u, 10u);
 }
 
@@ -746,7 +825,8 @@ void settle_delay(Link &l) {
     std::vector<std::uint32_t> trips = l.probe_trips;
     std::sort(trips.begin(), trips.end());
     const std::uint32_t median = trips[trips.size() / 2u];
-    l.delay = delay_for(median);
+    l.delay = delay_for(median, l.balance);
+    l.probe_median = median;
     std::cout << "[" << l.name << "] input delay " << l.delay << " frames, for a round trip of " << median
               << " ms (" << trips.size() << " timed, " << trips.front() << " to " << trips.back() << ")" << std::endl;
 }
@@ -770,6 +850,7 @@ bool connect(Link &l, bool host, const sockaddr_in &address, const std::string &
     l.epoch = epoch;
     l.answers = answers;
     l.player1 = host;
+    l.balance = std::getenv("D012_NO_NET_BALANCE") == nullptr;
     sockaddr_in bound{};
     bound.sin_family = AF_INET;
     if (host) {
@@ -844,10 +925,14 @@ bool connect(Link &l, bool host, const sockaddr_in &address, const std::string &
     if (l.leaving || l.refused || (host ? !l.peer_known || !l.decided : !l.welcomed)) {
         if (l.leaving) std::cout << "[" << l.name << "] this copy's player left while waiting" << std::endl;
         else if (!l.refused) std::cerr << "[" << l.name << "] the other copy did not come" << std::endl;
-        close_socket(l.socket);
-        l.socket = kNoSocket;
+        close_link_socket(l);
         return false;
     }
+    // The joining copy starts its frames when the WELCOME reaches it, half a
+    // round trip from now: the listening copy starts with it, so the frames
+    // begin in balance (Link::slacks) and need not settle into it.
+    if (host && l.balance && l.probe_median != 0u)
+        std::this_thread::sleep_for(std::chrono::milliseconds(std::min<std::uint32_t>(l.probe_median / 2u, 500u)));
     l.their_count = l.delay;
     l.confirmed = l.delay;
     l.heard = Clock::now();
@@ -855,10 +940,32 @@ bool connect(Link &l, bool host, const sockaddr_in &address, const std::string &
     return true;
 }
 
+// How long before this copy needed the other's input for a frame it came
+// (`slack`, less than 0 when it waited). Once both copies know their average,
+// the one with less holds its frames back by a share of the difference each
+// frame, so the two meet in the middle over a second or two.
+void note_slack(Link &l, Clock::duration slack) {
+    l.slacks.push_back(std::chrono::duration<double, std::milli>(slack).count());
+    if (l.slacks.size() > kSlackFrames) l.slacks.erase(l.slacks.begin());
+    if (l.slacks.size() < kSlackFrames) return;
+    double total = 0.0;
+    for (const double s : l.slacks) total += s;
+    l.slack = total / static_cast<double>(l.slacks.size());
+    l.slack_known = true;
+    if (!l.balance || l.their_slack == kNoSlack) return;
+    const double behind = static_cast<double>(l.their_slack) - l.slack;  // ms this copy is ahead by, twice over
+    if (behind <= kSlackMargin) return;
+    const auto hold = std::min(kMostHold, std::chrono::microseconds(static_cast<long long>(behind * 1000.0 / 2.0 /
+                                                                                            (2.0 * kSlackFrames))));
+    portablekit::hle_extension::hold_back(hold);
+    l.held += hold;
+}
+
 // This copy's input for `frame` goes out for frame + delay; returns this
 // copy's and the other copy's input for `frame` once the other's is in, or
 // the other's as not connected if it is lost.
 std::pair<Local, Local> trade(Link &l, std::uint64_t frame, const Local &local) {
+    const Clock::time_point needed = Clock::now();
     l.mine[frame + l.delay] = local;
     send_input(l);
     if (frame >= l.delay && !l.lost && l.their_count <= frame) {
@@ -894,6 +1001,8 @@ std::pair<Local, Local> trade(Link &l, std::uint64_t frame, const Local &local) 
     } else {
         receive(l, std::chrono::milliseconds(0));
     }
+    if (const auto came = l.arrived.find(frame); came != l.arrived.end() && !l.lost) note_slack(l, needed - came->second);
+    l.arrived.erase(l.arrived.begin(), l.arrived.upper_bound(frame));
     const Local me = frame < l.delay ? idle() : l.mine.at(frame);
     Local them = idle();
     if (frame >= l.delay) {
@@ -914,6 +1023,10 @@ std::pair<Local, Local> trade(Link &l, std::uint64_t frame, const Local &local) 
         std::cout << "[" << l.name << "] " << l.unit << "s " << l.report_from << "-" << frame << " in "
                   << ms(now - l.report_began) << " ms: waited on " << l.waits << ", " << ms(l.waited)
                   << " ms in all, the longest " << ms(l.longest) << " ms";
+        if (l.slack_known)
+            std::cout << "; slack " << static_cast<int>(l.slack) << " ms here, "
+                      << (l.their_slack == kNoSlack ? std::string("?") : std::to_string(l.their_slack))
+                      << " there; held back " << ms(l.held) << " ms";
         if (l.trips != 0u)
             std::cout << "; round trip " << l.trip_total / l.trips << " ms on average, " << l.trip_least << " to "
                       << l.trip_most;
@@ -927,6 +1040,7 @@ std::pair<Local, Local> trade(Link &l, std::uint64_t frame, const Local &local) 
         l.waits = 0u;
         l.waited = {};
         l.longest = {};
+        l.held = {};
     }
     return {me, them};
 }
@@ -941,8 +1055,7 @@ void note_hash(Link &l, std::uint64_t frame, std::uint64_t hash) {
 }
 
 void shut(Link &l) {
-    if (l.socket != kNoSocket) close_socket(l.socket);
-    l.socket = kNoSocket;
+    close_link_socket(l);
     l.active = false;
 }
 
