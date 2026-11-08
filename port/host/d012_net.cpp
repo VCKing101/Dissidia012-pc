@@ -188,8 +188,11 @@ constexpr auto kWatchFirst = std::chrono::seconds(40);
 // kWatchWindow frames without one in which a quarter of the buffer (at least
 // kWatchMargin frames) was always in hand more than needed make it up to
 // kWatchLower smaller. A quarter of the buffer more in hand than it (at least
-// kWatchSkip frames) for kWatchLook frames on end, after a slow moment of
-// this copy's or a smaller buffer, are run unseen.
+// kWatchSkip frames) for kWatchLook frames on end (not a moment's bunch of
+// late packets), as after a smaller buffer, are run unseen. After a slow moment of
+// this copy's own (more than kWatchSlow between two frames) they are run
+// unseen at once: the sound has just stopped for it, and a skip a moment later
+// would stop it again.
 constexpr std::uint64_t kWatchStart = 12u;
 constexpr std::uint64_t kWatchLeast = 6u;
 constexpr std::uint64_t kWatchMost = 45u;
@@ -199,6 +202,9 @@ constexpr std::uint64_t kWatchMargin = 4u;
 constexpr std::uint64_t kWatchLower = 3u;
 constexpr std::uint64_t kWatchSkip = 8u;
 constexpr std::uint64_t kWatchLook = 15u;
+// As the kernel's own limit: a debt larger than it is dropped, not made up,
+// so the copy stays behind.
+constexpr auto kWatchSlow = std::chrono::milliseconds(100);
 constexpr std::uint64_t kWatchDrift = 2u;
 constexpr std::uint64_t kWatchDriftLook = 90u;
 constexpr auto kWatchHold = std::chrono::microseconds(1000);
@@ -1669,6 +1675,9 @@ struct Watch {
     std::uint64_t skip_until = 0;  // frames before it run unseen
     std::uint64_t look_from = 0;   // the frames in hand since it, for a skip
     std::uint64_t look_least = ~std::uint64_t{0};
+    // When the last frame was handed out, for a slow moment of this copy's.
+    Clock::time_point left{};
+    bool left_any = false;
     // The most in hand in this block of kWatchDriftLook frames and the last.
     std::uint64_t drift_from = 0, drift_most = 0, drift_last = 0;
     // The window the buffer may be made smaller after.
@@ -2066,6 +2075,14 @@ bool watching() { return watch_state().active; }
 Pads watch_frame(std::uint64_t frame) {
     Watch &w = watch_state();
     Pads pads;
+    if (const auto pause = w.pauses.find(frame); pause != w.pauses.end()) {
+        std::cout << "[battle-watch] stops for " << pause->second << " ms at frame " << frame << " (D012_WATCH_PAUSE)"
+                  << std::endl;
+        std::this_thread::sleep_for(std::chrono::milliseconds(pause->second));
+    }
+    // This copy was slow since the last frame (not waiting for one: that is
+    // inside this call).
+    const bool slow = w.left_any && Clock::now() - w.left > kWatchSlow;
     watch_receive(w, std::chrono::milliseconds(0));
     const auto ms = [](Clock::duration d) { return std::chrono::duration_cast<std::chrono::milliseconds>(d).count(); };
     const auto ended = [&] { return w.end && w.frames.size() >= *w.end; };
@@ -2135,7 +2152,7 @@ Pads watch_frame(std::uint64_t frame) {
     const bool skip_ended = frame != 0u && frame == w.skip_until;
     const std::uint64_t skip_at = w.buffer + std::max(kWatchSkip, w.buffer / 4u);
     std::uint64_t over = 0u;
-    if (skip_ended && in_hand >= skip_at) {
+    if ((skip_ended || (slow && frame >= w.skip_until)) && in_hand >= skip_at) {
         over = in_hand - w.buffer;
     } else if (frame >= w.skip_until && frame + 1u - w.look_from >= kWatchLook) {
         if (w.look_least != ~std::uint64_t{0} && w.look_least >= skip_at) over = w.look_least - w.buffer;
@@ -2164,11 +2181,6 @@ Pads watch_frame(std::uint64_t frame) {
         std::max(w.drift_most, w.drift_last) + kWatchDrift < w.buffer) {
         portablekit::hle_extension::hold_back(kWatchHold);
         w.held += kWatchHold;
-    }
-    if (const auto pause = w.pauses.find(frame); pause != w.pauses.end()) {
-        std::cout << "[battle-watch] stops for " << pause->second << " ms at frame " << frame << " (D012_WATCH_PAUSE)"
-                  << std::endl;
-        std::this_thread::sleep_for(std::chrono::milliseconds(pause->second));
     }
     // The buffer smaller, after a window in which the path never made this
     // copy wait and more than it needed was always in hand.
@@ -2204,6 +2216,8 @@ Pads watch_frame(std::uint64_t frame) {
         w.waited = {};
         w.held = {};
     }
+    w.left = Clock::now();
+    w.left_any = true;
     return pads;
 }
 

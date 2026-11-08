@@ -880,8 +880,8 @@ fight.
 previous buffer has drained in emulated time (PortableKit `host/hle/hle_media.cpp`, V), and the sink keeps a ring of
 about 186 ms ahead of the device (`host/audio/audio_sink.cpp`, V). Frames run a few percent faster fill the ring
 until it drops its oldest samples on every buffer; a few percent slower empty it until it starts again with a gap
-(both read from the code, I: not heard, the test copies run without sound). So the watcher never changes its pace to
-grow or shrink its buffer. It does so with a single stop or a single skip, each heard once.
+(both read from the code, I). So the watcher never changes its pace to grow or shrink its buffer. It does so with a
+single stop or a single skip, each heard once, as a gap (19.5).
 
 **What it does** (`net::battle::watch_frame`, the constants at `kWatchStart`):
 
@@ -895,9 +895,10 @@ grow or shrink its buffer. It does so with a single stop or a single skip, each 
   always the frames the leader holds (not only once the battle has ended), for this.
 - **Smaller:** 900 frames (30 s) with no wait the path caused, in which a quarter of the buffer (at least 4 frames)
   more than needed was always in hand, make it up to 3 frames smaller.
-- **Skipping ahead:** a quarter of the buffer (at least 8 frames) more than it in hand for 15 frames on end (not a
-  moment's bunch of late packets), after a slow moment of this copy's (a window dragged, a disk stall: the kernel
-  drops a debt of more than 0.1 s rather than racing to make it up, so the copy stays behind) or a smaller buffer:
+- **Skipping ahead:** a quarter of the buffer (at least 8 frames) more than it in hand, for 15 frames on end (not a
+  moment's bunch of late packets) after a smaller buffer, or at once after a slow moment of this copy's own (more
+  than 0.1 s between two frames: a window dragged, a disk stall; the kernel drops a debt of more than 0.1 s rather
+  than racing to make it up, so the copy stays behind), so its sound stops once for both (19.5):
   the extra frames run unseen, as rollback runs frames again (`set_simulate_only`, patch 0092: nothing drawn or
   played, nothing waits for real time), and a skip that ends with as many again in hand goes on. After it the hold
   to real time starts again from that moment (`hle_extension::resync_real_time()`, PortableKit patch 0093), or the
@@ -925,8 +926,54 @@ input:
 | `gw7` | As `gw6`, with that | 33,000 frames watched (17 minutes, ended by the time limit): two waits of 0.3 s after the first (an outage and jitter beyond 1.5 s), nothing held back once the buffer was 45, no skip but the stop's (50 frames) |
 
 Every check value compared in these runs agreed (no copy logged a difference). Starting the drift record again
-when the buffer grows (the 0.3 s held back for nothing just after it in `gw7`) came after `gw7`, and was checked by
-the build and the port's tests only.
+when the buffer grows (the 0.3 s held back for nothing just after it in `gw7`) came after `gw7`; the runs of 19.5
+have it, and held nothing back once the buffer was 45.
 
-**Not verified.** How the stops and skips sound (the test copies run without sound); a real path; a watcher on
-another machine, the Steam Deck or Linux (GCC 13 compiles the changed files).
+**Not verified.** A real path; a watcher on another machine, the Steam Deck or Linux (GCC 13 compiles the changed
+files).
+
+### 19.5 How a watcher's stops and skips sound (8 November 2026)
+
+**How it was heard.** `D012_AUDIO_DUMP=FILE.wav` writes what the sink hands the device, before the volume setting
+(the test data is muted; the dump is not). `D012_TRACE_AUDIO=1` logs, each second of it, the frames the device took
+past what the game had written (`silent=`), so each `[battle-watch]` line falls in a known second of the dump. Each
+run is the `gw6` set-up with the watcher stopped by `D012_WATCH_PAUSE`; the script that lines the two up and measures
+each gap's edges is not in the repository (the measure: the largest change from one sample to the next at the edge,
+against the music's own largest in the half second before).
+
+**What a stop and a skip were.** The game stops writing sound for both: a stop holds the whole game, and frames run
+unseen mix none (patch 0092). The ring ran dry 0.35 to 0.4 s into a stop, so a stop of 0.8 s was 0.46 s of silence;
+a skip of 15 to 70 frames, 36 to 188 ms; a skip of 8, none (it ran before the ring was dry). Two faults:
+
+- **A click at each end of every gap.** The sound went from its level to nothing between two samples and back the
+  same way: a step at the edge of up to 15,376, three times the music's own largest (about 5,000).
+- **Two gaps for one slow moment.** The stop was skipped 15 frames later (the look of 19.4), when the sound had come
+  back: a second gap of 36 to 188 ms about a second after the first.
+
+**What changed.**
+
+- PortableKit patch 0094 (`host/audio/audio_sink.cpp`): the last 256 frames (6 ms) before the ring runs dry fade out,
+  and a producer's first 256 after it fade in. The fade out has to go on the ring before the device takes those
+  frames: it does when a hand-over leaves fewer than 256 behind. If the game then writes past them after all, the
+  fade is taken off again while none of it has played (what it took off each sample is put back), or the new frames
+  fade in if some has; a near miss is then a dip of 12 ms at most, never a click. A producer the sink starts again
+  ahead of a ring that had not run dry (its sound fell within a quarter of the prebuffer of the device, as after a
+  short skip) fades out where the ring ends too. `D012_AUDIO_NO_FADE=1` turns it off; the trace line gains `fades=`
+  and `undone=`.
+- `watch_frame` skips at once after a slow moment of this copy's own (19.4), inside the same gap.
+
+**Results (V).**
+
+| Run | What changed | Gaps in the fight (stop or skip: gap, step at the cut and at the return) |
+| --- | --- | --- |
+| `gw8` | Neither | Stop 0.8 s: 464 ms, 4,225 and 6,162, then its skip 0.9 s later: 36 ms, 7,370 and 15,376. Stop 1.5 s: 1,088 ms, 6,126 and 5,694, then its skip: 188 ms, 8,712 and 8,857. Skips of 22 and 15 frames: 41 and 64 ms, steps up to 6,987 |
+| `gw9` | The fade, without looking ahead | Steps of 2 to 77 at every edge but one skip's cut (1,246) |
+| `gw10` | And the skip at once | Stop and skip one gap: 911 ms for 0.8 s, 1,551 ms for 1.5 s. A second skip 2 s after the 1.5 s stop cut at 14,521: the hand-over before it had left a few frames |
+| `gw11` | And the fade put on ahead | The stops clean (5 to 80); the same second skip cut at 13,174, with no dry ring: the sink had started that sound again ahead of the device |
+| `gw12` | And the fade where the sink starts a producer again | Six stops (0.2 to 1.5 s) and five skips (11 to 44 frames): eight gaps, every edge at most 75 against the music's 3,000 to 10,000. The fade fired 31 times in the run, each before a real gap, and was never undone |
+
+A picture of the edges and clips of each case before and after are in `build/port/online/sound-check/` (local, not
+in the repository). Every check value compared in these runs agreed.
+
+**Not verified.** Heard by a person (the clips are for that); the device's own resampling after the sink (SDL); the
+fade in another game; a watcher on another machine, the Steam Deck or Linux (GCC 14 compiles both changed files).
