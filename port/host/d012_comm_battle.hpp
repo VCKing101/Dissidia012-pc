@@ -24,8 +24,10 @@ namespace d012::comm_battle {
 // copy is set up for network battles.
 void install(portablekit::HleRegistrar &hle);
 
-// D012_NET_BATTLE (d012_net.hpp) turns it on; D012_NO_NET_BATTLE=1 keeps the
-// game's own exchange even then.
+// D012_NET_BATTLE or ad hoc play (d012_net.hpp, configured()) turns it on;
+// D012_NO_NET_BATTLE=1 keeps the game's own exchange even then. Read at the
+// game's first call of a battle handler and again as each battle starts, so
+// online play turned on in the menu counts from the next battle.
 [[nodiscard]] bool enabled();
 
 // A battle is running on the port's link, or watched on its stream (Group

@@ -186,8 +186,8 @@ allowed.
 
 ## Not tested yet
 
-- Group Battle between machines (three copies on one PC were), and more than one player watching at once.
+- More than one player watching at once, and party battles of more than one fight between machines (a Steam
+  Deck and two PC copies were, one fight each).
 - Communications between two machines (two copies on one PC, and Windows against Linux in WSL, were).
 - Two Windows PCs on separate machines (Windows against the Steam Deck, and two copies on one PC, were).
-- The Steam Deck hosting: let the PC host.
 - A router that only has UPnP (the one tested answered NAT-PMP first).

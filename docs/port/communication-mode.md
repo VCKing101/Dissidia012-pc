@@ -978,3 +978,40 @@ clips after the change sound clean.
 
 **Not verified.** The device's own resampling after the sink (SDL); the
 fade in another game; a watcher on another machine, the Steam Deck or Linux (GCC 14 compiles both changed files).
+Section 19.6 has a watcher on the Steam Deck.
+
+### 19.6 The Steam Deck hosting, watching and leading (8 November 2026)
+
+The build of this section on the Steam Deck (native Linux, GCC 14, Wi-Fi) and this PC (llvm-mingw clang) on the same
+home network; one player at the Deck, the PC's copies driven by test input. The Deck hosted the session in every run,
+so its relay carried every battle. V unless marked.
+
+**Two faults, found on the Deck.**
+
+- **A watcher that went online before hosting saw a white screen.** Whether Communication Mode battles use the port's
+  link was read once, at the game's first call of a battle handler, and kept. The Deck had tried Group Battle before
+  hosting (ad hoc off: the game's switch-off error 0x80410B03), so it kept the game's own exchange. Its fighters
+  streamed on the port's link; it waited for the game's exchange, which never came, until the game gave up:
+  "Communications were disconnected", for the fighters too. Now `comm_battle::enabled()` is read again as each
+  battle starts, and the log says which way it went each time it changes.
+- **Create Room waited for ever after a failed try.** With ad hoc play on but no session hosted or joined, PortableKit
+  read the PSP's wireless switch as on, so the game tried to join and PortableKit failed it with an error no PSP gives
+  (0x80410B05). After the player then hosted, Create Room showed "Creating room..." for ever, with no way back. Patch
+  0095: the switch reads on only with ad hoc play on and a server, hosted or joined; before that the game says the
+  switch is off (0x80410B03) and starts cleanly once the player hosts.
+
+Both were reproduced on this PC first (the Deck's own steps, three copies on loopback) and fixed there, then on the
+Deck.
+
+**Results.**
+
+| Test | Who | Result |
+| --- | --- | --- |
+| 1-on-1, the Deck hosting | Deck against PC copy 1 (Online Lobby) | In step to the end (frame 4,867), 8 checks agreed; input delay 2 (auto), round trip 4 to 5 ms; one burst of 41 waits (1.6 s) when the round trip reached 177 ms |
+| Watching, before the first fix | PC copies fight, the Deck watches | White screen on the Deck; all three "Communications were disconnected" at frame 845 |
+| Watching | PC copies fight, the Deck watches (Tournament) | 9 minutes, all three left on frame 16,380 (a forfeit); 26 checks agreed; no skip; buffer 12, 9, then 6 frames; 18 stops, 3.8 s, each a stall of the fighters' own (161 and 268 waits between them through the Deck's relay). The player: smooth, no clicks, a delay only seen sitting next to a fighter |
+| Leading with a watcher | The Deck fights PC copy 1, PC copy 2 watches | All three left on frame 4,895; 8 checks agreed on each; one 0.4 s wait on the Deck at frame 374, the watcher's one stop the same moment; buffer down to 6 |
+| Create Room after a failed try, after the second fix | The Deck | The switch-off error, then Host a session, then the room made and both PC copies entered it |
+
+**Not verified.** Rollback on the Deck; Communications between machines; a party battle of more than one fight
+across machines; Round-Robin; more than one watcher at once; a path beyond one home network.

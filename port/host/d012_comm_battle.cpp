@@ -131,6 +131,7 @@ struct State {
     bool watching = false;  // a spectator on the leading fighter's stream
     bool unseen = false;    // a watcher skipping ahead (net::battle::Pads::unseen)
     bool decided = false;  // this battle's first frame chose the port's link or the game's exchange
+    bool checked = false;  // this battle's first frame read whether the port's link is on (refresh_enabled)
     std::uint32_t frame = 0;  // the frame this link reached
     std::map<std::string, std::uint32_t> battles;  // battles per group, for the link's tag
 };
@@ -143,6 +144,19 @@ State &state() {
 bool flag(const char *name) {
     const char *value = std::getenv(name);
     return value != nullptr && *value != '\0' && std::strcmp(value, "0") != 0;
+}
+
+void refresh_enabled();
+
+// Whether the port's link is on, read again as each battle starts (this
+// copy's first call of a battle's handler at frame 0): online play may be
+// turned on after the game first called the handlers, as by the Network page's
+// Host a session or Join after a try at going online without them.
+void check_enabled_at_start(State &s, bool ours, std::uint32_t frame) {
+    if (frame != 0u) s.checked = false;
+    if (!ours || frame != 0u || s.checked) return;
+    s.checked = true;
+    refresh_enabled();
 }
 
 // The same 24 bits on every copy: the battle group's name, and how many
@@ -323,6 +337,7 @@ void run_handler(Guest *g, const decomp::CallState &in, GuestRegs &out) {
     const bool ours = (flags & (kOpen | kRunning)) == (kOpen | kRunning) && (flags & kQuit) == 0u &&
                       g_ld32(g, net + kRole) == 0u;
     const std::uint32_t frame = g_ld32(g, net + kFrame);
+    check_enabled_at_start(s, ours, frame);
     if (!enabled()) {
         GuestRegs regs{};
         regs.a[0] = net;
@@ -426,6 +441,7 @@ void run_watch(Guest *g, const decomp::CallState &in, GuestRegs &out) {
     const bool ours = (flags & (kOpen | kRunning)) == (kOpen | kRunning) && (flags & kQuit) == 0u &&
                       g_ld32(g, net + kRole) == 1u;
     const std::uint32_t frame = g_ld32(g, net + kFrame);
+    check_enabled_at_start(s, ours, frame);
     if (!enabled()) return call_game(g, kWatchHandler, net, out);
     if (frame != 0u) s.decided = false;
     if (ours && frame == 0u && !s.decided) {
@@ -630,20 +646,31 @@ struct Install {
             {kLeaveBattle, "comm_battle_leave", decomp::Module::Main, decomp::Returns::Nothing, &run_leave_battle},
         };
         // Always in place: whether to use them is read when the game first
-        // calls them (settings.ini cannot be read this early).
+        // calls them (settings.ini cannot be read this early), and again as
+        // each battle starts (check_enabled_at_start).
         decomp::add_overrides(overrides, sizeof overrides / sizeof overrides[0], true);
     }
 } install_overrides;
 
+bool g_enabled = false;
+bool g_enabled_known = false;
+
+// Reads the setting, and says so when it is first read or changes.
+void refresh_enabled() {
+    const bool value = net::battle::configured() && !flag("D012_NO_NET_BATTLE");
+    if (value != g_enabled || !g_enabled_known) {
+        if (value) std::cout << "[comm-battle] Communication Mode battles run on the port's link" << std::endl;
+        else std::cout << "[comm-battle] Communication Mode battles run on the game's own exchange" << std::endl;
+    }
+    g_enabled = value;
+    g_enabled_known = true;
+}
+
 } // namespace
 
 bool enabled() {
-    static const bool on = [] {
-        const bool value = net::battle::configured() && !flag("D012_NO_NET_BATTLE");
-        if (value) std::cout << "[comm-battle] Communication Mode battles run on the port's link" << std::endl;
-        return value;
-    }();
-    return on;
+    if (!g_enabled_known) refresh_enabled();
+    return g_enabled;
 }
 
 // With D012_CLOCK_OFFSET_S, the peers' last-seen times move on with the

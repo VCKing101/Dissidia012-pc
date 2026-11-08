@@ -1,0 +1,56 @@
+From 9815c760fab9e0645d4fada1e8c1f1f2ab40ad99 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Sun, 8 Nov 2026 21:31:39 +1030
+Subject: [PATCH] Ad hoc: the wireless switch reads on only once there is a
+ session
+
+sceWlanGetSwitchState read on whenever ad hoc play was turned on in the
+settings, even with no server hosted or joined. A game then tried to
+join, and PortableKit failed the join with an error no PSP gives (its
+switch on, a PSP always reaches a group). Dissidia 012 showed that error
+(0x80410B05), then left its network half set up: after the player
+hosted, Create Room waited for ever with no way out of it.
+
+Now the switch reads on only when ad hoc play is on and there is a
+server, hosted or joined (adhoc_server_address()). Before that the game
+sees the switch off and says so itself (0x80410B03), and starts cleanly
+once the player hosts or joins.
+
+Tested with Dissidia 012 on Windows (two copies) and on the Steam Deck
+(native Linux): Create Room with ad hoc on and no session gave the
+switch-off error; after Host a session, Create Room made the room and
+the other copies found and entered it, then a watched party battle ran
+to its end. MSVC framework build, portablekit_host_check and its tests
+pass (ad hoc tests left out). Not tested: other games, a game that reads
+the switch only once at start.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/hle/hle_adhoc.cpp | 10 ++++++++--
+ 1 file changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/host/hle/hle_adhoc.cpp b/host/hle/hle_adhoc.cpp
+index 9759a8f..c1f3f7a 100644
+--- a/host/hle/hle_adhoc.cpp
++++ b/host/hle/hle_adhoc.cpp
+@@ -391,9 +391,15 @@ void register_net(HleRegistrar &hle) {
+         if (arg(ctx, 0) != 0u) write_mac(rt.memory(), arg(ctx, 0), own_mac());
+         done(ctx, "sceWlanGetEtherAddr", 1, 0u, adhoc::format_mac(own_mac()));
+     });
+-    // The wireless switch is the ad hoc setting: off, the game says so itself.
++    // The wireless switch is on while ad hoc play has somewhere to go: the
++    // setting on, and a server set, hosted or joined. Off, the game says so
++    // itself and starts cleanly once the player hosts or joins. (A switch on
++    // with no server let a game try to join, fail with an error PortableKit
++    // makes up, as no PSP would, and leave its network half set up: Dissidia
++    // 012's next Create Room then waited for ever.)
+     hle.add("sceWlanDrv", "sceWlanGetSwitchState", [](Runtime &, AllegrexContext &ctx) {
+-        done(ctx, "sceWlanGetSwitchState", 0, settings::current().adhoc ? 1u : 0u);
++        const bool on = settings::current().adhoc && !adhoc_server_address().empty();
++        done(ctx, "sceWlanGetSwitchState", 0, on ? 1u : 0u);
+     });
+ }
+ 
+-- 
+2.53.0.windows.1
+
