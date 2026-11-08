@@ -973,7 +973,8 @@ a skip of 15 to 70 frames, 36 to 188 ms; a skip of 8, none (it ran before the ri
 | `gw12` | And the fade where the sink starts a producer again | Six stops (0.2 to 1.5 s) and five skips (11 to 44 frames): eight gaps, every edge at most 75 against the music's 3,000 to 10,000. The fade fired 31 times in the run, each before a real gap, and was never undone |
 
 A picture of the edges and clips of each case before and after are in `build/port/online/sound-check/` (local, not
-in the repository). Every check value compared in these runs agreed.
+in the repository). Every check value compared in these runs agreed. Heard through headphones on 8 November: the
+clips after the change sound clean.
 
-**Not verified.** Heard by a person (the clips are for that); the device's own resampling after the sink (SDL); the
+**Not verified.** The device's own resampling after the sink (SDL); the
 fade in another game; a watcher on another machine, the Steam Deck or Linux (GCC 14 compiles both changed files).
