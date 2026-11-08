@@ -13,6 +13,9 @@ matching decompilation of the game's executable and overlays.
 **You need your own legally obtained copy of the game (USA ULUS10566 or Europe ULES01505); no game data is included or
 distributed.**
 
+**Community:** the [Discord server](https://discord.gg/9GrbdQwPbS) is for setup help, finding someone to play
+online and test sessions. Bugs and crashes go in [GitHub issues](https://github.com/VCKing101/Dissidia012-pc/issues).
+
 ## Current state
 
 - **Windows:** plays from New Game through the menus and battles in the recompiled build, with no interpreter
@@ -118,7 +121,8 @@ delay set from the connection.
 2. **Join:** on the **Network** page, type the host's address under **Join a session**.
 3. Both go to **Communications Mode**, into the same **Online Lobby**, and one challenges the other.
 
-Step by step, with pictures of each screen: the [players' guide](docs/port/play-online.md).
+Step by step, with pictures of each screen: the [players' guide](docs/port/play-online.md). To find someone to play,
+ask on the [Discord server](https://discord.gg/9GrbdQwPbS).
 
 ![The Network page while hosting: the local address, and the internet address the router opened its ports on](docs/images/online-network-page.png)
 
@@ -382,7 +386,7 @@ Many tool tests need the locally extracted game files and skip or fail without t
 
 Bug reports, fixes, features, tools and mods are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for how to propose a
 change and send a pull request, and for the one hard rule: no game data, from this or any other game, goes in the
-repository.
+repository. Questions and ideas are welcome on the [Discord server](https://discord.gg/9GrbdQwPbS) too.
 
 ## Credits
 

@@ -9,7 +9,7 @@ are all welcome. This is a one-person, spare-time project, so replies may take a
 - **Anything bigger** (a new feature, a new tool, a change to how mods work, work from another project of yours):
   open an issue first and describe what you have in mind. That way we can agree on where it fits before you spend
   time on it, and you won't be building against something that is about to change.
-- **Questions** are fine as issues too.
+- **Questions** are fine as issues too, or ask on the [Discord server](https://discord.gg/9GrbdQwPbS).
 
 ## The one hard rule: no game data
 

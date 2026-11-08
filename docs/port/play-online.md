@@ -14,6 +14,9 @@ One player **hosts** a session and the other **joins** it, both on the port's Ne
 the game as they would on a PSP. The host should be the player on a home connection: mobile data cannot host (see
 [If something goes wrong](#if-something-goes-wrong)).
 
+To find someone to play, ask on the [Discord server](https://discord.gg/9GrbdQwPbS). Send your address by direct
+message, not in a public channel.
+
 The pictures use example addresses; yours are your own.
 
 ## Host
