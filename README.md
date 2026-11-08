@@ -311,9 +311,7 @@ it is. The **Texture pack** row turns packs on and off and says how many texture
 
 - **Images must be PNG.** Packs that ship `.dds`, `.ktx2` or `.zim` images are not read yet. A zipped pack
   (`textures.zip`) has to be unpacked first.
-- **Packs made with PPSSPP's older `hash = quick`** are matched to the game's textures by
-  picture: each texture is compared with the pack's images the first time it is drawn, takes the one that clearly
-  matches, and keeps it for next time. A texture with no clear match keeps the game's own picture.
+- **Packs made with PPSSPP's older `hash = quick`** work as they do in PPSSPP.
 - **Use `ULUS10566` with the European disc too.** Its textures are the same as the USA disc's.
 - **Packs for another release** of the game load only if their `[games]` section lists `ULUS10566`, and images of
   text made for that release may not match. A pack made for the European release has the same images, but its

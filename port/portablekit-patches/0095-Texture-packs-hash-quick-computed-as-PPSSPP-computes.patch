@@ -1,0 +1,399 @@
+From 9e8f193b84b00a39785e507b12a35fef1e5c9e2a Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Sun, 8 Nov 2026 20:29:54 +1030
+Subject: [PATCH] Texture packs: hash = quick computed as PPSSPP computes it
+
+Packs keyed with the format's first hash, quick, were matched to the
+game's textures by picture, which cannot find an image the pack redrew
+rather than upscaled (a title screen on another background, recoloured
+interface pieces). texture_pack_quick_hash() now computes the hash, so a
+quick pack's keys find their textures directly, like xxh64 and xxh32
+packs.
+
+- The hash's definition was taken as facts (its two forms by length, the
+  eight 16-bit starting factors and their step, the order of the
+  operations in each 64-byte step) and written here in plain C++ over
+  32-bit words; SOURCE_PROVENANCE.md says so.
+- <prefix>_QUICK_BY_PICTURE=1 matches quick packs by picture as before;
+  <prefix>_NO_QUICK_MATCH=1 still refuses them.
+- The import screen no longer says quick packs are matched by picture.
+- texture_pack_tests checks the hash at seven lengths against a separate
+  model that keeps the state as 16- and 32-bit lanes.
+
+Verified with Dissidia 012 on Windows and a community HD pack (2,324 quick
+keys): the redrawn title screen, the first-run Data Config screen and the
+main menu replaced (13 images), and 98 of its images in a Quick Battle,
+against 4 and 62 matched by picture; texture pack tests pass (MSVC). Not
+checked: other games, other quick packs, Linux.
+---
+ docs/SOURCE_PROVENANCE.md       |  2 +-
+ host/gpu/texture_pack.cpp       | 88 +++++++++++++++++++++++++++------
+ host/gpu/texture_pack.hpp       | 43 ++++++++++------
+ host/gpu/vulkan_renderer.cpp    |  4 +-
+ host/ui/texture_pack_screen.cpp |  3 --
+ tests/texture_pack_tests.cpp    | 28 ++++++++++-
+ 6 files changed, 133 insertions(+), 35 deletions(-)
+
+diff --git a/docs/SOURCE_PROVENANCE.md b/docs/SOURCE_PROVENANCE.md
+index 4d4c4f0..685042f 100644
+--- a/docs/SOURCE_PROVENANCE.md
++++ b/docs/SOURCE_PROVENANCE.md
+@@ -26,7 +26,7 @@ The router port mapping (`port_mapping.cpp`, which asks the router to forward a
+ 
+ ## Texture packs
+ 
+-`host/gpu/texture_pack.cpp` and `replacement_textures.cpp` load HD texture packs made for PPSSPP, in its `textures.ini` format. They were written for this project. The format was learnt from PPSSPP's public documentation and pull requests about texture replacement, from reading PPSSPP's GPL-licensed source to find the format's facts (the layout of a key, the hash seeds, how the palette and the texture's dimensions enter the key, the order in which wildcard keys are tried, the ini sections and options), and from the keys a real community pack for Monster Hunter Portable 3rd HD Ver. uses, which the implementation reproduces. Only those facts and constants were taken; no code was copied, adapted or translated line by line. PPSSPP's `quick` hash is not implemented: packs keyed with it are matched to the game's textures by picture instead (`host/gpu/texture_pack_match.cpp`, written for this project from no other code; it uses only the key layout above). Hashing uses xxHash, and PNG files are read and written with stb_image and stb_image_write, all unmodified (table below).
++`host/gpu/texture_pack.cpp` and `replacement_textures.cpp` load HD texture packs made for PPSSPP, in its `textures.ini` format. They were written for this project. The format was learnt from PPSSPP's public documentation and pull requests about texture replacement, from reading PPSSPP's GPL-licensed source to find the format's facts (the layout of a key, the hash seeds, how the palette and the texture's dimensions enter the key, the order in which wildcard keys are tried, the ini sections and options), and from the keys a real community pack for Monster Hunter Portable 3rd HD Ver. uses, which the implementation reproduces. Only those facts and constants were taken; no code was copied, adapted or translated line by line. PPSSPP's `quick` hash, the format's first, is implemented the same way: its definition was taken as facts (the two forms by length, the eight 16-bit starting factors and their step, and the order of the multiply, add and XOR operations in each 64-byte step), and `texture_pack_quick_hash()` was written for this project from them in plain C++ over 32-bit words, with no SIMD code; its tests check it against a separate model written for this project. Packs keyed with it can also be matched to the game's textures by picture (`host/gpu/texture_pack_match.cpp`, written for this project from no other code; it uses only the key layout above). Hashing uses xxHash, and PNG files are read and written with stb_image and stb_image_write, all unmodified (table below).
+ 
+ ## Profile code
+ 
+diff --git a/host/gpu/texture_pack.cpp b/host/gpu/texture_pack.cpp
+index 419fc33..5735ad5 100644
+--- a/host/gpu/texture_pack.cpp
++++ b/host/gpu/texture_pack.cpp
+@@ -3,6 +3,7 @@
+ #include "texture_pack_match.hpp"
+ 
+ #include <algorithm>
++#include <array>
+ #include <bit>
+ #include <cctype>
+ #include <cstdio>
+@@ -136,11 +137,30 @@ bool is_paletted(TextureFormat format) {
+            format == TextureFormat::Clut32;
+ }
+ 
+-std::uint32_t data_hash(const std::uint8_t *data, std::size_t size, TexturePackHash hash) {
+-    // xxh64 keys keep the low 32 bits of the 64-bit hash. A quick pack's
+-    // textures are keyed with xxh64 too, and matched by picture.
+-    return hash == TexturePackHash::Xxh32 ? XXH32(data, size, kDataSeed)
+-                                          : static_cast<std::uint32_t>(XXH64(data, size, kDataSeed));
++std::uint32_t data_hash(const std::uint8_t *data, std::size_t size, const TexturePackOptions &options) {
++    // xxh64 keys keep the low 32 bits of the 64-bit hash. A quick pack matched
++    // by picture keys its textures with xxh64 too.
++    if (options.hash == TexturePackHash::Quick && !options.quick_by_picture) return texture_pack_quick_hash(data, size);
++    return options.hash == TexturePackHash::Xxh32 ? XXH32(data, size, kDataSeed)
++                                                  : static_cast<std::uint32_t>(XXH64(data, size, kDataSeed));
++}
++
++std::uint32_t load_u32(const std::uint8_t *at) {
++    return static_cast<std::uint32_t>(at[0]) | static_cast<std::uint32_t>(at[1]) << 8u |
++           static_cast<std::uint32_t>(at[2]) << 16u | static_cast<std::uint32_t>(at[3]) << 24u;
++}
++
++// Adds two words as two separate 16-bit halves, each wrapping on its own.
++std::uint32_t add_halves(std::uint32_t a, std::uint32_t b) {
++    return ((a & 0xFFFF0000u) + (b & 0xFFFF0000u)) | ((a + b) & 0xFFFFu);
++}
++
++// Multiplies two words as two separate 16-bit halves, keeping the low 16
++// bits of each product.
++std::uint32_t multiply_halves(std::uint32_t a, std::uint32_t b) {
++    const std::uint32_t low = ((a & 0xFFFFu) * (b & 0xFFFFu)) & 0xFFFFu;
++    const std::uint32_t high = ((a >> 16u) * (b >> 16u)) & 0xFFFFu;
++    return high << 16u | low;
+ }
+ 
+ bool is_hex_name(const std::string &stem) {
+@@ -160,6 +180,42 @@ std::vector<std::uint8_t> read_file(const std::filesystem::path &path) {
+ 
+ } // namespace
+ 
++std::uint32_t texture_pack_quick_hash(const std::uint8_t *data, std::size_t size) {
++    if (size % 64u != 0u) {
++        // Pairs of words: the first added, the second XORed in. Bytes past
++        // the last whole pair are not read.
++        std::uint32_t sum = 0u;
++        for (std::size_t at = 0; at + 8u <= size; at += 8u) {
++            sum += load_u32(data + at);
++            sum ^= load_u32(data + at + 4u);
++        }
++        return sum;
++    }
++    // Whole 64-byte steps: four rows of 16 bytes, each row four words or
++    // eight 16-bit halves, folded into a 16-byte state with a row of eight
++    // 16-bit factors that grows by the same step after each.
++    std::array<std::uint32_t, 4> state{};
++    std::array<std::uint32_t, 4> factors{0x9BD9C00Bu, 0xB6514B73u, 0x43094D9Bu, 0x00010083u};
++    for (std::size_t at = 0; at < size; at += 64u) {
++        const std::uint8_t *step = data + at;
++        for (std::size_t i = 0; i < 4u; ++i) {
++            const std::uint32_t first = load_u32(step + 4u * i);
++            const std::uint32_t second = load_u32(step + 16u + 4u * i);
++            const std::uint32_t third = load_u32(step + 32u + 4u * i);
++            const std::uint32_t fourth = load_u32(step + 48u + 4u * i);
++            std::uint32_t word = add_halves(state[i], multiply_halves(first, factors[i]));
++            word ^= second;
++            word += third;
++            word ^= multiply_halves(fourth, factors[i]);
++            state[i] = word;
++            factors[i] = add_halves(factors[i], 0x24552455u);
++        }
++    }
++    std::uint32_t hash = 0u;
++    for (std::size_t i = 0; i < 4u; ++i) hash += state[i] + factors[i];
++    return hash;
++}
++
+ std::string format_texture_pack_key(const TexturePackKey &key) {
+     char text[32];
+     std::snprintf(text, sizeof(text), "%016llx%08x", static_cast<unsigned long long>(key.cache_key),
+@@ -219,7 +275,7 @@ bool compute_texture_pack_key(const GuestMemory &memory, const TextureState &tex
+         }
+         const std::uint8_t *data = memory.raw_pointer(address, size);
+         if (data == nullptr) return false;
+-        hash = data_hash(data, size, options.hash);
++        hash = data_hash(data, size, options);
+     } else {
+         // Rows narrower than the buffer: each row is hashed on its own and the
+         // row hashes are folded together.
+@@ -229,7 +285,7 @@ bool compute_texture_pack_key(const GuestMemory &memory, const TextureState &tex
+         const std::uint8_t *data = memory.raw_pointer(address, span);
+         if (data == nullptr) return false;
+         for (std::uint32_t row = 0; row < height; ++row)
+-            hash = (hash * 11u) ^ data_hash(data + static_cast<std::size_t>(row) * stride, row_bytes, options.hash);
++            hash = (hash * 11u) ^ data_hash(data + static_cast<std::size_t>(row) * stride, row_bytes, options);
+     }
+ 
+     // Dimension word: log2 height in bits 8-11, log2 width in bits 0-3.
+@@ -401,7 +457,7 @@ std::unique_ptr<TexturePack> TexturePack::parse(const std::filesystem::path &dir
+         error = "no textures.ini and no hash-named images in " + directory.string();
+         return nullptr;
+     }
+-    if (pack->options_.hash == TexturePackHash::Quick) {
++    if (pack->options_.hash == TexturePackHash::Quick && pack->options_.quick_by_picture) {
+         // Keys with no data half name a texture by its shape and palette alone
+         // and need no hash; the others are matched by picture.
+         for (auto it = pack->entries_.begin(); it != pack->entries_.end();) {
+@@ -461,14 +517,18 @@ bool TexturePack::load_ini(const std::filesystem::path &path, bool is_override,
+             if (option == "hash") {
+                 const std::string kind = lower(value);
+                 static const bool no_quick_match = portablekit::env("NO_QUICK_MATCH") != nullptr;
++                static const bool quick_by_picture = portablekit::env("QUICK_BY_PICTURE") != nullptr;
+                 if (kind == "xxh64") options_.hash = TexturePackHash::Xxh64;
+                 else if (kind == "xxh32") options_.hash = TexturePackHash::Xxh32;
+-                else if (kind == "quick" && !no_quick_match) options_.hash = TexturePackHash::Quick;
+-                else if (!value.empty() || !is_override) {
+-                    // "quick" was the format's first hash. It is not computed
+-                    // here; such packs are matched by picture unless
+-                    // <prefix>_NO_QUICK_MATCH is set.
+-                    error = "textures.ini: hash = " + value + " is not supported (xxh64 and xxh32 are)";
++                else if (kind == "quick" && !no_quick_match) {
++                    // The format's first hash, computed as PPSSPP computes it;
++                    // <prefix>_QUICK_BY_PICTURE matches such packs by picture
++                    // instead, as before, and <prefix>_NO_QUICK_MATCH refuses
++                    // them.
++                    options_.hash = TexturePackHash::Quick;
++                    options_.quick_by_picture = quick_by_picture;
++                } else if (!value.empty() || !is_override) {
++                    error = "textures.ini: hash = " + value + " is not supported (xxh64, xxh32 and quick are)";
+                     return false;
+                 }
+                 hash_given = hash_given || !value.empty();
+diff --git a/host/gpu/texture_pack.hpp b/host/gpu/texture_pack.hpp
+index 1f76c76..27e507c 100644
+--- a/host/gpu/texture_pack.hpp
++++ b/host/gpu/texture_pack.hpp
+@@ -34,9 +34,10 @@
+ // for this project from the format's public description and from the keys
+ // real packs use; see docs/SOURCE_PROVENANCE.md.
+ //
+-// Packs keyed with the format's first hash, `hash = quick`, are matched to
+-// the game's textures by picture instead (texture_pack_match.hpp);
+-// <prefix>_NO_QUICK_MATCH=1 refuses them as before.
++// Packs keyed with the format's first hash, `hash = quick`, are hashed with
++// it too (texture_pack_quick_hash). <prefix>_QUICK_BY_PICTURE=1 matches them
++// to the game's textures by picture instead (texture_pack_match.hpp), and
++// <prefix>_NO_QUICK_MATCH=1 refuses them.
+ //
+ // This file knows nothing about Vulkan: it hashes textures, finds their
+ // replacement files and decodes those on worker threads. The renderer uploads
+@@ -54,8 +55,9 @@ struct Replacement {
+         Decoded,   // pixels below are ready for the renderer to upload
+         Resident,  // uploaded; the pixels have been freed
+         Failed,    // missing or unreadable; never tried again
+-        Matching,  // hash = quick: still being compared with the pack's
+-                   // images; Unloaded once it matched one, else Failed
++        Matching,  // a quick pack matched by picture: still being compared
++                   // with the pack's images; Unloaded once it matched one,
++                   // else Failed
+     };
+ 
+     std::filesystem::path file;  // absolute
+@@ -93,13 +95,22 @@ struct TexturePackKey {
+ // "0000000022585cbda625131a"
+ [[nodiscard]] std::string format_texture_pack_key(const TexturePackKey &key);
+ 
+-// Quick packs' textures are keyed with xxh64 here, and matched by picture.
+ enum class TexturePackHash : std::uint8_t { Xxh32, Xxh64, Quick };
+ 
++// The format's first hash, `hash = quick`, of `size` bytes that start on a
++// 16-byte boundary of guest memory (a texture's address always does): when
++// `size` is a whole number of 64-byte steps, the steps are folded into eight
++// 16-bit lanes; otherwise pairs of words are added and XORed.
++[[nodiscard]] std::uint32_t texture_pack_quick_hash(const std::uint8_t *data, std::size_t size);
++
+ // What [options] says, plus the parts of the other sections that change a
+ // texture's key.
+ struct TexturePackOptions {
+     TexturePackHash hash{TexturePackHash::Xxh64};
++    // A quick pack matched by picture (<prefix>_QUICK_BY_PICTURE): its
++    // textures are keyed with xxh64, and its keys that need a hash are
++    // compared with the pack's images instead.
++    bool quick_by_picture{};
+     bool ignore_address{};
+     bool reduce_hash{};
+     float reduce_hash_default{0.5f};
+@@ -136,15 +147,16 @@ struct TexturePackInfo {
+ class TexturePackMatcher;
+ 
+ // Decodes the texture being looked up, width x height RGBA8 (red in the low
+-// byte); false when it cannot. find() asks only for a quick pack's textures
+-// that need matching.
++// byte); false when it cannot. find() asks only for the textures of a quick
++// pack matched by picture that need matching.
+ using TexturePixels = std::function<bool(std::vector<std::uint32_t> &pixels)>;
+ 
+ class TexturePack {
+ public:
+     // Reads textures.ini (and the hash-named images in the folder itself) from
+     // `directory`. Returns null with `error` set when there is no usable pack.
+-    // A quick pack keeps its matches in `match_root` (none when empty).
++    // A quick pack matched by picture keeps its matches in `match_root` (none
++    // when empty).
+     static std::unique_ptr<TexturePack> open(const std::filesystem::path &directory, const std::string &game_id,
+                                              std::string &error, const std::filesystem::path &match_root = {});
+     // Reads a pack as open() does, without starting anything. False with
+@@ -157,8 +169,9 @@ public:
+ 
+     // Hashes `texture` and finds its replacement: null when the pack has none
+     // or says to leave the texture alone. Hashing reads the whole texture, so
+-    // call it once per texture upload, never per draw. In a quick pack a
+-    // texture not matched yet is decoded with `pixels` and returned Matching.
++    // call it once per texture upload, never per draw. In a quick pack matched
++    // by picture a texture not matched yet is decoded with `pixels` and
++    // returned Matching.
+     std::shared_ptr<Replacement> find(const GuestMemory &memory, const TextureState &texture,
+                                       std::uint16_t max_seen_v, const TexturePixels &pixels = {});
+ 
+@@ -172,7 +185,7 @@ public:
+     [[nodiscard]] const std::filesystem::path &directory() const noexcept { return directory_; }
+     [[nodiscard]] const TexturePackOptions &options() const noexcept { return options_; }
+     [[nodiscard]] std::size_t entry_count() const noexcept { return entries_.size() + quick_entries_.size(); }
+-    // A quick pack's matching, for the menu; empty for other packs.
++    // A quick pack's matching by picture, for the menu; empty for other packs.
+     [[nodiscard]] std::string match_status() const;
+ 
+ private:
+@@ -199,7 +212,8 @@ private:
+                                                  const TextureState &texture, std::uint32_t covered_width,
+                                                  std::uint32_t covered_height);
+     void start_matching(const std::filesystem::path &match_root);
+-    // find() for a quick pack's texture that no key names without its hash.
++    // find() for a texture of a quick pack matched by picture that no key
++    // names without its hash.
+     std::shared_ptr<Replacement> find_by_picture(const TextureState &texture, const TexturePackKey &key,
+                                                  std::uint32_t covered_width, std::uint32_t covered_height,
+                                                  const TexturePixels &pixels);
+@@ -210,7 +224,8 @@ private:
+     // Key -> file name relative to the pack; an empty name means "keep the
+     // original texture".
+     std::unordered_map<TexturePackKey, std::string, KeyHash> entries_;
+-    // A quick pack's keys whose data half needs its hash: matched by picture.
++    // The keys of a quick pack matched by picture whose data half needs its
++    // hash.
+     std::vector<std::pair<TexturePackKey, std::string>> quick_entries_;
+     std::unique_ptr<TexturePackMatcher> matcher_;
+     // Textures being matched, so a texture uploaded again waits on the same.
+diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
+index e8bf9e5..123e4b9 100644
+--- a/host/gpu/vulkan_renderer.cpp
++++ b/host/gpu/vulkan_renderer.cpp
+@@ -5233,7 +5233,7 @@ VulkanRenderer::Impl::Texture &VulkanRenderer::Impl::texture_for(const GuestMemo
+     texture.max_seen_v = max_seen_v;
+     // The pack's hash reads the whole texture, so it is taken here, once per
+     // upload, and never on the per-draw path above.
+-    // A quick pack's texture not matched yet is compared by picture: the
++    // A quick pack matched by picture compares a texture not matched yet: the
+     // decoded pixels, decoded here when the background decode has them.
+     if (pack)
+         texture.replacement = pack->find(memory, state, max_seen_v, [&](std::vector<std::uint32_t> &out) {
+@@ -5286,7 +5286,7 @@ void VulkanRenderer::Impl::apply_texture_pack() {
+                                           settings::current().texture_pack_folder, memory_stick_path());
+     const std::filesystem::path &folder = pack_location.folder;
+     std::string error;
+-    // A quick pack's matches are kept beside the installed packs, whichever
++    // A quick pack's picture matches are kept beside the installed packs, whichever
+     // folder the pack is read from.
+     pack = TexturePack::open(folder, portablekit::game().disc_id, error, VulkanRenderer::textures_root() / ".matched");
+     if (!pack) {
+diff --git a/host/ui/texture_pack_screen.cpp b/host/ui/texture_pack_screen.cpp
+index a871f10..acb3c4b 100644
+--- a/host/ui/texture_pack_screen.cpp
++++ b/host/ui/texture_pack_screen.cpp
+@@ -303,9 +303,6 @@ void review_screen(bool back) {
+                                       : c.hash == gpu::TexturePackHash::Xxh32 ? "xxh32"
+                                                                               : "quick") +
+                                      (c.ignore_address ? ", addresses ignored" : ""));
+-            if (c.hash == gpu::TexturePackHash::Quick)
+-                indented("Each texture is matched to the pack's images by picture the first time it is drawn, "
+-                         "and the match is kept.");
+             info_row("Images", count(c.images, "file", "files") + ", " + human_size(c.bytes) + " in all " +
+                                    count(c.files, "file", "files"));
+             if (c.missing > 0u) {
+diff --git a/tests/texture_pack_tests.cpp b/tests/texture_pack_tests.cpp
+index b140bca..a4240e7 100644
+--- a/tests/texture_pack_tests.cpp
++++ b/tests/texture_pack_tests.cpp
+@@ -184,7 +184,7 @@ void test_hashes(const fs::path &root) {
+     quick.replace(quick.find("xxh64"), 5, "quick");
+     make_pack(root / "quick" / kGame, quick);
+     TexturePackCheck c = check_texture_pack(root / "quick", kGame);
+-    check(c.ok() && c.hash == TexturePackHash::Quick && c.keys == 4u, "hash = quick is accepted, to match by picture");
++    check(c.ok() && c.hash == TexturePackHash::Quick && c.keys == 4u, "hash = quick is accepted");
+     std::string xxh32 = kIni;
+     xxh32.replace(xxh32.find("xxh64"), 5, "xxh32");
+     make_pack(root / "xxh32" / kGame, xxh32);
+@@ -195,6 +195,31 @@ void test_hashes(const fs::path &root) {
+     check(!c.ok() && !c.problem.empty(), "an ini that names no hash is refused");
+ }
+ 
++// The quick hash of a few lengths: whole 64-byte steps (the lane form, and
++// none at all), and others (pairs of words). The expected values come from a
++// separate model that keeps the state as bytes seen as 16- and 32-bit lanes.
++void test_quick_hash() {
++    const auto pattern = [](std::size_t size, std::uint32_t seed) {
++        std::vector<std::uint8_t> bytes(size);
++        for (std::uint8_t &byte : bytes) {
++            seed = (seed * 1103515245u + 12345u) & 0x7FFFFFFFu;
++            byte = static_cast<std::uint8_t>(seed >> 16u);
++        }
++        return bytes;
++    };
++    const struct {
++        std::size_t size;
++        std::uint32_t seed;
++        std::uint32_t hash;
++    } cases[] = {{0u, 1u, 0x9535599Cu},  {8u, 1u, 0x9063858Du},    {24u, 7u, 0x6D40A78Bu},  {64u, 1u, 0x4CDE3B85u},
++                 {128u, 3u, 0x170E79B6u}, {4096u, 5u, 0x8E2ABC1Au}, {4100u, 5u, 0xFA46E446u}};
++    for (const auto &c : cases) {
++        const std::vector<std::uint8_t> bytes = pattern(c.size, c.seed);
++        check(texture_pack_quick_hash(bytes.data(), bytes.size()) == c.hash,
++              "the quick hash of " + std::to_string(c.size) + " bytes");
++    }
++}
++
+ bool wait(TexturePackCopy &copy) {
+     for (int i = 0; i < 2000 && copy.state() == TexturePackCopy::State::Copying; ++i)
+         std::this_thread::sleep_for(std::chrono::milliseconds(5));
+@@ -620,6 +645,7 @@ int main(int argc, char **argv) {
+     test_layouts(scratch.root);
+     test_games(scratch.root);
+     test_hashes(scratch.root);
++    test_quick_hash();
+     test_copy(scratch.root);
+     test_location(scratch.root);
+     test_dxt_decode();
+-- 
+2.53.0.windows.1
+

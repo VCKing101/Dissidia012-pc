@@ -51,7 +51,7 @@ shows the folder in Explorer.
 ## 2. What is supported
 
 - **`textures.ini`**, in the sections PPSSPP defined:
-  - `[options]`: `hash` (`xxh64`, `xxh32`, or `quick`, matched by picture: section 4; required), `ignoreAddress`,
+  - `[options]`: `hash` (`xxh64`, `xxh32` or `quick`: section 4; required), `ignoreAddress`,
     `reduceHash`, `ignoreMipmap`,
     `skipLastDXT1Blocks128x64`, `skipLastDXT1Blocks128x128`.
   - `[hashes]`: `key = image`, the image's path relative to the pack. An empty image keeps the game's texture.
@@ -89,9 +89,23 @@ Not supported yet:
 
 ## 4. Packs made with `hash = quick`
 
-PPSSPP's first hash, `quick`, is not computed here, and older packs use it, a community HD pack for this game among
-them. A key's first 16 digits, the texture's size and palette, are the same with any hash; only the last
-8, the hash of the pixels, differ. So the port finds each texture's image by picture:
+PPSSPP's first hash, `quick`, is what older packs use, a community HD pack for this game among them. Since PortableKit
+patch 0095 the port computes it as PPSSPP does, so a quick pack's keys find their textures directly, like any other
+pack's. That includes images the pack redrew rather than upscaled, such as that pack's title screen, which looks
+nothing like the game's.
+
+Checked on 8 November 2026 with that pack (2,324 keys) installed in `textures\ULUS10566`, on the USA disc: the
+Square Enix logo, the opening credits, the redrawn title screen, the first-run Data Config screen and the main menu
+were replaced (13 images by the main menu), and a Quick Battle at the Old Chaos Shrine drew 98 of its images: every
+fighter icon, the whole stage, the battle HUD and Lightning's portraits in both costumes. Before, matching by picture
+found 4 by the main menu and 62 in a battle, and none of the title screen. Not checked: story mode, the world map,
+other quick packs, the European disc, the Steam Deck.
+
+### Matching by picture
+
+`D012_QUICK_BY_PICTURE=1` goes back to how quick packs loaded before patch 0095, when the hash was not computed: a
+key's first 16 digits (the texture's size and palette) are the same with any hash, so each texture was found among
+the pack's images by picture. `D012_NO_QUICK_MATCH=1` refuses quick packs.
 
 1. **When the pack loads**, every image it names is shrunk to a 16x16 signature and a thumbnail of at most 64
    pixels. This is saved, so only new or changed images are read again (2,116 images took 5 to 30 seconds the
@@ -102,7 +116,8 @@ them. A key's first 16 digits, the texture's size and palette, are the same with
 3. **A match is taken only when it is clear**: it scores below 45 (colour difference where both are solid, plus
    the share of pixels solid in only one), the next image is at least 1.7 times further off or is the same picture,
    and it is not a recolour (another costume's colours: at most 8% of the blurred picture may differ in hue).
-   Anything else keeps the game's own texture, as PPSSPP would.
+   Anything else keeps the game's own texture. An image the pack redrew (another background, other colours) is
+   never matched.
 4. **Matches are kept** in `textures\.matched\<pack id>.ini` in the data folder, as a `textures.ini` in the port's
    own keys, with the textures that matched nothing under `[unmatched]`. The next session uses them at once.
    Delete the file to match everything again. A match made for a key with no address or palette half applies to
@@ -117,15 +132,10 @@ them. A key's first 16 digits, the texture's size and palette, are the same with
 [texpack] 00000000e451fb3aa01e08e7 128x128 not matched: closest characters/lightning/lightningbattleport.png (41.6, next 70.7, alike 67.1, recoloured 11%)
 ```
 
-The last line of that example is Lightning's portrait in her other colours, which the pack has no image for.
-`D012_NO_QUICK_MATCH=1` refuses quick packs, as before.
-
-**How the limits were set:** a community HD pack (2,326 keys, 2,116 images) against 622 textures dumped from the menus
-and Quick Battles at the Old Chaos Shrine. Every one of the 64 textures matched was checked by eye and was right; the
-closest wrong candidates had a next image at most 1.26 times further off. Correct matches it misses: some logos and
-low-contrast stage textures with a near twin in the pack (they keep the game's texture). The fan-made Naofumi costume
-pack (5 keys, no `ignoreAddress`) matched all 5 with scores under 1. Not tried: other quick packs, story mode, the
-world map, the Steam Deck.
+**How the limits were set:** the same pack against 622 textures dumped from the menus and Quick Battles at the Old
+Chaos Shrine. Every one of the 64 textures matched was checked by eye and was right; the closest wrong candidates had
+a next image at most 1.26 times further off. The fan-made Naofumi costume pack (5 keys, no `ignoreAddress`) matched
+all 5 with scores under 1.
 
 ## 5. Making a pack
 
