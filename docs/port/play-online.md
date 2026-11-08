@@ -123,9 +123,10 @@ player picks Party A, Party B, or **Watch match** (SELECT). The creator picks th
 character on their slot, and both parties press **Enter Battle**. Anyone in the session can host the session, fighting
 or not.
 
-Players who are not fighting watch each fight a few frames behind the fighters. Their own controls do nothing in the
-fight. If the fight stops coming, a band says "Waiting for the fighters"; holding B (or Esc) stops watching, which
-ends the battle for that player.
+Players who are not fighting watch each fight a moment behind the fighters: under half a second on a good
+connection, up to a second and a half on a poor one. Their own controls do nothing in the fight. If the fight stops
+coming, a band says "Waiting for the fighters"; holding B (or Esc) stops watching, which ends the battle for that
+player. A player who falls behind jumps ahead to catch up.
 
 ## Trade Friend Cards and quests
 

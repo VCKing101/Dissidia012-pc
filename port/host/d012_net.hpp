@@ -115,6 +115,9 @@ struct Pads {
     input::Pad player[2];
     bool lost = false;  // the other copy is gone, or no frame of it came for 30 s
     bool left = false;  // this copy's player chose to leave while it waited
+    // A watcher's frame to run without showing or playing it, as fast as it
+    // can (portablekit set_simulate_only): it skips ahead to the live game.
+    bool unseen = false;
 };
 // As exchange() above, for the battle's frame `frame`.
 Pads exchange(std::uint64_t frame, const input::Pad &mine);
@@ -153,9 +156,12 @@ void close(std::uint64_t reached);
 bool watch(std::uint32_t tag);
 [[nodiscard]] bool watching();
 // Both players' pads for `frame`, once the stream has brought them (waiting
-// with a screen after half a second, as a fighter does). `lost` when the
-// stream ended before `frame` (the battle was quit there), stopped coming, or
-// the player chose to leave (`left`).
+// with a screen after half a second, as a fighter does). The watcher keeps a
+// buffer of frames in hand sized to its path; a frame that has not come
+// waits until the buffer is full again, and a watcher well behind the buffer
+// runs the extra frames `unseen`. `lost` when the stream ended before `frame`
+// (the battle was quit there), stopped coming, or the player chose to leave
+// (`left`).
 Pads watch_frame(std::uint64_t frame);
 // This copy's check value for `frame`, compared with the leading fighter's
 // whenever both are in. False once they have differed.

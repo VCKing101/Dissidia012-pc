@@ -829,9 +829,8 @@ reads (I: no other reader was found; the battle has run on without them on the f
   WATCH says it lacks it.
 - **A watcher's frame** (the override of 0x0890DF58): both pads for the frame from the stream, injected as the
   fighters inject them; the check step every tenth frame, compared with the leader's whenever both are in; never the
-  game's wait. It starts with 6 frames in hand, and a frame that has not come waits for 3 more, so a late packet
-  costs one wait rather than one on each frame after it; while fewer than 6 are in hand each frame is held back 2 ms.
-  The wait is the fighters' screen, "Waiting for the fighters…"; holding B leaves.
+  game's wait. It keeps a buffer of frames in hand, sized to its path (19.4). The wait is the fighters' screen,
+  "Waiting for the fighters…"; holding B leaves.
 - **The camera.** `comm_battle::active()` holds for a watcher too, and `net::battle::camera()` gives both fighters'
   camera settings from the stream, so the watcher turns each fighter's camera with that player's right stick and
   mouse exactly as the fighters do. A watcher has no local player: its own sticks do nothing in the fight.
@@ -869,3 +868,65 @@ Three copies on this PC, the build of the rollback branch, copy 1 hosting the se
 **Not verified.** Watchers on other machines; more than one watcher at once (the room had three members); a watcher
 that leaves mid-fight (the session then, as on a PSP: I); rollback fighters with a watcher; the Steam Deck or Linux
 as a watcher (GCC 13 compiles the changed files); a watcher whose game differs; Round-Robin with the stream.
+
+### 19.4 A watcher's buffer sized to its path, and skipping ahead (8 November 2026)
+
+19.2's watcher kept 6 frames in hand (0.2 s): enough on loopback, not on a path whose packets come late by more than
+that, where each late packet stopped the watcher's battle. A watcher does not need to be close to live, so its
+buffer now grows with the path, and a watcher left behind skips ahead instead of staying behind for the rest of the
+fight.
+
+**The constraint: sound.** The game's sound is timed by its frames: `sceAudioOutput*Blocking` returns once the
+previous buffer has drained in emulated time (PortableKit `host/hle/hle_media.cpp`, V), and the sink keeps a ring of
+about 186 ms ahead of the device (`host/audio/audio_sink.cpp`, V). Frames run a few percent faster fill the ring
+until it drops its oldest samples on every buffer; a few percent slower empty it until it starts again with a gap
+(both read from the code, I: not heard, the test copies run without sound). So the watcher never changes its pace to
+grow or shrink its buffer. It does so with a single stop or a single skip, each heard once.
+
+**What it does** (`net::battle::watch_frame`, the constants at `kWatchStart`):
+
+- **The buffer** starts at 12 frames (0.4 s), at least 6, at most 45 (1.5 s); `D012_WATCH_BUFFER=N` fixes it at N.
+- **A frame that has not come** waits, with the fighters' wait screen after half a second, until the whole buffer is
+  in again: one stop, as long as the gap, instead of a short one on each frame after it. The fighters' own stall
+  costs the watcher as long as it costs them, and no more.
+- **Larger:** a wait the path caused makes the buffer larger by the frames the wait lasted, plus 3. The frames that
+  came in the wait then are the buffer, so nothing is skipped after it. A wait is the fighters' own when a STREAM in
+  it said the leader held no frame the watcher lacked; those do not change the buffer. STREAM's u32 at +12 is now
+  always the frames the leader holds (not only once the battle has ended), for this.
+- **Smaller:** 900 frames (30 s) with no wait the path caused, in which a quarter of the buffer (at least 4 frames)
+  more than needed was always in hand, make it up to 3 frames smaller.
+- **Skipping ahead:** a quarter of the buffer (at least 8 frames) more than it in hand for 15 frames on end (not a
+  moment's bunch of late packets), after a slow moment of this copy's (a window dragged, a disk stall: the kernel
+  drops a debt of more than 0.1 s rather than racing to make it up, so the copy stays behind) or a smaller buffer:
+  the extra frames run unseen, as rollback runs frames again (`set_simulate_only`, patch 0092: nothing drawn or
+  played, nothing waits for real time), and a skip that ends with as many again in hand goes on. After it the hold
+  to real time starts again from that moment (`hle_extension::resync_real_time()`, PortableKit patch 0093), or the
+  copy would wait for real time to catch up with the frames it skipped. `D012_WATCH_SKIP=0` never skips.
+- **Following the fighters' pace.** The fighters' frames come a little slower at times as they keep in step with
+  each other (17.1), so a watcher on its own clock creeps up on the head of the stream. With more than
+  2 frames short of the buffer all through the last 90 to 180 frames (a lasting shortage, not a gap in the path,
+  which the buffer is for), each frame is held back 1 ms, as little as the fighters' own hold.
+- Every 900 frames the log gives the waits (and how many were the fighters' stalls), the time held back, the frames
+  skipped, the buffer and the frames in hand.
+
+Test switches: `D012_NET_SIM` takes an outage, `DELAY,JITTER,LOSS,EVERY_S,OUTAGE_MS` (every packet dropped for the
+last OUTAGE_MS of every EVERY_S seconds), and `D012_NET_SIM_STREAM=1` keeps the simulated path to the STREAM packets;
+`D012_WATCH_PAUSE=FRAME:MS[,...]` stops a watcher for MS at FRAME, as a slow moment of its own.
+
+**Results (V).** Three copies on this PC, set up as 19.3, a 2-against-1 Tournament, the fighters on random fight
+input:
+
+| Run | Path | What happened |
+| --- | --- | --- |
+| `gw3` | Copies 1 and 3 on 120 ± 90 ms losing 6% (`D012_NET_SIM`); this run had no hold back | Fight 1 ended at frame 6,893 on all three. No wait the path caused, but the frames in hand fell by about 3 a minute as the fighters held back, and the watcher stopped about 0.25 s once a minute at the head of the stream: the hold back to follow the fighters came from it |
+| `gw4` | Copy 1 on 100 ± 60 ms losing 3% with an outage of 1.5 s every 40 s; the watcher stopped 1.5 s at frame 2,000 and 0.8 s at 5,000 (`D012_WATCH_PAUSE`) | Fight 1 ended at 7,044 on all three, fight 2 (copy 1 watching through its own relay, stopped 1.2 s at 3,000) at 3,930. The outages stalled the fighters too, and were taken as the fighters' stalls: the buffer stayed. Each stop was skipped: 46, 22 and 34 frames. The buffer went from 12 to 9 after a steady 30 s. Two skips of 8 and 9 frames came from a moment's bunch of late packets: the 15 frames on end came from them |
+| `gw5` | The outage on the stream only (`D012_NET_SIM_STREAM=1`), every 30 s; the buffer grew 3 frames plus at most 9 a wait | Fight 1 ended at 10,532 on all three. The buffer took three outages to reach 45, each followed by a skip; after it a smaller buffer by 3 and a skip of 8 to 9 frames, then a wait on the next outage. Growing by the whole wait and the quarter-of-the-buffer margins came from it |
+| `gw6` | As `gw5`, with those | Fight 1 ended at 9,845 on all three: one wait of 1.1 s, the buffer straight to 45 with no skip, then one wait of 0.6 s in 5 minutes of outages; the stop skipped 58 frames. A second watched fight (a new Tournament) ran 56,700 frames (31 minutes, ended by the run's time limit) with no wait after the first, but a skip of 11 frames every 4 minutes: each outage held the watcher back 40 ms as if the fighters had slowed. Following the fighters only on a lasting shortage came from it |
+| `gw7` | As `gw6`, with that | 33,000 frames watched (17 minutes, ended by the time limit): two waits of 0.3 s after the first (an outage and jitter beyond 1.5 s), nothing held back once the buffer was 45, no skip but the stop's (50 frames) |
+
+Every check value compared in these runs agreed (no copy logged a difference). Starting the drift record again
+when the buffer grows (the 0.3 s held back for nothing just after it in `gw7`) came after `gw7`, and was checked by
+the build and the port's tests only.
+
+**Not verified.** How the stops and skips sound (the test copies run without sound); a real path; a watcher on
+another machine, the Steam Deck or Linux (GCC 13 compiles the changed files).

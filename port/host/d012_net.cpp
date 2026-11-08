@@ -31,7 +31,8 @@
 // - STREAM (10), the leading fighter to the relay, which passes it to the
 //   battle's watchers: u64 the first frame carried, u16 their count, u8 1 once
 //   the battle has ended for the leader, u8 the check values carried, u32 the
-//   frame it ended at, u32 a hash of the must-match list, both players'
+//   frames the leader holds (its battle ended there, once ended), u32 a hash
+//   of the must-match list, both players'
 //   camera settings (as in ABOUT, 9 bytes each), the check values (u32 frame,
 //   u32 value each), then 32 bytes a frame: player 0's pad and player 1's, as
 //   INPUT's 16 bytes with dialog and save 0.
@@ -45,11 +46,13 @@
 // game's session listens, and the other joins the session's address
 // (battle::open()).
 //
-// D012_NET_SIM=DELAY_MS[,JITTER_MS[,LOSS_PERCENT]] is a test switch: every
-// packet this copy sends is held DELAY_MS give or take JITTER_MS (so packets
-// may arrive out of order), or dropped LOSS_PERCENT times in a hundred, as an
-// internet path would. Two copies on one PC each with that setting are a link
-// with twice DELAY_MS of round trip.
+// D012_NET_SIM=DELAY_MS[,JITTER_MS[,LOSS_PERCENT[,EVERY_S,OUTAGE_MS]]] is a
+// test switch: every packet this copy sends is held DELAY_MS give or take
+// JITTER_MS (so packets may arrive out of order), or dropped LOSS_PERCENT
+// times in a hundred, as an internet path would, and every one dropped for
+// the last OUTAGE_MS of every EVERY_S seconds. Two copies on one PC each with
+// that setting are a link with twice DELAY_MS of round trip.
+// D012_NET_SIM_STREAM=1 keeps that to the STREAM packets, the watchers' path.
 //
 // MIT licence; see port/README.md.
 
@@ -166,14 +169,40 @@ constexpr std::uint64_t kStreamMost = 36u;
 constexpr std::size_t kStreamChecks = 4u;
 constexpr auto kStreamKeep = std::chrono::milliseconds(100);
 constexpr auto kStreamFlush = std::chrono::milliseconds(1500);
-// A watcher: how often it says what it holds, the frames it keeps in hand
-// before it starts (so a late packet does not stop its battle), and how long
-// it waits for a battle's first frames (the fighters may take 30 s to link).
+// A watcher: how often it says what it holds, and how long it waits for a
+// battle's first frames (the fighters may take 30 s to link).
 constexpr auto kWatchEvery = std::chrono::milliseconds(30);
-constexpr std::uint64_t kWatchBuffer = 6u;
-constexpr std::uint64_t kWatchRefill = 3u;  // frames more a wait gathers
-constexpr auto kWatchHold = std::chrono::microseconds(2000);  // a frame's hold while fewer are in hand
 constexpr auto kWatchFirst = std::chrono::seconds(40);
+// Its buffer, the frames it keeps in hand so a late packet does not stop its
+// battle (30 frames a second). It changes its pace only to follow the
+// fighters', whose frames come a little slower at times as they keep in step
+// with each other: more than kWatchDrift frames short all through the last
+// kWatchDriftLook frames or more (not a gap in the path, which the buffer is
+// for), each frame is held back kWatchHold, as little as the fighters' own
+// hold (kMostHold). The
+// game's sound is timed by its frames, and a larger change would break it up.
+// A frame that has not come waits until the whole buffer is in again. Such a
+// wait the path caused (not the fighters' own) makes the buffer as many
+// frames larger as the wait lasted, and kWatchRaise more: the frames that
+// came in the wait are the buffer then, so nothing is skipped after it.
+// kWatchWindow frames without one in which a quarter of the buffer (at least
+// kWatchMargin frames) was always in hand more than needed make it up to
+// kWatchLower smaller. A quarter of the buffer more in hand than it (at least
+// kWatchSkip frames) for kWatchLook frames on end, after a slow moment of
+// this copy's or a smaller buffer, are run unseen.
+constexpr std::uint64_t kWatchStart = 12u;
+constexpr std::uint64_t kWatchLeast = 6u;
+constexpr std::uint64_t kWatchMost = 45u;
+constexpr std::uint64_t kWatchRaise = 3u;
+constexpr std::uint64_t kWatchWindow = 900u;
+constexpr std::uint64_t kWatchMargin = 4u;
+constexpr std::uint64_t kWatchLower = 3u;
+constexpr std::uint64_t kWatchSkip = 8u;
+constexpr std::uint64_t kWatchLook = 15u;
+constexpr std::uint64_t kWatchDrift = 2u;
+constexpr std::uint64_t kWatchDriftLook = 90u;
+constexpr auto kWatchHold = std::chrono::microseconds(1000);
+constexpr auto kWatchFrameTime = std::chrono::microseconds(33367);  // the battle's frame: two vblanks
 
 // Takes the link's datagrams as they come, on a thread of its own, with the
 // moment each came: the game's thread reads the socket only once a frame, and
@@ -473,8 +502,15 @@ public:
     }
     bool on() const { return on_; }
     void send(Socket socket, const sockaddr_in &to, const std::vector<std::uint8_t> &out) {
+        if (stream_only_ && (out.size() <= 4u || out[4] != kStream)) {
+            send_now(socket, to, out);
+            return;
+        }
         std::lock_guard lock(mutex_);
         if (std::uniform_real_distribution<double>(0.0, 100.0)(random_) < loss_) return;
+        if (outage_every_.count() > 0 && outage_.count() > 0 &&
+            (Clock::now() - began_) % outage_every_ >= outage_every_ - outage_)
+            return;
         const double jitter =
             jitter_ms_ > 0.0 ? std::uniform_real_distribution<double>(-jitter_ms_, jitter_ms_)(random_) : 0.0;
         const auto due = Clock::now() + std::chrono::microseconds(
@@ -492,14 +528,24 @@ private:
     Simulated() {
         const char *text = std::getenv("D012_NET_SIM");
         if (text == nullptr || *text == '\0') return;
-        double values[3] = {0.0, 0.0, 0.0};
-        std::sscanf(text, "%lf,%lf,%lf", &values[0], &values[1], &values[2]);
+        double values[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
+        std::sscanf(text, "%lf,%lf,%lf,%lf,%lf", &values[0], &values[1], &values[2], &values[3], &values[4]);
         delay_ms_ = std::max(0.0, values[0]);
         jitter_ms_ = std::max(0.0, values[1]);
         loss_ = std::clamp(values[2], 0.0, 100.0);
+        outage_every_ = std::chrono::milliseconds(static_cast<long long>(std::max(0.0, values[3]) * 1000.0));
+        outage_ = std::chrono::milliseconds(static_cast<long long>(std::max(0.0, values[4])));
+        began_ = Clock::now();
+        const char *stream = std::getenv("D012_NET_SIM_STREAM");
+        stream_only_ = stream != nullptr && std::string(stream) == "1";
         on_ = true;
         std::cout << "[net] simulating a path of " << delay_ms_ << " ms each way, give or take " << jitter_ms_
-                  << " ms, losing " << loss_ << "% of packets (D012_NET_SIM)" << std::endl;
+                  << " ms, losing " << loss_ << "% of packets";
+        if (outage_every_.count() > 0 && outage_.count() > 0)
+            std::cout << ", and all for " << std::chrono::duration_cast<std::chrono::milliseconds>(outage_).count()
+                      << " ms every " << values[3] << " s";
+        if (stream_only_) std::cout << ", only the watchers' stream";
+        std::cout << " (D012_NET_SIM)" << std::endl;
         std::thread([this] { run(); }).detach();
     }
     void run() {
@@ -523,6 +569,9 @@ private:
     }
     bool on_ = false;
     double delay_ms_ = 0.0, jitter_ms_ = 0.0, loss_ = 0.0;
+    Clock::duration outage_every_{}, outage_{};
+    bool stream_only_ = false;
+    Clock::time_point began_{};
     std::mt19937 random_{12345u};
     std::mutex mutex_;
     std::condition_variable wake_;
@@ -707,7 +756,7 @@ void send_stream(Link &l, std::optional<std::uint64_t> end = std::nullopt) {
     put16(out, kHead + 8u, static_cast<std::uint16_t>(count));
     out[kHead + 10u] = end ? 1u : 0u;
     out[kHead + 11u] = static_cast<std::uint8_t>(checks.size());
-    put32(out, kHead + 12u, static_cast<std::uint32_t>(end.value_or(0u)));
+    put32(out, kHead + 12u, static_cast<std::uint32_t>(end.value_or(l.stream.size())));
     put32(out, kHead + 16u, matched_hash());
     // The leading copy is the game's player 0.
     put_camera(out, kHead + 20u, my_camera());
@@ -1609,12 +1658,31 @@ struct Watch {
     bool leaving = false;
     std::uint64_t checks = 0;
     Clock::time_point began{}, heard{}, said{};
-    // The waits since the last report.
+    // The buffer (kWatchStart): the frames wanted in hand, fixed by
+    // D012_WATCH_BUFFER=N; D012_WATCH_SKIP=0 never skips.
+    std::uint64_t buffer = kWatchStart;
+    bool adapts = true;
+    bool skips = true;
+    std::uint64_t leader_holds = 0;  // as the newest STREAM said
+    bool waiting = false;
+    bool leader_dry = false;  // a STREAM in this wait: the leader had no frame more
+    std::uint64_t skip_until = 0;  // frames before it run unseen
+    std::uint64_t look_from = 0;   // the frames in hand since it, for a skip
+    std::uint64_t look_least = ~std::uint64_t{0};
+    // The most in hand in this block of kWatchDriftLook frames and the last.
+    std::uint64_t drift_from = 0, drift_most = 0, drift_last = 0;
+    // The window the buffer may be made smaller after.
+    std::uint64_t window_from = 0;
+    std::uint64_t window_least = ~std::uint64_t{0};
+    bool window_waited = false;
+    // Since the last report.
     std::uint64_t report_from = 0;
     Clock::time_point report_began{};
-    std::uint64_t waits = 0;
-    Clock::duration waited{};
-    Clock::duration held{};
+    std::uint64_t waits = 0, stalls = 0, skips_made = 0, skipped = 0;
+    Clock::duration waited{}, held{};
+    // D012_WATCH_PAUSE=FRAME:MS[,FRAME:MS...], a test switch: this copy
+    // stops for MS at FRAME, as a slow moment of its own would.
+    std::map<std::uint64_t, long> pauses;
 };
 
 Watch &watch_state() {
@@ -1663,6 +1731,7 @@ void take_stream(Watch &w, const std::uint8_t *data, std::size_t size) {
         w.end = get<std::uint32_t>(data + kHead + 12u);
         std::cout << "[battle-watch] the fighters' battle ended at frame " << *w.end << std::endl;
     }
+    w.leader_holds = std::max<std::uint64_t>(w.leader_holds, get<std::uint32_t>(data + kHead + 12u));
     w.cameras[0] = take_camera(data + kHead + 20u);
     w.cameras[1] = take_camera(data + kHead + 29u);
     std::size_t at = kStreamHead;
@@ -1672,6 +1741,9 @@ void take_stream(Watch &w, const std::uint8_t *data, std::size_t size) {
         if (first + i != w.frames.size()) continue;  // held already, or after a gap
         w.frames.emplace_back(take_pad(data + at), take_pad(data + at + kLocalSize));
     }
+    // Waiting, and the leader had no frame this copy lacks: the fighters
+    // stalled, not the path.
+    if (w.waiting && w.leader_holds <= w.frames.size()) w.leader_dry = true;
     compare_watch_checks(w);
 }
 
@@ -1964,6 +2036,26 @@ bool watch(std::uint32_t tag) {
     w.receiver = std::make_shared<Receiver>(w.socket);
     w.active = true;
     w.began = w.heard = Clock::now();
+    if (const char *text = std::getenv("D012_WATCH_BUFFER"); text != nullptr && *text != '\0') {
+        const long frames = std::strtol(text, nullptr, 10);
+        if (frames >= 1 && frames <= 600) {
+            w.buffer = static_cast<std::uint64_t>(frames);
+            w.adapts = false;
+        }
+    }
+    if (const char *text = std::getenv("D012_WATCH_SKIP"); text != nullptr && std::string(text) == "0") w.skips = false;
+    if (const char *text = std::getenv("D012_WATCH_PAUSE"); text != nullptr) {
+        for (const char *at = text; *at != '\0';) {
+            char *end = nullptr;
+            const unsigned long long frame = std::strtoull(at, &end, 10);
+            if (end == at || *end != ':') break;
+            at = end + 1;
+            const long pause = std::strtol(at, &end, 10);
+            if (end == at) break;
+            w.pauses[frame] = pause;
+            at = *end == ',' ? end + 1 : end;
+        }
+    }
     say_watching(w);
     std::cout << "[battle-watch] watching battle " << w.tag << " through " << where << std::endl;
     return true;
@@ -1975,16 +2067,16 @@ Pads watch_frame(std::uint64_t frame) {
     Watch &w = watch_state();
     Pads pads;
     watch_receive(w, std::chrono::milliseconds(0));
-    // At the start, a few frames in hand. After it, a frame that has not
-    // come waits for a few more, so one late packet costs one wait and not a
-    // short one on each of the frames after it.
-    const std::uint64_t want = frame == 0u ? kWatchBuffer : frame < w.frames.size() ? frame + 1u : frame + 1u + kWatchRefill;
-    const auto ready = [&] {
-        if (w.end && w.frames.size() >= *w.end) return true;
-        return w.frames.size() >= want;
-    };
-    if (!ready() && !w.lost && !w.differs) {
+    const auto ms = [](Clock::duration d) { return std::chrono::duration_cast<std::chrono::milliseconds>(d).count(); };
+    const auto ended = [&] { return w.end && w.frames.size() >= *w.end; };
+    // The first frame, or one that has not come: wait until the buffer is in
+    // too, so the frames after it do not each wait a little.
+    if ((frame == 0u || frame >= w.frames.size()) && !ended() && !w.lost && !w.differs) {
         const auto began = Clock::now();
+        std::uint64_t want = frame + 1u + w.buffer;
+        bool came = false;  // the frame itself
+        w.waiting = true;
+        w.leader_dry = false;
         const auto turn = [&]() -> bool {
             watch_receive(w, std::chrono::milliseconds(2));
             const auto now = Clock::now();
@@ -1992,15 +2084,36 @@ Pads watch_frame(std::uint64_t frame) {
                 w.lost = true;
                 std::cerr << "[battle-watch] the fighters' stream stopped at frame " << frame << std::endl;
             }
-            return !ready() && !w.lost && !w.differs;
+            if (!came && w.frames.size() > frame) {
+                came = true;
+                // The path made this copy wait: a larger buffer. Not at the
+                // start (the fighters link then), nor for the fighters' stall.
+                if (frame != 0u && !w.leader_dry && w.adapts) {
+                    const auto frames = static_cast<std::uint64_t>((now - began) / kWatchFrameTime);
+                    const std::uint64_t larger = std::min(kWatchMost, w.buffer + kWatchRaise + frames);
+                    if (larger != w.buffer)
+                        std::cout << "[battle-watch] waited " << ms(now - began) << " ms at frame " << frame
+                                  << ": a buffer of " << larger << " frames (was " << w.buffer << ")" << std::endl;
+                    w.buffer = larger;
+                    want = frame + 1u + w.buffer;
+                    // The frames in hand before it say nothing of the pace.
+                    w.drift_most = w.drift_last = w.buffer;
+                }
+                if (frame != 0u && !w.leader_dry) w.window_waited = true;
+                if (frame != 0u && w.leader_dry) ++w.stalls;
+            }
+            return !ended() && w.frames.size() < want && !w.lost && !w.differs;
         };
         if (!wait_for(turn, "Waiting for the fighters\xE2\x80\xA6 ")) {
             w.lost = true;
             w.leaving = true;
             std::cout << "[battle-watch] this copy's player left while waiting at frame " << frame << std::endl;
         }
-        ++w.waits;
-        w.waited += Clock::now() - began;
+        w.waiting = false;
+        if (frame != 0u) {
+            ++w.waits;
+            w.waited += Clock::now() - began;
+        }
     }
     if (w.differs && failure.empty())
         failure = "This battle cannot be watched: this game differs from the fighters' games. Everyone needs the "
@@ -2014,22 +2127,80 @@ Pads watch_frame(std::uint64_t frame) {
     }
     pads.player[0] = w.frames[frame].first;
     pads.player[1] = w.frames[frame].second;
-    // Fewer than kWatchBuffer frames in hand (the fighters stalled, or this
-    // copy's frames run a little fast): a little slower until they are back.
-    if (!w.end && w.frames.size() < frame + 1u + kWatchBuffer) {
+    const std::uint64_t in_hand = w.frames.size() - frame - 1u;
+    // Well behind the buffer for kWatchLook frames on end (not a moment's
+    // bunch of late packets): up to it unseen, once the battle goes on. A
+    // skip just ended goes on if as many more came while it ran.
+    if (frame >= w.skip_until) w.look_least = std::min(w.look_least, in_hand);
+    const bool skip_ended = frame != 0u && frame == w.skip_until;
+    const std::uint64_t skip_at = w.buffer + std::max(kWatchSkip, w.buffer / 4u);
+    std::uint64_t over = 0u;
+    if (skip_ended && in_hand >= skip_at) {
+        over = in_hand - w.buffer;
+    } else if (frame >= w.skip_until && frame + 1u - w.look_from >= kWatchLook) {
+        if (w.look_least != ~std::uint64_t{0} && w.look_least >= skip_at) over = w.look_least - w.buffer;
+        w.look_from = frame + 1u;
+        w.look_least = ~std::uint64_t{0};
+    }
+    if (w.skips && !w.end && over != 0u) {
+        w.skip_until = frame + over;
+        w.look_from = w.skip_until;
+        w.look_least = ~std::uint64_t{0};
+        if (!skip_ended) ++w.skips_made;
+        w.skipped += w.skip_until - frame;
+        std::cout << "[battle-watch] " << in_hand << " frames in hand at frame " << frame << ": runs "
+                  << (w.skip_until - frame) << " unseen to the buffer of " << w.buffer
+                  << (skip_ended ? " (more came as it skipped)" : "") << std::endl;
+    }
+    pads.unseen = frame < w.skip_until;
+    // Following the fighters' pace.
+    if (frame + 1u - w.drift_from >= kWatchDriftLook) {
+        w.drift_last = w.drift_most;
+        w.drift_most = 0u;
+        w.drift_from = frame + 1u;
+    }
+    w.drift_most = std::max(w.drift_most, in_hand);
+    if (!w.end && !pads.unseen && frame >= kWatchDriftLook &&
+        std::max(w.drift_most, w.drift_last) + kWatchDrift < w.buffer) {
         portablekit::hle_extension::hold_back(kWatchHold);
         w.held += kWatchHold;
     }
+    if (const auto pause = w.pauses.find(frame); pause != w.pauses.end()) {
+        std::cout << "[battle-watch] stops for " << pause->second << " ms at frame " << frame << " (D012_WATCH_PAUSE)"
+                  << std::endl;
+        std::this_thread::sleep_for(std::chrono::milliseconds(pause->second));
+    }
+    // The buffer smaller, after a window in which the path never made this
+    // copy wait and more than it needed was always in hand.
+    if (!pads.unseen) w.window_least = std::min(w.window_least, in_hand);
+    if (frame + 1u - w.window_from >= kWatchWindow) {
+        const std::uint64_t margin = std::max(kWatchMargin, w.buffer / 4u);
+        if (w.adapts && !w.window_waited && w.window_least != ~std::uint64_t{0} && w.window_least > margin &&
+            w.buffer > kWatchLeast) {
+            const std::uint64_t smaller =
+                std::max(kWatchLeast, w.buffer - std::min(kWatchLower, w.window_least - margin));
+            std::cout << "[battle-watch] at least " << w.window_least << " frames in hand since frame "
+                      << w.window_from << ": a buffer of " << smaller << " frames (was " << w.buffer << ")"
+                      << std::endl;
+            w.buffer = smaller;
+        }
+        w.window_from = frame + 1u;
+        w.window_least = ~std::uint64_t{0};
+        w.window_waited = false;
+    }
     if (w.report_from == 0u && frame == 0u) w.report_began = Clock::now();
     if (frame + 1u - w.report_from >= kReportEvery) {
-        const auto ms = [](Clock::duration d) { return std::chrono::duration_cast<std::chrono::milliseconds>(d).count(); };
         const auto now = Clock::now();
         std::cout << "[battle-watch] frames " << w.report_from << "-" << frame << " in " << ms(now - w.report_began)
-                  << " ms: waited on " << w.waits << ", " << ms(w.waited) << " ms in all; held back "
-                  << ms(w.held) << " ms; " << (w.frames.size() - frame - 1u) << " frames in hand" << std::endl;
+                  << " ms: waited on " << w.waits << " (" << w.stalls << " the fighters' stalls), " << ms(w.waited)
+                  << " ms in all; held back " << ms(w.held) << " ms; skipped " << w.skipped << " frames in "
+                  << w.skips_made << "; buffer " << w.buffer << ", " << in_hand << " frames in hand" << std::endl;
         w.report_began = now;
         w.report_from = frame + 1u;
         w.waits = 0u;
+        w.stalls = 0u;
+        w.skips_made = 0u;
+        w.skipped = 0u;
         w.waited = {};
         w.held = {};
     }

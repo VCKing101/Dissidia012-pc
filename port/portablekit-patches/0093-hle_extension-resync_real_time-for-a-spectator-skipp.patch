@@ -1,0 +1,55 @@
+From ceb0137edb09e154d4240367c20f2dc8ecc7d93a Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Sun, 8 Nov 2026 13:41:33 +1030
+Subject: [PATCH] hle_extension::resync_real_time(), for a spectator skipping
+ ahead
+
+The game runs on from this moment at normal speed, however far its time
+was ahead of or behind real time (Kernel::resync_real_time). For frames
+run with set_simulate_only that went past real time, such as a netplay
+spectator skipping ahead to a live game: without it the game would then
+wait for real time to catch up with the frames it skipped.
+
+Tested with Dissidia 012 on Windows: three copies on one PC, a watcher of
+an online battle skipping 22 to 58 frames after stopping on purpose,
+then running on at full speed with no wait. Not tested: other games,
+Linux, the Steam Deck.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/hle/hle_extension_host.cpp       | 2 ++
+ include/portablekit/hle_extension.hpp | 5 +++++
+ 2 files changed, 7 insertions(+)
+
+diff --git a/host/hle/hle_extension_host.cpp b/host/hle/hle_extension_host.cpp
+index 1b99d07..07ecc00 100644
+--- a/host/hle/hle_extension_host.cpp
++++ b/host/hle/hle_extension_host.cpp
+@@ -137,6 +137,8 @@ void set_simulate_only(bool on) { kernel().set_simulate_only(on); }
+ 
+ bool simulate_only() { return kernel().simulate_only(); }
+ 
++void resync_real_time() { kernel().resync_real_time(); }
++
+ } // namespace hle_extension
+ 
+ HleExtensionReport install_linked_hle_extensions(Runtime &runtime, HleRegistrar &hle) {
+diff --git a/include/portablekit/hle_extension.hpp b/include/portablekit/hle_extension.hpp
+index a941fbc..c445e1e 100644
+--- a/include/portablekit/hle_extension.hpp
++++ b/include/portablekit/hle_extension.hpp
+@@ -330,6 +330,11 @@ void hold_back(std::chrono::microseconds by);
+ // is back at the frame it had reached.
+ void set_simulate_only(bool on);
+ [[nodiscard]] bool simulate_only();
++// Forgets how far the game's time is ahead of or behind real time, so it
++// runs on from this moment at normal speed. For frames run with
++// set_simulate_only that went past real time (a spectator skipping ahead to
++// a live game): without it the game would wait for real time to catch up.
++void resync_real_time();
+ 
+ } // namespace portablekit::hle_extension
+ 
+-- 
+2.53.0.windows.1
+

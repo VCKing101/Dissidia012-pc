@@ -129,6 +129,7 @@ Rollback &rollback() {
 struct State {
     bool linked = false;
     bool watching = false;  // a spectator on the leading fighter's stream
+    bool unseen = false;    // a watcher skipping ahead (net::battle::Pads::unseen)
     bool decided = false;  // this battle's first frame chose the port's link or the game's exchange
     std::uint32_t frame = 0;  // the frame this link reached
     std::map<std::string, std::uint32_t> battles;  // battles per group, for the link's tag
@@ -163,7 +164,18 @@ std::uint32_t tag_for(Guest *g) {
 
 // Ends the battle as the game ends one on a desync or a quit notice: its own
 // error box on this PSP.
+// A watcher's frames shown and heard again after a skip ahead, from the
+// current moment on: the frames it ran unseen went past real time.
+void seen_again() {
+    State &s = state();
+    if (!s.unseen) return;
+    s.unseen = false;
+    ext::set_simulate_only(false);
+    ext::resync_real_time();
+}
+
 void quit(Guest *g, gaddr net, std::uint32_t frame, GuestRegs &out) {
+    seen_again();
     g_st32(g, net + kFlags, g_ld32(g, net + kFlags) | kQuit);
     g_st32(g, net + kQuitFrame, frame);
     if (state().watching) net::battle::unwatch();
@@ -452,6 +464,14 @@ void run_watch(Guest *g, const decomp::CallState &in, GuestRegs &out) {
             return quit(g, net, frame, out);
         }
     }
+    // Skipping ahead to the buffer: this frame run as fast as it can, not
+    // shown or heard; the first frame after it shown again.
+    if (pads.unseen && !s.unseen) {
+        s.unseen = true;
+        ext::set_simulate_only(true);
+    } else if (!pads.unseen) {
+        seen_again();
+    }
     for (int player = 0; player < 2; ++player) {
         inject(g, player, pads.player[player]);
         camera::linked_mouse(player, pads.player[player]);
@@ -463,6 +483,7 @@ void run_watch(Guest *g, const decomp::CallState &in, GuestRegs &out) {
 
 void run_leave_battle(Guest *g, const decomp::CallState &in, GuestRegs &out) {
     State &s = state();
+    seen_again();
     if (s.linked) {
         std::cout << "[comm-battle] this copy leaves the battle at frame " << s.frame << std::endl;
         net::battle::close(s.frame);
