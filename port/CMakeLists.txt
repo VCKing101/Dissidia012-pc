@@ -83,6 +83,8 @@ portablekit_add_game(D012Native ${d012_corpus}
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_portable.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_update_rules.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_updates.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_discord_rules.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_discord.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_dialogs.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_cheats.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_title_quit.cpp"
@@ -216,6 +218,7 @@ endif()
 # portablekit_add_game() found above.
 add_library(d012_manifest STATIC "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_json.cpp"
                                  "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_update_rules.cpp"
+                                 "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_discord_rules.cpp"
                                  "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_mod_manifest.cpp"
                                  "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_nintendo_stream.cpp"
                                  "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/model.cpp"

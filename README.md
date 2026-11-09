@@ -56,6 +56,8 @@ online and test sessions. Bugs and crashes go in [GitHub issues](https://github.
   under Voice ([below](#japanese-voices)).
 - **Update check**: when a new version is out, the title screen says so, and **Check for updates** on the menu's
   System page opens its download page ([below](#updates)).
+- **Discord status**: while Discord is open, your profile shows what you are playing, such as "Quick Battle,
+  Cloud vs Sephiroth" ([below](#discord-status)).
 - **Save, load and keyboard screens in the game's own style**: the PSP drew these itself; here they are drawn with
   the game's own menu pieces, read from your disc, like its Data Config page, with its menu sounds.
 - **Close the game from the title screen**: press circle there, then choose Yes.
@@ -261,6 +263,16 @@ until you press a button.
 - **Check when the game starts**, on the same page, turns the check at start off. The button still works.
 - The check sends GitHub only its request, which names the port's version. It never downloads or installs anything.
 - A copy built from source (`setup.ps1`) does not check by itself: update it with `git pull` and `setup.ps1`.
+
+## Discord status
+
+While the Discord app is open on the same PC, your Discord profile shows what you are doing in the game: in the
+menus, Story Mode, a Quick Battle, an online battle, or a replay, with who is fighting whom and how long you have
+played.
+
+- **Show on Discord**, on the System page of the port's menu, turns it off.
+- It goes through the Discord app on your PC; the game itself sends nothing over the internet for it.
+- Developer notes: [docs/port/discord-status.md](docs/port/discord-status.md).
 
 ## Downloadable content (DLC)
 

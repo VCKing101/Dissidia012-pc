@@ -167,6 +167,12 @@ disassembler and the new `tools/port/` scripts cover the analysis.
 - [Title quit](title-quit.md): circle on the title screen's menu asks "Close the game?"; how the port tells the title
   screen apart (its handler's pad call, `menu:0x089DF330`), and PortableKit's `ui::request_quit()` (patch 0087).
 
+## Discord status (9 November 2026)
+
+- [Discord status](discord-status.md): the player's Discord profile shows the menus, a Quick Battle, an online
+  battle or a replay, and who fights whom, over Discord's local connection (a named pipe or socket, no SDK). The
+  FIELD object's mode `+0x4C` (0 to 14) and each side's character ID at battle setup `+0x1058`.
+
 ## Next steps
 
 1. ~~Read PortableKit's sources.~~ Done; see above.
