@@ -221,7 +221,7 @@ were copied in. Two faults the owner found, both in PortableKit (worktree `Porta
   `D012_TEST_CRASH=8` and `8,abort`, output to `/dev/null`): exit 139 and 134, the log written, the frame named
   `test_crash` from the kept symbols; a piped run is not redirected. On the Deck (`D012_TEST_CRASH=20` as a launch
   option) the report was complete, in Steam's console log then; `coredumpctl` listed the crash.
-- **One version for both setups:** `tools/port/release-version.txt` (0.6.0), read by `package_installer.py` and
+- **One version for both setups:** `tools/port/release-version.txt` (0.7.0), read by `package_installer.py` and
   `linux_setup.sh` unless `--version` is given.
 - **Windows unchanged:** the linux branch with PortableKit-linux built for Windows with llvm-mingw
   (`tools/local/port/build-d012-linux-clang`, `build-d012-linux-installer`): it links, `d012_tests` all pass, a
