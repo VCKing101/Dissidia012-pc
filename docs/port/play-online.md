@@ -186,8 +186,8 @@ allowed.
 
 ## Not tested yet
 
-- More than one player watching at once, and party battles of more than one fight between machines (a Steam
-  Deck and two PC copies were, one fight each).
+- More than one player watching at once (a Steam Deck and two PC copies played Tournaments and a Round-Robin,
+  one watcher at a time).
 - Sending an Original Quest, and Import a Friend Card (Friend Cards were traded between Windows and a Steam Deck).
 - Two Windows PCs on separate machines (Windows against the Steam Deck, and two copies on one PC, were).
 - A router that only has UPnP (the one tested answered NAT-PMP first).

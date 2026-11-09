@@ -980,7 +980,7 @@ clips after the change sound clean.
 fade in another game; a watcher on another machine, the Steam Deck or Linux (GCC 14 compiles both changed files).
 Section 19.6 has a watcher on the Steam Deck.
 
-### 19.6 The Steam Deck hosting, watching, leading and trading (8 and 9 November 2026)
+### 19.6 The Steam Deck hosting, watching, leading, trading and in party battles (8 and 9 November 2026)
 
 The build of this section on the Steam Deck (native Linux, GCC 14, Wi-Fi) and this PC (llvm-mingw clang) on the same
 home network; one player at the Deck, the PC's copies driven by test input. The Deck hosted the session in every run,
@@ -1015,6 +1015,20 @@ with 3 leaves `DISCOVER` at `DiscoverTerm`. The game closes then without `Adhocc
 the next player to search found someone no longer exchanging ("Player found! Exchanging data..."). Reproduced and
 fixed on this PC (two copies on loopback, the ad hoc trace on), then on the Deck.
 
+**A fourth: a Group Battle room started late froze its host.** The Deck pressed Start Group Battle a few minutes
+after the PC copies entered its room, and stayed on "Beginning Group Battle with following members" for ever, the
+members on "Please wait while the members are finalized". A Group Battle host accepts its room's members only when it
+starts (`MatchingSelectTarget` for each, then an 8-byte `SendData` to each). A member's request, though, gave up in
+PortableKit after its tries (30, 2 s apart: a minute), the parent still heard all along; the member's game then went
+quiet, and when the host accepted it at last it had heard nothing from it for over 30 s, so the link timed out at
+once (ESTABLISHED and TIMEOUT in the same frame) and `SendData` failed with 0x80410817 (not established). Room 1 had
+worked only because the Deck started it within the minute. Reproduced on this PC with three copies: a start 40 to 55 s
+after the members asked worked, one after 90 s froze as on the Deck. Patch 0099: a request counts its tries only
+while the parent is silent, so it waits as long as the parent is heard, and a member accepted late starts its link
+fresh (`MatchingConfig::request_waits_while_heard`; `<prefix>_ADHOC_MATCHING_REQUEST_GIVES_UP=1` gives up as before).
+A unit test with two engines wired in memory covers a parent accepting after two minutes, one gone quiet, and the
+old way. After it, a start 2.5 minutes after the members asked reached Party Select on this PC, and on the Deck.
+
 **Results.**
 
 | Test | Who | Result |
@@ -1027,11 +1041,12 @@ fixed on this PC (two copies on loopback, the ad hoc trace on), then on the Deck
 | Rollback | The Deck fights PC copy 1 (`online.rollback=7` on both; PC copy 1 on `D012_NET_SIM=50,10,1`) | Input delay 1 at a 59 ms round trip; both left on frame 8,533, 14 checks agreed; full speed throughout. The Deck went back 108 times, PC copy 1 1,769; a save took 5 to 6 ms a frame on the Deck, a restore 4 to 5 ms. The player: looked fine |
 | Communications, before the third fix | The Deck (its own save) and PC copy 1 (`data-versus-user`) | Each found the other at once; each got the other's Friend Card (NEW, and 10 PP); the Deck still had the card after closing the game and starting it again. The one that stopped second was stuck until the other searched again |
 | Communications, after the third fix | The same | The PC stopped first; circle on the Deck then asked "Data received: 1. Continue data transfer?"; after NO, the PC's card was in the Deck's received list and its Friend Cards |
+| Party battle of two fights | Party A: the Deck and PC copy 1; Party B: PC copy 2 (Tournament) | Fight 1, the Deck against PC copy 2, PC copy 1 watching: both PC copies left on frame 7,313; no wait, no skip; round trip 5 ms. Fight 2, PC copy 1 against PC copy 2, the Deck watching on the stream: all left on frame 5,362, 9 and 21 checks agreed. PC copy 2 won both, 2 - 0 on both PC copies. The player: the Deck's view looked fine |
+| Round-Robin, after the fourth fix | Party A: the Deck alone; Party B: PC copies 1 and 2 (3 Rounds; started minutes after the members entered) | Three rounds (Cloud against Lightning, Kain against Vaan, Bartz against Laguna), each with the PC copy not fighting watching on the stream; both PC copies left each on the same frame (2,497, 3,162, 2,576), 14 checks agreed on each; one catch-up skip at each round's start on a watcher (14 to 17 frames); the result 3 - 0 to Party A, the same on all |
 | Circle on one PC, after the third fix | Two copies on loopback | The other gone first: "Data received: 1", the card kept, NEW. Searching alone: "No data has been received". A search after a cancelled one does not find the copy that cancelled |
 
 Between the first five rows and the rest, both branches moved onto main `c022ee8` (9 November); the PortableKit patch
 for the switch became 0097, as main had taken 0095 and 0096.
 
-**Not verified.** Sending an Original Quest and Import a Friend Card between machines; a party battle of more than one
-fight across machines; Round-Robin; more than one watcher at once; a path beyond one home network; rollback on a real
+**Not verified.** Sending an Original Quest and Import a Friend Card between machines; more than one watcher at once; a path beyond one home network; rollback on a real
 path's jitter (the PC copy's lag was simulated).
