@@ -28,6 +28,7 @@ the menus to Quick Battles, with the HUD's HP bars, billboarded particles and si
 | `host/d012_dlc.cpp`, `.hpp` | DLC: one startup log line saying what DLC the game will find in `ms0:/PSP/GAME/<disc id>`, how many files are still encrypted EDATA, and a warning for `.edat` files in a folder of another name; it only reports ([README](../README.md#downloadable-content-dlc)) |
 | `host/d012_loading_layout.cpp`, `.hpp` | The loading screen's right-half pages moved down and made shorter for the track wheel, by checked edits of the screen's layout data in memory (section 11) |
 | `host/d012_test_switches.cpp`, `.hpp` | Test switches, off by default: `D012_TEST_UNLOCK_FIGHTERS`, `D012_TEST_EX_FULL` ([docs/port/graphics-triage.md](../docs/port/graphics-triage.md)) |
+| `host/d012_brave_pool_guard.cpp` | In battle, the pool of flying Brave numbers is put right before each update: a slot holding anything but one of its entries gets a free entry, or none, instead of crashing the game ([issue 16](https://github.com/VCKing101/Dissidia012-pc/issues/16)) |
 | `host/d012_crash_report.cpp` | The crash report, always on: an unhandled exception or an abort logs the exception, its module and offset, and the stack, and writes a minidump to `data/logs/D012Native-crash.dmp` (`D012_CRASH_DUMP=<dir>`: one per run in that folder) ([docs/port/quit-crash.md](../docs/port/quit-crash.md)) |
 | `host/d012_decomp_harness.cpp`, `.hpp`, `host/d012_decomp_bgm.cpp` | Decompiled functions as native overrides, and the differential test against the recompiled originals |
 | `decomp/` | The decompiled BGM functions (C) |
@@ -146,6 +147,7 @@ The profile's own switches:
 | `D012_TEST_UNLOCK_FIGHTERS=1` | Test only: every fighter can be picked on the select screens (the unlock flags are set in the running game; an autosave keeps them, so use a copy of the data directory) |
 | `D012_TEST_EX_FULL=1` | Test only: in battle the player's EX gauge is kept full (R + square enters EX Mode; the next HP attack that lands is an EX Burst) |
 | `D012_CRASH_DUMP=<dir>` | On a crash, write the minidump to `<dir>/crash_<pid>.dmp` instead of `<data>/logs/D012Native-crash.dmp` (the logged stack has names from `D012Native.pdb` when the build links with `/DEBUG`, else module+offset) |
+| `D012_BRAVE_POOL_GUARD=0` | The Brave numbers' pool is left as it is (`port/host/d012_brave_pool_guard.cpp`): a slot holding something that is not an entry crashes the battle, as in issue 16 |
 | `D012_TEST_CRASH=<s>[,abort]` | Test only: a thread reads address 0 (or calls `abort()`) that many seconds after start, to check the crash report |
 
 And the framework changes' off switches, each restoring the old behaviour: `D012_QUICK_BY_PICTURE=1` (texture packs
