@@ -9,7 +9,8 @@
 #
 # and adds a menu entry, which the player adds to Steam ("Add to Steam" on the
 # Steam Deck). The questions are zenity dialogs (SteamOS has zenity), or text
-# in a terminal when there is no zenity or no desktop.
+# in a terminal when there is no zenity or no desktop. Started from the desktop
+# (no terminal) with no zenity, it opens a terminal window and asks there.
 #
 # Unattended, for tests: D012_SETUP_ISO=<iso> D012_SETUP_DIR=<folder> asks
 # nothing; D012_SETUP_COPY_ISO=1 copies the image; D012_SETUP_NO_MENU=1 adds
@@ -32,8 +33,63 @@ if [[ "$unattended" -eq 0 ]] && command -v zenity >/dev/null 2>&1 &&
     [[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]]; then
     gui=1
 fi
+
+# Started from the desktop with no zenity: the questions go to a terminal
+# window. The setup runs again in it, with D012_SETUP_IN_TERMINAL naming a
+# folder for its marks ("started" holds its process id, "ended" its exit code).
+# This run waits until that one ends: the AppImage's files are there only while
+# this one runs. Some terminals hand the window to one already running and
+# return at once, so the marks, not the terminal's process, say when it ends.
+in_terminal="${D012_SETUP_IN_TERMINAL:-}"
+open_terminal() {
+    [[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]] || return 1
+    local marks term pid exited waited code
+    marks="$(mktemp -d)" || return 1
+    local run=(env "D012_SETUP_IN_TERMINAL=$marks" "$here/AppRun")
+    for term in xdg-terminal-exec x-terminal-emulator konsole gnome-terminal ptyxis kgx \
+        xfce4-terminal mate-terminal alacritty kitty foot wezterm xterm; do
+        command -v "$term" >/dev/null 2>&1 || continue
+        case "$term" in
+            x-terminal-emulator|konsole|alacritty|xterm) "$term" -e "${run[@]}" ;;
+            gnome-terminal|ptyxis|kgx) "$term" -- "${run[@]}" ;;
+            xfce4-terminal|mate-terminal) "$term" -x "${run[@]}" ;;
+            wezterm) "$term" start -- "${run[@]}" ;;
+            *) "$term" "${run[@]}" ;;
+        esac >/dev/null 2>&1 &
+        pid=$!
+        # Up to 20 seconds for the setup to start in the window. A terminal
+        # that fails is passed over at once; one that returns 0 handed it on.
+        exited=0
+        for ((waited = 0; waited < 200; waited++)); do
+            [[ -s "$marks/started" ]] && break
+            if [[ "$exited" -eq 0 ]] && ! kill -0 "$pid" 2>/dev/null; then
+                wait "$pid" || break
+                exited=1
+            fi
+            sleep 0.1
+        done
+        if [[ -s "$marks/started" ]]; then
+            # Until its end mark, or until it is gone (the window was closed).
+            while [[ ! -e "$marks/ended" ]] && kill -0 "$(cat "$marks/started")" 2>/dev/null; do
+                sleep 0.5
+            done
+            code="$(cat "$marks/ended" 2>/dev/null)"
+            rm -rf "$marks"
+            exit "${code:-1}"
+        fi
+        [[ "$exited" -eq 0 ]] && kill "$pid" 2>/dev/null
+    done
+    rm -rf "$marks"
+    return 1
+}
+if [[ -n "$in_terminal" ]]; then
+    echo "$$" > "$in_terminal/started.part" && mv "$in_terminal/started.part" "$in_terminal/started"
+    # The window closes when the setup ends, so its last words wait for Enter.
+    trap 'code=$?; printf "\nPress Enter to close this window. "; read -r _; echo "$code" > "$in_terminal/ended"' EXIT
+fi
 if [[ "$unattended" -eq 0 && "$gui" -eq 0 && ! -t 0 ]]; then
-    echo "$title: no desktop and no terminal to ask in. Run it from a terminal, or set D012_SETUP_ISO and D012_SETUP_DIR." >&2
+    [[ -z "$in_terminal" ]] && open_terminal
+    echo "$title: no zenity and no terminal window to ask in. Run it from a terminal, or set D012_SETUP_ISO and D012_SETUP_DIR." >&2
     exit 1
 fi
 
@@ -69,7 +125,7 @@ choose_iso() {
                     --filename="$HOME/" --file-filter="Disc images (*.iso) | *.iso *.ISO" \
                     --file-filter="All files | *" 2>/dev/null)" || exit 1
             else
-                read -r -e -p "Your Dissidia 012 disc image (.iso): " iso
+                read -r -e -p "Your Dissidia 012 disc image (.iso): " iso || exit 1
                 iso="${iso/#\~/$HOME}"
             fi
         fi
@@ -108,7 +164,7 @@ choose_folder() {
             fi
         else
             local typed
-            read -r -e -p "Install folder [$dir]: " typed
+            read -r -e -p "Install folder [$dir]: " typed || exit 1
             [[ -n "$typed" ]] && dir="${typed/#\~/$HOME}"
         fi
     fi
