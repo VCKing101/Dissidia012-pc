@@ -7,6 +7,7 @@
 // port/README.md.
 
 #include "checks.hpp"
+#include "d012_discord_rules.hpp"
 #include "d012_json.hpp"
 #include "d012_mod_manifest.hpp"
 #include "d012_update_rules.hpp"
@@ -848,6 +849,86 @@ void test_update_rules() {
     expect(!rules::parse_release("<html>", error), "an answer that is not JSON is refused");
 }
 
+void test_discord_rules() {
+    namespace rules = d012::discord_rules;
+    using Scene = rules::Scene;
+    expect(std::string(rules::character_name(13)) == "Cloud" && std::string(rules::character_name(31)) == "Lightning" &&
+               std::string(rules::character_name(32)) == "Feral Chaos",
+           "characters are named by ID");
+    expect(rules::character_name(0) == nullptr && rules::character_name(34) == nullptr &&
+               rules::character_name(-1) == nullptr && rules::character_name(35) == nullptr,
+           "no name for what is not a character");
+
+    expect(rules::describe(Scene{}) == rules::Activity{"In the menus", ""}, "the menus before anything");
+    Scene menus;
+    menus.where = Scene::Where::Menus;
+    menus.mode = 4;
+    menus.fighters[0] = 13;
+    expect(rules::describe(menus) == rules::Activity{"In the menus", ""}, "the menus name no fighter");
+    Scene quick;
+    quick.where = Scene::Where::Field;
+    quick.mode = 4;
+    quick.fighters[0] = 13;
+    quick.fighters[1] = 14;
+    expect(rules::describe(quick) == rules::Activity{"Quick Battle", "Cloud vs Sephiroth"}, "a Quick Battle");
+    Scene online = quick;
+    online.mode = 5;
+    online.fighters[1] = 31;
+    expect(rules::describe(online) == rules::Activity{"Online battle", "Cloud vs Lightning"}, "an online battle");
+    Scene other = quick;
+    other.mode = 1;
+    other.fighters[1] = -1;
+    expect(rules::describe(other) == rules::Activity{"In a battle", "As Cloud"}, "another mode, one fighter");
+    Scene map = quick;
+    map.mode = 0;
+    expect(rules::describe(map) == rules::Activity{"Story Mode", ""}, "the world map names no fighter");
+
+    const std::string frame = rules::encode(rules::Op::Frame, "{}");
+    expect(frame == std::string("\x01\x00\x00\x00\x02\x00\x00\x00{}", 10), "a message is opcode, length, JSON");
+    std::string buffer = frame.substr(0, 9);
+    expect(!rules::take_message(buffer) && buffer.size() == 9, "half a message waits");
+    buffer += frame.substr(9) + rules::encode(rules::Op::Ping, "[1]");
+    auto first = rules::take_message(buffer);
+    auto second = rules::take_message(buffer);
+    expect(first && first->op == rules::Op::Frame && first->json == "{}" && second && second->op == rules::Op::Ping &&
+               second->json == "[1]" && buffer.empty(),
+           "messages are taken one by one");
+    buffer = std::string("\x01\x00\x00\x00\xFF\xFF\xFF\x7F", 8);
+    expect(rules::broken(buffer) && !rules::take_message(buffer), "a huge length is a broken stream");
+
+    const d012::json::Value hello = parse(rules::handshake("123"));
+    expect(hello.find("v") && hello.find("v")->number == 1 && hello.find("client_id") &&
+               hello.find("client_id")->text == "123",
+           "the handshake names the version and application");
+
+    const rules::Activity fight{"Quick Battle", "Cloud vs Sephiroth"};
+    const d012::json::Value set = parse(rules::set_activity(&fight, 4242, 1762650000, 7));
+    const d012::json::Value *args = set.find("args");
+    const d012::json::Value *activity = args ? args->find("activity") : nullptr;
+    expect(set.find("cmd") && set.find("cmd")->text == "SET_ACTIVITY" && set.find("nonce") &&
+               set.find("nonce")->text == "7" && args && args->find("pid") && args->find("pid")->number == 4242,
+           "SET_ACTIVITY names the process");
+    expect(activity && activity->find("details")->text == "Quick Battle" &&
+               activity->find("state")->text == "Cloud vs Sephiroth" &&
+               activity->find("timestamps")->find("start")->number == 1762650000 &&
+               activity->find("buttons")->items.size() == 1,
+           "the activity has both lines, the start time and the button");
+    const d012::json::Value bare = parse(rules::set_activity(nullptr, 1, 0, 1));
+    expect(bare.find("args") && !bare.find("args")->find("activity"), "no activity clears the status");
+    const rules::Activity menu{"In the menus", ""};
+    const d012::json::Value no_state = parse(rules::set_activity(&menu, 1, 0, 1));
+    expect(!no_state.find("args")->find("activity")->find("state"), "an empty second line is left out");
+
+    const rules::Answer ready = rules::read_answer(R"({"cmd":"DISPATCH","evt":"READY","data":{"v":1}})");
+    expect(ready.event == "READY" && ready.command == "DISPATCH" && ready.error.empty(), "READY is read");
+    const rules::Answer refused = rules::read_answer(R"({"code":4000,"message":"Invalid Client ID"})");
+    expect(refused.error == "Invalid Client ID", "a refusal's reason is read");
+    const rules::Answer failed =
+        rules::read_answer(R"({"cmd":"SET_ACTIVITY","evt":"ERROR","data":{"code":4000,"message":"bad"},"nonce":"2"})");
+    expect(failed.event == "ERROR" && failed.error == "bad", "an error answer is read");
+    expect(rules::read_answer("not json").event.empty(), "what is not JSON is nothing");
+}
+
 
 } // namespace
 
@@ -867,6 +948,7 @@ int main(int argc, char **argv) {
     test_undo();
     test_psp_iso();
     test_update_rules();
+    test_discord_rules();
     if (g_failures == 0) std::cout << "all passed\n";
     return g_failures == 0 ? 0 : 1;
 }
