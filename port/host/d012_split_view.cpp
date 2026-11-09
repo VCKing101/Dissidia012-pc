@@ -29,10 +29,12 @@
 
 #include "d012_decomp_harness.hpp"
 #include "d012_versus.hpp"
+#include "snapshot.hpp"
 
 #include "hle/hle_common.hpp"
 
 #include <algorithm>
+#include <any>
 #include <array>
 #include <climits>
 #include <cmath>
@@ -1240,6 +1242,26 @@ FramingCount &framing_count() {
     return count;
 }
 
+// The split view's state in save states (portablekit snapshot): what it set
+// up in the game, and the map and fighters' fades of the second view.
+struct SplitSaved {
+    State state;
+    MapFade map;
+    FighterFade fighters;
+};
+
+void add_state_to_snapshots() {
+    portablekit::snapshot::add(
+        "split view", [] { return std::any(SplitSaved{state(), map_fade(), fighter_fade()}); },
+        [](const std::any &any) {
+            const SplitSaved &saved = std::any_cast<const SplitSaved &>(any);
+            state() = saved.state;
+            map_fade() = saved.map;
+            fighter_fade() = saved.fighters;
+        });
+}
+const bool added_to_snapshots = (add_state_to_snapshots(), true);
+
 // A point's column in a 480-wide view, through the view x projection at
 // `matrix` (four columns of four floats, as libGu keeps them); -1 behind the
 // camera.
@@ -1856,6 +1878,14 @@ std::array<PopupRecord, kPopupSlots> &popup_records() {
     static std::array<PopupRecord, kPopupSlots> records;
     return records;
 }
+
+// The popups' places in save states: the second view draws them from these.
+const bool popups_in_snapshots = (portablekit::snapshot::add(
+                                      "split view popups", [] { return std::any(popup_records()); },
+                                      [](const std::any &any) {
+                                          popup_records() = std::any_cast<const std::array<PopupRecord, kPopupSlots> &>(any);
+                                      }),
+                                  true);
 
 gaddr popup_ring(Guest *g) {
     const gaddr hud = g_ld32(g, kEffectsHud);

@@ -1,0 +1,239 @@
+From 8eb5fdbfedaec10bad699b1bead40170d799f178 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Mon, 9 Nov 2026 22:05:24 +1030
+Subject: [PATCH] Ad hoc matching: a request waits while the parent is heard
+
+A child's request to join gave up after its tries (30, 2 s apart in
+Dissidia 012: a minute) even with the parent heard all along. Dissidia
+012's Group Battle host accepts its room's members only when it starts,
+so a room started more than a minute after its members asked broke: the
+members' games had gone quiet, the host's accept found a link silent for
+over 30 s and timed it out the same frame, and its first SendData failed
+with 0x80410817. The host then waited for ever on "Beginning Group
+Battle with following members".
+
+Now a request counts its tries only while the parent is silent: it waits
+as long as the parent is heard, and gives up after its tries once the
+parent goes quiet. A member accepted late starts its link as heard now.
+MatchingConfig::request_waits_while_heard; <prefix>_ADHOC_MATCHING_
+REQUEST_GIVES_UP=1 gives up after the tries as before.
+
+A unit test wires two engines to each other in memory (no sockets): a
+parent accepting after two minutes, one gone quiet, and the old way.
+
+Tested with Dissidia 012: three copies on loopback on Windows (a room
+started 2.5 minutes after its members asked reached Party Select; 90 s
+froze before), and a Steam Deck (native Linux) hosting two Windows copies
+through a whole Round-Robin. Not verified: another game's matching, a
+P2P request.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/adhoc/matching.cpp |   8 ++++
+ host/adhoc/matching.hpp |   4 ++
+ host/hle/hle_adhoc.cpp  |   1 +
+ tests/adhoc_tests.cpp   | 101 ++++++++++++++++++++++++++++++++++++++++
+ 4 files changed, 114 insertions(+)
+
+diff --git a/host/adhoc/matching.cpp b/host/adhoc/matching.cpp
+index 96739e2..e570852 100644
+--- a/host/adhoc/matching.cpp
++++ b/host/adhoc/matching.cpp
+@@ -1,5 +1,6 @@
+ #include "adhoc/matching.hpp"
+ 
++#include <algorithm>
+ #include <utility>
+ 
+ namespace portablekit::adhoc {
+@@ -87,6 +88,7 @@ std::uint32_t Matching::select_target(const Mac &peer, std::string data, std::ui
+         entry.link = Link::Established;
+         entry.since_us = now_us;
+         entry.sent_us = now_us;
++        entry.heard_us = std::max(entry.heard_us, now_us - std::min(now_us, config_.keepalive_us));
+         entry.attempts = 0u;
+         entry.request = std::move(data);
+         send(peer, kAccept, entry.request);
+@@ -272,6 +274,12 @@ void Matching::tick(std::uint64_t now_us) {
+             break;
+         case Link::Asking:
+             if (now_us - entry.sent_us < config_.retransmit_us) break;
++            // A request waits as long as the one asked is still heard: a parent
++            // may take its time to accept (Dissidia 012 accepts a room's members
++            // only when its host starts, minutes later). Only a silent one makes
++            // the tries count, and the request gives up once they run out.
++            if (config_.request_waits_while_heard && now_us - entry.heard_us < config_.hello_us + config_.retransmit_us)
++                entry.attempts = 0u;
+             if (entry.attempts >= config_.retries) {
+                 entry.link = Link::Heard;
+                 entry.request.clear();
+diff --git a/host/adhoc/matching.hpp b/host/adhoc/matching.hpp
+index fefb3d2..f8816b0 100644
+--- a/host/adhoc/matching.hpp
++++ b/host/adhoc/matching.hpp
+@@ -88,6 +88,10 @@ struct MatchingConfig {
+     std::uint64_t keepalive_us{10'000'000u};
+     std::uint32_t retries{30u};
+     std::uint64_t retransmit_us{2'000'000u};
++    // A request to join waits for as long as the one asked is heard, and gives
++    // up after `retries` tries only once it is silent. False: it gives up after
++    // `retries` tries whatever is heard, as before.
++    bool request_waits_while_heard{true};
+ };
+ 
+ struct MatchingNotice {
+diff --git a/host/hle/hle_adhoc.cpp b/host/hle/hle_adhoc.cpp
+index e6cbee6..a4abc34 100644
+--- a/host/hle/hle_adhoc.cpp
++++ b/host/hle/hle_adhoc.cpp
+@@ -1043,6 +1043,7 @@ void register_matching(HleRegistrar &hle) {
+         config.keepalive_us = arg(ctx, 5);
+         config.retries = arg(ctx, 6);
+         config.retransmit_us = arg(ctx, 7);
++        config.request_waits_while_heard = !env_set("ADHOC_MATCHING_REQUEST_GIVES_UP");
+         const std::uint32_t handler = rt.memory().load32(ctx.gpr[29]);
+         const std::uint32_t id = s.next_matching++;
+         MatchingObject object;
+diff --git a/tests/adhoc_tests.cpp b/tests/adhoc_tests.cpp
+index dfbb459..af75f1b 100644
+--- a/tests/adhoc_tests.cpp
++++ b/tests/adhoc_tests.cpp
+@@ -5,6 +5,7 @@
+ // Needs no game data. Every wait is bounded.
+ #include "adhoc/client.hpp"
+ #include "adhoc/discovery.hpp"
++#include "adhoc/matching.hpp"
+ #include "adhoc/port_mapping.hpp"
+ #include "adhoc/protocol.hpp"
+ #include "adhoc/server.hpp"
+@@ -620,6 +621,103 @@ void router_messages() {
+           "router: private, provider-shared and missing addresses are");
+ }
+ 
++// A parent that accepts a child's request long after it came, as Dissidia
++// 012's Group Battle host does when it starts the room. The engines are wired
++// to each other in memory, on a clock of their own: no sockets.
++struct MatchingPair {
++    portablekit::adhoc::Mac parent_mac{0x02, 0, 0, 0, 0, 0x01};
++    portablekit::adhoc::Mac child_mac{0x02, 0, 0, 0, 0, 0x02};
++    std::vector<std::pair<bool, std::string>> wire;  // (to the parent?, packet)
++    bool child_silent = false;
++    bool parent_silent = false;
++    std::optional<portablekit::adhoc::Matching> parent;
++    std::optional<portablekit::adhoc::Matching> child;
++    std::vector<portablekit::adhoc::MatchingNotice> parent_notices, child_notices;
++
++    explicit MatchingPair(bool waits) {
++        using namespace portablekit::adhoc;
++        MatchingConfig config;  // the game's own: hello 5 s, keepalive 10 s, 30 tries 2 s apart
++        config.max_peers = 10u;
++        config.request_waits_while_heard = waits;
++        config.mode = MatchingMode::Parent;
++        parent.emplace(parent_mac, config, [this](const Mac &, const std::string &packet) {
++            if (!parent_silent) wire.emplace_back(false, packet);
++        });
++        config.mode = MatchingMode::Child;
++        child.emplace(child_mac, config, [this](const Mac &, const std::string &packet) {
++            if (!child_silent) wire.emplace_back(true, packet);
++        });
++    }
++    void deliver(std::uint64_t now) {
++        auto packets = std::exchange(wire, {});
++        for (const auto &[to_parent, packet] : packets) {
++            if (to_parent) parent->receive(child_mac, packet, now);
++            else child->receive(parent_mac, packet, now);
++        }
++        for (auto &n : parent->take_notices()) parent_notices.push_back(std::move(n));
++        for (auto &n : child->take_notices()) child_notices.push_back(std::move(n));
++    }
++    // Runs both to `until`, a frame (33 ms) at a time.
++    void run(std::uint64_t &now, std::uint64_t until) {
++        for (; now < until; now += 33'333u) {
++            parent->tick(now);
++            child->tick(now);
++            deliver(now);
++        }
++    }
++    bool child_got(portablekit::adhoc::MatchingEvent event) const {
++        return std::any_of(child_notices.begin(), child_notices.end(), [&](const auto &n) { return n.event == event; });
++    }
++    bool parent_got(portablekit::adhoc::MatchingEvent event) const {
++        return std::any_of(parent_notices.begin(), parent_notices.end(), [&](const auto &n) { return n.event == event; });
++    }
++};
++
++void matching_request_waits() {
++    using portablekit::adhoc::MatchingEvent;
++    {
++        MatchingPair pair(true);
++        std::uint64_t now = 1'000'000u;
++        pair.parent->start(std::string(16u, 'h'), now);
++        pair.child->start({}, now);
++        pair.run(now, now + 6'000'000u);  // the child hears the parent's hello
++        check(pair.child->select_target(pair.parent_mac, "ask", now) == 0u, "a child asks to join");
++        pair.run(now, now + 120'000'000u);  // two minutes before the parent accepts
++        check(pair.parent_got(MatchingEvent::Request), "the parent hears the request");
++        check(!pair.child_got(MatchingEvent::Timeout), "the request waits two minutes while the parent is heard");
++        check(pair.parent->select_target(pair.child_mac, "yes", now) == 0u, "the parent accepts after two minutes");
++        pair.run(now, now + 1'000'000u);
++        check(pair.child_got(MatchingEvent::Established), "the child is joined");
++        check(!pair.parent_got(MatchingEvent::Timeout), "the parent keeps the child it accepted");
++        check(pair.parent->send_data(pair.child_mac, "start", now) == 0u, "the parent sends to its new member");
++        pair.run(now, now + 1'000'000u);
++        check(pair.child_got(MatchingEvent::Data) && pair.parent_got(MatchingEvent::DataAck), "the data arrives and is acked");
++    }
++    {
++        MatchingPair pair(true);
++        std::uint64_t now = 1'000'000u;
++        pair.parent->start(std::string(16u, 'h'), now);
++        pair.child->start({}, now);
++        pair.run(now, now + 6'000'000u);
++        check(pair.child->select_target(pair.parent_mac, "ask", now) == 0u, "a child asks a parent that then goes quiet");
++        pair.parent_silent = true;
++        pair.run(now, now + 50'000'000u);
++        check(!pair.child_got(MatchingEvent::Timeout), "a request to a parent gone quiet keeps trying for a while");
++        pair.run(now, now + 30'000'000u);
++        check(pair.child_got(MatchingEvent::Timeout), "and gives up after its tries once the parent is silent");
++    }
++    {
++        MatchingPair pair(false);
++        std::uint64_t now = 1'000'000u;
++        pair.parent->start(std::string(16u, 'h'), now);
++        pair.child->start({}, now);
++        pair.run(now, now + 6'000'000u);
++        check(pair.child->select_target(pair.parent_mac, "ask", now) == 0u, "the old way: a child asks");
++        pair.run(now, now + 70'000'000u);
++        check(pair.child_got(MatchingEvent::Timeout), "the old way: the request gives up after 30 tries");
++    }
++}
++
+ int main(int argc, char **argv) {
+     WinsockSession winsock;
+     if (argc > 1 && std::string(argv[1]) == "--exit-while-hosting") return exit_while_hosting(false);
+@@ -627,6 +725,7 @@ int main(int argc, char **argv) {
+     // The router messages alone open no socket, so no firewall asks anything.
+     if (argc > 1 && std::string(argv[1]) == "--router-messages") {
+         router_messages();
++        matching_request_waits();
+         return failures == 0 ? 0 : 1;
+     }
+     // Neither do the tests that listen on loopback alone.
+@@ -634,6 +733,7 @@ int main(int argc, char **argv) {
+         relay_report();
+         relay_out_of_reach();
+         router_messages();
++        matching_request_waits();
+         std::cout << (failures == 0 ? "all loopback ad hoc tests passed" : std::to_string(failures) + " failed")
+                   << std::endl;
+         return failures == 0 ? 0 : 1;
+@@ -649,6 +749,7 @@ int main(int argc, char **argv) {
+     relay_out_of_reach();
+     discovery(37500);
+     router_messages();
++    matching_request_waits();
+     std::cout << (failures == 0 ? "all ad hoc tests passed" : std::to_string(failures) + " failed") << std::endl;
+     return failures == 0 ? 0 : 1;
+ }
+-- 
+2.53.0.windows.1
+

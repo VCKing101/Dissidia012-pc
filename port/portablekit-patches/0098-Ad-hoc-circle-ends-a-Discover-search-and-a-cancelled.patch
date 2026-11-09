@@ -1,0 +1,113 @@
+From 2e6e5f4c56815a95457c9b2168bc52620f9676a7 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Mon, 9 Nov 2026 20:38:04 +1030
+Subject: [PATCH] Ad hoc: circle ends a Discover search, and a cancelled one
+ leaves its group
+
+While sceNetAdhocDiscover searched, nothing could end the search but
+finding someone or running out of time. A game does not read the pad
+then: on a PSP the system shows "cancel with circle" and ends the search
+itself. Dissidia 012 searches again as soon as the other player leaves
+its exchange, so whoever stopped second was left on "Receiving data from
+1 players" with circle doing nothing, searching for ever.
+
+Now a new press of circle (not one still held when the search began)
+ends a running search with 3, as Stop does. <prefix>_ADHOC_DISCOVER_NO_CIRCLE
+leaves circle to the game, as before.
+
+A search ended with 3 also leaves its group at Term. The game closes
+then without sceNetAdhocctlDisconnect, and staying in the group made the
+next player to search find someone who was no longer exchanging.
+
+Tested with Dissidia 012: two copies on loopback on Windows (the other
+gone first, searching alone, and a search after a cancelled one), and a
+Steam Deck (native Linux) against Windows. Not verified: another game's
+use of Discover, a search ended by the game's own Stop.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/hle/hle_adhoc.cpp | 34 +++++++++++++++++++++++++++++++---
+ 1 file changed, 31 insertions(+), 3 deletions(-)
+
+diff --git a/host/hle/hle_adhoc.cpp b/host/hle/hle_adhoc.cpp
+index c1f3f7a..e6cbee6 100644
+--- a/host/hle/hle_adhoc.cpp
++++ b/host/hle/hle_adhoc.cpp
+@@ -1159,6 +1159,15 @@ void register_matching(HleRegistrar &hle) {
+ // the PSP's own names for them are not known. The status is 0 idle, 1
+ // searching, 2 ended. The group stays joined after the search, for the
+ // exchange.
++//
++// While a search runs the game does not read the pad: on a PSP the system
++// shows "cancel with circle" and ends the search itself. So a new press of
++// circle here ends it with 3, as Stop does. A game that searched again after
++// the other player left would otherwise wait with nothing able to end it.
++// A search ended with 3 leaves the group at Term: the game closes without
++// disconnecting, and staying in it would let the next player to search find
++// someone who is no longer exchanging.
++// <prefix>_ADHOC_DISCOVER_NO_CIRCLE=1 leaves circle to the game, as before.
+ void register_discover(HleRegistrar &hle) {
+     constexpr std::uint32_t kDiscoverNone = 0u;
+     constexpr std::uint32_t kDiscoverSearching = 1u;
+@@ -1171,22 +1180,32 @@ void register_discover(HleRegistrar &hle) {
+         std::uint32_t param = 0u;
+         std::string group;
+         std::chrono::steady_clock::time_point until{};
++        bool circle_held = false;
++        std::uint32_t result = kFound;
+     };
+     static Search search;
++    constexpr std::uint32_t kCircle = 0x2000u;
++    const auto circle_down = [] { return (first_pad_sample_now().buttons & kCircle) != 0u; };
+     const auto finish = [](psprecomp::GuestMemory &memory, std::uint32_t result) {
+         memory.store32(search.param + 0x10u, result);
+         search.status = kDiscoverEnded;
++        search.result = result;
+         trace_line("discover ended, result " + std::to_string(result));
+     };
+-    // Ends a running search once someone else is in the group, or its time is up.
+-    const auto check = [finish](psprecomp::GuestMemory &memory) {
++    // Ends a running search once someone else is in the group, its time is up,
++    // or the player presses circle.
++    const auto check = [finish, circle_down](psprecomp::GuestMemory &memory) {
+         if (search.status != kDiscoverSearching) return;
++        const bool circle = circle_down();
++        const bool pressed = circle && !search.circle_held;
++        search.circle_held = circle;
++        if (pressed && !env_set("ADHOC_DISCOVER_NO_CIRCLE")) return finish(memory, kStopped);
+         pump_events();
+         const auto group = Client::get().group();
+         if (group && group->name == search.group && !Client::get().peers().empty()) finish(memory, kFound);
+         else if (std::chrono::steady_clock::now() >= search.until) finish(memory, kNobody);
+     };
+-    hle.add("sceNetAdhocDiscover", "sceNetAdhocDiscoverInitStart", [](Runtime &rt, AllegrexContext &ctx) {
++    hle.add("sceNetAdhocDiscover", "sceNetAdhocDiscoverInitStart", [circle_down](Runtime &rt, AllegrexContext &ctx) {
+         constexpr const char *kName = "sceNetAdhocDiscoverInitStart";
+         if (!state().ctl_initialized) return done(ctx, kName, 1, err::kCtlNotInitialized);
+         if (arg(ctx, 0) == 0u) return done(ctx, kName, 1, err::kCtlInvalidArg);
+@@ -1199,6 +1218,8 @@ void register_discover(HleRegistrar &hle) {
+         const std::uint32_t seconds = std::clamp<std::uint32_t>(rt.memory().load32(search.param + 0xCu), 1u, 600u);
+         search.until = std::chrono::steady_clock::now() + std::chrono::seconds(seconds);
+         search.status = kDiscoverSearching;
++        search.circle_held = circle_down();
++        search.result = kFound;
+         start_client();
+         if (const auto group = Client::get().group(); !group || group->name != search.group)
+             Client::get().join(search.group);
+@@ -1218,6 +1239,13 @@ void register_discover(HleRegistrar &hle) {
+         done(ctx, "sceNetAdhocDiscoverStop", 0, 0u);
+     });
+     hle.add("sceNetAdhocDiscover", "sceNetAdhocDiscoverTerm", [](Runtime &, AllegrexContext &ctx) {
++        if (search.result == kStopped) {
++            search.result = kFound;
++            if (const auto group = Client::get().group(); group && group->name == search.group) {
++                Client::get().leave();
++                pump_events();
++            }
++        }
+         search.status = kDiscoverNone;
+         done(ctx, "sceNetAdhocDiscoverTerm", 0, 0u);
+     });
+-- 
+2.53.0.windows.1
+

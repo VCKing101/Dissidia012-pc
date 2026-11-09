@@ -2,6 +2,8 @@
 // against the recompiled originals. See d012_decomp_harness.hpp. MIT licence;
 // see port/README.md.
 
+#include "d012_comm_battle.hpp"
+#include "d012_rollback.hpp"
 #include "d012_decomp_harness.hpp"
 
 #include "app_paths.hpp"
@@ -561,6 +563,8 @@ void post_dispatch(Runtime &rt, AllegrexContext &, std::uint32_t, std::int32_t) 
     // After an overlay was installed, and now and then in case one was
     // installed without a dispatch miss.
     if (h.rearm_pending || (++h.dispatches & 0xFFFFu) == 0u) rearm(rt);
+    rollback::after_dispatch(rt);
+    comm_battle::after_dispatch(rt);
 }
 
 bool code_miss(Runtime &rt, AllegrexContext &, std::uint32_t pc) {

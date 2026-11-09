@@ -118,6 +118,10 @@ disassembler and the new `tools/port/` scripts cover the analysis.
 - Lockstep (section 12, `D012_NET`): two copies on one PC, linked over loopback UDP, swap each frame's input with
   3 frames of delay. From boot to a versus battle with player 2 on the second copy, 10,799 reads with all of guest
   RAM the same in both.
+- [Online play, what comes next](online-next.md) (7 November 2026): what Group Battle, Communications and rollback
+  need. Communications and the frames' balance are done (Communication Mode, section 17), Group Battle with its
+  watchers on the port's netcode (sections 18 and 19), and rollback, off by default (section 5.8), with the Steam
+  Deck's headroom the open question.
 - [Communication Mode](communication-mode.md) (31 October 2026): a map of the game's five Communication Mode rows and
   what each asks of the network. The battle is already an input lockstep in which both machines simulate both
   fighters and cameras, so one function (`0x0890D664`) can be swapped for the port's lockstep with full analog. The

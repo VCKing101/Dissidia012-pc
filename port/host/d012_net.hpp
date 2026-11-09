@@ -7,6 +7,7 @@
 
 #include "d012_input.hpp"
 
+#include <optional>
 #include <cstdint>
 #include <string>
 #include <utility>
@@ -61,9 +62,9 @@ namespace battle {
 // On with ad hoc play (network.adhoc), or with D012_NET_BATTLE=PORT or
 // ADDRESS:PORT (settings.ini's online.battle_link), a test switch: where
 // player 0's copy listens for player 1's (127.0.0.1 without an address).
-// Without it, the copy that hosts the game's session listens on every network
-// at port() (which Windows asks the player to allow), and the other joins the
-// session's address there. The listening copy's D012_NET_DELAY or
+// Without it, both fighters' copies go through the relay of the copy that
+// hosts the game's session (serve()), at port() of the session's address, and
+// player 0's copy leads the link. The leading copy's D012_NET_DELAY or
 // online.input_delay sets the input delay: a number of frames, or by default
 // "auto", from the round trip timed as the two link.
 [[nodiscard]] bool configured();
@@ -71,6 +72,9 @@ namespace battle {
 // The battle link's UDP port: D012_NET_BATTLE_PORT or online.battle_port,
 // 27420 by default. A hosting copy asks the router to forward it.
 [[nodiscard]] std::uint16_t port();
+// While this copy hosts the session, relay its battles on port() (none with
+// online.battle_link set): the two fighters need not be this copy.
+void serve();
 
 // What must be the same on both copies for their battles to stay in step: the
 // program, mods that change the game, settings that change the fight. `what`
@@ -90,7 +94,7 @@ struct Camera {
     bool invert_y = false;
 };
 void set_camera(const Camera &mine);
-// The game's player 0 or 1's, while a battle is linked.
+// The game's player 0 or 1's, while a battle is linked or watched.
 [[nodiscard]] Camera camera(int player);
 
 // Links this copy, the game's `player` 0 or 1, for the battle `tag` (24 bits;
@@ -111,15 +115,58 @@ struct Pads {
     input::Pad player[2];
     bool lost = false;  // the other copy is gone, or no frame of it came for 30 s
     bool left = false;  // this copy's player chose to leave while it waited
+    // A watcher's frame to run without showing or playing it, as fast as it
+    // can (portablekit set_simulate_only): it skips ahead to the live game.
+    bool unseen = false;
 };
 // As exchange() above, for the battle's frame `frame`.
 Pads exchange(std::uint64_t frame, const input::Pad &mine);
+
+// Rollback (D012_NET_ROLLBACK or online.rollback): how many frames this copy
+// may run past the other's latest input, guessing it; 0, the default, keeps
+// the lockstep. The guessed frames come off the automatic input delay.
+[[nodiscard]] std::uint32_t rollback_frames();
+// Rollback's exchange: both pads for `frame` without waiting for the other's,
+// guessed (`guessed`) when it has not come. A frame run again (`rerun`) keeps
+// the input this copy sent for it, sends nothing and never waits.
+Pads exchange_ahead(std::uint64_t frame, const input::Pad &mine, bool rerun, bool &guessed);
+// The earliest frame whose guess the other's real input has shown wrong since
+// the last call, if any: the game goes back to it and runs on from there.
+[[nodiscard]] std::optional<std::uint64_t> take_wrong_guess();
+// The other copy's frames held: every frame below this one is certain.
+[[nodiscard]] std::uint64_t confirmed();
 
 // The game's own check value for `frame`, compared with the other copy's.
 // False once the two have differed for some frame.
 bool check(std::uint64_t frame, std::uint64_t hash);
 
-void close();
+// Ends the battle's link, `reached` the frame this copy's battle had reached.
+// The leading copy first gives its watchers the rest of the battle.
+void close(std::uint64_t reached);
+
+// Watching a battle (Group Battle's members who are not fighting,
+// docs/port/communication-mode.md section 19). The leading fighter's copy
+// streams both players' certain pads, both camera settings and its check
+// values through the session host's relay to every copy that watches the
+// battle's tag, from the first frame each watcher lacks. Only through a relay:
+// with online.battle_link set there is none, and watched battles stay on the
+// game's own exchange.
+[[nodiscard]] bool can_stream();
+// Starts watching the battle `tag`; false when no socket or relay address.
+bool watch(std::uint32_t tag);
+[[nodiscard]] bool watching();
+// Both players' pads for `frame`, once the stream has brought them (waiting
+// with a screen after half a second, as a fighter does). The watcher keeps a
+// buffer of frames in hand sized to its path; a frame that has not come
+// waits until the buffer is full again, and a watcher well behind the buffer
+// runs the extra frames `unseen`. `lost` when the stream ended before `frame`
+// (the battle was quit there), stopped coming, or the player chose to leave
+// (`left`).
+Pads watch_frame(std::uint64_t frame);
+// This copy's check value for `frame`, compared with the leading fighter's
+// whenever both are in. False once they have differed.
+bool watch_check(std::uint64_t frame, std::uint32_t value);
+void unwatch();
 
 } // namespace battle
 

@@ -11,11 +11,14 @@
 
 #include "d012_sync.hpp"
 
+#include "snapshot.hpp"
+
 #include "hle/hle_common.hpp"
 
 #include "psprecomp/guest_memory.hpp"
 #include "psprecomp/runtime.hpp"
 
+#include <any>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -122,6 +125,14 @@ void after_pad_read(psprecomp::GuestMemory &memory, std::uint32_t buffer, bool b
     }
     std::fwrite(t.hashes.data(), sizeof(std::uint64_t), t.pages, t.file);
     if (t.reads % 64u == 0u) std::fflush(t.file);
+}
+
+std::uint64_t reads() { return trace().reads; }
+
+void add_to_snapshots() {
+    portablekit::snapshot::add(
+        "sync trace", [] { return std::any(trace().reads); },
+        [](const std::any &any) { trace().reads = std::any_cast<std::uint64_t>(any); });
 }
 
 std::uint32_t page_count(psprecomp::GuestMemory &memory) {

@@ -1,0 +1,210 @@
+From 07c5c05d67f5f4d4229745bff2fab063d5d99af8 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Sun, 8 Nov 2026 17:28:13 +1030
+Subject: [PATCH] Audio: fade the sound out and in where the ring runs dry
+
+When the guest stops writing sound (a stall, a frame held for the
+network, frames run with set_simulate_only), the sink's ring ran dry and
+the sound stopped between two samples, then started again the same way:
+a click at each end of every gap. Now the last ~6 ms before a gap fade
+out and a producer's first ~6 ms after it fade in.
+
+The fade out goes on the ring when a hand-over leaves less than the fade
+behind, before the device takes those frames. If a producer then writes
+past them after all, the fade is taken off again while none of it has
+played (exactly: what it took off each sample is put back), or the new
+frames fade in if some has. A producer started again ahead of a ring
+that had not run dry (its cursor fell within a quarter of the prebuffer
+of the device) fades out where the ring ends too. <prefix>_AUDIO_NO_FADE
+turns it all off. <prefix>_TRACE_AUDIO's line gains fades= and undone=.
+
+Tested with Dissidia 012 on Windows: a netplay spectator's sound dumped
+(<prefix>_AUDIO_DUMP) over five 10-minute runs with stops of 0.2 to
+1.5 s and skips of 11 to 44 frames. Before, the step at each gap's edge
+was up to three times the music's own largest step from one sample to
+the next; after, every edge of the last run's eight gaps was at most 75,
+against the music's 3,000 to 10,000. The fade fired 31 times in that run,
+each before a real gap, and was never undone. MSVC framework build and
+its tests pass (ad hoc left out); GCC 14 compiles the file. Not tested:
+listened to by ear, other games, Linux, the Steam Deck.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/audio/audio_sink.cpp | 104 ++++++++++++++++++++++++++++++++++++--
+ 1 file changed, 99 insertions(+), 5 deletions(-)
+
+diff --git a/host/audio/audio_sink.cpp b/host/audio/audio_sink.cpp
+index 5f14ac7..0638394 100644
+--- a/host/audio/audio_sink.cpp
++++ b/host/audio/audio_sink.cpp
+@@ -26,6 +26,17 @@ namespace {
+ constexpr std::size_t kRingFrames = 8192u;
+ // The device is kept two guest buffers ahead of the write cursor.
+ constexpr std::size_t kPrebufferFrames = 2048u;
++// ~6 ms. When the ring runs dry (the guest stopped: a stall, a frame held for
++// the network, frames run unheard), the sound stops and starts again between
++// two samples, which is heard as a click at each end. The last frames before
++// the gap fade out and a producer's first buffer after it fades in, over this
++// many frames. <prefix>_AUDIO_NO_FADE turns it off.
++//
++// The fade out is put on the ring when a hand-over leaves less than this
++// behind, before the device takes those frames: once it has them it is too
++// late. If a producer then writes past them after all, the fade is taken off
++// again while none of it has played, or the new frames fade in if some has.
++constexpr std::size_t kFadeFrames = 256u;
+ 
+ [[nodiscard]] std::int16_t saturate(std::int32_t value) noexcept {
+     return static_cast<std::int16_t>(std::clamp(value, -32768, 32767));
+@@ -101,6 +112,15 @@ struct AudioSink::Impl {
+     bool closed{};
+     bool enabled{true};
+     bool trace{};
++    bool fade{true};
++    // A fade out on the ring's last frames, [fade_from, fade_to), and what it
++    // took off each sample, to put back if the ring does not run dry there.
++    bool fade_live{};
++    std::uint64_t fade_from{};
++    std::uint64_t fade_to{};
++    std::vector<std::int32_t> fade_taken = std::vector<std::int32_t>(kFadeFrames * kChannels, 0);
++    // Where the ring ended when a producer last started again ahead of it.
++    std::uint64_t restart_faded{};
+ 
+     WavWriter dump;
+     std::vector<std::int16_t> scratch;
+@@ -109,6 +129,8 @@ struct AudioSink::Impl {
+     std::uint64_t window_frames{};
+     std::uint64_t window_silent{};
+     std::uint64_t window_dropped{};
++    std::uint64_t window_fades{};
++    std::uint64_t window_undone{};
+     std::int32_t window_peak{};
+     double window_energy{};
+     std::uint64_t total_frames{};
+@@ -127,6 +149,27 @@ struct AudioSink::Impl {
+     void retire(std::size_t count, std::int16_t *out, bool played) {
+         const std::uint64_t available = write_end > read_position ? write_end - read_position : 0u;
+         const std::uint64_t silent = count > available ? count - available : 0u;
++        if (fade_live && read_position >= fade_to) fade_live = false;
++        // This hand-over leaves less than a fade behind: the ring is about to
++        // run dry. Fade out its last frames while they are still here.
++        if (fade && played && out != nullptr && available > 0u && available < count + kFadeFrames &&
++            !(fade_live && fade_to == write_end)) {
++            const auto span = static_cast<std::size_t>(std::min<std::uint64_t>(available, kFadeFrames));
++            fade_from = write_end - span;
++            fade_to = write_end;
++            fade_live = true;
++            ++window_fades;
++            for (std::size_t i = 0; i < span; ++i) {
++                const std::size_t slot = static_cast<std::size_t>((fade_from + i) % kRingFrames) * kChannels;
++                const auto weight = static_cast<std::int32_t>(span - i - 1u);
++                for (std::size_t side = 0; side < kChannels; ++side) {
++                    const std::int32_t was = ring[slot + side];
++                    const std::int32_t now = was * weight / static_cast<std::int32_t>(span);
++                    ring[slot + side] = static_cast<std::int16_t>(now);
++                    fade_taken[i * kChannels + side] = was - now;
++                }
++            }
++        }
+         for (std::size_t frame = 0; frame < count; ++frame) {
+             const std::size_t slot = static_cast<std::size_t>((read_position + frame) % kRingFrames) * kChannels;
+             const std::int16_t left = ring[slot];
+@@ -160,16 +203,20 @@ struct AudioSink::Impl {
+         ++seconds;
+         if (dump.active()) dump.flush();
+         if (trace) {
+-            std::printf("[audio] %llus frames=%llu peak=%d rms=%.1f silent=%llu dropped=%llu\n",
++            std::printf("[audio] %llus frames=%llu peak=%d rms=%.1f silent=%llu dropped=%llu fades=%llu undone=%llu\n",
+                         static_cast<unsigned long long>(seconds),
+                         static_cast<unsigned long long>(window_frames), window_peak, rms,
+                         static_cast<unsigned long long>(window_silent),
+-                        static_cast<unsigned long long>(window_dropped));
++                        static_cast<unsigned long long>(window_dropped),
++                        static_cast<unsigned long long>(window_fades),
++                        static_cast<unsigned long long>(window_undone));
+             std::fflush(stdout);
+         }
+         window_frames = 0u;
+         window_silent = 0u;
+         window_dropped = 0u;
++        window_fades = 0u;
++        window_undone = 0u;
+         window_peak = 0;
+         window_energy = 0.0;
+     }
+@@ -206,6 +253,7 @@ void AudioSink::initialize() {
+     impl.started = true;
+     impl.trace = portablekit::env("TRACE_AUDIO") != nullptr;
+     impl.enabled = portablekit::env("NO_AUDIO") == nullptr;
++    impl.fade = portablekit::env("AUDIO_NO_FADE") == nullptr;
+     const settings::Settings &player = settings::current();
+     impl.gain = player.mute ? 0.0f : static_cast<float>(player.volume) / 100.0f;
+ 
+@@ -310,7 +358,48 @@ void AudioSink::mix(std::uint64_t &cursor, const std::int16_t *frames, std::size
+ 
+     // A cursor behind the device belongs to a producer that stalled; restart it
+     // at the write target rather than writing frames that already played.
+-    if (cursor < impl.read_position + kPrebufferFrames / 4u) cursor = impl.read_position + kPrebufferFrames;
++    // Its first frames after the gap fade in.
++    std::size_t fade_in = 0u;
++    if (cursor < impl.read_position + kPrebufferFrames / 4u) {
++        cursor = impl.read_position + kPrebufferFrames;
++        if (impl.fade) {
++            fade_in = std::min(count, kFadeFrames);
++            // The ring had not run dry: it does now, where it ends, so fade
++            // that out (unless a fade out is there already, kept as it is).
++            if (impl.write_end > impl.read_position && !(impl.fade_live && impl.fade_to == impl.write_end) &&
++                impl.restart_faded != impl.write_end) {
++                const auto span =
++                    static_cast<std::size_t>(std::min<std::uint64_t>(impl.write_end - impl.read_position, kFadeFrames));
++                const std::uint64_t from = impl.write_end - span;
++                for (std::size_t i = 0; i < span; ++i) {
++                    const std::size_t slot = static_cast<std::size_t>((from + i) % kRingFrames) * kChannels;
++                    const auto weight = static_cast<std::int32_t>(span - i - 1u);
++                    for (std::size_t side = 0; side < kChannels; ++side)
++                        impl.ring[slot + side] = static_cast<std::int16_t>(
++                            impl.ring[slot + side] * weight / static_cast<std::int32_t>(span));
++                }
++                ++impl.window_fades;
++            }
++            impl.restart_faded = impl.write_end;
++        }
++        impl.fade_live = false;
++    }
++    // The ring did not run dry where a fade out was put on it: take the fade
++    // off while none of it has played, or fade these frames in if some has.
++    if (impl.fade_live && cursor + count > impl.fade_to) {
++        impl.fade_live = false;
++        if (impl.read_position <= impl.fade_from) {
++            const auto span = static_cast<std::size_t>(impl.fade_to - impl.fade_from);
++            for (std::size_t i = 0; i < span; ++i) {
++                const std::size_t slot = static_cast<std::size_t>((impl.fade_from + i) % kRingFrames) * kChannels;
++                for (std::size_t side = 0; side < kChannels; ++side)
++                    impl.ring[slot + side] = saturate(impl.ring[slot + side] + impl.fade_taken[i * kChannels + side]);
++            }
++            ++impl.window_undone;
++        } else if (fade_in == 0u && impl.fade) {
++            fade_in = std::min(count, kFadeFrames);
++        }
++    }
+ 
+     // The ring cannot hold what a runaway producer wants to write. Retire the
+     // oldest frames unplayed to make room: the device misses them, but the
+@@ -326,8 +415,13 @@ void AudioSink::mix(std::uint64_t &cursor, const std::int16_t *frames, std::size
+     const std::int32_t right_gain = static_cast<std::int32_t>(std::min<std::uint32_t>(right_volume, 0x8000u));
+     for (std::size_t frame = 0; frame < count; ++frame) {
+         const std::size_t slot = static_cast<std::size_t>((cursor + frame) % kRingFrames) * kChannels;
+-        const std::int32_t left = (static_cast<std::int32_t>(frames[frame * kChannels]) * left_gain) >> 15;
+-        const std::int32_t right = (static_cast<std::int32_t>(frames[frame * kChannels + 1u]) * right_gain) >> 15;
++        std::int32_t left = (static_cast<std::int32_t>(frames[frame * kChannels]) * left_gain) >> 15;
++        std::int32_t right = (static_cast<std::int32_t>(frames[frame * kChannels + 1u]) * right_gain) >> 15;
++        if (frame < fade_in) {
++            const auto weight = static_cast<std::int32_t>(frame + 1u);
++            left = left * weight / static_cast<std::int32_t>(fade_in);
++            right = right * weight / static_cast<std::int32_t>(fade_in);
++        }
+         impl.ring[slot] = saturate(impl.ring[slot] + left);
+         impl.ring[slot + 1u] = saturate(impl.ring[slot + 1u] + right);
+     }
+-- 
+2.53.0.windows.1
+

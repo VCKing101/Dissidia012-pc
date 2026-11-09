@@ -1,0 +1,226 @@
+From 0ae0766b440c3eae97f2eccd1e5a673bbb27ca73 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Sun, 8 Nov 2026 00:37:05 +1030
+Subject: [PATCH] Simulate-only frames and a restore that keeps real time, for
+ rollback
+
+Kernel::set_simulate_only (hle_extension::set_simulate_only): while on,
+nothing waits for real time (the hold is neither slept on nor moved), the
+flip presents nothing, display lists are walked as without a renderer, and
+game audio reaches no device (the channels' times still count). A netplay
+port turns it on for the frames it runs again after a restore and off when
+the game is back at the frame it had reached. snapshot::restore and
+Kernel::restore_state take keep_pacing, so those frames end where real time
+already is instead of the hold starting again; snapshot::save_into reuses a
+state's buffers, for a ring saved every frame.
+
+Tested with Dissidia 012 on Windows: online battles between two copies on
+one PC with 7 frames of rollback over a simulated 100 ms path kept full
+speed and stayed in step. Not tested: other games, Linux, the Deck.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/hle/hle_extension_host.cpp       |  4 ++++
+ host/hle/hle_media.cpp                |  9 ++++++---
+ host/kernel/kernel.cpp                | 10 +++++++---
+ host/kernel/kernel.hpp                | 10 +++++++++-
+ host/snapshot.cpp                     | 19 +++++++++++++------
+ host/snapshot.hpp                     |  7 ++++++-
+ include/portablekit/hle_extension.hpp |  7 +++++++
+ 7 files changed, 52 insertions(+), 14 deletions(-)
+
+diff --git a/host/hle/hle_extension_host.cpp b/host/hle/hle_extension_host.cpp
+index 01d6da1..1b99d07 100644
+--- a/host/hle/hle_extension_host.cpp
++++ b/host/hle/hle_extension_host.cpp
+@@ -133,6 +133,10 @@ SecondPad first_pad_now() {
+ 
+ void hold_back(std::chrono::microseconds by) { kernel().hold_back_real_time(by); }
+ 
++void set_simulate_only(bool on) { kernel().set_simulate_only(on); }
++
++bool simulate_only() { return kernel().simulate_only(); }
++
+ } // namespace hle_extension
+ 
+ HleExtensionReport install_linked_hle_extensions(Runtime &runtime, HleRegistrar &hle) {
+diff --git a/host/hle/hle_media.cpp b/host/hle/hle_media.cpp
+index 4379198..8ac62ae 100644
+--- a/host/hle/hle_media.cpp
++++ b/host/hle/hle_media.cpp
+@@ -192,7 +192,9 @@ void run_ge_list(Runtime &rt, std::uint32_t id) {
+         kernel().queue_interrupt(std::move(call));
+     });
+ #if defined(PORTABLEKIT_HAS_RENDERER)
+-    if (media().renderer && media().renderer->available()) {
++    // A frame run again (Kernel::simulate_only) walks its lists as a run
++    // without a renderer does: nothing is drawn.
++    if (media().renderer && media().renderer->available() && !kernel().simulate_only()) {
+         gpu::VulkanRenderer &renderer = *media().renderer;
+         const psprecomp::GuestMemory &memory = rt.memory();
+         renderer.begin_display_list();
+@@ -598,7 +600,7 @@ void register_display_ctrl(HleRegistrar &hle) {
+         media().display.pixel_format = arg(ctx, 2);
+         trace_pacing("sceDisplaySetFrameBuf");
+         stall_watchdog::note_frame();
+-        present_frame(rt);
++        if (!kernel().simulate_only()) present_frame(rt);
+         kernel().finish(ctx, 0u);
+     });
+ 
+@@ -850,7 +852,8 @@ void audio_output(Runtime &rt, AllegrexContext &ctx) {
+             // played, it would pile up faster than the device plays it. The
+             // channel's cursor stays where it was and catches up with the
+             // device when sound comes back.
+-            if (!fast_loading::note_audio(peak))
++            // A frame run again (Kernel::simulate_only) was heard already.
++            if (!fast_loading::note_audio(peak) && !kernel().simulate_only())
+                 audio::AudioSink::instance().mix(state.cursor, staging.data(), frames, left, right);
+         } else {
+             log_once("audio-buffer", "[audio] output buffer is not a single mapped range; dropping it");
+diff --git a/host/kernel/kernel.cpp b/host/kernel/kernel.cpp
+index ff4ef96..0376ada 100644
+--- a/host/kernel/kernel.cpp
++++ b/host/kernel/kernel.cpp
+@@ -145,7 +145,7 @@ std::shared_ptr<const Kernel::Saved> Kernel::save_state() const {
+     return saved;
+ }
+ 
+-void Kernel::restore_state(const Saved &saved) {
++void Kernel::restore_state(const Saved &saved, bool keep_pacing) {
+     // Threads in place where they exist, so a Thread a caller still points
+     // at stays the same object.
+     for (auto it = threads_.begin(); it != threads_.end();)
+@@ -184,8 +184,9 @@ void Kernel::restore_state(const Saved &saved) {
+     vtimers = saved.vtimers;
+     sub_interrupts = saved.sub_interrupts;
+     // Emulated time went back: the hold to real time starts again from here,
+-    // or the next frames would race to make up the frames undone.
+-    pacing_started_ = false;
++    // or the next frames would race to make up the frames undone, unless they
++    // are to be run again up to where they were.
++    if (!keep_pacing) pacing_started_ = false;
+ }
+ 
+ Kernel &kernel() {
+@@ -622,6 +623,9 @@ void Kernel::advance_clock(std::uint64_t target_us) {
+ }
+ 
+ bool Kernel::pace_to_real_time() {
++    // Frames run again catch up with real time as fast as they can, and the
++    // hold is not moved: they end where real time already is.
++    if (simulate_only_) return true;
+     // Virtual time jumps to the next event whenever every thread waits, so
+     // without this the game runs as fast as frames can be presented: two to
+     // three times PSP speed on a 60-90 Hz display. Runs without a window, and
+diff --git a/host/kernel/kernel.hpp b/host/kernel/kernel.hpp
+index 2749b19..821d2c2 100644
+--- a/host/kernel/kernel.hpp
++++ b/host/kernel/kernel.hpp
+@@ -255,7 +255,14 @@ public:
+     // real time, the busy clock's real-time start or the hooks.
+     struct Saved;
+     [[nodiscard]] std::shared_ptr<const Saved> save_state() const;
+-    void restore_state(const Saved &saved);
++    // `keep_pacing`: the hold to real time stays as it is, for frames about
++    // to be run again faster than real time (simulate_only) up to where they
++    // were. Otherwise it starts again from the restore.
++    void restore_state(const Saved &saved, bool keep_pacing = false);
++    // Frames run again after a restore (rollback netplay): nothing waits for
++    // real time, and the media modules show and play nothing (hle_media.cpp).
++    void set_simulate_only(bool on) noexcept { simulate_only_ = on; }
++    [[nodiscard]] bool simulate_only() const noexcept { return simulate_only_; }
+     // Holds emulated time back by `by` of real time: from now on each frame
+     // comes that much later than it would have. Nothing while emulated time
+     // is not held to real time.
+@@ -434,6 +441,7 @@ private:
+     SceUID busy_thread_{};
+     std::uint64_t busy_waits_{};
+     std::chrono::steady_clock::time_point busy_since_{};
++    bool simulate_only_{};
+     bool pacing_started_{};
+     bool pacing_fast_{};  // the hold lets emulated time run ahead: a load runs fast
+     std::chrono::steady_clock::time_point pacing_real_base_{};
+diff --git a/host/snapshot.cpp b/host/snapshot.cpp
+index 3175bc6..8684059 100644
+--- a/host/snapshot.cpp
++++ b/host/snapshot.cpp
+@@ -37,25 +37,32 @@ void add(std::string name, std::function<std::any()> save, std::function<void(co
+ }
+ 
+ std::shared_ptr<const State> save(psprecomp::Runtime &runtime) {
+-    auto state = std::make_shared<State>();
+-    state->ram = runtime.memory().bytes();
+-    state->vram = runtime.memory().vram_bytes();
++    std::shared_ptr<State> state;
++    save_into(runtime, state);
++    return state;
++}
++
++void save_into(psprecomp::Runtime &runtime, std::shared_ptr<State> &into) {
++    if (!into) into = std::make_shared<State>();
++    State *state = into.get();
++    state->ram.assign(runtime.memory().bytes().begin(), runtime.memory().bytes().end());
++    state->vram.assign(runtime.memory().vram_bytes().begin(), runtime.memory().vram_bytes().end());
+     state->cpu = runtime.cpu();
+     state->starvation_phase = runtime.starvation_phase();
+     state->thread_uid = psprecomp::runtime_thread_uid();
+     state->thread_name = psprecomp::runtime_thread_name();
+     state->kernel = kernel().save_state();
++    state->parts.clear();
+     state->parts.reserve(participants().size());
+     for (const Participant &p : participants()) state->parts.push_back(p.save());
+-    return state;
+ }
+ 
+-void restore(psprecomp::Runtime &runtime, const State &state) {
++void restore(psprecomp::Runtime &runtime, const State &state, bool keep_pacing) {
+     runtime.memory().restore_bytes(state.ram, state.vram);
+     runtime.cpu() = state.cpu;
+     runtime.set_starvation_phase(state.starvation_phase);
+     psprecomp::set_runtime_thread_identity(state.thread_uid, state.thread_name);
+-    kernel().restore_state(*state.kernel);
++    kernel().restore_state(*state.kernel, keep_pacing);
+     const std::vector<Participant> &list = participants();
+     for (std::size_t i = 0; i < list.size() && i < state.parts.size(); ++i) list[i].restore(state.parts[i]);
+ }
+diff --git a/host/snapshot.hpp b/host/snapshot.hpp
+index dd3fd92..a9e7e89 100644
+--- a/host/snapshot.hpp
++++ b/host/snapshot.hpp
+@@ -33,8 +33,13 @@ struct State;
+ 
+ // The whole state now. Call only between dispatches.
+ [[nodiscard]] std::shared_ptr<const State> save(psprecomp::Runtime &runtime);
++// The whole state now, into `into`, whose buffers are used again (a ring of
++// states saved every frame allocates nothing after the first round).
++void save_into(psprecomp::Runtime &runtime, std::shared_ptr<State> &into);
+ // Puts `state` back: the next dispatch runs where it was taken.
+-void restore(psprecomp::Runtime &runtime, const State &state);
++// `keep_pacing`: for frames about to be run again up to where they were
++// (Kernel::set_simulate_only); otherwise the hold to real time restarts.
++void restore(psprecomp::Runtime &runtime, const State &state, bool keep_pacing = false);
+ 
+ // The bytes a state keeps, for logs.
+ [[nodiscard]] std::size_t size(const State &state);
+diff --git a/include/portablekit/hle_extension.hpp b/include/portablekit/hle_extension.hpp
+index a8bf6b7..a941fbc 100644
+--- a/include/portablekit/hle_extension.hpp
++++ b/include/portablekit/hle_extension.hpp
+@@ -324,6 +324,13 @@ void want_second_pad(bool wanted);
+ // game is not held to real time (unthrottled, or a load running fast).
+ void hold_back(std::chrono::microseconds by);
+ 
++// Frames a netplay port runs again after restoring an earlier state
++// (portablekit snapshot): while on, nothing waits for real time, no frame is
++// shown and no sound reaches the device. The port turns it off when the game
++// is back at the frame it had reached.
++void set_simulate_only(bool on);
++[[nodiscard]] bool simulate_only();
++
+ } // namespace portablekit::hle_extension
+ 
+ // Defines a module's entry function. `name` is the module's name as its
+-- 
+2.53.0.windows.1
+

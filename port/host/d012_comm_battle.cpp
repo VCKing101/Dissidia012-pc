@@ -20,10 +20,18 @@
 // other copy gone, ends the battle with the game's own error (quit flag,
 // return 3).
 //
-// Anything but a running battle, and a spectator (role 1, Group Battle), stays
-// the game's. When the game takes this PSP out of a battle (main 0x089072AC:
-// the quit combo, a lost session), the link says so to the other copy, whose
-// battle then ends with the game's error at once instead of after 10 s.
+// A spectator's handler (role 1, Group Battle's members who are not
+// fighting: main 0x0890DF58) is the port's too: it takes both players' pads
+// for the frame from the leading fighter's stream (d012_net.hpp, watch()),
+// injects both as the fighters do, and compares its check value with theirs.
+// The game's own spectator relay is not used. With no relay to stream through
+// (online.battle_link set), a battle others watch stays on the game's own
+// exchange, on every copy alike.
+//
+// Anything but a running battle stays the game's. When the game takes this
+// PSP out of a battle (main 0x089072AC: the quit combo, a lost session), the
+// link says so to the other copy, whose battle then ends with the game's error
+// at once instead of after 10 s.
 //
 // MIT licence; see port/README.md.
 
@@ -39,6 +47,7 @@
 #include "hle/hle_common.hpp"
 #include "install/user_data.hpp"
 #include "portablekit/hle_extension.hpp"
+#include "snapshot.hpp"
 #if defined(PORTABLEKIT_HAS_RENDERER)
 #include "ui/ui.hpp"
 #include "ui/widgets.hpp"
@@ -47,6 +56,11 @@
 #include "psprecomp/runtime.hpp"
 
 #include <algorithm>
+#include <any>
+#include <chrono>
+#include <memory>
+#include <optional>
+#include <vector>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -62,6 +76,7 @@ namespace {
 namespace ext = portablekit::hle_extension;
 
 constexpr std::uint32_t kHandler = 0x0890D664u;   // role 0's per-frame exchange (net)
+constexpr std::uint32_t kWatchHandler = 0x0890DF58u;  // role 1's (a spectator's) per-frame handler (net)
 constexpr std::uint32_t kCheckStep = 0x0890CD90u; // the check value of every tenth frame (net)
 constexpr std::uint32_t kLeaveBattle = 0x089072ACu; // (session, flag): the raw pads back to this PSP's
 constexpr std::uint32_t kSession = 0x089D8364u;   // -> the lobby session; net is at +0x10D8
@@ -81,14 +96,42 @@ constexpr std::uint32_t kLocal = 0x44u;      // this PSP's player
 constexpr std::uint32_t kFrame = 0x48u;      // the frame applied next
 constexpr std::uint32_t kPeerConfirmed = 0x4Cu + 0x50u;
 constexpr std::uint32_t kSampled = 0x568u;
+constexpr std::uint32_t kSpectators = 0x358u;  // the PSPs watching (Group Battle), fed by the game's relay
 constexpr std::uint32_t kOpen = 1u;
 constexpr std::uint32_t kRunning = 2u;
 constexpr std::uint32_t kQuit = 4u;
 
 constexpr std::uint32_t kSelect = 0x0001u;
 
+// Rollback (net::battle::rollback_frames): a state saved as each battle
+// frame's handler is about to run, so the game can go back to a frame whose
+// guessed input was wrong and run on from it again, showing nothing until it
+// is back where it was (ext::set_simulate_only).
+struct Rollback {
+    struct Saved {
+        std::uint32_t frame = ~0u;
+        std::shared_ptr<portablekit::snapshot::State> state;
+    };
+    std::vector<Saved> ring;
+    std::optional<std::uint32_t> restore_to;  // asked for by the handler, done after it returns
+    std::uint32_t rerun_until = 0;            // the live frame the frames run again lead back to
+    std::map<std::uint32_t, std::uint32_t> checks;  // check values by frame, sent once the frame is certain
+    std::uint64_t rollbacks = 0, rerun = 0, longest = 0, reported = 0;
+    std::chrono::steady_clock::time_point reported_at{};
+    std::chrono::steady_clock::duration restore_time{}, save_time{};
+};
+
+Rollback &rollback() {
+    static Rollback r;
+    return r;
+}
+
 struct State {
     bool linked = false;
+    bool watching = false;  // a spectator on the leading fighter's stream
+    bool unseen = false;    // a watcher skipping ahead (net::battle::Pads::unseen)
+    bool decided = false;  // this battle's first frame chose the port's link or the game's exchange
+    bool checked = false;  // this battle's first frame read whether the port's link is on (refresh_enabled)
     std::uint32_t frame = 0;  // the frame this link reached
     std::map<std::string, std::uint32_t> battles;  // battles per group, for the link's tag
 };
@@ -103,8 +146,22 @@ bool flag(const char *name) {
     return value != nullptr && *value != '\0' && std::strcmp(value, "0") != 0;
 }
 
-// The same 24 bits on both copies: the battle group's name, and how many
-// battles this copy has begun in that group.
+void refresh_enabled();
+
+// Whether the port's link is on, read again as each battle starts (this
+// copy's first call of a battle's handler at frame 0): online play may be
+// turned on after the game first called the handlers, as by the Network page's
+// Host a session or Join after a try at going online without them.
+void check_enabled_at_start(State &s, bool ours, std::uint32_t frame) {
+    if (frame != 0u) s.checked = false;
+    if (!ours || frame != 0u || s.checked) return;
+    s.checked = true;
+    refresh_enabled();
+}
+
+// The same 24 bits on every copy: the battle group's name, and how many
+// battles this copy has begun in that group, fighting or watching (a party
+// battle's fighters change from fight to fight, and every member runs each).
 std::uint32_t tag_for(Guest *g) {
     const gaddr session = g_ld32(g, kSession);
     std::string group;
@@ -121,12 +178,32 @@ std::uint32_t tag_for(Guest *g) {
 
 // Ends the battle as the game ends one on a desync or a quit notice: its own
 // error box on this PSP.
+// A watcher's frames shown and heard again after a skip ahead, from the
+// current moment on: the frames it ran unseen went past real time.
+void seen_again() {
+    State &s = state();
+    if (!s.unseen) return;
+    s.unseen = false;
+    ext::set_simulate_only(false);
+    ext::resync_real_time();
+}
+
 void quit(Guest *g, gaddr net, std::uint32_t frame, GuestRegs &out) {
+    seen_again();
     g_st32(g, net + kFlags, g_ld32(g, net + kFlags) | kQuit);
     g_st32(g, net + kQuitFrame, frame);
-    net::battle::close();
+    if (state().watching) net::battle::unwatch();
+    else net::battle::close(frame);
     state().linked = false;
+    state().watching = false;
     out.v0 = 3u;
+}
+
+void call_game(Guest *g, std::uint32_t handler, gaddr net, GuestRegs &out) {
+    GuestRegs regs{};
+    regs.a[0] = net;
+    decomp::call_original(g, handler, regs);
+    out.v0 = regs.v0;
 }
 
 void inject(Guest *g, int player, const input::Pad &pad) {
@@ -163,6 +240,96 @@ void note_frame_step(Guest *g, std::uint32_t frame) {
               << taken << " vblanks taken of " << target << ", step " << step << std::endl;
 }
 
+input::Pad sample_mine() {
+    const ext::SecondPad now = ext::first_pad_now();
+    input::Pad mine;
+    mine.connected = now.connected;
+    mine.buttons = now.buttons;
+    mine.extra = now.extra;
+    mine.lx = now.analog_x;
+    mine.ly = now.analog_y;
+    mine.rx = now.right_x;
+    mine.ry = now.right_y;
+    camera::send_mouse(mine);
+    if ((mine.extra & ext::kExtraR3) != 0u) mine.buttons |= kSelect;
+    return mine;
+}
+
+// A battle frame with rollback: both pads at once, the other's guessed when it
+// has not come, and back to the earliest frame whose guess turned out wrong.
+void run_ahead(Guest *g, gaddr net, std::uint32_t frame, GuestRegs &out) {
+    State &s = state();
+    Rollback &r = rollback();
+    const bool rerun = r.rerun_until != 0u && frame < r.rerun_until;
+    if (!rerun && r.rerun_until != 0u) {
+        // Back at the frame the game had reached: shown and heard again.
+        r.rerun_until = 0u;
+        ext::set_simulate_only(false);
+    }
+    std::uint64_t certain = 0;
+    if (!rerun) {
+        if (const std::optional<std::uint64_t> wrong = net::battle::take_wrong_guess(); wrong && *wrong < frame) {
+            // Back to it once this call returns (after_dispatch): nothing of
+            // this frame has run yet.
+            r.restore_to = static_cast<std::uint32_t>(*wrong);
+            r.rerun_until = frame;
+            out.v0 = 0u;
+            return;
+        }
+        certain = net::battle::confirmed();
+    }
+    bool guessed = false;
+    const net::battle::Pads pads = net::battle::exchange_ahead(frame, rerun ? input::Pad{} : sample_mine(), rerun, guessed);
+    if (pads.lost) {
+        if (pads.left) std::cout << "[comm-battle] this copy's player left the battle at frame " << frame << std::endl;
+        else std::cerr << "[comm-battle] the other fighter's copy is gone at frame " << frame << std::endl;
+        ext::set_simulate_only(false);
+        return quit(g, net, frame, out);
+    }
+    if (frame > 0u && frame % 10u == 0u) {
+        g_call1(g, kCheckStep, net);
+        const std::uint32_t count = g_ld32(g, net + kCheckCount);
+        const gaddr newest = net + kChecks + (count - 1u) * 8u;
+        if (count != 0u && g_ld32(g, newest) == frame) r.checks[frame] = g_ld32(g, newest + 4u);
+    }
+    // The check values of frames whose inputs are all certain: run with the
+    // real inputs, so the two copies' must agree.
+    for (auto it = r.checks.begin(); !rerun && it != r.checks.end() && it->first < certain;) {
+        if (!net::battle::check(it->first, it->second)) {
+            std::cerr << "[comm-battle] the two battles differ; it ends at frame " << frame << std::endl;
+            ext::set_simulate_only(false);
+            return quit(g, net, frame, out);
+        }
+        it = r.checks.erase(it);
+    }
+    for (int player = 0; player < 2; ++player) {
+        inject(g, player, pads.player[player]);
+        camera::linked_mouse(player, pads.player[player]);
+    }
+    if (!rerun) note_frame_step(g, frame);
+    s.frame = frame + 1u;
+    g_st32(g, net + kFrame, frame + 1u);
+    g_st32(g, net + kSampled, frame + 1u);
+    g_st32(g, net + kPeerConfirmed, frame);
+    if (!rerun && frame >= r.reported + 900u) {
+        const auto ms = [](std::chrono::steady_clock::duration d, std::uint64_t n) {
+            return n == 0u ? 0.0 : std::chrono::duration<double, std::milli>(d).count() / static_cast<double>(n);
+        };
+        const auto now = std::chrono::steady_clock::now();
+        if (r.reported_at != std::chrono::steady_clock::time_point{})
+            std::cout << "[comm-battle] frames " << r.reported << "-" << frame << " in "
+                      << std::chrono::duration_cast<std::chrono::milliseconds>(now - r.reported_at).count() << " ms"
+                      << std::endl;
+        r.reported_at = now;
+        std::cout << "[comm-battle] rollback to frame " << frame << ": went back " << r.rollbacks << " times, "
+                  << r.rerun << " frames run again, the most at once " << r.longest << "; a save "
+                  << ms(r.save_time, frame) << " ms, a restore " << ms(r.restore_time, r.rollbacks) << " ms"
+                  << std::endl;
+        r.reported = frame;
+    }
+    out.v0 = 0u;
+}
+
 void run_handler(Guest *g, const decomp::CallState &in, GuestRegs &out) {
     const gaddr net = in.gpr[4];
     const std::uint32_t flags = g_ld32(g, net + kFlags);
@@ -170,6 +337,7 @@ void run_handler(Guest *g, const decomp::CallState &in, GuestRegs &out) {
     const bool ours = (flags & (kOpen | kRunning)) == (kOpen | kRunning) && (flags & kQuit) == 0u &&
                       g_ld32(g, net + kRole) == 0u;
     const std::uint32_t frame = g_ld32(g, net + kFrame);
+    check_enabled_at_start(s, ours, frame);
     if (!enabled()) {
         GuestRegs regs{};
         regs.a[0] = net;
@@ -177,10 +345,31 @@ void run_handler(Guest *g, const decomp::CallState &in, GuestRegs &out) {
         out.v0 = regs.v0;
         return;
     }
-    if (ours && frame == 0u) {
+    if (frame != 0u) s.decided = false;
+    if (ours && frame == 0u && !s.decided) {
+        s.decided = true;
+        s.watching = false;
+        const std::uint32_t tag = tag_for(g);
+        // A battle others watch (Group Battle's members who are not fighting)
+        // goes to them on the leading fighter's stream, through the session
+        // host's relay. Without one (online.battle_link) it stays on the game's
+        // own exchange, which relays the fighters' pads to the watchers. Every
+        // copy sees the same watchers and settings, so all choose alike.
+        if (const std::uint32_t watching = g_ld32(g, net + kSpectators); watching != 0u) {
+            std::cout << "[comm-battle] " << watching << (watching == 1u ? " copy watches" : " copies watch")
+                      << " this battle"
+                      << (net::battle::can_stream() ? ": they get the fighters' stream"
+                                                     : ": it runs on the game's own exchange (no relay to stream through)")
+                      << std::endl;
+            if (!net::battle::can_stream()) {
+                s.linked = false;
+                return call_game(g, kHandler, net, out);
+            }
+        }
         // A new battle: its own link.
+        rollback() = Rollback{};
         const int player = static_cast<int>(g_ld32(g, net + kLocal));
-        s.linked = net::battle::open(player, tag_for(g));
+        s.linked = net::battle::open(player, tag);
         s.frame = 0u;
         camera::clear_linked_mouse();
         if (!s.linked) {
@@ -198,6 +387,7 @@ void run_handler(Guest *g, const decomp::CallState &in, GuestRegs &out) {
         out.v0 = regs.v0;
         return;
     }
+    if (net::battle::rollback_frames() != 0u) return run_ahead(g, net, frame, out);
     const ext::SecondPad now = ext::first_pad_now();
     input::Pad mine;
     mine.connected = now.connected;
@@ -240,12 +430,85 @@ void run_handler(Guest *g, const decomp::CallState &in, GuestRegs &out) {
     out.v0 = 0u;
 }
 
+// A spectator's frame on the port's stream: both pads as the leading fighter
+// used them, the check value every tenth frame compared with theirs, and never
+// the game's wait. The stream ending before this frame (a fighter left, or
+// the stream stopped) ends the battle with the game's error, as the fighters'.
+void run_watch(Guest *g, const decomp::CallState &in, GuestRegs &out) {
+    const gaddr net = in.gpr[4];
+    const std::uint32_t flags = g_ld32(g, net + kFlags);
+    State &s = state();
+    const bool ours = (flags & (kOpen | kRunning)) == (kOpen | kRunning) && (flags & kQuit) == 0u &&
+                      g_ld32(g, net + kRole) == 1u;
+    const std::uint32_t frame = g_ld32(g, net + kFrame);
+    check_enabled_at_start(s, ours, frame);
+    if (!enabled()) return call_game(g, kWatchHandler, net, out);
+    if (frame != 0u) s.decided = false;
+    if (ours && frame == 0u && !s.decided) {
+        s.decided = true;
+        const std::uint32_t tag = tag_for(g);
+        s.watching = false;
+        s.linked = false;
+        if (net::battle::can_stream()) {
+            s.watching = net::battle::watch(tag);
+            s.frame = 0u;
+            camera::clear_linked_mouse();
+            if (!s.watching) {
+                std::cerr << "[comm-battle] cannot watch this battle; it ends" << std::endl;
+                return quit(g, net, 0u, out);
+            }
+            std::cout << "[comm-battle] this copy watches the battle on the fighters' stream" << std::endl;
+        } else {
+            std::cout << "[comm-battle] this copy watches the battle on the game's own exchange" << std::endl;
+        }
+    }
+    if (!ours || !s.watching || frame != s.frame) return call_game(g, kWatchHandler, net, out);
+    const net::battle::Pads pads = net::battle::watch_frame(frame);
+    if (pads.lost) {
+        if (pads.left) std::cout << "[comm-battle] this copy's player stopped watching at frame " << frame << std::endl;
+        else std::cout << "[comm-battle] the watched battle ends at frame " << frame << std::endl;
+        if (const std::string why = net::battle::why_not(); !why.empty()) net::battle::notice(why);
+        return quit(g, net, frame, out);
+    }
+    if (frame > 0u && frame % 10u == 0u) {
+        g_call1(g, kCheckStep, net);
+        const std::uint32_t count = g_ld32(g, net + kCheckCount);
+        const gaddr newest = net + kChecks + (count - 1u) * 8u;
+        if (count != 0u && g_ld32(g, newest) == frame && !net::battle::watch_check(frame, g_ld32(g, newest + 4u))) {
+            std::cerr << "[comm-battle] this copy's battle differs from the fighters'; it ends at frame " << frame
+                      << std::endl;
+            return quit(g, net, frame, out);
+        }
+    }
+    // Skipping ahead to the buffer: this frame run as fast as it can, not
+    // shown or heard; the first frame after it shown again.
+    if (pads.unseen && !s.unseen) {
+        s.unseen = true;
+        ext::set_simulate_only(true);
+    } else if (!pads.unseen) {
+        seen_again();
+    }
+    for (int player = 0; player < 2; ++player) {
+        inject(g, player, pads.player[player]);
+        camera::linked_mouse(player, pads.player[player]);
+    }
+    s.frame = frame + 1u;
+    g_st32(g, net + kFrame, frame + 1u);
+    out.v0 = 0u;
+}
+
 void run_leave_battle(Guest *g, const decomp::CallState &in, GuestRegs &out) {
     State &s = state();
+    seen_again();
     if (s.linked) {
         std::cout << "[comm-battle] this copy leaves the battle at frame " << s.frame << std::endl;
-        net::battle::close();
+        net::battle::close(s.frame);
         s.linked = false;
+    }
+    if (s.watching) {
+        std::cout << "[comm-battle] this copy leaves the watched battle at frame " << s.frame << std::endl;
+        net::battle::unwatch();
+        s.watching = false;
     }
     GuestRegs regs{};
     regs.a[0] = in.gpr[4];
@@ -337,9 +600,10 @@ void network_rows() {
     }();
     ui::section("Online battles");
     ui::RowOptions options;
-    options.description = "How many frames pass between a button and the fighter acting, in online battles you "
-                          "host. Auto sets it from the connection as the battle starts: 2 on a home network, 3 at "
-                          "about 75 to 100 ms. More smooths a poor connection; fewer responds sooner.";
+    options.description = "How many frames pass between a button and the fighter acting, in online battles. Auto "
+                          "sets it from the connection as the battle starts: 2 up to a round trip of about 100 ms, "
+                          "more beyond. More smooths a poor connection; fewer responds sooner. When the two players' "
+                          "settings differ, the higher counts.";
     if (const char *text = std::getenv("D012_NET_DELAY"); text != nullptr && *text != '\0') {
         options.disabled = true;
         options.note = "Set by D012_NET_DELAY";
@@ -378,23 +642,35 @@ struct Install {
     Install() {
         static const decomp::Override overrides[] = {
             {kHandler, "comm_battle_exchange", decomp::Module::Main, decomp::Returns::Integer, &run_handler},
+            {kWatchHandler, "comm_battle_watch", decomp::Module::Main, decomp::Returns::Integer, &run_watch},
             {kLeaveBattle, "comm_battle_leave", decomp::Module::Main, decomp::Returns::Nothing, &run_leave_battle},
         };
         // Always in place: whether to use them is read when the game first
-        // calls them (settings.ini cannot be read this early).
+        // calls them (settings.ini cannot be read this early), and again as
+        // each battle starts (check_enabled_at_start).
         decomp::add_overrides(overrides, sizeof overrides / sizeof overrides[0], true);
     }
 } install_overrides;
 
+bool g_enabled = false;
+bool g_enabled_known = false;
+
+// Reads the setting, and says so when it is first read or changes.
+void refresh_enabled() {
+    const bool value = net::battle::configured() && !flag("D012_NO_NET_BATTLE");
+    if (value != g_enabled || !g_enabled_known) {
+        if (value) std::cout << "[comm-battle] Communication Mode battles run on the port's link" << std::endl;
+        else std::cout << "[comm-battle] Communication Mode battles run on the game's own exchange" << std::endl;
+    }
+    g_enabled = value;
+    g_enabled_known = true;
+}
+
 } // namespace
 
 bool enabled() {
-    static const bool on = [] {
-        const bool value = net::battle::configured() && !flag("D012_NO_NET_BATTLE");
-        if (value) std::cout << "[comm-battle] Communication Mode battles run on the port's link" << std::endl;
-        return value;
-    }();
-    return on;
+    if (!g_enabled_known) refresh_enabled();
+    return g_enabled;
 }
 
 // With D012_CLOCK_OFFSET_S, the peers' last-seen times move on with the
@@ -431,15 +707,24 @@ void wrap_peer_times(portablekit::HleRegistrar &hle) {
 }
 
 void install(portablekit::HleRegistrar &hle) {
+    // The handler's own count of the battle's frames goes back with the game.
+    portablekit::snapshot::add(
+        "comm battle", [] { return std::any(state().frame); },
+        [](const std::any &any) { state().frame = std::any_cast<std::uint32_t>(any); });
+    psprecomp::set_runtime_pre_dispatch_hook(
+        [](psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx, std::uint32_t pc, std::int32_t) {
+            before_dispatch(rt, pc, ctx);
+        });
     for (const ClockImport &clock : kClocks) wrap_clock(hle, clock);
     if (clock_offset_us() != 0u) wrap_peer_times(hle);
     // The release build's log is a file under Proton and Windows alike, and
     // a game closed from the system loses what is still buffered: unbuffered
     // whenever this copy is set up for network battles.
     if (net::battle::configured()) std::setvbuf(stdout, nullptr, _IONBF, 0);
-    // A copy that hosts the session listens for the other fighter's: its
-    // router forwards the battle port along with the server's.
+    // A copy that hosts the session relays its battles: its router forwards
+    // the battle port along with the server's.
     portablekit::adhoc_host_forward_also({true, net::battle::port()});
+    net::battle::serve();
     // What both fighters' copies must share, or their battles part: the
     // program, mods that change the game (none yet: the mods folder holds music
     // only, which may differ; a kind of mod that changes the game sets this
@@ -471,17 +756,54 @@ void install(portablekit::HleRegistrar &hle) {
 #endif
 }
 
+void before_dispatch(psprecomp::Runtime &rt, std::uint32_t pc, const psprecomp::AllegrexContext &ctx) {
+    if (pc != kHandler || !state().linked || net::battle::rollback_frames() == 0u) return;
+    const std::uint32_t frame = rt.memory().load32(ctx.gpr[4] + kFrame);
+    if (frame != state().frame) return;
+    Rollback &r = rollback();
+    const std::size_t size = net::battle::rollback_frames() + 4u;
+    if (r.ring.size() != size) r.ring.resize(size);
+    Rollback::Saved &slot = r.ring[frame % size];
+    const auto began = std::chrono::steady_clock::now();
+    portablekit::snapshot::save_into(rt, slot.state);
+    r.save_time += std::chrono::steady_clock::now() - began;
+    slot.frame = frame;
+}
+
+void after_dispatch(psprecomp::Runtime &rt) {
+    Rollback &r = rollback();
+    if (!r.restore_to) return;
+    const std::uint32_t to = *r.restore_to;
+    r.restore_to.reset();
+    const auto slot = std::find_if(r.ring.begin(), r.ring.end(), [&](const Rollback::Saved &x) { return x.frame == to; });
+    if (slot == r.ring.end() || !slot->state) {
+        std::cerr << "[comm-battle] frame " << to << " is too far back to run again; the battles may part"
+                  << std::endl;
+        r.rerun_until = 0u;
+        return;
+    }
+    const auto began = std::chrono::steady_clock::now();
+    portablekit::snapshot::restore(rt, *slot->state, true);
+    r.restore_time += std::chrono::steady_clock::now() - began;
+    ext::set_simulate_only(true);
+    ++r.rollbacks;
+    r.rerun += r.rerun_until - to;
+    r.longest = std::max<std::uint64_t>(r.longest, r.rerun_until - to);
+}
+
 bool active(Guest *g) {
-    if (!state().linked || !net::battle::open_now()) return false;
+    const State &s = state();
+    if (!(s.linked && net::battle::open_now()) && !(s.watching && net::battle::watching())) return false;
     const gaddr session = g_ld32(g, kSession);
     if (session == 0u) return false;
     const gaddr net = session + kSessionNet;
     const std::uint32_t flags = g_ld32(g, net + kFlags);
-    return (flags & (kOpen | kRunning)) == (kOpen | kRunning) && (flags & kQuit) == 0u && g_ld32(g, net + kRole) == 0u;
+    return (flags & (kOpen | kRunning)) == (kOpen | kRunning) && (flags & kQuit) == 0u &&
+           g_ld32(g, net + kRole) == (s.watching ? 1u : 0u);
 }
 
 int local_player(Guest *g) {
-    if (!active(g)) return -1;
+    if (state().watching || !active(g)) return -1;
     return static_cast<int>(g_ld32(g, g_ld32(g, kSession) + kSessionNet + kLocal));
 }
 

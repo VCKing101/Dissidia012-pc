@@ -8,7 +8,8 @@ between Windows and Linux, and the details may change. How it works and how it w
 Both players need the same version of the port, the same mods that change the game (music mods may differ) and the
 same test settings. The game checks as the battle starts and says what differs. Saves and official DLC may differ.
 
-Only the Online Lobby's 1-on-1 battles are supported. Group Battle and Communications are untested.
+The Online Lobby's 1-on-1 battles, Group Battle's party battles and Communications (trading Friend Cards and quests)
+work online. In Group Battle, players who are not fighting watch the fight as the fighters play it.
 
 One player **hosts** a session and the other **joins** it, both on the port's Network page. Then both go online in
 the game as they would on a PSP. The host should be the player on a home connection: mobile data cannot host (see
@@ -98,9 +99,9 @@ Battle starts a rematch.
 
 ## During a battle
 
-**Input delay** (Network page, Online battles): the frames between pressing a button and the fighter acting. The
-host's setting counts. **Auto**, the default, sets it from the connection as the battle starts: 2 frames on a home
-network, 3 at a round trip of about 75 to 100 ms, more when it is longer. A fixed number smooths a poor connection
+**Input delay** (Network page, Online battles): the frames between pressing a button and the fighter acting. When
+the two players' settings differ, the higher counts. **Auto**, the default, sets it from the connection as the battle starts: 2 frames up to a
+round trip of about 100 ms, more when it is longer. A fixed number smooths a poor connection
 (higher) or responds sooner (lower).
 
 ![The Network page's Ad hoc play and Online battles sections, with Input delay set to Auto and its help text below](../images/online-input-delay.png)
@@ -113,6 +114,30 @@ After 30 seconds the game gives up by itself.
 
 **Each player keeps their own camera settings.** The right-stick camera's dead zone, sensitivity and inverted axes
 are sent across, so the other game turns your camera the way you set it.
+
+## Group Battle
+
+Everyone hosts or joins one session as above. Then one player chooses **Communications Mode**, **Group Battle**,
+**Create Room**, and the others **Search for a Room** and enter it. The room's creator starts the Group Battle; each
+player picks Party A, Party B, or **Watch match** (SELECT). The creator picks the format, each fighter sets a
+character on their slot, and both parties press **Enter Battle**. Anyone in the session can host the session, fighting
+or not.
+
+Players who are not fighting watch each fight a moment behind the fighters: under half a second on a good
+connection, up to a second and a half on a poor one. Their own controls do nothing in the fight. If the fight stops
+coming, a band says "Waiting for the fighters"; holding B (or Esc) stops watching, which ends the battle for that
+player. A player who falls behind jumps ahead to catch up.
+
+## Trade Friend Cards and quests
+
+Both players host or join a session as above. Then, in the game:
+
+1. Choose **Communications Mode**, then **Communications**, then **Send Friend Card** or **Send Original Quest**.
+2. Read the two notes about sleep mode (the PC does not sleep) and answer **YES** to "Begin player exchange?".
+3. Each game shows "Receiving data from 1 players" once the other is there too. Everyone in the session with
+   Communications open trades with everyone else, up to 16 players.
+4. Press circle to stop, and **NO** to "Continue data transfer?". The game lists the cards and quests that came;
+   new Friend Cards are in **Friend Cards**, marked NEW.
 
 ## If something goes wrong
 
@@ -161,6 +186,8 @@ allowed.
 
 ## Not tested yet
 
+- More than one player watching at once (a Steam Deck and two PC copies played Tournaments and a Round-Robin,
+  one watcher at a time).
+- Sending an Original Quest, and Import a Friend Card (Friend Cards were traded between Windows and a Steam Deck).
 - Two Windows PCs on separate machines (Windows against the Steam Deck, and two copies on one PC, were).
-- The Steam Deck hosting: let the PC host.
 - A router that only has UPnP (the one tested answered NAT-PMP first).

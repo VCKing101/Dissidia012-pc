@@ -32,6 +32,9 @@
 // MIT licence; see port/README.md.
 
 #include "d012_input.hpp"
+
+#include "d012_rollback.hpp"
+#include "snapshot.hpp"
 #include "d012_net.hpp"
 #include "d012_sync.hpp"
 
@@ -47,6 +50,7 @@
 #include "ui/save_list_dialog.hpp"
 #endif
 
+#include <any>
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
@@ -416,6 +420,33 @@ void answer_saves_from(const std::string &path) {
 
 const Frame &current() { return state().frame; }
 
+// What of State a save state keeps: not the files or the replay itself.
+struct Saved {
+    Frame frame;
+    std::uint64_t reads = 0;
+    Dialog dialog;
+    SaveAsk save;
+    std::uint64_t ram_hash = 0;
+};
+
+void add_to_snapshots() {
+    portablekit::snapshot::add(
+        "input record",
+        [] {
+            const State &s = state();
+            return std::any(Saved{s.frame, s.reads, s.dialog, s.save, s.ram_hash});
+        },
+        [](const std::any &any) {
+            const Saved &saved = std::any_cast<const Saved &>(any);
+            State &s = state();
+            s.frame = saved.frame;
+            s.reads = saved.reads;
+            s.dialog = saved.dialog;
+            s.save = saved.save;
+            s.ram_hash = saved.ram_hash;
+        });
+}
+
 void install(portablekit::HleRegistrar &hle) {
     static bool installed = false;
     if (installed) return;
@@ -472,6 +503,12 @@ void install(portablekit::HleRegistrar &hle) {
             f = net::exchange(f.read, mine);
         } else if (s.replaying && f.read < s.replay.size()) {
             f = s.replay[f.read];
+            // The rollback test's misprediction (d012_rollback.hpp).
+            if (rollback::wrong_input()) {
+                f.player2.lx = static_cast<std::uint8_t>(0xFFu - f.player2.lx);
+                f.player2.ly = static_cast<std::uint8_t>(0xFFu - f.player2.ly);
+                f.player2.buttons ^= 0x4000u;  // cross
+            }
         } else {
             f.player1 = live_player1(memory, buffer, count);
             f.player2 = live_player2();
