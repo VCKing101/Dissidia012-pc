@@ -9,6 +9,8 @@
 
 #include <cstdint>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace d012::net {
 
@@ -76,6 +78,8 @@ namespace battle {
 // compares both lists as the battle links and refuses a copy that differs.
 // Registered at start-up.
 void must_match(const std::string &what, const std::string &value);
+// Every item registered, in order: for a problem report.
+[[nodiscard]] std::vector<std::pair<std::string, std::string>> must_match_items();
 
 // A player's right-stick camera settings. Each copy sends its own as the
 // battle links, and both copies turn each fighter's camera with that player's.

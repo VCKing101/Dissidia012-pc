@@ -1069,6 +1069,8 @@ void must_match(const std::string &what, const std::string &value) {
     else items.emplace_back(what, value);
 }
 
+std::vector<std::pair<std::string, std::string>> must_match_items() { return matched(); }
+
 void set_camera(const Camera &mine) { my_camera() = mine; }
 
 Camera camera(int player) { return player == local_player ? my_camera() : battle_link().their_camera; }

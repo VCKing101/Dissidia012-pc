@@ -40,7 +40,8 @@ The pictures use example addresses; yours are your own.
 5. Close the menu (B, Esc, or L3 + R3 again). The session runs as long as the game does; **Stop hosting**, further
    down the same rows, ends it.
 
-**Hosting** shows how many players are online in the game, you included, and lists them. If the internet row says
+**Hosting** shows how many players are online in the game, you included, and lists them with the lobby each is in,
+named as the game names it (Lobby 1 Cornelia). If the internet row says
 the router did not open the ports, or that your provider shares the address, see
 [If something goes wrong](#if-something-goes-wrong).
 
@@ -114,6 +115,16 @@ After 30 seconds the game gives up by itself.
 are sent across, so the other game turns your camera the way you set it.
 
 ## If something goes wrong
+
+**You see each other on the Network page but not in the game.** Only one player selects Host a session; the other
+selects Join. Then both pick the same lobby. The host's list shows the lobby each player is in, and says so when
+everyone is in a different one. If it says a player is **not seen by the others**, their game reaches TCP 27312 but not
+27313, which carries everything in a lobby: open both, as below. That player's own game says the same at the top of
+the screen.
+
+**Sending a report.** On the Network page, under Troubleshooting, **Save network log** writes a file with what this
+game could reach, and on the host who reached which port and lobby. The page shows where it saved it. Send both
+players' files with the report.
 
 **"This battle cannot start: the other player's game differs in ..."** The two games are not the same: update both
 to the same release, and use the same mods that change the game. The notice names what differs; here, one player had
