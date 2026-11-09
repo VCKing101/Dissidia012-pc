@@ -980,7 +980,7 @@ clips after the change sound clean.
 fade in another game; a watcher on another machine, the Steam Deck or Linux (GCC 14 compiles both changed files).
 Section 19.6 has a watcher on the Steam Deck.
 
-### 19.6 The Steam Deck hosting, watching and leading (8 November 2026)
+### 19.6 The Steam Deck hosting, watching, leading and trading (8 and 9 November 2026)
 
 The build of this section on the Steam Deck (native Linux, GCC 14, Wi-Fi) and this PC (llvm-mingw clang) on the same
 home network; one player at the Deck, the PC's copies driven by test input. The Deck hosted the session in every run,
@@ -997,11 +997,23 @@ so its relay carried every battle. V unless marked.
 - **Create Room waited for ever after a failed try.** With ad hoc play on but no session hosted or joined, PortableKit
   read the PSP's wireless switch as on, so the game tried to join and PortableKit failed it with an error no PSP gives
   (0x80410B05). After the player then hosted, Create Room showed "Creating room..." for ever, with no way back. Patch
-  0095: the switch reads on only with ad hoc play on and a server, hosted or joined; before that the game says the
+  0097: the switch reads on only with ad hoc play on and a server, hosted or joined; before that the game says the
   switch is off (0x80410B03) and starts cleanly once the player hosts.
 
 Both were reproduced on this PC first (the Deck's own steps, three copies on loopback) and fixed there, then on the
 Deck.
+
+**A third, found the next day: circle could not end a search.** In Communications, whoever stopped second was stuck
+on "Receiving data from 1 players" with circle doing nothing. When the other player leaves, the game searches again
+(`DiscoverInitStart` once more), and while a search runs it does not read the pad: it calls `DiscoverUpdate` and
+`DiscoverGetStatus` each frame and never `DiscoverStop`. On a PSP the system shows "cancel with circle" and ends the
+search itself. PortableKit's search ended only when someone was found or its 20 s ran out, and then the game searched
+again, so nothing could end it. It never showed on one PC before: with the other player already there, the search
+ends at once and the exchange screen, where the game reads circle itself, comes up. Patch 0098: a new press of circle
+ends a running search with 3, as Stop does (`<prefix>_ADHOC_DISCOVER_NO_CIRCLE=1` turns it off), and a search ended
+with 3 leaves `DISCOVER` at `DiscoverTerm`. The game closes then without `AdhocctlDisconnect`, and without the leave
+the next player to search found someone no longer exchanging ("Player found! Exchanging data..."). Reproduced and
+fixed on this PC (two copies on loopback, the ad hoc trace on), then on the Deck.
 
 **Results.**
 
@@ -1012,6 +1024,14 @@ Deck.
 | Watching | PC copies fight, the Deck watches (Tournament) | 9 minutes, all three left on frame 16,380 (a forfeit); 26 checks agreed; no skip; buffer 12, 9, then 6 frames; 18 stops, 3.8 s, each a stall of the fighters' own (161 and 268 waits between them through the Deck's relay). The player: smooth, no clicks, a delay only seen sitting next to a fighter |
 | Leading with a watcher | The Deck fights PC copy 1, PC copy 2 watches | All three left on frame 4,895; 8 checks agreed on each; one 0.4 s wait on the Deck at frame 374, the watcher's one stop the same moment; buffer down to 6 |
 | Create Room after a failed try, after the second fix | The Deck | The switch-off error, then Host a session, then the room made and both PC copies entered it |
+| Rollback | The Deck fights PC copy 1 (`online.rollback=7` on both; PC copy 1 on `D012_NET_SIM=50,10,1`) | Input delay 1 at a 59 ms round trip; both left on frame 8,533, 14 checks agreed; full speed throughout. The Deck went back 108 times, PC copy 1 1,769; a save took 5 to 6 ms a frame on the Deck, a restore 4 to 5 ms. The player: looked fine |
+| Communications, before the third fix | The Deck (its own save) and PC copy 1 (`data-versus-user`) | Each found the other at once; each got the other's Friend Card (NEW, and 10 PP); the Deck still had the card after closing the game and starting it again. The one that stopped second was stuck until the other searched again |
+| Communications, after the third fix | The same | The PC stopped first; circle on the Deck then asked "Data received: 1. Continue data transfer?"; after NO, the PC's card was in the Deck's received list and its Friend Cards |
+| Circle on one PC, after the third fix | Two copies on loopback | The other gone first: "Data received: 1", the card kept, NEW. Searching alone: "No data has been received". A search after a cancelled one does not find the copy that cancelled |
 
-**Not verified.** Rollback on the Deck; Communications between machines; a party battle of more than one fight
-across machines; Round-Robin; more than one watcher at once; a path beyond one home network.
+Between the first five rows and the rest, both branches moved onto main `c022ee8` (9 November); the PortableKit patch
+for the switch became 0097, as main had taken 0095 and 0096.
+
+**Not verified.** Sending an Original Quest and Import a Friend Card between machines; a party battle of more than one
+fight across machines; Round-Robin; more than one watcher at once; a path beyond one home network; rollback on a real
+path's jitter (the PC copy's lag was simulated).

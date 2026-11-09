@@ -317,8 +317,11 @@ holding packets 50 ± 10 ms with 1% loss (`D012_NET_SIM`):
 - Copy 1 went back more: copy 2's route changes its stick more often. Every guess is "the same as last frame", so a
   moving stick is a wrong guess nearly every time it moves.
 
-**Not verified.** Two machines; a real path's jitter; the Steam Deck's time for a save and for frames run again
-(5.3); how a correction looks and sounds to a player (a sound the corrected frames start joins part-way, and a
+**The Steam Deck (8 November).** The Deck against a PC copy on simulated lag (Communication Mode 19.6): input delay 1
+at a 59 ms round trip, in step to the end at full speed; a save took 5 to 6 ms a frame on the Deck, a restore 4 to
+5 ms; the Deck went back 108 times, the PC copy 1,769. The player saw nothing wrong.
+
+**Not verified.** A real path's jitter; how a correction looks and sounds to a player (a sound the corrected frames start joins part-way, and a
 mispredicted one already played); a rollback longer than the window (the copy waits, as the lockstep does); Group
 Battle with rollback (a watched fight streams the certain frames, Communication Mode 19); Windows against Linux
 with rollback.
