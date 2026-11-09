@@ -124,13 +124,15 @@ std::string read_setting(const char *key) {
     return {};
 }
 
+// What the connection's thread reads is made once and never destroyed: the
+// thread runs until the process ends, after the game's statics are gone.
 const std::string &application_id() {
-    static const std::string id = [] {
+    static const std::string *const id = new std::string([] {
         if (const char *forced = env("D012_DISCORD_APP_ID"); forced != nullptr) return std::string(forced);
         if (std::string set = read_setting(kApplicationKey); !set.empty()) return set;
         return std::string(rules::kApplicationId);
-    }();
-    return id;
+    }());
+    return *id;
 }
 
 std::atomic<bool> &show_setting() {
@@ -168,20 +170,31 @@ bool showing() {
 
 enum class Status { Off, Waiting, Showing, Refused };
 
-std::mutex g_mutex;
-rules::Scene g_scene;
-Status g_status = Status::Off;
-std::string g_refusal;
+// Between the game's thread (the scene), the connection's thread (the status)
+// and the menu. Never destroyed, as application_id().
+struct Shared {
+    std::mutex mutex;
+    rules::Scene scene;
+    Status status = Status::Off;
+    std::string refusal;
+};
+
+Shared &shared() {
+    static Shared *const s = new Shared;
+    return *s;
+}
 
 void set_status(Status status, std::string refusal = {}) {
-    std::lock_guard lock(g_mutex);
-    g_status = status;
-    g_refusal = std::move(refusal);
+    Shared &s = shared();
+    std::lock_guard lock(s.mutex);
+    s.status = status;
+    s.refusal = std::move(refusal);
 }
 
 rules::Scene scene() {
-    std::lock_guard lock(g_mutex);
-    return g_scene;
+    Shared &s = shared();
+    std::lock_guard lock(s.mutex);
+    return s.scene;
 }
 
 // --- The connection --------------------------------------------------------
@@ -490,8 +503,9 @@ void sample(psprecomp::GuestMemory &memory) {
                       << s.fighters[1] << std::endl;
     }
     last = s;
-    std::lock_guard lock(g_mutex);
-    g_scene = s;
+    Shared &shared_state = shared();
+    std::lock_guard lock(shared_state.mutex);
+    shared_state.scene = s;
 }
 
 #if defined(PORTABLEKIT_HAS_RENDERER)
@@ -517,9 +531,10 @@ void system_rows() {
     Status status;
     std::string refusal;
     {
-        std::lock_guard lock(g_mutex);
-        status = g_status;
-        refusal = g_refusal;
+        Shared &s = shared();
+        std::lock_guard lock(s.mutex);
+        status = s.status;
+        refusal = s.refusal;
     }
     switch (status) {
     case Status::Off:
@@ -557,10 +572,9 @@ void install(portablekit::HleRegistrar &hle) {
         if (++reads % kSampleEvery == 0u) sample(rt.memory());
     });
     try {
-        std::thread([] {
-            static Link link;
-            link.run();
-        }).detach();
+        // Never destroyed (see application_id()): the process's end closes
+        // the connection, which clears the status.
+        std::thread([] { (new Link)->run(); }).detach();
     } catch (const std::exception &e) {
         std::cout << "[discord] the status could not start: " << e.what() << std::endl;
     }
