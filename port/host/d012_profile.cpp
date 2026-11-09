@@ -17,8 +17,40 @@
 #include "d012_hle.hpp"
 #include "d012_version.hpp"
 
+#include <algorithm>
+#include <iterator>
+#include <string>
+#include <string_view>
+
 namespace portablekit {
 namespace {
+
+// The game's ad hoc groups as the Network page names them
+// (docs/port/communication-mode.md, sections 1 to 3): the Online Lobby's
+// lobby n joins "LOBBY<n - 1>" and the list names it; Group Battle's rooms are
+// listed in "MLOBBY"; a 1-on-1 battle and a filled Group Battle room are the
+// host's 8 random digits; Communications exchanges data in "DISCOVER".
+constexpr const char *kLobbyNames[] = {
+    "Cornelia", "Fynn",    "Palamecia", "Sasune", "Baron",      "Tycoon",    "Bal",    "Figaro",
+    "Midgar",   "Balamb",  "Galbadia",  "Esthar", "Alexandria", "Lindblum",  "Besaid", "Zanarkand",
+};
+
+std::string adhoc_group_name(std::string_view group) {
+    const auto digits = [](std::string_view text) {
+        return !text.empty() && text.size() <= 8u &&
+               std::all_of(text.begin(), text.end(), [](char c) { return c >= '0' && c <= '9'; });
+    };
+    if (group.size() > 5u && group.substr(0, 5u) == "LOBBY" && digits(group.substr(5u))) {
+        const int number = std::stoi(std::string(group.substr(5u))) + 1;
+        std::string name = "Lobby " + std::to_string(number);
+        if (number <= static_cast<int>(std::size(kLobbyNames))) name += std::string(" ") + kLobbyNames[number - 1];
+        return name;
+    }
+    if (group == "MLOBBY") return "Group Battle rooms";
+    if (group.size() == 8u && digits(group)) return "A battle or party room";
+    if (group == "DISCOVER") return "Communications";
+    return {};
+}
 
 // The game names its saves "ms0:/PSP/SAVEDATA/%s%s": the disc id followed by
 // the slot. Slots 00 and 01 were seen in the emulator; whether the game uses
@@ -133,6 +165,7 @@ const GameProfile &game() {
         // Both releases announce the North American code, so a European copy
         // and a North American one can find each other.
         .adhoc_product_code = "ULUS10566",
+        .adhoc_group_name = adhoc_group_name,
 
         // L2 and R2, which a PSP lacks, switch the loading screen's D-pad
         // between its menu and the battle music (d012_bgm_playlist.cpp); R3

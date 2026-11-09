@@ -1,0 +1,1261 @@
+From 76cd68aebc6ebd3e108a0ad846580837dcd8ccec Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Mon, 9 Nov 2026 16:00:36 +1030
+Subject: [PATCH] Ad hoc: say who the others cannot see, and why
+
+Two players saw each other in the host's list on the Network page, which
+only needs the matchmaking port, and never in the game's lobby, where
+everything goes through the relay port and only to players in the same
+group. Nothing said which of those failed.
+
+- The server counts each player's relay connections and datagrams (sent,
+  received, sent to nobody) and logs a player who has been in a group for
+  10 s with no relay connection (kRelayMissingMs).
+- The client keeps why each connection failed ("refused", "no answer"...)
+  and counts relay connections that never came up while the server
+  answers; adhoc::relay_unreachable() is true once that has lasted 10 s in
+  a group. The game then says over the screen that the others cannot see
+  this player and which port the host opens (<prefix>_NO_ADHOC_NOTICE=1
+  never does), and Status says the same with the relay's address, its
+  links and the failures.
+- The host's list names each player's room as the game does
+  (GameProfile::adhoc_group_name; the profile guide says how), marks a
+  player in a room with no relay connection "not seen by the others" with
+  a sentence on the two ports, and says when everyone is alone in a
+  different room.
+- Save network log starts with the build and the game, a port's own lines
+  (ui::add_network_log_lines), the settings, the hosted server's players
+  (room, relay connections, datagrams), the router and discovery, and adds
+  the relay's state to the client's.
+- <prefix>_ADHOC_LOOPBACK=1 hosts on 127.0.0.1 alone, asks no router and
+  turns local network discovery off (the Network page says so): copies on
+  one computer then open nothing a firewall asks about.
+- adhoc_tests --loopback (ctest portablekit_net_loopback_tests) runs the
+  new checks, which listen on loopback alone: per-player counts with two
+  rooms and a player with no relay connection, and a stand-in server whose
+  relay port refuses, through to the saved log.
+
+Tested on Windows: the loopback ad hoc tests and the framework tests
+without the all-interface ad hoc suite (23 of 23, MSVC). With Dissidia 012
+(clang release build), two copies on one PC with <prefix>_ADHOC_LOOPBACK:
+players in different lobbies get the host's warning; a joiner that reaches
+the server through a proxy passing only its first port sits in the same
+lobby with no card on either side (the reported fault), and gets the
+notice and the Status warning while the host's list marks it not seen;
+both saved logs show it. Not run: the all-interface ad hoc suite (it
+raises a firewall prompt), two machines, Linux.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ CMakeLists.txt         |   3 +
+ docs/PROFILE_GUIDE.md  |   2 +
+ host/adhoc/client.cpp  | 119 +++++++++++++++++++----
+ host/adhoc/client.hpp  |  19 +++-
+ host/adhoc/host.cpp    |  26 +++--
+ host/adhoc/server.cpp  |  56 ++++++++++-
+ host/adhoc/server.hpp  |  16 ++++
+ host/adhoc/session.hpp |   6 ++
+ host/profile.hpp       |   4 +
+ host/ui/menu.cpp       | 212 +++++++++++++++++++++++++++++++++++++----
+ host/ui/ui.hpp         |   6 ++
+ tests/adhoc_tests.cpp  | 190 ++++++++++++++++++++++++++++++++++++
+ 12 files changed, 608 insertions(+), 51 deletions(-)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 2c298f1..c8c55c6 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -243,6 +243,9 @@ if(PSPRECOMP_BUILD_TESTS)
+     endif()
+     set_target_properties(portablekit_adhoc_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+     add_test(NAME portablekit_adhoc_tests COMMAND portablekit_adhoc_tests)
++    # The tests that listen on loopback alone, which no firewall asks about, on
++    # their own: a framework check that skips the others can still run these.
++    add_test(NAME portablekit_net_loopback_tests COMMAND portablekit_adhoc_tests --loopback)
+ endif()
+ 
+ # Fixed-size memory pools (sceKernel*Fpl): their bookkeeping, with no kernel.
+diff --git a/docs/PROFILE_GUIDE.md b/docs/PROFILE_GUIDE.md
+index 19d29dd..5e77479 100644
+--- a/docs/PROFILE_GUIDE.md
++++ b/docs/PROFILE_GUIDE.md
+@@ -71,6 +71,8 @@ For a picture of the port's own beside one of the game's screens, such as a hint
+ 
+ `tilt` is for a game played by tilting its world, as LocoRoco is with L and R: the buttons that tilt left and right, whether the game eases its tilt towards the held side (then a small roll of the device presses the button for part of the frames and tilts the world part of the way), and a sentence for the menu. With it, Controls gets a Tilt controls section, off by default, and the motion sensors of a gamepad (DualShock 4, DualSense, Switch Pro, a Steam Deck seen through SDL's own driver) or of the phone itself press those buttons (`host/input/tilt.hpp` for the arithmetic, `host/input/motion.hpp` for the sensors). Find the buttons and the easing with the game's pad trace before filling it in. Without it, nothing opens a sensor and the menu has no such section.
+ 
++`adhoc_group_name` names the game's ad hoc groups on the Network page the way the game's own screens name them, so a host comparing rooms sees "Lobby 1" where the game joined `LOBBY0`. It gets a group's name and returns the player's, or an empty string for a group it does not know. Find the names with `<prefix>_TRACE_ADHOC`, which logs every group joined. Without it the page shows the groups' own names, and the network log always gives both.
++
+ `player_name_label` and `default_player_name` are what the interface calls the name a game asks for and what it answers before the player sets one: "Player name" and "Player" unless a profile says otherwise. Yakumo says "Hunter name" and "Hunter".
+ 
+ `glyph_cache` is for changing the font while a game runs. A game that caches the glyphs it has drawn keeps them until its atlas needs the cell, so a new font shows only in text it has not drawn yet. Where the game keeps that atlas, read off its own text code, lets the framework make it draw them again. Null for any game nobody has traced.
+diff --git a/host/adhoc/client.cpp b/host/adhoc/client.cpp
+index 7a13ef5..bb01842 100644
+--- a/host/adhoc/client.cpp
++++ b/host/adhoc/client.cpp
+@@ -195,11 +195,37 @@ struct Backoff {
+     void reset() { current = milliseconds(0); }
+ };
+ 
++// Why a connection could not be made, in a few words.
++std::string connect_error_text(int error) {
++#if defined(_WIN32)
++    switch (error) {
++    case WSAECONNREFUSED: return "refused";
++    case WSAETIMEDOUT: return "no answer";
++    case WSAEHOSTUNREACH: return "no route to it";
++    case WSAENETUNREACH: return "no route to its network";
++    case WSAECONNRESET: return "reset";
++    default: break;
++    }
++#else
++    switch (error) {
++    case ECONNREFUSED: return "refused";
++    case ETIMEDOUT: return "no answer";
++    case EHOSTUNREACH: return "no route to it";
++    case ENETUNREACH: return "no route to its network";
++    case ECONNRESET: return "reset";
++    default: break;
++    }
++#endif
++    return "error " + std::to_string(error);
++}
++
+ // One TCP connection to the server.
+ struct Link {
+     Socket socket{kNoSocket};
+     bool open{};         // the TCP connection is up
++    bool opened{};       // it came up since start(), even if it is gone again
+     bool failed{};       // closed by the server, refused, or broken
++    std::string failure; // why, once failed
+     std::string input;
+     std::string output;
+     Clock::time_point started{};
+@@ -211,22 +237,22 @@ struct Link {
+     bool start(const Address &address) {
+         close();
+         failed = false;
++        opened = false;
++        failure.clear();
+         socket = ::socket(address.storage.ss_family, SOCK_STREAM, IPPROTO_TCP);
+         if (socket == kNoSocket || !set_nonblocking(socket)) {
+-            close();
+-            failed = true;
++            fail("cannot make a socket");
+             return false;
+         }
+         tune_socket(socket);
+         started = Clock::now();
+         last_write = started;
+         if (::connect(socket, reinterpret_cast<const sockaddr *>(&address.storage), address.length) == 0) {
+-            open = true;
++            open = opened = true;
+             return true;
+         }
+-        if (!connect_pending(socket_error())) {
+-            close();
+-            failed = true;
++        if (const int error = socket_error(); !connect_pending(error)) {
++            fail(connect_error_text(error));
+             return false;
+         }
+         return true;
+@@ -241,9 +267,10 @@ struct Link {
+         pause_reading = false;
+     }
+ 
+-    void fail() {
++    void fail(std::string why) {
+         close();
+         failed = true;
++        failure = std::move(why);
+     }
+ 
+     // After poll(): completes a pending connect, reads and writes.
+@@ -256,13 +283,13 @@ struct Link {
+                 socklen_t length = sizeof(error);
+                 getsockopt(socket, SOL_SOCKET, SO_ERROR, reinterpret_cast<char *>(&error), &length);
+                 if (error != 0) {
+-                    fail();
++                    fail(connect_error_text(error));
+                     return;
+                 }
+-                open = true;
++                open = opened = true;
+                 last_write = now;
+             } else {
+-                if (now - started > kConnectTimeout) fail();
++                if (now - started > kConnectTimeout) fail("no answer");
+                 return;
+             }
+         }
+@@ -278,7 +305,7 @@ struct Link {
+                 if (count == 0 || !would_block(socket_error())) {
+                     // Keep what arrived before the close for the owner to parse.
+                     std::string remaining = std::move(input);
+-                    fail();
++                    fail(count == 0 ? "closed by the server" : "broken");
+                     input = std::move(remaining);
+                     return;
+                 }
+@@ -299,11 +326,11 @@ struct Link {
+                 continue;
+             }
+             if (count < 0 && would_block(socket_error())) break;
+-            fail();
++            fail("broken");
+             return;
+         }
+         if (output.empty()) last_write = now;
+-        else if (now - last_write > kStallTimeout) fail();
++        else if (now - last_write > kStallTimeout) fail("stalled");
+     }
+ };
+ 
+@@ -409,6 +436,13 @@ struct Client::Impl {
+     std::uint64_t dropped{};
+     std::uint64_t timeouts{};
+     std::map<Mac, Clock::time_point> heard;
++    // The relay's health: connections to it that never came up since it last
++    // answered, why the last one failed, and since when every relay link the
++    // game's sockets want in the group has been down.
++    std::uint32_t relay_failures{};
++    std::string relay_error;
++    std::optional<Clock::time_point> relay_down_since;
++    bool relay_failure_reported{};
+     mutable std::mutex snapshot_mutex;
+     Diagnostics snapshot;
+     Clock::time_point snapshot_at{};
+@@ -486,11 +520,11 @@ struct Client::Impl {
+         }
+     }
+ 
+-    void on_ctl_lost(const char *why) {
++    void on_ctl_lost(const std::string &why) {
+         last_error = why;
+         online_since.reset();
+         if (logged_in) ++reconnects;
+-        if (logged_in || ctl.active()) report(std::string("lost the server connection: ") + why);
++        if (logged_in || ctl.active()) report("lost the server connection: " + why);
+         ctl.close();
+         logged_in = false;
+         scan_sent = false;
+@@ -664,10 +698,11 @@ struct Client::Impl {
+             if (!ctl.input.empty()) handle_ctl_input();
+             ++failed_attempts;
+             address_index = addresses.empty() ? 0u : (address_index + 1u) % addresses.size();
+-            on_ctl_lost(logged_in ? "closed" : "could not connect");
++            const std::string why = ctl.failure.empty() ? std::string("?") : ctl.failure;
++            on_ctl_lost(logged_in ? why : "could not connect (" + why + ")");
+             if (failed_attempts == 1u || failed_attempts % 10u == 0u)
+                 report("cannot reach the ad hoc server " + identity.server + " (attempt " +
+-                       std::to_string(failed_attempts) + ")");
++                       std::to_string(failed_attempts) + ": " + why + ")");
+             return;
+         }
+         if (!ctl.active()) {
+@@ -697,6 +732,25 @@ struct Client::Impl {
+ 
+     Address relay_address() const { return server->with_port(relay_port); }
+ 
++    // Relay connections that failed without ever coming up, each once: this
++    // runs before the maintain_ functions clear `failed`. Relay links are only
++    // made while logged in, so the server's own port answers and the relay's
++    // does not.
++    void note_relay_failures() {
++        const auto note = [&](const Link &link) {
++            if (!link.failed || link.opened) return;
++            ++relay_failures;
++            relay_error = link.failure;
++            if (relay_failure_reported) return;
++            relay_failure_reported = true;
++            report("cannot connect to the relay at " + (server ? relay_address().describe() : std::string("?")) +
++                   " (" + link.failure + "), though the server answers: the others in the group cannot see or hear "
++                   "this player");
++        };
++        for (const auto &[handle, socket] : datagrams) note(socket.link);
++        for (const auto &[handle, socket] : streams) note(socket.link);
++    }
++
+     void start_relay(Link &link, const std::string &init, const std::string &what) {
+         if (!link.start(relay_address())) return;
+         link.output = init;
+@@ -748,7 +802,7 @@ struct Client::Impl {
+                     report("the relay sent an oversized datagram; reconnecting the socket");
+                     socket.partial.reset();
+                     in.clear();
+-                    socket.link.fail();
++                    socket.link.fail("oversized datagram");
+                     return;
+                 }
+             }
+@@ -893,7 +947,7 @@ struct Client::Impl {
+             if (size > relay::kPtpBlockMax * 2u) {
+                 report("the relay sent an oversized stream block; closing the stream");
+                 in.clear();
+-                socket.link.fail();
++                socket.link.fail("oversized stream block");
+                 return;
+             }
+             if (in.size() - offset - relay::kPtpHeaderSize < size) break;
+@@ -1002,6 +1056,20 @@ struct Client::Impl {
+                 if (socket.link.open) ++d.relay_links_up;
+             }
+         }
++        if (joined && d.relay_links_wanted != 0u && d.relay_links_up == 0u) {
++            if (!relay_down_since) relay_down_since = now;
++        } else {
++            relay_down_since.reset();
++        }
++        if (d.relay_links_up != 0u) {
++            if (relay_failure_reported) report("the relay answers now");
++            relay_failure_reported = false;
++            relay_failures = 0u;
++        }
++        if (server) d.relay_address = relay_address().describe();
++        d.relay_failures = relay_failures;
++        d.relay_error = relay_error;
++        if (relay_down_since) d.relay_down_ms = ms(*relay_down_since);
+         d.total = traffic;
+         const double seconds = std::chrono::duration<double>(now - snapshot_at).count();
+         if (seconds > 0.0 && snapshot_at != Clock::time_point{}) {
+@@ -1037,6 +1105,7 @@ struct Client::Impl {
+                     resolve_generation = generation;
+                 }
+                 maintain_ctl(now);
++                note_relay_failures();
+                 maintain_datagrams(now);
+                 maintain_streams(now);
+                 entries.clear();
+@@ -1162,7 +1231,7 @@ void Client::note_timeout() {
+     ++impl_->timeouts;
+ }
+ 
+-std::filesystem::path Client::save_log(const std::filesystem::path &dir) const {
++std::filesystem::path Client::save_log(const std::filesystem::path &dir, const std::vector<std::string> &about) const {
+     const Diagnostics d = diagnostics();
+     std::vector<std::string> lines;
+     {
+@@ -1195,6 +1264,8 @@ std::filesystem::path Client::save_log(const std::filesystem::path &dir) const {
+         return "?";
+     };
+     out << portablekit::game().project_name << " ad hoc log\n\n";
++    for (const std::string &line : about) out << line << "\n";
++    if (!about.empty()) out << "\n";
+     out << "server: " << (d.server.empty() ? "(none)" : d.server) << " -> "
+         << (d.server_address.empty() ? "-" : d.server_address) << "\n";
+     out << "state: " << state(d.state) << ", failed attempts " << d.failed_attempts << ", reconnects " << d.reconnects
+@@ -1202,6 +1273,14 @@ std::filesystem::path Client::save_log(const std::filesystem::path &dir) const {
+     out << "me: " << format_mac(d.mac) << " \"" << d.nickname << "\" " << d.product << "\n";
+     if (d.rtt_ms) out << "round trip: " << *d.rtt_ms << " ms\n";
+     out << "group: " << d.group.value_or(d.joining ? *d.joining + " (joining)" : "-") << "\n";
++    out << "relay: " << (d.relay_address.empty() ? "-" : d.relay_address) << ", links " << d.relay_links_up << " of "
++        << d.relay_links_wanted << " up";
++    if (d.relay_down_ms) out << ", all down for " << *d.relay_down_ms << " ms";
++    if (d.relay_failures != 0u)
++        out << ", " << d.relay_failures << " connections failed since it last answered (last: " << d.relay_error
++            << ")";
++    if (relay_unreachable(d)) out << "; UNREACHABLE: the others in the group cannot see or hear this player";
++    out << "\n";
+     for (const PeerSummary &peer : d.peers)
+         out << "peer: " << format_mac(peer.mac) << " \"" << peer.nickname << "\" in group " << peer.in_group_ms
+             << " ms, heard " << (peer.last_heard_ms ? std::to_string(*peer.last_heard_ms) + " ms ago" : "never")
+diff --git a/host/adhoc/client.hpp b/host/adhoc/client.hpp
+index 30c79ae..0f6ee67 100644
+--- a/host/adhoc/client.hpp
++++ b/host/adhoc/client.hpp
+@@ -128,12 +128,25 @@ struct Diagnostics {
+     std::vector<SocketSummary> sockets;
+     std::size_t relay_links_up{};
+     std::size_t relay_links_wanted{};
++    std::string relay_address;               // the relay's host and port, once the server is found
++    std::uint32_t relay_failures{};          // relay connections that never came up, since it last answered
++    std::string relay_error;                 // why the last of them failed: "refused", "no answer"...
++    std::optional<std::uint64_t> relay_down_ms;  // in a group, with relay links wanted and none up, this long
+     Traffic total;
+     Traffic per_second;
+     std::uint64_t dropped{};   // datagrams dropped: no link, full buffers, oversized
+     std::uint64_t timeouts{};  // blocking ad hoc calls that ended in a PSP timeout
+ };
+ 
++// The relay out of reach while the server answers: the game is in a group and
++// has sockets, but none of their relay connections has come up for this long
++// and some were refused or went unanswered. The others in the group then
++// neither see nor hear this player, so the interface says so.
++inline constexpr std::uint64_t kRelayUnreachableMs = 10000u;
++[[nodiscard]] inline bool relay_unreachable(const Diagnostics &d) {
++    return d.relay_down_ms && *d.relay_down_ms >= kRelayUnreachableMs && d.relay_failures != 0u;
++}
++
+ class Client {
+ public:
+     static Client &get();
+@@ -209,8 +222,10 @@ public:
+     // tracing is on.
+     static void log(const std::string &line, bool print);
+     // Writes the log buffer and a snapshot of diagnostics() into `directory`
+-    // as adhoc-<date>-<time>.log. Returns the file's path; empty on failure.
+-    [[nodiscard]] std::filesystem::path save_log(const std::filesystem::path &directory) const;
++    // as adhoc-<date>-<time>.log, after the caller's `about` lines (versions,
++    // a hosted server's players...). Returns the file's path; empty on failure.
++    [[nodiscard]] std::filesystem::path save_log(const std::filesystem::path &directory,
++                                                 const std::vector<std::string> &about = {}) const;
+ 
+ private:
+     Client();
+diff --git a/host/adhoc/host.cpp b/host/adhoc/host.cpp
+index af56c66..561bc9a 100644
+--- a/host/adhoc/host.cpp
++++ b/host/adhoc/host.cpp
+@@ -51,6 +51,7 @@ void remember(const std::string &address) {
+ void open_router_ports(std::uint16_t adhocctl_port, const std::vector<adhoc::ForwardedPort> &also) {
+     const char *off = std::getenv(portablekit::env_name("NO_ROUTER_PORTS").c_str());
+     if (!settings::current().adhoc_router_ports || (off != nullptr && *off != '\0' && *off != '0')) return;
++    if (adhoc_loopback_only()) return;
+     std::vector<adhoc::ForwardedPort> ports = {{false, adhocctl_port}, {false, adhoc::relay_port_for(adhocctl_port)}};
+     for (const adhoc::ForwardedPort &port : also)
+         if (std::find(ports.begin(), ports.end(), port) == ports.end()) ports.push_back(port);
+@@ -67,6 +68,14 @@ void adhoc_host_forward_also(adhoc::ForwardedPort port) {
+ 
+ adhoc::RouterStatus adhoc_router_status() { return adhoc::PortMapper::get().status(); }
+ 
++bool adhoc_loopback_only() {
++    static const bool on = [] {
++        const char *text = portablekit::env("ADHOC_LOOPBACK");
++        return text != nullptr && *text != '\0' && std::string(text) != "0";
++    }();
++    return on;
++}
++
+ std::string adhoc_server_address() {
+     if (adhoc_hosting()) {
+         const std::uint16_t port = host().port;
+@@ -84,6 +93,7 @@ bool adhoc_host_start() {
+         if (state.server.running()) return true;
+         adhoc::ServerConfig config;
+         config.adhocctl_port = static_cast<std::uint16_t>(settings::current().adhoc_host_port);
++        config.loopback_only = adhoc_loopback_only();
+         if (!state.server.start(config)) {
+             state.error = state.server.status().error;
+             return false;
+@@ -93,13 +103,15 @@ bool adhoc_host_start() {
+         port = state.port;
+         also = state.also;
+         adhoc::Server *server = &state.server;
+-        adhoc::Discovery::get().start_announcing(config.adhocctl_port, [server] {
+-            adhoc::Announcement info;
+-            info.name = adhoc_player_name();
+-            info.product = portablekit::game().adhoc_product_code;
+-            info.players = static_cast<unsigned>(server->status().players.size());
+-            return info;
+-        });
++        if (!config.loopback_only) {
++            adhoc::Discovery::get().start_announcing(config.adhocctl_port, [server] {
++                adhoc::Announcement info;
++                info.name = adhoc_player_name();
++                info.product = portablekit::game().adhoc_product_code;
++                info.players = static_cast<unsigned>(server->status().players.size());
++                return info;
++            });
++        }
+     }
+     settings::Settings &s = settings::current();
+     if (!s.adhoc && settings::overridden_by("network.adhoc").empty()) {
+diff --git a/host/adhoc/server.cpp b/host/adhoc/server.cpp
+index 157b622..2b67c76 100644
+--- a/host/adhoc/server.cpp
++++ b/host/adhoc/server.cpp
+@@ -161,6 +161,15 @@ struct Player {
+     std::optional<std::string> group;
+     std::uint32_t id{};
+     Clock::time_point login_time{};
++    Clock::time_point group_since{};
++    bool relay_missing_logged{};  // in this group
++};
++
++// One player's datagrams through the relay, by MAC.
++struct DatagramCounts {
++    std::uint64_t sent{};
++    std::uint64_t received{};
++    std::uint64_t unheard{};
+ };
+ 
+ enum class RelayKind { Pending, Datagram, Listen, Connect, Accept };
+@@ -202,6 +211,7 @@ struct Server::Impl {
+     std::uint64_t relayed_packets{};
+     std::uint64_t relayed_bytes{};
+     std::uint64_t dropped{};
++    std::map<Mac, DatagramCounts> datagram_counts;
+     Clock::time_point published{};
+ 
+     // adhocctl ---------------------------------------------------------------
+@@ -267,6 +277,8 @@ struct Server::Impl {
+             send(player, ctl::peer_joined(member->nickname, member->mac, member->id));
+         }
+         player.group = group;
++        player.group_since = Clock::now();
++        player.relay_missing_logged = false;
+         send(player, ctl::joined(host));
+         log_event(player.nickname + " joined group " + group, config.print_events);
+     }
+@@ -297,6 +309,7 @@ struct Server::Impl {
+         player.product = product;
+         player.id = make_player_id(player.link.peer);
+         player.login_time = Clock::now();
++        datagram_counts[mac] = DatagramCounts{};
+         log_event(player.nickname + " (" + format_mac(mac) + ", " + product + ") logged in from " +
+                       player.link.peer.host(),
+                   config.print_events);
+@@ -357,6 +370,14 @@ struct Server::Impl {
+         return nullptr;
+     }
+ 
++    // A player's relay connections that named their socket.
++    std::size_t relay_connections(const Mac &mac) const {
++        return static_cast<std::size_t>(std::count_if(sessions.begin(), sessions.end(), [&](const auto &entry) {
++            const RelaySession &session = entry.second;
++            return !session.link.dead && session.kind != RelayKind::Pending && session.mac == mac;
++        }));
++    }
++
+     bool same_group(const Mac &a, const Mac &b) {
+         const Player *first = nullptr;
+         const Player *second = nullptr;
+@@ -378,6 +399,7 @@ struct Server::Impl {
+         to.link.out.append(data, size);
+         ++relayed_packets;
+         relayed_bytes += size;
++        ++datagram_counts[to.mac].received;
+     }
+ 
+     void handle_datagrams(int key, RelaySession &session) {
+@@ -396,15 +418,22 @@ struct Server::Impl {
+             if (in.size() - offset - relay::kPdpHeaderSize < size) break;
+             const char *data = in.data() + offset + relay::kPdpHeaderSize;
+             offset += relay::kPdpHeaderSize + size;
++            DatagramCounts &counts = datagram_counts[session.mac];
++            ++counts.sent;
+             if (destination == kBroadcastMac) {
++                std::size_t receivers = 0;
+                 for (auto &[other_key, other] : sessions)
+                     if (other_key != key && !other.link.dead && other.kind == RelayKind::Datagram &&
+-                        other.port == port && other.mac != session.mac && same_group(session.mac, other.mac))
++                        other.port == port && other.mac != session.mac && same_group(session.mac, other.mac)) {
++                        ++receivers;
+                         deliver_datagram(session, other, data, size);
++                    }
++                if (receivers == 0u) ++counts.unheard;
+             } else if (RelaySession *target = find_session(RelayKind::Datagram, destination, port, key)) {
+                 deliver_datagram(session, *target, data, size);
+             } else {
+                 ++dropped;
++                ++counts.unheard;
+             }
+         }
+         in.erase(0, offset);
+@@ -561,6 +590,15 @@ struct Server::Impl {
+             } else if (player.logged_in && now - player.link.last_seen > kIdleTimeout) {
+                 log_event(player.nickname + " timed out", config.print_events);
+                 drop_player(player);
++            } else if (player.logged_in && player.group && !player.relay_missing_logged &&
++                       now - player.group_since > milliseconds(kRelayMissingMs) &&
++                       relay_connections(player.mac) == 0u) {
++                player.relay_missing_logged = true;
++                log_event(player.nickname + " has been in group " + *player.group + " for " +
++                              std::to_string(kRelayMissingMs / 1000u) +
++                              " s with no relay connection: TCP " + std::to_string(relay_port_for(config.adhocctl_port)) +
++                              " may not reach this server from " + player.link.peer.host(),
++                          config.print_events);
+             }
+         }
+         for (auto &[key, session] : sessions) {
+@@ -631,8 +669,24 @@ struct Server::Impl {
+             entry.group = player.group;
+             entry.online_ms =
+                 static_cast<std::uint64_t>(std::chrono::duration_cast<milliseconds>(now - player.login_time).count());
++            if (player.group)
++                entry.in_group_ms = static_cast<std::uint64_t>(
++                    std::chrono::duration_cast<milliseconds>(now - player.group_since).count());
++            entry.relay_connections = relay_connections(player.mac);
++            if (const auto counts = datagram_counts.find(player.mac); counts != datagram_counts.end()) {
++                entry.datagrams_sent = counts->second.sent;
++                entry.datagrams_received = counts->second.received;
++                entry.datagrams_unheard = counts->second.unheard;
++            }
+             status.players.push_back(std::move(entry));
+         }
++        // Counts of players gone (and of relay sockets that outlived theirs).
++        for (auto it = datagram_counts.begin(); it != datagram_counts.end();) {
++            const bool online = std::any_of(players.begin(), players.end(), [&](const auto &entry) {
++                return entry.second.logged_in && !entry.second.link.dead && entry.second.mac == it->first;
++            });
++            it = online ? std::next(it) : datagram_counts.erase(it);
++        }
+         status.groups = group_hosts.size();
+         status.relay_sessions = sessions.size();
+         for (const auto &[key, session] : sessions)
+diff --git a/host/adhoc/server.hpp b/host/adhoc/server.hpp
+index 50a1516..d2eca71 100644
+--- a/host/adhoc/server.hpp
++++ b/host/adhoc/server.hpp
+@@ -25,6 +25,10 @@
+ // both sides are told and their data is passed through; when either closes,
+ // the other is closed after what it was sent has been delivered.
+ //
++// The status counts each player's relay connections and datagrams, so a host
++// can see who reaches the matchmaking port but not the relay's, and whose
++// datagrams nobody receives.
++//
+ // Threading. start() binds the listening sockets on the calling thread, which
+ // takes no time, and everything else runs on one network thread of the
+ // server's own. stop() closes every connection and joins that thread.
+@@ -49,6 +53,10 @@ struct ServerConfig {
+     bool print_events{};
+ };
+ 
++// A player in a group this long with no relay connection is reported: to the
++// network log once, and on the host's screen while it lasts.
++inline constexpr std::uint64_t kRelayMissingMs = 10000u;
++
+ struct ServerPlayer {
+     std::string nickname;
+     Mac mac{};
+@@ -56,6 +64,14 @@ struct ServerPlayer {
+     std::string product;
+     std::optional<std::string> group;
+     std::uint64_t online_ms{};
++    std::optional<std::uint64_t> in_group_ms;  // since it joined `group`
++    // Its relay connections open now: one per ad hoc socket of its game. A
++    // player in a group with none for long cannot reach the relay port, so
++    // the others in the group neither see nor hear it.
++    std::size_t relay_connections{};
++    std::uint64_t datagrams_sent{};      // through the relay, since it logged in
++    std::uint64_t datagrams_received{};  // passed on to it by the relay
++    std::uint64_t datagrams_unheard{};   // it sent, and nobody had a socket to take them
+ };
+ 
+ struct ServerStatus {
+diff --git a/host/adhoc/session.hpp b/host/adhoc/session.hpp
+index 28edb49..f3a976c 100644
+--- a/host/adhoc/session.hpp
++++ b/host/adhoc/session.hpp
+@@ -28,6 +28,12 @@ void adhoc_apply_settings(bool switch_now = false);
+ 
+ // Hosting (adhoc/host.cpp) ------------------------------------------------------
+ 
++// <prefix>_ADHOC_LOOPBACK: hosting listens on 127.0.0.1 alone, asks no router
++// and announces nothing, and the Network page listens for no session on the
++// local network. For copies of a game on one computer, which then open
++// nothing a firewall asks about.
++[[nodiscard]] bool adhoc_loopback_only();
++
+ // Starts the built-in server on the host port from the settings (27312 and
+ // the relay on 27313), announces it on the local network, turns ad hoc play
+ // on and points this instance's game at it. With the Open router ports
+diff --git a/host/profile.hpp b/host/profile.hpp
+index 6ee4bef..df26a0d 100644
+--- a/host/profile.hpp
++++ b/host/profile.hpp
+@@ -259,6 +259,10 @@ struct GameProfile {
+     // agree on it, so it is the original release's code even when the port's
+     // disc id is a different one.
+     const char *adhoc_product_code;
++    // How the interface names one of the game's ad hoc groups for a player,
++    // as the game's own screens do: a lobby group named "LOBBY0" is "Lobby 1"
++    // there. Empty, or null: the group's own name.
++    std::string (*adhoc_group_name)(std::string_view group) = nullptr;
+ 
+     // --- Controls ----------------------------------------------------------
+     // What the triggers may press instead of L and R, for the way this game is
+diff --git a/host/ui/menu.cpp b/host/ui/menu.cpp
+index 2971aca..5119b3f 100644
+--- a/host/ui/menu.cpp
++++ b/host/ui/menu.cpp
+@@ -104,6 +104,13 @@ std::vector<void (*)()> &port_network_rows() {
+     return list;
+ }
+ 
++// Lines of the port's own at the head of a saved network log
++// (add_network_log_lines).
++std::vector<void (*)(std::vector<std::string> &)> &port_network_log_lines() {
++    static std::vector<void (*)(std::vector<std::string> &)> list;
++    return list;
++}
++
+ // And on the System page (add_system_rows).
+ std::vector<void (*)()> &port_system_rows() {
+     static std::vector<void (*)()> list;
+@@ -1078,6 +1085,28 @@ std::string format_bytes(std::uint64_t bytes) {
+     return text;
+ }
+ 
++// A group as the game's own screens name it (GameProfile::adhoc_group_name);
++// "MHP3Q000" is Hall 01 in its game's list.
++std::string group_name(const std::string &group) {
++    if (const auto name = portablekit::game().adhoc_group_name; name != nullptr)
++        if (std::string text = name(group); !text.empty()) return text;
++    if (group.size() == 8u && group.compare(0, 5, "MHP3Q") == 0 &&
++        std::all_of(group.begin() + 5, group.end(), [](char c) { return c >= '0' && c <= '9'; })) {
++        char text[16];
++        std::snprintf(text, sizeof(text), "Hall %02d", std::atoi(group.c_str() + 5) + 1);
++        return text;
++    }
++    return group;
++}
++
++// The game's name for a group, with the group's own after it when they differ:
++// "Lobby 1 (LOBBY0)", for a player comparing it with the game's screen and
++// for whoever reads a log.
++std::string group_name_and_id(const std::string &group) {
++    const std::string name = group_name(group);
++    return name == group ? group : name + " (" + group + ")";
++}
++
+ // One line of what the client is doing, for the menu and the overlay.
+ std::string connection_text(const adhoc::Diagnostics &d) {
+     switch (d.state) {
+@@ -1101,11 +1130,11 @@ std::string connection_text(const adhoc::Diagnostics &d) {
+ 
+ std::string group_text(const adhoc::Diagnostics &d) {
+     if (d.group) {
+-        std::string text = *d.group + ", " + std::to_string(d.peers.size() + 1u) + " players";
++        std::string text = group_name_and_id(*d.group) + ", " + std::to_string(d.peers.size() + 1u) + " players";
+         if (d.rejoin_ms) text += ", rejoining for " + format_duration(*d.rejoin_ms);
+         return text;
+     }
+-    if (d.joining) return "Joining " + *d.joining + "…";
++    if (d.joining) return "Joining " + group_name_and_id(*d.joining) + "…";
+     return "None";
+ }
+ 
+@@ -1114,6 +1143,45 @@ std::string traffic_text(const adhoc::Traffic &t) {
+            std::to_string(t.packets_out) + " (" + format_bytes(t.bytes_out) + ")";
+ }
+ 
++// The relay as this player's game reaches it, for the Status rows.
++std::string relay_text(const adhoc::Diagnostics &d) {
++    std::string text = (d.relay_address.empty() ? std::string("Not found yet") : d.relay_address) + ", " +
++                       std::to_string(d.relay_links_up) + " of " + std::to_string(d.relay_links_wanted) + " links up";
++    if (d.relay_failures != 0u)
++        text += ", " + std::to_string(d.relay_failures) + (d.relay_failures == 1u ? " try" : " tries") + " failed (" +
++                d.relay_error + ")";
++    return text;
++}
++
++// What a player sees when the session's server answers but its relay does not.
++std::string relay_unreachable_text(const adhoc::Diagnostics &d) {
++    const std::size_t colon = d.relay_address.rfind(':');
++    const int relay = colon == std::string::npos ? adhoc::kRelayPort : std::atoi(d.relay_address.c_str() + colon + 1u);
++    const std::string port = std::to_string(relay);
++    return "The other players cannot see you: the host's TCP " + port + " does not answer, though " +
++           std::to_string(relay - 1) + " does. The host opens " + port + " the same way.";
++}
++
++// A hosted player in a room with no relay connection: its game's sockets do
++// not reach the relay port, so nobody in the room sees it.
++bool relay_missing(const adhoc::ServerPlayer &player) {
++    return player.group && player.in_group_ms && *player.in_group_ms >= adhoc::kRelayMissingMs &&
++           player.relay_connections == 0u;
++}
++
++// Two or more hosted players settled in rooms, each alone in a different one:
++// they meant to meet and picked different rooms.
++bool rooms_apart(const adhoc::ServerStatus &status) {
++    std::map<std::string, int> rooms;
++    for (const adhoc::ServerPlayer &player : status.players) {
++        if (!player.group) continue;
++        if (!player.in_group_ms || *player.in_group_ms < 5000u) return false;
++        ++rooms[player.product + '\n' + *player.group];
++    }
++    return rooms.size() >= 2u &&
++           std::all_of(rooms.begin(), rooms.end(), [](const auto &room) { return room.second == 1; });
++}
++
+ // The on-screen network overlay (menu: Network, or <prefix>_ADHOC_OVERLAY).
+ bool &network_overlay() {
+     static bool shown = [] {
+@@ -1128,16 +1196,6 @@ std::string &saved_log_path() {
+     return path;
+ }
+ 
+-// "MHP3Q000" is Hall 01 in the game's list.
+-std::string group_name(const std::string &group) {
+-    if (group.size() == 8u && group.compare(0, 5, "MHP3Q") == 0 &&
+-        std::all_of(group.begin() + 5, group.end(), [](char c) { return c >= '0' && c <= '9'; })) {
+-        char text[16];
+-        std::snprintf(text, sizeof(text), "Hall %02d", std::atoi(group.c_str() + 5) + 1);
+-        return text;
+-    }
+-    return group;
+-}
+ 
+ std::string players_text(std::size_t count) {
+     return std::to_string(count) + (count == 1u ? " player" : " players");
+@@ -1190,6 +1248,65 @@ void router_rows(const std::string &suffix, std::string &copied) {
+     }
+ }
+ 
++// The head of a saved network log: what was running, the session this copy
++// hosts as its server sees it, the router and discovery. With the client's own
++// state after it, one file from the host says who reached which port and
++// room, and one from a player says what their copy could reach.
++std::vector<std::string> network_log_about() {
++    std::vector<std::string> lines;
++    const GameProfile &game = portablekit::game();
++    std::string build = std::string(game.project_name) + " " +
++                        (game.project_version != nullptr ? game.project_version : kBuildVersion);
++    if (game.project_version != nullptr) build += ", PortableKit " + std::string(kBuildVersion);
++    if (*kBuildLabel != '\0') build += ", build " + std::string(kBuildLabel);
++    lines.push_back("build: " + build);
++    lines.push_back("game: " + std::string(game.game_title) + " (" + active_disc_id_display() + ")");
++    for (void (*add)(std::vector<std::string> &) : port_network_log_lines()) add(lines);
++    const settings::Settings &s = settings::current();
++    lines.push_back(std::string("settings: ad hoc play ") + (s.adhoc ? "on" : "off") + ", server \"" + s.adhoc_server +
++                    "\", open router ports " + (s.adhoc_router_ports ? "on" : "off"));
++    if (adhoc_hosting()) {
++        const adhoc::ServerStatus st = adhoc_host_status();
++        lines.push_back("hosting: TCP " + std::to_string(st.adhocctl_port) + " and " + std::to_string(st.relay_port) +
++                        ", up " + format_duration(st.uptime_ms) + ", " + players_text(st.players.size()) + ", " +
++                        std::to_string(st.groups) + " rooms, " + std::to_string(st.relay_sessions) +
++                        " relay connections, " + std::to_string(st.relayed_packets) + " packets relayed, " +
++                        std::to_string(st.dropped) + " datagrams dropped");
++        for (const adhoc::ServerPlayer &player : st.players)
++            lines.push_back(
++                "  player \"" + player.nickname + "\" " + adhoc::format_mac(player.mac) + " from " + player.address +
++                ", " + player.product + ", online " + format_duration(player.online_ms) + ", room " +
++                (player.group ? group_name_and_id(*player.group) + " for " + format_duration(player.in_group_ms.value_or(0u))
++                              : std::string("none")) +
++                ", " + std::to_string(player.relay_connections) + " relay connections, datagrams sent " +
++                std::to_string(player.datagrams_sent) + " (" + std::to_string(player.datagrams_unheard) +
++                " to nobody), received " + std::to_string(player.datagrams_received) +
++                (relay_missing(player) ? "; NOT SEEN: no relay connection" : ""));
++        if (rooms_apart(st)) lines.push_back("  everyone is alone in a different room");
++        const adhoc::RouterStatus router = adhoc_router_status();
++        std::string text;
++        switch (router.state) {
++        case adhoc::RouterState::Off: text = "not asked"; break;
++        case adhoc::RouterState::Working: text = "asking"; break;
++        case adhoc::RouterState::Failed: text = "failed: " + router.error; break;
++        case adhoc::RouterState::Open:
++            text = "open with " + router.method + ", outside address " + router.external_address +
++                   (router.shared ? " (shared by the provider: not on the internet)" : "");
++            break;
++        }
++        lines.push_back("router: " + text + (router.ports.empty() ? "" : ", " + adhoc::describe_ports(router.ports)));
++    }
++    const adhoc::DiscoveryStatus ds = adhoc::Discovery::get().status();
++    lines.push_back("discovery: " +
++                    (ds.listening ? "listening, " + std::to_string(ds.hosts) + " hosts heard"
++                                  : (ds.listen_error.empty() ? std::string("not listening") : ds.listen_error)) +
++                    (ds.announcing ? "; announcing " + ds.announce_note : std::string()));
++    for (const adhoc::FoundHost &host : adhoc::Discovery::get().hosts())
++        lines.push_back("  heard \"" + host.info.name + "\" at " + host.join_address() + ", " +
++                        players_text(host.info.players) + ", " + host.info.product);
++    return lines;
++}
++
+ // Hosting and joining a session.
+ void play_together() {
+     settings::Settings &s = settings::current();
+@@ -1222,15 +1339,27 @@ void play_together() {
+         router_rows(suffix, copied);
+         if (!copied.empty()) info_row("Copied", copied);
+         ImGui::PushID("hosted players");
++        std::vector<std::string> unseen;
+         for (std::size_t i = 0; i < status.players.size(); ++i) {
+             const adhoc::ServerPlayer &player = status.players[i];
+             ImGui::PushID(static_cast<int>(i));
++            const bool missing = relay_missing(player);
++            if (missing) unseen.push_back(player.nickname);
+             info_row(player.nickname.c_str(),
+                      (example_addresses() ? "198.51.100." + std::to_string(20u + i) : player.address) + "   " +
+-                         (player.group ? group_name(*player.group) : std::string("not in a room")));
++                         (player.group ? group_name(*player.group) : std::string("not in a room")) +
++                         (missing ? "   not seen by the others" : ""));
+             ImGui::PopID();
+         }
+         ImGui::PopID();
++        // What keeps players who see each other here from meeting in the game.
++        if (rooms_apart(status)) paragraph("Everyone is in a different room. Pick the same one.", colors::kDanger);
++        for (const std::string &name : unseen)
++            paragraph(name + "'s game reaches TCP " + std::to_string(status.adhocctl_port) + " here but not " +
++                          std::to_string(status.relay_port) +
++                          ", which carries everything in a room: nobody there sees them. Both ports must reach this "
++                          "PC.",
++                      colors::kDanger);
+         // One ID for Host and Stop, so the focus stays on the row.
+         if (button_row("Stop hosting###hosting",
+                        {false, {},
+@@ -1251,8 +1380,10 @@ void play_together() {
+ 
+     section("Join a session");
+     adhoc::Discovery &discovery = adhoc::Discovery::get();
+-    discovery.start_listening();
+-    discovery.query(s.adhoc_recent);
++    if (!adhoc_loopback_only()) {
++        discovery.start_listening();
++        discovery.query(s.adhoc_recent);
++    }
+     const std::vector<adhoc::FoundHost> hosts = discovery.hosts();
+     const bool hosting = adhoc_hosting();
+     const auto joined = [&](const std::string &address) {
+@@ -1268,7 +1399,10 @@ void play_together() {
+                                                   "other; then go online in the game."}))
+             adhoc_join(address);
+     }
+-    if (hosts.empty()) info_row("On this network", "Looking for hosted sessions…");
++    if (adhoc_loopback_only())
++        info_row("On this network", "Not looked for: " + portablekit::env_name("ADHOC_LOOPBACK") + " is set");
++    else if (hosts.empty())
++        info_row("On this network", "Looking for hosted sessions…");
+     if (!hosting && s.adhoc && !s.adhoc_server.empty())
+         info_row("Joined", s.adhoc_server + "   connects when you go online");
+     if (text_row("join_address", "Address", typed_address, 100u, true, address_character,
+@@ -1329,6 +1463,7 @@ void Menu::network() {
+ 
+     section("Status");
+     info_row("Connection", connection_text(d));
++    if (adhoc::relay_unreachable(d)) paragraph(relay_unreachable_text(d), colors::kDanger);
+     if (adhoc_hosting()) {
+         const adhoc::ServerStatus st = adhoc_host_status();
+         info_row("Server", "TCP " + std::to_string(st.adhocctl_port) + " and " + std::to_string(st.relay_port) +
+@@ -1384,9 +1519,7 @@ void Menu::network() {
+         ImGui::PopID();
+     }
+     ImGui::PopID();
+-    if (d.relay_links_wanted != 0u)
+-        info_row("Relay links", std::to_string(d.relay_links_up) + " of " + std::to_string(d.relay_links_wanted) +
+-                                    " up");
++    if (d.relay_links_wanted != 0u || d.relay_failures != 0u) info_row("Relay", relay_text(d));
+     info_row("Per second", traffic_text(d.per_second));
+     info_row("Since start", traffic_text(d.total));
+     info_row("Problems", std::to_string(d.dropped) + " datagrams dropped, " + std::to_string(d.timeouts) +
+@@ -1409,7 +1542,7 @@ void Menu::network() {
+         } catch (const std::exception &) {
+             directory = "logs";
+         }
+-        const std::filesystem::path path = client.save_log(directory);
++        const std::filesystem::path path = client.save_log(directory, network_log_about());
+         saved_log_path() = path.empty() ? "Could not write to " + install::path_to_utf8(directory)
+                                         : install::path_to_utf8(path);
+         std::cout << "[adhoc] network log: " << saved_log_path() << std::endl;
+@@ -1729,6 +1862,36 @@ void draw_network_overlay() {
+     ImGui::PopStyleVar();
+ }
+ 
++// Whether to tell the player over the game that the others cannot see them
++// (adhoc::relay_unreachable). <prefix>_NO_ADHOC_NOTICE=1 never does.
++bool relay_notice_wanted() {
++    static const bool off = portablekit::env_set("NO_ADHOC_NOTICE");
++    if (off || !settings::current().adhoc) return false;
++    return adhoc::relay_unreachable(adhoc::Client::get().diagnostics());
++}
++
++// That notice: a short band at the top of the window while it lasts. The
++// Network page's Status says the same with the details.
++void draw_relay_notice() {
++    const adhoc::Diagnostics d = adhoc::Client::get().diagnostics();
++    const ImGuiIO &io = ImGui::GetIO();
++    const float font = Layer::get().font_size();
++    ImGui::SetNextWindowPos({io.DisplaySize.x * 0.5f, font * 0.5f}, ImGuiCond_Always, {0.5f, 0.0f});
++    ImGui::SetNextWindowSizeConstraints({0.0f, 0.0f}, {std::min(io.DisplaySize.x - font, font * 34.0f), FLT_MAX});
++    ImGui::SetNextWindowBgAlpha(0.85f);
++    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {font * 0.6f, font * 0.4f});
++    ImGui::Begin("##relay notice", nullptr,
++                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_AlwaysAutoResize |
++                     ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav);
++    ImGui::PushTextWrapPos(std::min(io.DisplaySize.x - font * 2.0f, font * 33.0f));
++    ImGui::PushStyleColor(ImGuiCol_Text, colors::kDanger);
++    ImGui::TextUnformatted(relay_unreachable_text(d).c_str());
++    ImGui::PopStyleColor();
++    ImGui::PopTextWrapPos();
++    ImGui::End();
++    ImGui::PopStyleVar();
++}
++
+ // The menu while it is open over the running game, and a quit chosen in it.
+ std::optional<Menu> &menu_over_game_state() {
+     static std::optional<Menu> menu;
+@@ -1813,6 +1976,10 @@ void add_network_rows(void (*rows)()) {
+     if (rows != nullptr) port_network_rows().push_back(rows);
+ }
+ 
++void add_network_log_lines(void (*lines)(std::vector<std::string> &)) {
++    if (lines != nullptr) port_network_log_lines().push_back(lines);
++}
++
+ void add_system_rows(void (*rows)()) {
+     if (rows != nullptr) port_system_rows().push_back(rows);
+ }
+@@ -1856,17 +2023,20 @@ void draw_over_game() {
+     const bool overlay = network_overlay();
+     const bool touch = !menu && layer.renderer().touch_controls_visible();
+     const bool status = g_status_overlay_visible != nullptr && g_status_overlay_visible();
++    const bool relay_notice = !menu && relay_notice_wanted();
+     // The port's pictures beside the game's screens, under the menu.
+     std::uint32_t game_overlay_mask = 0u;
+     for (std::size_t i = 0; i < game_overlays().size() && i < 32u; ++i)
+         if (game_overlays()[i].visible()) game_overlay_mask |= 1u << i;
+-    if (hint_left <= 0.0 && !overlay && !menu && !touch && !status && game_overlay_mask == 0u) return;
++    if (hint_left <= 0.0 && !overlay && !menu && !touch && !status && !relay_notice && game_overlay_mask == 0u)
++        return;
+     layer.begin_frame();
+     for (std::size_t i = 0; i < game_overlays().size() && i < 32u; ++i)
+         if ((game_overlay_mask & (1u << i)) != 0u) game_overlays()[i].draw();
+     if (touch) draw_touch_controls(layer.renderer().touch_controls(), settings::current().touch_opacity);
+     if (hint_left > 0.0) draw_hint(hint_left);
+     if (overlay) draw_network_overlay();
++    if (relay_notice) draw_relay_notice();
+     if (status) g_status_overlay_draw();
+     if (menu && !menu->frame()) {
+         const bool quit = menu->quit() || layer.window_closed();
+diff --git a/host/ui/ui.hpp b/host/ui/ui.hpp
+index 2746183..b6eae4b 100644
+--- a/host/ui/ui.hpp
++++ b/host/ui/ui.hpp
+@@ -2,6 +2,7 @@
+ 
+ #include <memory>
+ #include <string>
++#include <vector>
+ 
+ struct ImFont;
+ 
+@@ -55,6 +56,11 @@ void open_panel_over_game(bool (*frame)());
+ void add_menu_rows(void (*rows)());
+ // The same on the Network page, after Ad hoc play's rows and before Status.
+ void add_network_rows(void (*rows)());
++// Lines of the port's own near the head of a saved network log (the Network
++// page's Save network log), after the build and the game: what a problem
++// report needs that only the port knows, such as its own settings for
++// online play. `lines` appends them.
++void add_network_log_lines(void (*lines)(std::vector<std::string> &));
+ // And on the System page, after Saves and before About.
+ void add_system_rows(void (*rows)());
+ // Where the game's 480x272 picture was last drawn, in ImGui's coordinates
+diff --git a/tests/adhoc_tests.cpp b/tests/adhoc_tests.cpp
+index e712b1f..39c09b3 100644
+--- a/tests/adhoc_tests.cpp
++++ b/tests/adhoc_tests.cpp
+@@ -13,8 +13,11 @@
+ #include <chrono>
+ #include <cstdlib>
+ #include <cstdio>
++#include <filesystem>
++#include <fstream>
+ #include <functional>
+ #include <iostream>
++#include <iterator>
+ #include <optional>
+ #include <string>
+ #include <thread>
+@@ -310,6 +313,182 @@ void discovery(std::uint16_t port) {
+                   << ")" << std::endl;
+ }
+ 
++// What the host's status says about each player's relay connections and
++// datagrams: two players who see each other in the server's list but sit in
++// different rooms, then in the same one. Loopback alone, so no firewall asks.
++void relay_report() {
++    Server server;
++    std::uint16_t port = 0;
++    for (std::uint16_t candidate = 38312; candidate < 38400 && port == 0u; candidate += 2) {
++        ServerConfig config;
++        config.adhocctl_port = candidate;
++        config.loopback_only = true;
++        if (server.start(config)) port = candidate;
++    }
++    check(port != 0u, "relay report: a loopback server starts");
++    if (port == 0u) return;
++    const std::uint16_t relay_port = relay_port_for(port);
++    const auto player = [&](const Mac &mac) -> std::optional<ServerPlayer> {
++        for (const ServerPlayer &entry : server.status().players)
++            if (entry.mac == mac) return entry;
++        return std::nullopt;
++    };
++
++    Client &a = Client::get();
++    Identity identity;
++    identity.server = "127.0.0.1:" + std::to_string(port);
++    identity.nickname = "HunterA";
++    identity.mac = kMacA;
++    identity.product = kProduct;
++    a.start(identity);
++    a.join("LOBBY0");
++    check(wait_until([&] { return a.in_group(); }), "relay report: A joins LOBBY0");
++    const int pdp = a.pdp_open(100, 8192);
++    check(wait_until([&] { return a.diagnostics().relay_links_up == 1u; }), "relay report: A's socket reaches the relay");
++
++    // B, by hand, in another room, with a socket on the same port.
++    Raw b(port);
++    b.send(ctl::login(kMacB, "HunterB", kProduct));
++    b.send(ctl::connect("LOBBY1"));
++    Raw b_pdp(relay_port);
++    b_pdp.send(relay::init(relay::kInitPdp, kMacB, 100, Mac{}, 0));
++    check(wait_until([&] {
++              const auto pa = player(kMacA);
++              const auto pb = player(kMacB);
++              return pa && pb && pa->relay_connections == 1u && pb->relay_connections == 1u && pb->group &&
++                     *pb->group == "LOBBY1" && pa->in_group_ms.has_value();
++          }),
++          "relay report: the status lists each player's room and relay connection");
++
++    // B, alone in its room, broadcasts as other emulators do (this client
++    // sends a copy to each peer it knows instead, so alone it sends nothing).
++    const std::string hello = "hello";
++    b_pdp.send(relay::pdp_header(kBroadcastMac, 100, static_cast<std::uint32_t>(hello.size())) + hello);
++    check(wait_until([&] {
++              const auto pb = player(kMacB);
++              return pb && pb->datagrams_sent == 1u && pb->datagrams_unheard == 1u;
++          }),
++          "relay report: a broadcast nobody in the room can take counts as unheard");
++
++    b.send(ctl::connect("LOBBY0"));
++    check(wait_until([&] { return a.peers().size() == 1u; }), "relay report: B moves to A's room");
++    a.pdp_send(pdp, kBroadcastMac, 100, hello.data(), hello.size());
++    const auto header = b_pdp.read(relay::kPdpHeaderSize);
++    const auto body = b_pdp.read(hello.size());
++    check(header && wire::get_mac(header->data()) == kMacA && body == hello, "relay report: now B receives A's");
++    check(wait_until([&] {
++              const auto pa = player(kMacA);
++              const auto pb = player(kMacB);
++              return pa && pb && pa->datagrams_sent == 1u && pa->datagrams_unheard == 0u &&
++                     pb->datagrams_received == 1u;
++          }),
++          "relay report: sent and received are counted per player");
++
++    // C joins the room with no relay connection at all, as a player whose
++    // relay port is blocked does: A's copies for C reach nobody.
++    const Mac mac_c{0x02, 0x11, 0x22, 0x33, 0x44, 0x0C};
++    Raw c(port);
++    c.send(ctl::login(mac_c, "HunterC", kProduct));
++    c.send(ctl::connect("LOBBY0"));
++    check(wait_until([&] { return a.peers().size() == 2u; }), "relay report: C joins the room");
++    a.pdp_send(pdp, kBroadcastMac, 100, hello.data(), hello.size());
++    check(b_pdp.read(relay::kPdpHeaderSize + hello.size()).has_value(), "relay report: B receives A's next one");
++    check(wait_until([&] {
++              const auto pa = player(kMacA);
++              const auto pc = player(mac_c);
++              return pa && pc && pa->datagrams_sent == 3u && pa->datagrams_unheard == 1u && pc->group &&
++                     pc->in_group_ms && pc->relay_connections == 0u && pc->datagrams_received == 0u;
++          }),
++          "relay report: what A sends C counts as unheard, and C shows no relay connection");
++
++    a.pdp_close(pdp);
++    server.stop();
++    a.stop();
++}
++
++// A session whose server answers and whose relay port does not, as when only
++// the first port is forwarded: the player's own copy notices and says so. The
++// server here is a few lines that answer the login and the join; nothing
++// listens on the port after it.
++void relay_out_of_reach() {
++    Socket listener = kNoSocket;
++    std::uint16_t port = 0;
++    for (std::uint16_t candidate = 38412; candidate < 38500 && port == 0u; candidate += 2) {
++        const auto bind_loopback = [](std::uint16_t number) {
++            Socket s = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
++            const Address address = Address::ipv4_address(htonl(INADDR_LOOPBACK), number);
++            if (::bind(s, reinterpret_cast<const sockaddr *>(&address.storage), address.length) != 0 ||
++                ::listen(s, 4) != 0) {
++                close_socket(s);
++                return kNoSocket;
++            }
++            return s;
++        };
++        Socket relay = bind_loopback(static_cast<std::uint16_t>(candidate + 1));
++        if (relay == kNoSocket) continue;  // something listens there
++        close_socket(relay);
++        listener = bind_loopback(candidate);
++        if (listener != kNoSocket) port = candidate;
++    }
++    check(port != 0u, "relay out of reach: a stand-in server listens");
++    if (port == 0u) return;
++    set_nonblocking(listener);
++
++    Client &a = Client::get();
++    Identity identity;
++    identity.server = "127.0.0.1:" + std::to_string(port);
++    identity.nickname = "Stranded";
++    identity.mac = kMacA;
++    identity.product = kProduct;
++    a.start(identity);
++    a.join("LOBBY0");
++    Socket s = kNoSocket;
++    wait_until([&] { return (s = ::accept(listener, nullptr, nullptr)) != kNoSocket; });
++    check(s != kNoSocket, "relay out of reach: the client connects to the server");
++    if (s == kNoSocket) {
++        close_socket(listener);
++        a.stop();
++        return;
++    }
++    set_nonblocking(s);
++    // Login, then the join, then the server's confirmation of it.
++    std::string in;
++    wait_until([&] {
++        char buffer[512];
++        const auto count = ::recv(s, buffer, static_cast<int>(sizeof(buffer)), 0);
++        if (count > 0) in.append(buffer, static_cast<std::size_t>(count));
++        return in.size() >= ctl::client_packet_size(ctl::kLogin) + ctl::client_packet_size(ctl::kConnect);
++    });
++    const std::string joined = ctl::joined(kMacA);
++    ::send(s, joined.data(), static_cast<int>(joined.size()), kSendFlags);
++    check(wait_until([&] { return a.in_group(); }), "relay out of reach: the server confirms the join");
++    const int pdp = a.pdp_open(100, 8192);
++
++    check(wait_until([&] { return a.diagnostics().relay_failures != 0u; }, 15000),
++          "relay out of reach: the client counts a relay connection that never came up");
++    Diagnostics d = a.diagnostics();
++    std::cout << "     why: " << d.relay_error << ", down for " << d.relay_down_ms.value_or(0u) << " ms" << std::endl;
++    check(d.relay_down_ms.has_value() && !d.relay_error.empty(), "relay out of reach: it says since when and why");
++    check(wait_until([&] { return relay_unreachable(a.diagnostics()); }, 15000),
++          "relay out of reach: after a while it counts as unreachable");
++
++    const std::filesystem::path directory =
++        std::filesystem::temp_directory_path() / ("portablekit-adhoc-test-" + std::to_string(port));
++    const std::filesystem::path log = a.save_log(directory, {"build: test"});
++    std::string text;
++    if (std::ifstream file{log, std::ios::binary}; file) text.assign(std::istreambuf_iterator<char>(file), {});
++    check(text.find("build: test") != std::string::npos && text.find("UNREACHABLE") != std::string::npos &&
++              text.find("cannot connect to the relay") != std::string::npos,
++          "relay out of reach: the saved log has the caller's lines, the relay's state and the report");
++    std::error_code ec;
++    std::filesystem::remove_all(directory, ec);
++
++    a.pdp_close(pdp);
++    a.stop();
++    close_socket(s);
++    close_socket(listener);
++}
++
+ // A process that hosts, with a player in a group and discovery running, and
+ // then leaves main(): with `tidy`, after shutting the network down as the
+ // game does; without, leaving everything to exit, which must not abort either.
+@@ -429,6 +608,15 @@ int main(int argc, char **argv) {
+         router_messages();
+         return failures == 0 ? 0 : 1;
+     }
++    // Neither do the tests that listen on loopback alone.
++    if (argc > 1 && std::string(argv[1]) == "--loopback") {
++        relay_report();
++        relay_out_of_reach();
++        router_messages();
++        std::cout << (failures == 0 ? "all loopback ad hoc tests passed" : std::to_string(failures) + " failed")
++                  << std::endl;
++        return failures == 0 ? 0 : 1;
++    }
+     check(exits_cleanly(argv[0], "--exit-after-shutdown"), "a hosting process that shuts down exits with 0");
+     // The race this guards against, a thread using what exit() already
+     // destroyed, does not show every time.
+@@ -436,6 +624,8 @@ int main(int argc, char **argv) {
+     for (int run = 0; run < 5 && clean; ++run) clean = exits_cleanly(argv[0], "--exit-while-hosting");
+     check(clean, "a hosting process that just returns exits with 0, five times");
+     server_and_client();
++    relay_report();
++    relay_out_of_reach();
+     discovery(37500);
+     router_messages();
+     std::cout << (failures == 0 ? "all ad hoc tests passed" : std::to_string(failures) + " failed") << std::endl;
+-- 
+2.53.0.windows.1
+

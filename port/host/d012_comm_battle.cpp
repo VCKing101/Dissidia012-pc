@@ -359,6 +359,19 @@ void network_rows() {
         std::cerr << "[comm-battle] settings.ini not written for " << kDelayKey << ": " << e.what() << std::endl;
     }
 }
+
+// The port's lines at the head of a saved network log: what both fighters'
+// copies must share, the battle's port and input delay, and why the last
+// battle could not start.
+void network_log_lines(std::vector<std::string> &lines) {
+    for (const auto &[what, value] : net::battle::must_match_items())
+        lines.push_back("must match: " + what + " = " + (value.empty() ? "-" : value));
+    const std::string delay = net::setting("D012_NET_DELAY", kDelayKey);
+    lines.push_back("battle: UDP " + std::to_string(net::battle::port()) + ", input delay " +
+                    (delay.empty() ? "auto" : delay));
+    if (const std::string why = net::battle::why_not(); !why.empty())
+        lines.push_back("last battle that could not start: " + why);
+}
 #endif
 
 struct Install {
@@ -454,6 +467,7 @@ void install(portablekit::HleRegistrar &hle) {
     net::battle::must_match("the camera follow (D012_CAMERA_FOLLOW_DEADZONE)", env("D012_CAMERA_FOLLOW_DEADZONE"));
 #if defined(PORTABLEKIT_HAS_RENDERER)
     portablekit::ui::add_network_rows(&network_rows);
+    portablekit::ui::add_network_log_lines(&network_log_lines);
 #endif
 }
 
