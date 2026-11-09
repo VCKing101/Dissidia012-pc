@@ -134,7 +134,7 @@ disassembler and the new `tools/port/` scripts cover the analysis.
   joined the address the PC showed and played a whole battle (section 14). For players (section 15): both copies
   must run the same program and rules or the battle says what differs, each player keeps their camera settings, a
   wait shows a band the player can leave, and the Network page has the input delay.
-- [Playing online](play-online.md): the players' guide (test builds only): host, join, and what to do when the
+- [Playing online](play-online.md): the players' guide: host, join, and what to do when the
   router, a shared provider address or a firewall stops it, including Tailscale and ZeroTier.
 
 ## Texture packs (1 November 2026)

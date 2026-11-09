@@ -50,8 +50,9 @@ online and test sessions. Bugs and crashes go in [GitHub issues](https://github.
 - **A Bloom switch** on the menu's Video page: the game's soft glow over battles and the world map, on or off.
 - **HD texture packs** in PPSSPP's format, and a menu option that dumps the game's textures to start one
   ([below](#hd-texture-packs)).
-- **Online versus (experimental)**: 1-on-1 battles over the internet through the game's own Communication Mode, with
-  full analog and each player's right-stick camera ([guide](docs/port/play-online.md)).
+- **Online play (experimental)**: 1-on-1 battles, Group Battle's party battles with watching, and Friend Card trading
+  over the internet through the game's own Communication Mode, with full analog and each player's right-stick camera
+  ([guide](docs/port/play-online.md)).
 - **Japanese voices** from your own Japanese disc image, with English text: choose the disc in the game's Options,
   under Voice ([below](#japanese-voices)).
 - **Update check**: when a new version is out, the title screen says so, and **Check for updates** on the menu's
@@ -131,8 +132,11 @@ ask on the [Discord server](https://discord.gg/9GrbdQwPbS).
 Both players need the same release and the same mods that change the game; the game checks and says what differs.
 When the router cannot open its ports, or your provider shares one address among its customers (as on mobile data),
 the [players' guide](docs/port/play-online.md) has the fixes: forwarding three ports by hand, or a VPN such as
-Tailscale. Only the Online Lobby's 1-on-1 battles are supported so far; two Windows PCs on separate machines and the
-Steam Deck hosting are untested.
+Tailscale.
+
+**Group Battle** works online too: one player creates a room, the others enter it, and players who are not fighting
+watch each fight. So does trading Friend Cards in **Communications**. More than one player watching at once and two
+Windows PCs on separate machines are untested.
 
 ## Japanese voices
 
