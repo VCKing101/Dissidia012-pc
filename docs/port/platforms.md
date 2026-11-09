@@ -181,7 +181,13 @@ were copied in. Two faults the owner found, both in PortableKit (worktree `Porta
   the sysroot's absolute symlinks are made relative. clang and lld themselves need glibc 2.34, libstdc++ and zlib
   (SteamOS has glibc 2.43); the game needs 2.31.
 - **The wizard** (`tools/port/linux_setup/AppRun`): zenity dialogs (SteamOS ships zenity), text prompts in a
-  terminal, or none with `D012_SETUP_ISO` and `D012_SETUP_DIR`. It asks for the ISO (checked as on Windows), the
+  terminal, or none with `D012_SETUP_ISO` and `D012_SETUP_DIR`. Started from the desktop with no zenity (and so no
+  terminal), it opens a terminal window and runs itself again in it: the first of `xdg-terminal-exec`,
+  `x-terminal-emulator`, konsole, gnome-terminal, ptyxis, kgx, xfce4-terminal, mate-terminal, alacritty, kitty, foot,
+  wezterm and xterm. The first run waits until the one in the window ends (marks in a temporary folder named by
+  `D012_SETUP_IN_TERMINAL`), because the AppImage's files are there only while it runs and some terminals return at
+  once; the window waits for Enter before it closes. The AppImage catalog's test (appimage.github.io) starts it that
+  way, on a virtual screen with xterm and no zenity; before this the setup quit there with nothing on screen. It asks for the ISO (checked as on Windows), the
   folder (`~/Games/Dissidia012`; it refuses a folder holding the Windows version), whether to copy the ISO; copies
   the program over the previous one (`data/` and `game-code/` kept), runs `--install` and `--compile-game` with a
   progress bar from their `[compile-game] N%` lines, and adds a menu entry for "Add to Steam". The menu icon is

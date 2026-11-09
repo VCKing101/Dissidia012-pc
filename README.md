@@ -244,8 +244,8 @@ crash writes where it happened at the end of the log.
 
 You need 64-bit x86 Linux from about 2021 on (glibc 2.34 or newer) with a Vulkan graphics driver, about 1.5 GB of
 free space while it sets up (3.2 GB if the ISO is copied in; the installed game then takes about 600 MB), and FUSE to
-start the AppImage, which most systems have. The setup's windows need `zenity`; without it, start the setup from a
-terminal and it asks there. SteamOS has all of these.
+start the AppImage, which most systems have. The setup's windows need `zenity`; without it, the setup asks its
+questions in a terminal window. SteamOS has all of these.
 
 - The Battle BGM Maker is not in the Linux setup yet. Music mods made with it elsewhere play as they do on Windows.
 - Install it in a folder of its own: the setup will not install over the Windows version's folder (a Proton install).
