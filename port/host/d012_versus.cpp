@@ -20,7 +20,8 @@
 //     fighter's pad, battle 0x08B20458, and the pause menu answers the pad
 //     that opened it) and waits for player 2's pad to return. Player 1's
 //     gamepad lost the same way: START in the game's own pad for one read.
-//     A notice over the battle says which controller to plug in again.
+//     A notice over the battle says which controller to plug in again;
+//     player 1's goes too once they press anything on the keyboard.
 //   - The opponent's AI mode: the battle set-up switches slot 1 to the CPU
 //     through battle 0x08B2F2E4(fighter, 0) (calls at main 0x0888BE5C and
 //     0x0888BE90). In a Quick Battle (FIELD+0x4C == 4) that call asks for
@@ -898,6 +899,19 @@ void read_pads(const portablekit::HleFunction &previous, psprecomp::Runtime &rt,
         }
     }
     if (first) s.lost &= ~kLostPlayer1;
+    // "Or play on the keyboard": with no gamepad, player 1's pad is the
+    // keyboard and mouse, so any press or stick on it takes the notice away
+    // (also when Controls > Player 1 is set to the keyboard in a battle). The
+    // pause stays until player 1 presses Start, as when a gamepad comes back.
+    // Not while the keyboard is player 2's.
+    if (!first && (s.lost & kLostPlayer1) != 0u && s.pause1_reads == 0u && !ext::second_pad().keyboard) {
+        const input::Pad &p1 = input::current().player1;
+        const auto off_centre = [](std::uint8_t v) { return v < 0x50u || v > 0xB0u; };
+        if (p1.buttons != 0u || off_centre(p1.lx) || off_centre(p1.ly)) {
+            s.lost &= ~kLostPlayer1;
+            std::cout << "[versus] player 1 goes on on the keyboard" << std::endl;
+        }
+    }
     if (s.pause1_reads != 0u && buffer != 0u) {
         --s.pause1_reads;
         for (std::uint32_t i = 0; i < count; ++i)
