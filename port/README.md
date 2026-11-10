@@ -392,8 +392,17 @@ game's code from the player's disc, after `--install <iso>` has decrypted the ex
 three overlays and `LIBSUPPREACC.PRX` from the ISO (checked by SHA-256), names each overlay's corpus as
 `tools/port/overlay_meta.py` does, runs `psp_recomp` five times with the dispatch calls, compiles every unit with
 `toolchain/bin/clang++` (`D012_TOOLCHAIN_DIR` names another) and links `game-code/main.dll` and one library per
-overlay, each on its own. It writes `game-code/key.txt`, a hash of everything the code is made from, and does
-nothing when that matches (2 s), so an installer can run it after every update. Progress goes to stdout and to
+overlay, each on its own. It writes two hashes in `game-code/key.txt`, so an installer can run it after every
+update and only a change to the game's code compiles again: the input key, of everything the code is made from
+(the disc's files, `psp_recomp`, the compiler, `sdk/`, the ABI versions, the optimisation level), and the source
+key, of everything clang and the linker are given (the C++ `psp_recomp` wrote, `sdk/`, the compiler and its
+flags). When the input key matches, it does nothing (2 s). When it differs but the source key matches, the
+libraries stand and only `key.txt` is rewritten: that is a new recompiler whose changes are to the runtime it
+shares with the program (`psprecomp_core`), not to the C++ it writes, and costs the five recompiles only (64 s
+against 3 min 31 s for a whole compile, measured on 10 November 2026 with 20 jobs). The
+installer build links `psp_recomp` without lld's link-time stamp (`--no-insert-timestamp`), so a recompiler
+built from the same source in another folder has the same bytes, and the same input key. A `key.txt` of 0.7.0
+or before has the input key only, so the first update from one compiles in full. Progress goes to stdout and to
 `game-code-status.txt`; the tools' output to `game-code-build.log`.
 
 Measured on 28 October 2026 (i7-12700K, 8 jobs, -O1): 4 minutes from the ISO, of which about 1 for the five
