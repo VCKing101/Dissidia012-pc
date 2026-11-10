@@ -97,7 +97,8 @@ generated tones.
 Battle Mode has a new row, **Quick Battle (Player vs Player)**: a 1-on-1 between two players on one PC, the second
 on a second controller. Player 2 picks the opponent with their own controller, from player 1's roster, and fights with
 player 1's saved build for that character (level, equipment, abilities, look and set); the battle setup drops the
-CPU's rows. In battle the screen is split down the middle, each half from its player's own camera and at 60 fps, with
+CPU's rows. Player 2 can change that build in Customization with △ on their own controller, on their pick or on the
+battle setup screen. In battle the screen is split down the middle, each half from its player's own camera and at 60 fps, with
 the game's HUD across both and each player's own command prompts. Chases stay split; EX Bursts and the victory play
 full screen. A versus battle gives no rewards and leaves no records in the save. Either player can pause, and a
 controller that goes away pauses the battle until it comes back ([notes](docs/port/local-versus.md)).

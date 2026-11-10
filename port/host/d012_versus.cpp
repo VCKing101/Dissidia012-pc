@@ -14,7 +14,16 @@
 //   - The game's own pad while the opponent is picked: every menu reads
 //     logical pad 0, so while the character room (menu overlay, object
 //     *0x08AA3F44) is in its opponent states 8 to 11, the pad read gets
-//     player 2's pad instead of player 1's.
+//     player 2's pad instead of player 1's. The same while player 2 is in
+//     Customize, and on the way there and back (d012_versus_rules.hpp).
+//   - Player 2's Customize. On their pick, triangle gives the grid's
+//     Customize, which the game's opponent pick (menu 0x08A984BC, an
+//     override in the menu overlay) has no case for: the room waited for
+//     ever. The override starts it as player 1's pick starts its own, for
+//     player 2's character, and refuses it where player 1's pick would. On
+//     the setup screen, player 2's triangle goes into the game's pad read
+//     as a press of the setup's own Customize, which is then given player
+//     2's character.
 //   - Player 2's pad lost in battle: START on raw pad 1 for one read, so the
 //     game's own pause opens as player 2's (the battle checks START on each
 //     fighter's pad, battle 0x08B20458, and the pause menu answers the pad
@@ -39,6 +48,7 @@
 #include "d012_input.hpp"
 #include "d012_rollback.hpp"
 #include "d012_sync.hpp"
+#include "d012_versus_rules.hpp"
 
 #include "hle/hle_common.hpp"
 #include "install/user_data.hpp"
@@ -71,6 +81,7 @@ namespace d012::versus {
 namespace {
 
 namespace ext = portablekit::hle_extension;
+namespace rules = d012::versus_rules;
 
 constexpr std::uint32_t kSceCtrlReadBufferPositive = 0x1F803938u;
 constexpr std::uint32_t kSelect = 0x0001u;
@@ -106,6 +117,19 @@ constexpr std::uint32_t kRoomWork = 0x154u;
 constexpr std::uint32_t kRoomState = 0x910u;
 constexpr std::uint32_t kFirstOpponentState = 8u;
 constexpr std::uint32_t kLastOpponentState = 11u;
+// The room's work area: where it goes after Customize, its flags, the pick
+// grid, the character Customize opens, the opponent's character, and the
+// settings handed to Customize.
+constexpr std::uint32_t kRoomBackTo = 0x918u;
+constexpr std::uint32_t kRoomFlags = 0x91Cu;
+constexpr std::uint32_t kRoomGrid = 0x92Cu;
+constexpr std::uint32_t kRoomCustomized = 0x8048u;
+constexpr std::uint32_t kRoomOpponent = 0x8050u;
+constexpr std::uint32_t kRoomCustomizeSettings = 0x8060u;
+// The setup object (+0x978), its state (+0x1EE4) and its result (+0x558).
+constexpr std::uint32_t kRoomSetup = 0x978u;
+constexpr std::uint32_t kSetupState = 0x1EE4u;
+constexpr std::uint32_t kSetupResult = 0x558u;
 
 struct State {
     std::uint32_t reads = 0;
@@ -146,6 +170,23 @@ struct State {
     bool start_menu = false;  // the start menu is up (player 2's pad looked for)
     // Pad reads left for the notice "Connect a second controller".
     std::uint32_t ask_reads = 0;
+    // Player 2's way to Customize and back, and whether the game's pad had
+    // player 2's at the last read.
+    rules::Trip trip;
+    bool player2_menu = false;
+    // Player 2's buttons at the last read, for presses.
+    std::uint32_t p2_before = 0;
+    // Player 2's triangle went to the setup screen at the last read, with
+    // the room's flags and the setup's result then; and reads left in which
+    // the room is to take the setup's Customize, which is player 2's.
+    bool setup_press = false;
+    std::uint32_t setup_flags = 0;
+    std::uint32_t setup_result = 0;
+    std::uint32_t setup_wait = 0;
+    // Player 2's Customize is on screen (the room in state 52 on player 2's
+    // trip), and since when, for its "Player 2" plate.
+    bool customizing = false;
+    std::chrono::steady_clock::time_point customizing_time;
 };
 
 constexpr std::uint32_t kLostPlayer1 = 1u;
@@ -180,16 +221,39 @@ bool battle_resident(psprecomp::GuestMemory &memory) {
     return memory.load32(kSetAiMode) == 0x27BDFFF0u && memory.load32(kSetAiMode + 4u) == 0x2CA60006u;
 }
 
-// The character room is on screen and picking the opponent.
-bool picking_opponent(psprecomp::GuestMemory &memory) {
+// The character room, when it is up: its work area, state and flags.
+struct Room {
+    bool present = false;
+    std::uint32_t work = 0, state = 0, flags = 0;
+};
+
+Room read_room(psprecomp::GuestMemory &memory) {
     for (std::uint32_t i = 0; i < 3u; ++i)
-        if (memory.load32(kRoomStates + 8u * i + 4u) != kRoomStateSignature[i]) return false;
+        if (memory.load32(kRoomStates + 8u * i + 4u) != kRoomStateSignature[i]) return {};
     const std::uint32_t room = memory.load32(kRoomObject);
-    if (!user_ram(room)) return false;
+    if (!user_ram(room)) return {};
     const std::uint32_t work = memory.load32(room + kRoomWork);
-    if (!user_ram(work)) return false;
-    const std::uint32_t phase = memory.load32(work + kRoomState);
-    return phase >= kFirstOpponentState && phase <= kLastOpponentState;
+    if (!user_ram(work)) return {};
+    return {true, work, memory.load32(work + kRoomState), memory.load32(work + kRoomFlags)};
+}
+
+// The setup screen's result (rules::kSetupCustomize), or 0 with no setup.
+std::uint32_t setup_result(psprecomp::GuestMemory &memory, const Room &room) {
+    if (!room.present) return 0u;
+    const std::uint32_t setup = memory.load32(room.work + kRoomSetup);
+    const std::uint32_t state = user_ram(setup) ? memory.load32(setup + kSetupState) : 0u;
+    return user_ram(state) ? memory.load32(state + kSetupResult) : 0u;
+}
+
+// The character room is on screen and picking the opponent.
+bool picking_opponent(const Room &room) {
+    return room.present && room.state >= kFirstOpponentState && room.state <= kLastOpponentState;
+}
+
+// The game's character ids that Customize takes (d012_versus_rules.hpp).
+bool customizable_character(std::uint32_t character) {
+    const auto id = static_cast<std::int32_t>(character);
+    return rules::customizable(id, id);
 }
 
 // The header over the opponent's grid. When the room starts the opponent's
@@ -569,6 +633,157 @@ void run_build_cpu_side(Guest *g, const decomp::CallState &in, GuestRegs &) {
               << g_ld16s(g, setup + kSideController + 4u) << std::endl;
 }
 
+// Player 2's Customize from their pick (menu overlay). The room's opponent
+// pick update (state 9, menu 0x08A984BC) takes the grid's results 2 (a
+// character picked) and 4 (back) only. Player 2's grid is a "Player Select"
+// one (set_opponent_header), whose triangle gives result 5, Customize, with
+// no check of the cell, and the update then turns the grid's input off and
+// waits for ever: the freeze a tester found. The update itself has the way
+// out to Customize after a fade (state 10 with state 50 next), but nothing
+// starts it. In versus:
+//
+//   - before the update, triangle on a cell player 1's pick would refuse
+//     (Chaos, Feral Chaos, a locked or the random cell; menu 0x08A8255C) is
+//     taken off this frame's presses of the game's pad (logical pad 0,
+//     pressed at +0x08) with the game's "not allowed" sound;
+//   - after it, a result 5 starts what player 1's pick (state 5, menu
+//     0x08A9E0E8) does for its own: the character under the cursor is the
+//     opponent's (+0x8050) and Customize's (+0x8048), Customize's settings
+//     made (main 0x0892A13C), the room flagged for Customize and to come back
+//     to player 2's pick (state 8), and the same white fade out, whose end
+//     (menu 0x08A9CEC4) lets the update go on to Customize.
+//
+// Player 2's pad stays the game's through it all (read_pads, rules::room_pad).
+//
+// Player 2's pick shows no button prompts (the update hides the room's prompt
+// bar every frame, menu 0x08A9C5A0); player 1's shows Set, Look and
+// Customization while the cursor is on a character (set 0, menu 0x08A9C55C).
+// Player 2's shows the setup screen's set 4, "Customization" alone, while the
+// cursor is on a character Customize takes: the room's record of the set
+// shown (+0x81C4) is -1 to the game's update, so that it leaves the bar
+// alone, and 4 otherwise.
+//
+// D012_NO_PLAYER2_CUSTOMIZE=1 leaves all of it out: the game's own pick and
+// setup screen, and the freeze.
+bool player2_customize() {
+    static const bool on = [] {
+        const char *text = std::getenv("D012_NO_PLAYER2_CUSTOMIZE");
+        return text == nullptr || *text == '\0' || std::strcmp(text, "0") == 0;
+    }();
+    return on;
+}
+
+constexpr std::uint32_t kPlayer2PickUpdate = 0x08A984BCu;
+constexpr std::uint32_t kLogicalPad0Pressed = 0x08C15C50u + 0x08u;
+constexpr std::uint32_t kGridWork = 0x28u;
+constexpr std::uint32_t kGridState = 0x5E4u;
+constexpr std::uint32_t kGridFlags = 0x5E8u;
+constexpr std::uint32_t kGridResult = 0x5F8u;
+constexpr std::uint32_t kGridBusy = 0x620u;
+constexpr std::uint32_t kGridCell = 0x08A7F104u;       // (grid, 2, -1): the cell under the cursor
+constexpr std::uint32_t kGridCharacter = 0x08A81188u;  // (grid): its character
+constexpr std::uint32_t kMenuSound = 0x088D4BF4u;      // (sound)
+constexpr std::uint32_t kSoundRefused = 4u;
+constexpr std::uint32_t kCustomizeSettingsInit = 0x0892A13Cu;
+constexpr std::uint32_t kFadeFrames = 0x088D4C5Cu;
+constexpr std::uint32_t kFadeStart = 0x08873D34u;  // (f12 frames, 3, done, 0, 1, 2)
+constexpr std::uint32_t kFadeColour = 0x08873DB0u;  // (rgba floats, 2)
+constexpr std::uint32_t kFadeDone = 0x08A9CEC4u;
+constexpr std::uint32_t kRoomPromptsShown = 0x81C4u;
+constexpr std::uint32_t kShowPrompts = 0x08A9C55Cu;  // (room, set)
+constexpr std::uint32_t kHidePrompts = 0x08A9C5A0u;  // (room, 0)
+constexpr std::uint32_t kPromptsCustomize = 4u;
+constexpr std::uint32_t kPromptsNone = 0xFFFFFFFFu;
+
+// Whether the character under player 2's cursor can be customised.
+bool cursor_customizable(Guest *g, gaddr grid) {
+    const auto cell = static_cast<std::int32_t>(g_call3(g, kGridCell, grid, 2u, 0xFFFFFFFFu));
+    const auto character = static_cast<std::int32_t>(g_call1(g, kGridCharacter, grid));
+    return rules::customizable(cell, character);
+}
+
+// After the update, on player 2's pick: "Customization" shown while the
+// cursor is on a character it takes.
+void show_player2_prompts(Guest *g, gaddr room, gaddr work, gaddr grid, bool shown) {
+    const bool wanted = cursor_customizable(g, grid);
+    if (wanted && !shown) g_call2(g, kShowPrompts, room, kPromptsCustomize);
+    if (!wanted && shown) g_call2(g, kHidePrompts, room, 0u);
+    g_st32(g, work + kRoomPromptsShown, wanted ? kPromptsCustomize : kPromptsNone);
+}
+
+void refuse_triangle(Guest *g, gaddr work) {
+    const gaddr grid = g_ld32(g, work + kRoomGrid);
+    const gaddr grid_work = grid != 0u ? g_ld32(g, grid + kGridWork) : 0u;
+    if (grid_work == 0u) return;
+    const std::uint32_t pressed = g_ld32(g, kLogicalPad0Pressed);
+    if ((pressed & rules::kLogicalTriangle) == 0u) return;
+    if (!rules::grid_takes_triangle(g_ld32(g, grid_work + kGridState), g_ld32s(g, grid_work + kGridBusy),
+                                    g_ld32(g, grid_work + kGridFlags)))
+        return;
+    if (cursor_customizable(g, grid)) return;
+    g_st32(g, kLogicalPad0Pressed, pressed & ~rules::kLogicalTriangle);
+    g_call1(g, kMenuSound, kSoundRefused);
+    std::cout << "[versus] no Customize for the character under player 2's cursor ("
+              << static_cast<std::int32_t>(g_call1(g, kGridCharacter, grid)) << ")" << std::endl;
+}
+
+void start_player2_customize(Guest *g, gaddr work, gaddr grid) {
+    const std::uint32_t character = g_call1(g, kGridCharacter, grid);
+    g_st32(g, work + kRoomOpponent, character);
+    g_st32(g, work + kRoomCustomized, character);
+    g_call1(g, kCustomizeSettingsInit, work + kRoomCustomizeSettings);
+    g_st32(g, work + kRoomFlags, g_ld32(g, work + kRoomFlags) | rules::kFlagCustomize | rules::kFlagFading);
+    g_st32(g, work + kRoomBackTo, rules::kBackToPlayer2Pick);
+    GuestRegs fade{};
+    fade.f[0] = static_cast<float>(static_cast<std::int32_t>(g_call1(g, kFadeFrames, 0u)));
+    fade.a[0] = 3u;
+    fade.a[1] = kFadeDone;
+    fade.a[2] = 0u;
+    fade.a[3] = 1u;
+    fade.a[4] = 2u;
+    g->call(g, kFadeStart, &fade);
+    const gaddr colour = g_push(g, 16u);
+    for (std::uint32_t i = 0; i < 4u; ++i) g_stf(g, colour + 4u * i, 255.0f);
+    g_call2(g, kFadeColour, colour, 2u);
+    g_pop(g, 16u);
+    state().trip = rules::Trip{rules::Trip::From::Pick};
+    std::cout << "[versus] player 2 customises character " << static_cast<std::int32_t>(character)
+              << " (from their pick)" << std::endl;
+}
+
+void run_player2_pick(Guest *g, const decomp::CallState &in, GuestRegs &) {
+    const gaddr room = in.gpr[4];
+    const gaddr work = g_ld32(g, room + kRoomWork);
+    const std::uint32_t flags = work != 0u ? g_ld32(g, work + kRoomFlags) : rules::kFlagFading;
+    const bool on = active() && player2_customize();
+    bool shown = false;
+    if (on && (flags & rules::kFlagFading) == 0u) {
+        refuse_triangle(g, work);
+        shown = g_ld32(g, work + kRoomPromptsShown) == kPromptsCustomize;
+        if (shown) g_st32(g, work + kRoomPromptsShown, kPromptsNone);
+    }
+    GuestRegs regs = arguments(in);
+    decomp::call_original(g, kPlayer2PickUpdate, regs);
+    if (!on || work == 0u || (flags & rules::kFlagFading) != 0u) return;
+    const gaddr grid = g_ld32(g, work + kRoomGrid);
+    const gaddr grid_work = grid != 0u ? g_ld32(g, grid + kGridWork) : 0u;
+    if (grid_work == 0u) return;
+    const std::uint32_t after = g_ld32(g, work + kRoomState);
+    if (rules::pick_customize(flags, after, g_ld32(g, grid_work + kGridResult))) {
+        start_player2_customize(g, work, grid);
+        return;
+    }
+    if (after == rules::kPlayer2PickUpdate && (g_ld32(g, work + kRoomFlags) & rules::kFlagFading) == 0u)
+        show_player2_prompts(g, room, work, grid, shown);
+}
+
+// The game's own update alone, for the differential test (it runs both in a
+// copy of the game, where player 2's Customize must not start).
+void check_player2_pick(Guest *g, const decomp::CallState &in, GuestRegs &) {
+    GuestRegs regs = arguments(in);
+    decomp::call_original(g, kPlayer2PickUpdate, regs);
+}
+
 #if defined(PORTABLEKIT_HAS_RENDERER)
 // The notice over a paused battle whose controller went away: a band in the
 // middle of the game's picture, in the PSP's pixels scaled to where the
@@ -655,36 +870,52 @@ void hud_draw() {
 // faded in as the game's slides in.
 bool pick_header_visible() { return active() && state().picking; }
 
-void pick_header_draw() {
+// A red plate in the shape of the game's headers (pointed ends), in the PSP's
+// pixels, faded in from `since` as the game's own slide in.
+void draw_player2_plate(float left, float right, float top, float bottom, float text_size, const char *line,
+                        std::chrono::steady_clock::time_point since) {
     const portablekit::ui::GamePicture picture = portablekit::ui::game_picture();
     const float sx = picture.width / 480.0f;
     const float sy = picture.height / 272.0f;
     const auto at = [&](float x, float y) { return ImVec2(picture.left + x * sx, picture.top + y * sy); };
-    const float since = std::chrono::duration<float>(std::chrono::steady_clock::now() - state().picking_time).count();
-    const float alpha = std::clamp((since - 0.1f) / 0.25f, 0.0f, 1.0f);
+    const float shown = std::chrono::duration<float>(std::chrono::steady_clock::now() - since).count();
+    const float alpha = std::clamp((shown - 0.1f) / 0.25f, 0.0f, 1.0f);
     if (alpha <= 0.0f) return;
     const auto colour = [&](int r, int g, int b, float a) {
         return IM_COL32(r, g, b, static_cast<int>(a * alpha));
     };
     ImDrawList *draw = ImGui::GetForegroundDrawList();
     ImFont *font = portablekit::ui::game_text_font();
-    // The game's plate: x 15.5 to 135, y 30.5 to 48.5, pointed ends; this one
-    // is longer for the longer words.
-    const float left = 14.5f, right = 150.0f, top = 30.0f, bottom = 49.0f, mid = (top + bottom) * 0.5f, point = 6.0f;
+    const float mid = (top + bottom) * 0.5f, point = (bottom - top) * 0.32f;
     const ImVec2 outline[6] = {at(left, mid),           at(left + point, top),    at(right - point, top),
                                at(right, mid),          at(right - point, bottom), at(left + point, bottom)};
     draw->AddConvexPolyFilled(outline, 6, colour(150, 26, 44, 255.0f));
-    const ImVec2 upper[4] = {at(left + point * 0.5f, mid - 4.5f), at(left + point, top + 1.5f),
-                             at(right - point, top + 1.5f), at(right - point * 0.5f, mid - 4.5f)};
+    const float band = (bottom - top) * 0.24f;
+    const ImVec2 upper[4] = {at(left + point * 0.5f, mid - band), at(left + point, top + 1.5f),
+                             at(right - point, top + 1.5f), at(right - point * 0.5f, mid - band)};
     draw->AddConvexPolyFilled(upper, 4, colour(222, 74, 84, 200.0f));
     draw->AddPolyline(outline, 6, colour(236, 232, 244, 255.0f), ImDrawFlags_Closed, 1.3f * sy);
-    const char *line = "Player 2 Select";
-    const float size = 12.5f * sy;
+    const float size = text_size * sy;
     const ImVec2 extent = font->CalcTextSizeA(size, 1.0e9f, 0.0f, line);
     const ImVec2 centre = at((left + right) * 0.5f, mid);
     const ImVec2 origin(centre.x - extent.x * 0.5f, centre.y - extent.y * 0.5f);
     draw->AddText(font, size, ImVec2(origin.x + 0.8f * sx, origin.y + 0.8f * sy), colour(60, 0, 12, 200.0f), line);
     draw->AddText(font, size, origin, colour(255, 255, 255, 255.0f), line);
+}
+
+void pick_header_draw() {
+    // The game's plate: x 15.5 to 135, y 30.5 to 48.5, pointed ends; this one
+    // is longer for the longer words.
+    draw_player2_plate(14.5f, 150.0f, 30.0f, 49.0f, 12.5f, "Player 2 Select", state().picking_time);
+}
+
+// Player 2's Customize: the game's screen names no player, so "Player 2" in a
+// plate of the same kind beside its title, between it and the button
+// prompts.
+bool customize_header_visible() { return active() && state().customizing; }
+
+void customize_header_draw() {
+    draw_player2_plate(156.0f, 226.0f, 7.0f, 23.0f, 11.0f, "Player 2", state().customizing_time);
 }
 #endif
 
@@ -700,6 +931,8 @@ struct Install {
              &run_list_rewards},
             {kBuildCpuSide, "versus_build_cpu_side", decomp::Module::Main, decomp::Returns::Nothing,
              &run_build_cpu_side},
+            {kPlayer2PickUpdate, "versus_player2_pick", decomp::Module::MenuOverlay, decomp::Returns::Nothing,
+             &run_player2_pick, true, nullptr, &check_player2_pick},
         };
         decomp::add_overrides(overrides, sizeof overrides / sizeof overrides[0], true);
     }
@@ -871,6 +1104,11 @@ void read_pads(const portablekit::HleFunction &previous, psprecomp::Runtime &rt,
         s.fighting = false;
         s.split = false;
         s.fallen = 0u;
+        s.trip = {};
+        s.player2_menu = false;
+        s.setup_press = false;
+        s.setup_wait = 0u;
+        s.customizing = false;
         return;
     }
     read_fighting(memory, s, battle);
@@ -920,22 +1158,89 @@ void read_pads(const portablekit::HleFunction &previous, psprecomp::Runtime &rt,
     }
     feed_raw_pad1(memory, s);
     trace_fighters(memory, s);
-    const bool picking = picking_opponent(memory);
+    const Room room = battle ? Room{} : read_room(memory);
+    const bool picking = picking_opponent(room);
     if (picking != s.picking) {
         s.picking = picking;
         if (picking) s.picking_time = std::chrono::steady_clock::now();
-        std::cout << "[versus] " << (picking ? "player 2 picks the opponent" : "player 1's pad again")
+    }
+    // Player 2's triangle given to the setup screen at the last read: if the
+    // setup chose its Customize from it, the room takes it a frame later
+    // (menu 0x08A9E5E0 sets it going to Customize with player 1's
+    // character), and Customize is then given player 2's.
+    if (s.setup_press) {
+        s.setup_press = false;
+        if (rules::setup_chose_customize(s.setup_result, setup_result(memory, room)))
+            s.setup_wait = rules::kSetupWaitReads;
+    }
+    if (s.setup_wait != 0u) {
+        --s.setup_wait;
+        if (!room.present || room.state != rules::kSetupUpdate) {
+            s.setup_wait = 0u;
+        } else if (rules::setup_took_customize(s.setup_flags, room.flags, memory.load32(room.work + kRoomBackTo))) {
+            s.setup_wait = 0u;
+            const std::uint32_t character = memory.load32(room.work + kRoomOpponent);
+            memory.store32(room.work + kRoomCustomized, character);
+            s.trip = rules::Trip{rules::Trip::From::Setup};
+            std::cout << "[versus] player 2 customises character " << static_cast<std::int32_t>(character)
+                      << " (from the setup screen)" << std::endl;
+        }
+    }
+    const bool trip = s.trip.active();
+    rules::step(s.trip, room.present, room.state);
+    if (trip && !s.trip.active()) std::cout << "[versus] player 2's Customize closed" << std::endl;
+    const bool customizing = s.trip.active() && room.state == rules::kCustomizeOpen;
+    if (customizing && !s.customizing) s.customizing_time = std::chrono::steady_clock::now();
+    s.customizing = customizing;
+    const bool player2_menu = room.present && rules::room_pad(room.state, s.trip) == rules::Pad::Player2;
+    if (player2_menu != s.player2_menu) {
+        s.player2_menu = player2_menu;
+        std::cout << "[versus] "
+                  << (!player2_menu ? "player 1's pad again"
+                      : picking     ? "player 2 picks the opponent"
+                                    : "player 2's pad in Customize")
                   << std::endl;
     }
-    if (!picking || buffer == 0u) return;
-    for (std::uint32_t i = 0; i < count; ++i) {
-        const std::uint32_t sample = buffer + i * 16u;
-        memory.store32(sample + 4u, s.pad.connected ? s.pad.buttons : 0u);
-        memory.store8(sample + 8u, s.pad.connected ? s.pad.analog_x : 0x80u);
-        memory.store8(sample + 9u, s.pad.connected ? s.pad.analog_y : 0x80u);
-        memory.store8(sample + 10u, s.pad.connected ? s.pad.right_x : 0x80u);
-        memory.store8(sample + 11u, s.pad.connected ? s.pad.right_y : 0x80u);
+    const std::uint32_t p2_buttons = s.pad.connected ? s.pad.buttons : 0u;
+    const std::uint32_t p2_before = s.p2_before;
+    s.p2_before = p2_buttons;
+    if (buffer == 0u) return;
+    if (player2_menu) {
+        for (std::uint32_t i = 0; i < count; ++i) {
+            const std::uint32_t sample = buffer + i * 16u;
+            memory.store32(sample + 4u, p2_buttons);
+            memory.store8(sample + 8u, s.pad.connected ? s.pad.analog_x : 0x80u);
+            memory.store8(sample + 9u, s.pad.connected ? s.pad.analog_y : 0x80u);
+            memory.store8(sample + 10u, s.pad.connected ? s.pad.right_x : 0x80u);
+            memory.store8(sample + 11u, s.pad.connected ? s.pad.right_y : 0x80u);
+        }
+        return;
     }
+    // The setup screen is player 1's, but player 2's triangle is the setup's
+    // Customize for player 2's character: a press on the game's pad for this
+    // read, when player 1 is not pressing it themselves.
+    if (!room.present || !player2_customize()) return;
+    std::uint32_t p1_buttons = 0;
+    for (std::uint32_t i = 0; i < count; ++i) p1_buttons |= memory.load32(buffer + i * 16u + 4u);
+    if (!rules::setup_triangle(room.state, room.flags, p2_buttons, p2_before, p1_buttons)) return;
+    const std::uint32_t character = memory.load32(room.work + kRoomOpponent);
+    if (!customizable_character(character)) {
+        std::cout << "[versus] no Customize for player 2's character " << static_cast<std::int32_t>(character)
+                  << std::endl;
+        GuestRegs regs{};
+        regs.a[0] = kSoundRefused;
+        try {
+            decomp::call_game(rt, ctx, kMenuSound, regs);
+        } catch (const std::exception &e) {
+            std::cerr << "[versus] the game's menu sound failed: " << e.what() << "\n";
+        }
+        return;
+    }
+    for (std::uint32_t i = 0; i < count; ++i)
+        memory.store32(buffer + i * 16u + 4u, memory.load32(buffer + i * 16u + 4u) | rules::kTriangle);
+    s.setup_press = true;
+    s.setup_flags = room.flags;
+    s.setup_result = setup_result(memory, room);
 }
 
 void install(portablekit::HleRegistrar &hle) {
@@ -953,6 +1258,7 @@ void install(portablekit::HleRegistrar &hle) {
     portablekit::ui::add_game_overlay(&hud_visible, &hud_draw);
     portablekit::ui::add_game_overlay(&notice_visible, &notice_draw);
     portablekit::ui::add_game_overlay(&pick_header_visible, &pick_header_draw);
+    portablekit::ui::add_game_overlay(&customize_header_visible, &customize_header_draw);
     portablekit::ui::add_menu_rows(&menu_rows);
 #endif
     if (const portablekit::HleFunction saving = hle.bound_function("sceUtility", kSavedataInitStart); saving) {

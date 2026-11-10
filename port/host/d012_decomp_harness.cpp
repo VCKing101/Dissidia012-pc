@@ -550,9 +550,16 @@ void rearm(Runtime &rt) {
     Harness &h = harness();
     const Library *resident = resident_overlay(rt.memory());
     const bool battle = resident != nullptr && resident->name == "battle";
+    const bool menu = resident != nullptr && resident->name == "menu";
     if (battle && (h.rearm_pending || resident != h.armed_overlay)) {
         register_set(rt, Module::BattleOverlay);
         std::cout << "[decomp] overrides in the battle overlay registered" << std::endl;
+    }
+    if (menu && (h.rearm_pending || resident != h.armed_overlay) &&
+        std::any_of(h.overrides.begin(), h.overrides.end(),
+                    [](const Registered &reg) { return reg.o.module == Module::MenuOverlay; })) {
+        register_set(rt, Module::MenuOverlay);
+        if (resident != h.armed_overlay) std::cout << "[decomp] overrides in the menu overlay registered" << std::endl;
     }
     h.armed_overlay = resident;
     h.rearm_pending = false;

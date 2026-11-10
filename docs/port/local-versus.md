@@ -41,7 +41,8 @@ In:
 - **Entry:** a new Battle Mode row, "Quick Battle (Player vs Player)". It appears only when everything below works.
 - **Characters:** player 2 picks from player 1's save on their own controller. Level, equipment, abilities,
   accessories, look and set are player 1's saved build for that character (changed 27 October 2026, section 7.12;
-  first planned as Quick Battle's opponent settings, which the setup screen no longer shows).
+  first planned as Quick Battle's opponent settings, which the setup screen no longer shows). Since 10 November 2026
+  player 2 can open Customization for it on their pick or the setup screen (7.16).
 - **Menus:** player 1 runs every menu but player 2's pick: the settings page (CPU strength and behaviour rows
   hidden), the Opponent Info and BGM screen, and the post-battle menu.
 - **Pause:** either player can pause; the pause menu answers to whoever paused.
@@ -955,7 +956,8 @@ time, no pipelines; the owner found them gone in the next session, after the dis
   record's costume and -1s first. Checked (`savebuild2/`, `savebuild3/`): player 2's Cloud has player 1's
   unequipped level 1 stats (BRV 95, ATK 11, no Katana or Bronze Helm), player 2's Tifa player 1's six Power Rings;
   the battle runs as before. The log line `player 2's N from player 1's save` gives the level, set and costume.
-  Player 2 cannot change the look or set on their pick (player 1 can, for the same records).
+  Player 2 cannot change the look or set on their pick (player 1 can, for the same records). Player 2's Customize
+  can (7.16).
 
 ## 7.13 No records from a versus battle; before the merge (27 October 2026)
 
@@ -1076,6 +1078,89 @@ chasing, the × showed on the line between the halves; with player 2 chasing, no
   and the lines in player 2's half in player 2's chase, in player 1's half in player 1's, and the `--chase` route
   plays through. **Not checked:** a chase started from a wall rush or other launchers, both players able to chase at
   once.
+
+## 7.16 Player 2's Customize (10 November 2026)
+
+A tester, over Parsec on v0.7.0: player 2 cannot customise their character, and the customise button freezes the
+game. V unless marked.
+
+**The freeze.**
+
+- Player 2's pick is a "Player Select" grid (header 4, 7.11). Its △ (logical 0x1000) gives the grid's result 5,
+  Customize, with no check of the cell. Player 1's grid checks the cell first (menu `0x08A8255C`): no Customize
+  on Chaos (0x17), Feral Chaos (cell 0x20), a locked cell (-2) or the random cell (-3), with the "not allowed"
+  sound.
+- The room's opponent pick update (state 9, menu `0x08A984BC`) takes the grid's results 2 (picked) and 4 (back)
+  only, and turns the grid's input off for any result (menu `0x08A80F14(grid, 0)`). After a 5 the room stays in
+  state 9 with a deaf grid for ever. The update even has the way on to Customize after a fade (state 10 with
+  state 50 next), but nothing starts it.
+- Player 2's pick shows no button prompts: the same update hides the room's prompt bar every frame. Player 1's shows
+  Set, Look and Customization.
+- Reproduced with the fix off (`D012_NO_PLAYER2_CUSTOMIZE=1`, `freeze2/`): △ on player 2's pad, then right, cross and
+  circle on player 2's and circle on player 1's. The cursor goes and nothing changes for 2,400 frames.
+
+**How the room goes to Customize.**
+
+- States 50 and 51 take the room down; 52 starts the game's Customize (menu `0x08AF3130`) for the character at
+  `+0x8048` and pauses the room's task (main `0x08865184`). Customize's close (menu `0x08A9A52C`) puts the room in
+  state 0, which goes straight to the state at `+0x918`. Customize reads logical pad 0, as every menu does.
+- Player 1's pick (state 5, menu `0x08A9E0E8`), result 5: the character into `+0x804C` and `+0x8048`, Customize's
+  settings made (main `0x0892A13C` on `+0x8060`), flags `+0x91C |= 8`, `+0x918 = 4`, and a white fade (main
+  `0x08873D34`, its end menu `0x08A9CEC4` setting flag 4; colour main `0x08873DB0`).
+- The setup screen's △: the setup (its state 2, menu `0x08AA58D4`; I, from the frame below) records result 3 at
+  `+0x558` of its state and hands it to the room a frame later (its closing state, menu `0x08AA4158`); in a run the
+  room's Customize flag came one pad read after the press's. The room (state 13, menu `0x08A9E5E0`) then
+  puts player 1's character (`+0x804C`) in `+0x8048`, `+0x918 = 12`, and fades.
+
+**What the port does** (`d012_versus.cpp`; the rules in `d012_versus_rules.cpp`, checked by `d012_tests`):
+
+- **The harness takes overrides in the menu overlay** (`Module::MenuOverlay`, registered each time the menu overlay is
+  installed, as the battle overlay's are). The room calls its states through its table (`jalr`), so an override of a
+  state takes every frame of it. The earlier menu hooks (7.6) are main functions and stay so.
+- **Player 2's pick** (`run_player2_pick`, over menu `0x08A984BC`): before the game's update, △ on a cell player 1's
+  pick would refuse is taken off this frame's presses (logical pad 0, pressed at `0x08C15C58`) with the "not
+  allowed" sound. After it, a result 5 starts what player 1's pick does, for the cell's character (into `+0x8050` as
+  well), with the room coming back to player 2's pick (`+0x918 = 8`). The prompt bar shows the setup screen's set 4,
+  "Customization" alone, while the cursor is on a character Customize takes (the room's record of the set shown,
+  `+0x81C4`, is -1 to the game's update, so that it leaves the bar alone).
+- **The setup screen** (in the pad read): player 2's △, pressed while player 1 is not pressing it, goes into the game's
+  pad for that read. If the setup chose Customize from it, the room's Customize gets player 2's character (`+0x8050`
+  into `+0x8048`) when the room takes it, before Customize opens. Player 2's △ with a character Customize does not
+  take (Chaos, Feral Chaos) plays the "not allowed" sound instead.
+- **Whose pad** (`rules::room_pad`): player 2's from their △ on either screen, through Customize and back to where it
+  came from; player 1's again on the setup screen. Player 1's own Customize, from either screen, stays player 1's.
+- **"Player 2"** in a red plate beside Customize's title while player 2's Customize is up, as on their pick.
+- `D012_NO_PLAYER2_CUSTOMIZE=1` leaves all of this out.
+
+**Where the changes go.** Player 2 fights with player 1's saved build for that character (7.12), so player 2's
+Customize edits that build in player 1's save, and the game saves it as it saves player 1's own Customize. Both
+players on the same character share one build. A save of player 2's own stays out of scope (0.1).
+
+**Checked** (recompiled clang build, local, `build/port/p2cust/`, data `build/port/data-p2cust`, a copy of
+`data-versus-test`; each route presses player 1's buttons on pad 1 only and player 2's on pad 2 only;
+`D012_TRACE_RECORDS=1` logs the records' sets). The final build ran both routes again from a fresh copy of the save
+(`final_pick2`, `final_setup`), with the same results:
+
+| Run | What it showed |
+| --- | --- |
+| `pickfull2` | Player 1 Vaan, player 2 Lightning. △ on player 2's pick: Customize for Lightning, with "Player 2" (`pickfull3`). Player 1's SELECT there did nothing; player 2's opened the set list, and Set B was chosen (Lightning's record: set 1). Circle: back on player 2's pick, "SET: Set B", the "Customization" prompt. The battle: "player 2's 31 from player 1's save: level 1, set 1" |
+| `setupfull2` | On the setup screen player 2's △: Customize for Lightning, not player 1's Vaan. Player 1's SELECT did nothing, player 2's changed the set; back on the setup screen. Then player 1's △: Customize for Vaan, where player 2's SELECT did nothing; back. The battle with player 2's new set |
+| `refuse1` | Player 1's own Customize from their pick: player 2's SELECT ignored, back to player 1's pick. Player 2's cursor on the random cell: no prompt; △ refused with the sound, and the pick goes on; player 2 picks Laguna |
+| `stock1` | A stock Quick Battle (versus not chosen): "CPU Select" with no prompts, △ there and player 2's △ on the setup screen do nothing, player 1's Customize as before |
+| `freeze2` | The freeze, with `D012_NO_PLAYER2_CUSTOMIZE=1` |
+
+Not checked:
+
+- Real controllers (only SDL virtual pads), the Steam Deck, the Linux build.
+- Customize's other pages (equipment, abilities and the rest) on player 2's pad: only the set list was used, and the
+  Abilities page opened.
+- Player 2's pad lost in Customize: as on player 2's pick, the game waits for it, and player 1's pad does nothing
+  there.
+- Whether the button symbol on player 2's prompt follows player 2's controller type (button prompts) or player
+  1's.
+- The differential test (`D012_DECOMP_VERIFY=1`) on a build with the Battle Mode row: in one run the start menu
+  stopped on a white screen before Quick Battle, with the row made twice (its hooks also ran in the test's copy of
+  the game). Not this change's; not looked into further.
 
 ## 8. For later: two copies over the game's ad hoc versus
 
