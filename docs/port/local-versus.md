@@ -678,6 +678,11 @@ Left open at the time, all done since (7.8):
   (Start would resume). The input script gained `detach` / `attach` for its first virtual pad. Player 2's gamepad
   never takes player 1's place: the scan keeps it as player 2's. (Since 10 November that holds in versus; on the
   start menu it moves to player 1, [controller-picker.md](controller-picker.md).)
+- **Player 1 on the keyboard** (10 November 2026). Player 1's notice ends "or play on the keyboard", but it went only
+  when a gamepad came back, so a player who went on on the keyboard kept it over the battle. Setting Controls >
+  Player 1 to Keyboard in a battle showed it the same way, since that leaves player 1 no gamepad. Now any press or
+  stick on player 1's keyboard takes it away (the log says "player 1 goes on on the keyboard"); the pause stays until
+  Start, as when a gamepad comes back. Not while the keyboard is player 2's.
 - **Player 2's EX Burst** (`p2burst/`, `D012_TEST_EX_FULL=2` keeps both gauges full): EX Mode, the burst landing on
   player 1, its stages full screen (7.5), player 1's defence prompt, and the damage.
 - **A battle player 2 wins** (`p2results4/`): the finishing blow full screen, then the game's own ending for player 1
