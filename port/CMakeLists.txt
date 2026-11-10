@@ -76,6 +76,7 @@ portablekit_add_game(D012Native ${d012_corpus}
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_rollback.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_comm_battle.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_brave_pool_guard.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_button_prompts.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_math_check.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_math.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_loading_layout.cpp"

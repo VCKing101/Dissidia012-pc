@@ -28,7 +28,11 @@
 #include "kernel/iso_image.hpp"
 #include "profile.hpp"
 #include "ui/dialog_skin.hpp"
+#include "ui/layer.hpp"
 #include "ui/ui.hpp"
+#include "gpu/vulkan_renderer.hpp"
+
+#include "d012_button_prompts.hpp"
 
 #include <imgui.h>
 #include <imgui_internal.h>
@@ -52,6 +56,7 @@
 #include <cstring>
 #include <filesystem>
 #include <iostream>
+#include <list>
 #include <map>
 #include <mutex>
 #include <optional>
@@ -311,6 +316,10 @@ struct Art {
     bool ready{};
     std::array<Texture, kSheetCount> sheets;
     Texture blue_cell;  // the key cell in the blue plate's colours, for the selected key
+    // The button symbols as read, and copies of them drawn in the style of
+    // another pad (Controls > Button prompts), by what each was drawn for.
+    Picture symbols;
+    std::list<std::pair<portablekit::TextureEditContext, Texture>> prompted;
 };
 
 Art &art() {
@@ -376,6 +385,7 @@ bool available() {
         const Picture &p = pictures.sheets[static_cast<std::size_t>(s)];
         a.sheets[static_cast<std::size_t>(s)] = make_texture(p.width, p.height, p.rgba.data());
     }
+    a.symbols = pictures.sheets[kSymbols];
     const std::vector<std::uint8_t> cell = blue_cell(pictures.sheets[kCells]);
     a.blue_cell = make_texture(kCell.w, kCell.h, cell.data());
     a.ready = true;
@@ -415,7 +425,42 @@ Canvas canvas() {
     return c;
 }
 
-const Texture &sheet(Sheet s) { return art().sheets[static_cast<std::size_t>(s)]; }
+// What the game's own button symbols show now (Controls > Button prompts),
+// or none while they are the PSP's.
+std::optional<portablekit::TextureEditContext> prompts_now() {
+    const std::optional<portablekit::TextureEditContext> context =
+        portablekit::ui::Layer::get().renderer().texture_edit_context();
+    if (!context || context->prompts.style == portablekit::input::PromptStyle::Psp) return std::nullopt;
+    return context;
+}
+
+// A sheet; the button symbols drawn as the game's own are now, by the same
+// code (d012_button_prompts.cpp: they are the game's icon sheet), at four
+// times the size. Pieces keep their places in the game's pixels.
+const Texture &sheet(Sheet s) {
+    Art &a = art();
+    if (s == kSymbols) {
+        if (const std::optional<portablekit::TextureEditContext> context = prompts_now()) {
+            for (const auto &[made_for, texture] : a.prompted)
+                if (made_for == *context) return texture;
+            const Picture &p = a.symbols;
+            std::vector<std::uint32_t> pixels(static_cast<std::size_t>(p.width) * p.height);
+            std::memcpy(pixels.data(), p.rgba.data(), pixels.size() * 4u);
+            std::vector<std::uint32_t> drawn;
+            std::uint32_t width = 0u, height = 0u;
+            if (d012::draw_button_prompts(d012::kButtonPromptIcons, pixels.data(), static_cast<std::uint32_t>(p.width),
+                                          static_cast<std::uint32_t>(p.height), *context, drawn, width, height)) {
+                Texture t = make_texture(static_cast<int>(width), static_cast<int>(height),
+                                         reinterpret_cast<const std::uint8_t *>(drawn.data()));
+                t.width = p.width;
+                t.height = p.height;
+                a.prompted.emplace_back(*context, t);
+                return a.prompted.back().second;
+            }
+        }
+    }
+    return a.sheets[static_cast<std::size_t>(s)];
+}
 
 // A piece at (x, y) w x h; `flip` mirrors it left to right.
 void image(const Canvas &c, const Texture &t, float sx, float sy, float sw, float sh, float x, float y, float w,
@@ -739,8 +784,24 @@ void instruction(const Canvas &c, std::string_view text) {
 
 // The game's button symbols for what the buttons do: confirm and back follow
 // the menu's "Confirm button" setting (south: cross confirms).
-const Piece &confirm_symbol(bool south) { return south ? kCross : kCircle; }
-const Piece &back_symbol(bool south) { return south ? kCircle : kCross; }
+// With another pad's buttons (Controls > Button prompts), the symbol of the
+// button where it sits on the pad: the sheet's PSP button sent from there
+// shows that button.
+const Piece &symbol_at(const portablekit::input::ButtonPrompts &prompts, portablekit::input::FaceButton at) {
+    if (prompts.cross == at) return kCross;
+    if (prompts.circle == at) return kCircle;
+    return at == portablekit::input::FaceButton::West ? kSquare : kTriangle;
+}
+const Piece &confirm_symbol(bool south) {
+    using portablekit::input::FaceButton;
+    if (const auto context = prompts_now()) return symbol_at(context->prompts, south ? FaceButton::South : FaceButton::East);
+    return south ? kCross : kCircle;
+}
+const Piece &back_symbol(bool south) {
+    using portablekit::input::FaceButton;
+    if (const auto context = prompts_now()) return symbol_at(context->prompts, south ? FaceButton::East : FaceButton::South);
+    return south ? kCircle : kCross;
+}
 
 struct Hint {
     const Piece *symbol;  // null: the label alone
