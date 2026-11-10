@@ -1,0 +1,621 @@
+From 8925d6355540392dc15bafaeb2a2a58582d84ca3 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Tue, 10 Nov 2026 19:40:41 +1030
+Subject: [PATCH] Button prompts: a profile can draw the game's textures again
+ as they load
+
+A game's button symbols are often sprites in its own textures, so a
+player with an Xbox, PlayStation or Nintendo pad sees the PSP's buttons.
+A profile can now list textures by the keys Dump textures gives them
+(GameProfile::edited_textures) and draw each again as it loads
+(edit_texture): at any size, with the same texture coordinates, as a
+texture pack's image is drawn. A texture pack's own image still wins.
+
+What the drawing depends on is a TextureEditContext: the button prompts
+to show and whether Texture filter is Sharp. The renderer works it out
+each frame from the settings and the gamepad in use, and when it
+changes, drops its cached textures so the listed ones are drawn again
+the next time they are used. VulkanRenderer::texture_edit_context()
+hands it to a profile's own screens. <prefix>_NO_TEXTURE_EDITS=1 leaves
+the textures as they are.
+
+A profile that sets button_prompts gets a Button prompts row on the
+Controls page (input.button_prompts, <prefix>_BUTTON_PROMPTS):
+Automatic, PSP, Xbox, PlayStation or Nintendo. Automatic takes the
+pad's kind from SDL_GetGamepadType, a Steam Deck's own controls from its
+name; with no pad it shows the PSP's. The face buttons follow the pad's
+positions and the Confirm button setting (host/input/button_prompts.*),
+covered by the input tests.
+
+Tested with Dissidia 012 on Windows (clang build, USA disc): a scripted
+Quick Battle in each style, and the owner playing with a DualSense and
+DS4Windows' virtual DS4 and Xbox 360 pads, the setting and the pad
+changed while playing. Not verified: a real Xbox, Nintendo or Steam
+Deck controller, Linux, another game.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ CMakeLists.txt                |   5 +-
+ cmake/PortableKit.cmake       |   1 +
+ docs/DESKTOP_APP.md           |   2 +-
+ docs/PROFILE_GUIDE.md         |   2 +
+ host/gpu/vulkan_renderer.cpp  | 102 ++++++++++++++++++++++++++++++++--
+ host/gpu/vulkan_renderer.hpp  |   5 ++
+ host/input/button_prompts.cpp |  55 ++++++++++++++++++
+ host/input/button_prompts.hpp |  51 +++++++++++++++++
+ host/profile.hpp              |  40 +++++++++++++
+ host/settings/settings.cpp    |  11 ++++
+ host/settings/settings.hpp    |   4 ++
+ host/ui/menu.cpp              |  12 ++++
+ tests/input_tests.cpp         |  35 ++++++++++++
+ 13 files changed, 317 insertions(+), 8 deletions(-)
+ create mode 100644 host/input/button_prompts.cpp
+ create mode 100644 host/input/button_prompts.hpp
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index c8c55c6..3607135 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -431,12 +431,13 @@ if(PSPRECOMP_BUILD_TESTS)
+ endif()
+ 
+ # Keyboard and mouse bindings: names, settings.ini spelling, the menu's
+-# assignment rules and what held keys press; and the stick's mapping to the
+-# PSP nub. No SDL or game data.
++# assignment rules and what held keys press; the stick's mapping to the PSP
++# nub; and the button prompts for each pad and setting. No SDL or game data.
+ if(PSPRECOMP_BUILD_TESTS)
+     add_executable(portablekit_input_tests
+         "${PORTABLEKIT_ROOT}/tests/input_tests.cpp"
+         "${PORTABLEKIT_ROOT}/host/input/bindings.cpp"
++        "${PORTABLEKIT_ROOT}/host/input/button_prompts.cpp"
+         "${PORTABLEKIT_ROOT}/host/input/stick.cpp")
+     target_include_directories(portablekit_input_tests PRIVATE "${PORTABLEKIT_ROOT}/host")
+     set_target_properties(portablekit_input_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+diff --git a/cmake/PortableKit.cmake b/cmake/PortableKit.cmake
+index 9b045a2..1d41e6a 100644
+--- a/cmake/PortableKit.cmake
++++ b/cmake/PortableKit.cmake
+@@ -39,6 +39,7 @@ set(PORTABLEKIT_HOST_SOURCES
+     host/gpu/ge_census.cpp
+     host/gpu/texture_decode.cpp
+     host/input/bindings.cpp
++    host/input/button_prompts.cpp
+     host/input/stick.cpp
+     host/input/touch_controls.cpp
+     host/input/tilt.cpp
+diff --git a/docs/DESKTOP_APP.md b/docs/DESKTOP_APP.md
+index d8fc79f..25ed478 100644
+--- a/docs/DESKTOP_APP.md
++++ b/docs/DESKTOP_APP.md
+@@ -83,7 +83,7 @@ Today a port is a `GameProfile` written in C++ ([`host/profile.hpp`](../host/pro
+ | `save_game_name`, `save_folders` | the disc id. The game names its folders itself when it saves; the save screen's labels are generic ("Game data") | the main one; the others only by running |
+ | `adhoc_product_code` | the disc id | a guess that holds for most games |
+ | `app_name`, `project_name`, `env_prefix`, data names | the app's own (`portablekit`, `PORTABLEKIT_*`) | — |
+-| `register_extra_hle`, `patch_loaded_image`, `camera`, `view_aspect_frame`, `interpolation_thresholds`, `glyph_cache`, `trigger_profiles`, `other_releases`, `sharp_textures`, `cheats` | none: the framework's defaults | these are what hand profiles are for |
++| `register_extra_hle`, `patch_loaded_image`, `camera`, `view_aspect_frame`, `interpolation_thresholds`, `glyph_cache`, `trigger_profiles`, `other_releases`, `sharp_textures`, `edited_textures`, `cheats` | none: the framework's defaults | these are what hand profiles are for |
+ 
+ The entry point, the code ranges, the imports and relocations are read from the ELF by the framework already; the recompiler finds the code by its own analysis (`psp_recomp --auto`). Modules the game loads from its disc that the framework implements as HLE (`libfont.prx`, `psmf.prx` and the like) are recognised by name at run time.
+ 
+diff --git a/docs/PROFILE_GUIDE.md b/docs/PROFILE_GUIDE.md
+index 5e77479..c18ca63 100644
+--- a/docs/PROFILE_GUIDE.md
++++ b/docs/PROFILE_GUIDE.md
+@@ -79,6 +79,8 @@ For a picture of the port's own beside one of the game's screens, such as a hint
+ 
+ `sharp_textures` lists pixel art to draw with nearest filtering whatever the Texture filter setting says, for a sprite that smoothing blurs at a higher resolution. Each is a `SharpTexture`: its key as **Dump textures** names the file (the address ignored, xxh64), and its width and height. Only a texture of a listed size is hashed, when it is uploaded, so the list costs nothing for the others. A key covers one texture with one palette, so a sprite sheet loaded with another palette, or as a different part of its picture, has a key of its own: dump each scene it appears in. `<prefix>_NO_SHARP_PIXEL_ART=1` draws them as the setting says, for a comparison. A texture pack's image for a listed texture keeps the pack's own filtering. Without any, the setting decides for every texture.
+ 
++`edited_textures` lists textures the profile draws again as they load, with `edit_texture` doing the drawing: the game's button symbols in the style of the gamepad in use, for one. Each is an `EditedTexture`, named and found as a `SharpTexture` is. `edit_texture` gets the game's decoded picture (RGBA8) and a `TextureEditContext`, and returns its own picture, the same shape at any size (four times gives room for sharp detail), drawn with the same texture coordinates as a texture pack's image; false keeps the game's. The context holds what the picture may depend on: Button prompts with the gamepad in use and the Confirm button setting (`input::ButtonPrompts`: the style, and which face button sends each of the PSP's), and whether Texture filter is Sharp. When it changes, the cached textures are dropped and the listed ones drawn again. Set `button_prompts` when they are the game's button symbols, and the Controls page offers Button prompts (Automatic, PSP, Xbox, PlayStation, Nintendo; Automatic follows the pad, the PSP's with none). A texture pack's image for one is drawn instead. `<prefix>_NO_TEXTURE_EDITS=1` draws the game's own, for a comparison. Keep the game's pixels out of the profile: draw over the picture it is given.
++
+ `cheats` lists cheats the port offers on the menu's Cheats page, beside the player's own PPSSPP cheat file (`PSP/Cheats/<disc id>.ini` on the memory stick, `host/cheats/cheats.hpp`). Each is a `BuiltinCheat`: a key for settings.ini, the heading it goes under, a name, a sentence for the footer, and its choices, each a label and its CWCheat code lines (what a cheat file has after `_L`). One choice makes a switch; several make Off and each. They run through the same engine as the file, before it, every 77 ms of the game's time, so a code written as a player would write it gives the same result. A write into recompiled code is left out, as for the file; such a code needs the interpreter, which cheats do not reach yet. Test each against the game's own screens before listing it: a public list's codes can name an address the game no longer reads. Without any, the page has only the switch and the file.
+ 
+ `interpolation_thresholds` is for frame interpolation, which blends the game's frames and must not blend across a camera cut. The angles and fractions it uses to tell a cut from motion hold for any game; its distances are in the game's own world units, and the defaults were measured on Monster Hunter Portable 3rd. A game whose world is on a very different scale gives its own; one that does not, gets those defaults.
+diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
+index 123e4b9..5e94908 100644
+--- a/host/gpu/vulkan_renderer.cpp
++++ b/host/gpu/vulkan_renderer.cpp
+@@ -56,6 +56,7 @@
+ #include <map>
+ #include <memory>
+ #include <string>
++#include <string_view>
+ #include <utility>
+ #include <set>
+ #include <sstream>
+@@ -2209,6 +2210,12 @@ struct VulkanRenderer::Impl {
+     bool dump_wanted{};
+     std::filesystem::path dump_folder;  // empty: textures/dump/<disc id>
+     void apply_texture_dump();
++    // The profile's textures drawn again (GameProfile::edited_textures): what
++    // they were last drawn for. When it changes (Button prompts, the gamepad in
++    // use, Texture filter), begin_frame() drops the cached textures so they are
++    // drawn again. None until the first frame, and none without such textures.
++    std::optional<TextureEditContext> edit_context;
++    void apply_texture_edits();
+     // Every cached texture is dropped, so the next draws decode them again.
+     // The GPU must be idle.
+     void drop_cached_textures();
+@@ -5087,8 +5094,73 @@ bool listed_pixel_art(const GuestMemory &memory, const TextureState &texture, st
+     return false;
+ }
+ 
++// Which of the profile's textures drawn again this is
++// (GameProfile::edited_textures), by its key as a dump names it, or none.
++// Only a texture of a listed size is hashed.
++std::optional<std::size_t> listed_edit(const GuestMemory &memory, const TextureState &texture,
++                                       std::uint16_t max_seen_v, const TexturePackOptions &options) {
++    const std::span<const EditedTexture> listed = portablekit::game().edited_textures;
++    const auto sized = [&](const EditedTexture &entry) {
++        return entry.width == texture.width && entry.height == texture.height;
++    };
++    if (std::none_of(listed.begin(), listed.end(), sized)) return std::nullopt;
++    TexturePackKey key;
++    std::uint32_t covered_width = 0u, covered_height = 0u;
++    if (!compute_texture_pack_key(memory, texture, max_seen_v, options, key, covered_width, covered_height))
++        return std::nullopt;
++    const std::string name = format_texture_pack_key(key);
++    for (std::size_t i = 0; i < listed.size(); ++i)
++        if (sized(listed[i]) && name == listed[i].key) return i;
++    return std::nullopt;
++}
++
++// What kind of pad `pad` is, as far as the names on its buttons go. A Steam
++// Deck's own controls, or Steam's virtual pad on a Deck, print A B X Y and
++// L1 R1.
++input::PadKind pad_kind(SDL_Gamepad *pad) {
++    if (pad == nullptr) return input::PadKind::None;
++    const char *name = SDL_GetGamepadName(pad);
++    const std::string_view text = name != nullptr ? name : "";
++    switch (SDL_GetGamepadType(pad)) {
++    case SDL_GAMEPAD_TYPE_PS3:
++    case SDL_GAMEPAD_TYPE_PS4:
++    case SDL_GAMEPAD_TYPE_PS5: return input::PadKind::PlayStation;
++    case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO:
++    case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_LEFT:
++    case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_RIGHT:
++    case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_PAIR: return input::PadKind::Nintendo;
++    default: break;
++    }
++    const char *deck = std::getenv("SteamDeck");  // Steam sets it on a Steam Deck
++    const bool on_deck = deck != nullptr && std::strcmp(deck, "1") == 0;
++    if (text.find("Steam Deck") != std::string_view::npos ||
++        (on_deck && text.find("Steam Virtual") != std::string_view::npos))
++        return input::PadKind::SteamDeck;
++    return input::PadKind::Xbox;
++}
++
+ } // namespace
+ 
++void VulkanRenderer::Impl::apply_texture_edits() {
++    static const bool off = portablekit::env_set("NO_TEXTURE_EDITS");
++    const GameProfile &profile = portablekit::game();
++    if (off || profile.edit_texture == nullptr || profile.edited_textures.empty()) return;
++    const settings::Settings &s = settings::current();
++    TextureEditContext context;
++    context.prompts =
++        input::button_prompts(s.button_prompts, pad_kind(gamepad), s.confirm_south, profile.confirm_button == 1u);
++    context.sharp_textures = sharp_textures;
++    if (edit_context && *edit_context == context) return;
++    const bool first = !edit_context;
++    edit_context = context;
++    if (profile.button_prompts)
++        std::cout << "[render] button prompts: " << input::prompt_style_name(context.prompts.style) << "\n";
++    if (first) return;
++    // Drawn again as they are next used.
++    device_wait_idle();
++    drop_cached_textures();
++}
++
+ VulkanRenderer::Impl::Texture &VulkanRenderer::Impl::texture_for(const GuestMemory &memory, const DrawCall &call) {
+     const TextureState &state = call.texture;
+     const TextureKeyInput input{state.address,
+@@ -5164,8 +5236,13 @@ VulkanRenderer::Impl::Texture &VulkanRenderer::Impl::texture_for(const GuestMemo
+             if (on) perf::note_texture_decoded(std::chrono::duration<double, std::milli>(perf::Clock::now() - start).count());
+         }
+     } decode_timer;
++    const std::uint16_t max_seen_v =
++        state.height == 512u ? update_max_seen_v(0u, drawn_max_v(call), call.through) : 0u;
++    // A texture the profile draws again is decoded here and now, for it.
++    const std::optional<std::size_t> edit =
++        edit_context ? listed_edit(memory, state, max_seen_v, kDumpOptions) : std::nullopt;
+     std::shared_ptr<DecodeJob> job;
+-    if (recording && async_uploads() && background_decode() && !dumper) {
++    if (recording && async_uploads() && background_decode() && !dumper && !edit) {
+         job = std::make_shared<DecodeJob>();
+         if (!snapshot_texture(memory, state, job->snapshot)) job.reset();
+     }
+@@ -5186,9 +5263,18 @@ VulkanRenderer::Impl::Texture &VulkanRenderer::Impl::texture_for(const GuestMemo
+         }
+         return white_texture;
+     }
+-    const std::uint16_t max_seen_v =
+-        state.height == 512u ? update_max_seen_v(0u, drawn_max_v(call), call.through) : 0u;
+     if (dumper) dumper->dump(memory, state, max_seen_v, pack ? pack->options() : kDumpOptions, pixels.data());
++    // The profile's own picture for it, drawn with the same texture
++    // coordinates whatever its size; the dump keeps the game's.
++    std::vector<std::uint32_t> edited;
++    std::uint32_t edited_width = 0u, edited_height = 0u;
++    if (edit && !job) {
++        const bool drawn = portablekit::game().edit_texture(*edit, pixels.data(), state.width, state.height,
++                                                            *edit_context, edited, edited_width, edited_height);
++        if (!drawn || edited_width == 0u || edited_height == 0u ||
++            edited.size() != std::size_t{edited_width} * edited_height)
++            edited.clear();
++    }
+ 
+     // <prefix>_TEXTURE_CACHE_LIMIT keeps fewer textures, to test eviction.
+     static const std::size_t cache_limit = [] {
+@@ -5215,8 +5301,9 @@ VulkanRenderer::Impl::Texture &VulkanRenderer::Impl::texture_for(const GuestMemo
+         ++textures_erased;
+     }
+     const bool decoded_now = !job;  // `job` is handed over below
+-    Texture texture = job ? create_texture_image(state.width, state.height)
+-                          : create_texture(state.width, state.height, pixels.data());
++    Texture texture = job                ? create_texture_image(state.width, state.height)
++                      : !edited.empty() ? create_texture(edited_width, edited_height, edited.data())
++                                        : create_texture(state.width, state.height, pixels.data());
+     if (texture.descriptor == VK_NULL_HANDLE) return white_texture;
+     if (listed_pixel_art(memory, state, max_seen_v, kDumpOptions)) {
+         texture.always_sharp = true;
+@@ -7311,6 +7398,10 @@ std::array<float, 4> VulkanRenderer::game_picture() const noexcept {
+ std::string VulkanRenderer::device_name() const { return impl_ ? impl_->device_name : std::string{}; }
+ SDL_Gamepad *VulkanRenderer::gamepad() const noexcept { return impl_ ? impl_->gamepad : nullptr; }
+ 
++std::optional<TextureEditContext> VulkanRenderer::texture_edit_context() const {
++    return impl_ ? impl_->edit_context : std::nullopt;
++}
++
+ VkExtent2D VulkanRenderer::Impl::wanted_target_extent() const {
+     const bool known = content_rect.extent.width != 0u && content_rect.extent.height != 0u;
+     const double window_width = known ? content_rect.extent.width : static_cast<double>(target_extent.width);
+@@ -7810,6 +7901,7 @@ void VulkanRenderer::begin_frame() {
+     impl.report_pipelines(false);
+     impl.apply_texture_pack();
+     impl.apply_texture_dump();
++    impl.apply_texture_edits();
+     impl.replacements.begin_frame(impl.frames);
+     if (texture_pack_trace() && impl.pack && impl.frames % 60u == 0u) {
+         std::cout << "[texpack] frame " << impl.frames << ": " << impl.replaced_draws << " draws replaced in 60 frames, "
+diff --git a/host/gpu/vulkan_renderer.hpp b/host/gpu/vulkan_renderer.hpp
+index ca07fda..bb03487 100644
+--- a/host/gpu/vulkan_renderer.hpp
++++ b/host/gpu/vulkan_renderer.hpp
+@@ -277,6 +277,11 @@ public:
+     [[nodiscard]] std::string device_name() const;
+     // The pad the game reads, or null.
+     [[nodiscard]] SDL_Gamepad *gamepad() const noexcept;
++    // What the profile's textures drawn again were last drawn for
++    // (GameProfile::edited_textures), so the port's own screens can show the
++    // same button prompts. None before the first frame, or without such
++    // textures.
++    [[nodiscard]] std::optional<TextureEditContext> texture_edit_context() const;
+ 
+     // The port's own interface (host/ui). Every window event is offered to
+     // the hook first; returning true keeps it from the game.
+diff --git a/host/input/button_prompts.cpp b/host/input/button_prompts.cpp
+new file mode 100644
+index 0000000..e556f17
+--- /dev/null
++++ b/host/input/button_prompts.cpp
+@@ -0,0 +1,55 @@
++#include "input/button_prompts.hpp"
++
++namespace portablekit::input {
++
++ButtonPrompts button_prompts(PromptSetting setting, PadKind pad, bool confirm_south, bool cross_confirms) {
++    ButtonPrompts prompts;
++    // South sends the confirm button when confirm_south is set, the back
++    // button otherwise (the renderer's read_gamepad), so it sends cross
++    // exactly when those two agree.
++    const bool south_sends_cross = confirm_south == cross_confirms;
++    prompts.cross = south_sends_cross ? FaceButton::South : FaceButton::East;
++    prompts.circle = south_sends_cross ? FaceButton::East : FaceButton::South;
++    switch (setting) {
++    case PromptSetting::Automatic:
++        switch (pad) {
++        case PadKind::None: prompts.style = PromptStyle::Psp; break;
++        case PadKind::Xbox: prompts.style = PromptStyle::Xbox; break;
++        case PadKind::PlayStation: prompts.style = PromptStyle::PlayStation; break;
++        case PadKind::Nintendo: prompts.style = PromptStyle::Nintendo; break;
++        case PadKind::SteamDeck:
++            prompts.style = PromptStyle::Xbox;
++            prompts.numbered_shoulders = true;
++            break;
++        }
++        break;
++    case PromptSetting::Psp: prompts.style = PromptStyle::Psp; break;
++    case PromptSetting::Xbox: prompts.style = PromptStyle::Xbox; break;
++    case PromptSetting::PlayStation: prompts.style = PromptStyle::PlayStation; break;
++    case PromptSetting::Nintendo: prompts.style = PromptStyle::Nintendo; break;
++    }
++    return prompts;
++}
++
++const char *prompt_setting_label(PromptSetting setting) {
++    switch (setting) {
++    case PromptSetting::Automatic: return "Automatic";
++    case PromptSetting::Psp: return "PSP";
++    case PromptSetting::Xbox: return "Xbox";
++    case PromptSetting::PlayStation: return "PlayStation";
++    case PromptSetting::Nintendo: return "Nintendo";
++    }
++    return "Automatic";
++}
++
++const char *prompt_style_name(PromptStyle style) {
++    switch (style) {
++    case PromptStyle::Psp: return "psp";
++    case PromptStyle::Xbox: return "xbox";
++    case PromptStyle::PlayStation: return "playstation";
++    case PromptStyle::Nintendo: return "nintendo";
++    }
++    return "psp";
++}
++
++} // namespace portablekit::input
+diff --git a/host/input/button_prompts.hpp b/host/input/button_prompts.hpp
+new file mode 100644
+index 0000000..1fc20b3
+--- /dev/null
++++ b/host/input/button_prompts.hpp
+@@ -0,0 +1,51 @@
++#pragma once
++
++// What the game's button symbols are drawn as: the PSP's own, or the buttons
++// of the gamepad in use (Controls > Button prompts, input.button_prompts). A
++// profile that draws the game's symbol textures again
++// (GameProfile::edit_texture) reads it from the TextureEditContext it is
++// given. No SDL here: the renderer says what kind of pad is in use.
++
++#include <cstdint>
++
++namespace portablekit::input {
++
++// The player's choice. Automatic follows the gamepad in use.
++enum class PromptSetting : std::uint8_t { Automatic, Psp, Xbox, PlayStation, Nintendo };
++inline constexpr int kPromptSettings = 5;
++
++// What the symbols are drawn as.
++enum class PromptStyle : std::uint8_t { Psp, Xbox, PlayStation, Nintendo };
++
++// A face button by where it sits on the pad.
++enum class FaceButton : std::uint8_t { South, East, West, North };
++
++// The kind of pad in use, as far as the names on its buttons go.
++enum class PadKind : std::uint8_t { None, Xbox, PlayStation, Nintendo, SteamDeck };
++
++struct ButtonPrompts {
++    PromptStyle style{PromptStyle::Psp};
++    // The pad's face button that sends each of the PSP's. The Confirm button
++    // setting moves cross and circle between south and east.
++    FaceButton cross{FaceButton::South};
++    FaceButton circle{FaceButton::East};
++    FaceButton square{FaceButton::West};
++    FaceButton triangle{FaceButton::North};
++    // Shoulders named L1 and R1 in the Xbox style, as a Steam Deck prints them.
++    bool numbered_shoulders{};
++
++    bool operator==(const ButtonPrompts &) const = default;
++};
++
++// The prompts for `setting` with `pad` in use. `confirm_south` is the Confirm
++// button setting; `cross_confirms` says the game confirms with cross
++// (GameProfile::confirm_button == 1) rather than circle.
++[[nodiscard]] ButtonPrompts button_prompts(PromptSetting setting, PadKind pad, bool confirm_south, bool cross_confirms);
++
++// The menu's name for a setting: "Automatic", "PSP", "Xbox", ...
++[[nodiscard]] const char *prompt_setting_label(PromptSetting setting);
++
++// A style's name for logs: "psp", "xbox", "playstation", "nintendo".
++[[nodiscard]] const char *prompt_style_name(PromptStyle style);
++
++} // namespace portablekit::input
+diff --git a/host/profile.hpp b/host/profile.hpp
+index df26a0d..8a3a607 100644
+--- a/host/profile.hpp
++++ b/host/profile.hpp
+@@ -12,12 +12,15 @@
+ // entry point, its segments, its imports) is read from the ELF, not declared.
+ 
+ #include "input/bindings.hpp"
++#include "input/button_prompts.hpp"
+ 
+ #include <array>
++#include <cstddef>
+ #include <cstdint>
+ #include <span>
+ #include <string>
+ #include <string_view>
++#include <vector>
+ 
+ namespace psprecomp {
+ class Elf32Image;
+@@ -84,6 +87,32 @@ struct SharpTexture {
+     std::uint16_t height;
+ };
+ 
++// A texture of the game's that the profile draws again as it loads
++// (GameProfile::edited_textures).
++struct EditedTexture {
++    const char *key;      // as Dump textures names it, e.g. "00000000c1a4601a0f4147e8"
++    std::uint16_t width;  // its size: only textures of this size are hashed to find it
++    std::uint16_t height;
++};
++
++// What a texture drawn again may depend on. When it changes, the listed
++// textures are drawn again.
++struct TextureEditContext {
++    input::ButtonPrompts prompts;  // Button prompts and the gamepad in use
++    bool sharp_textures{};         // Texture filter is Sharp
++
++    bool operator==(const TextureEditContext &) const = default;
++};
++
++// Draws listed texture `index` again from the game's picture: `pixels` is
++// `width` x `height` RGBA8 (bytes R, G, B, A, rows top first). Fills `out` with
++// the new picture, `out_width` x `out_height`, the same shape at any size; a
++// larger one is drawn with the same texture coordinates, as a texture pack's
++// image is. False keeps the game's picture.
++using EditTexture = bool (*)(std::size_t index, const std::uint32_t *pixels, std::uint32_t width,
++                             std::uint32_t height, const TextureEditContext &context,
++                             std::vector<std::uint32_t> &out, std::uint32_t &out_width, std::uint32_t &out_height);
++
+ // One setting of a built-in cheat: its CWCheat codes, the lines a cheat file
+ // gives after "_L", one per line ("0x203BFA00 0x05F5E0FF\n...").
+ struct CheatChoice {
+@@ -351,6 +380,17 @@ struct GameProfile {
+     // setting decides for every texture.
+     std::span<const SharpTexture> sharp_textures = {};
+ 
++    // --- Textures drawn again --------------------------------------------------
++    // Textures the profile draws again as they load (edit_texture), such as the
++    // game's button symbols in the style of the gamepad in use. A texture pack's
++    // image for one is drawn instead. Empty: none.
++    // <prefix>_NO_TEXTURE_EDITS=1 draws the game's own.
++    std::span<const EditedTexture> edited_textures = {};
++    EditTexture edit_texture = nullptr;
++    // The textures drawn again are the game's button symbols: the Controls page
++    // offers Button prompts.
++    bool button_prompts = false;
++
+     // --- Cheats ----------------------------------------------------------------
+     // The cheats the port offers on the Cheats page, besides the player's own
+     // cheat file (cheats/cheats.hpp). Empty: only the file's.
+diff --git a/host/settings/settings.cpp b/host/settings/settings.cpp
+index 74e2f02..43a98e3 100644
+--- a/host/settings/settings.cpp
++++ b/host/settings/settings.cpp
+@@ -121,6 +121,11 @@ const Names<JumpButton> kJumpButtons{{{JumpButton::Off, "off"},
+                                       {JumpButton::North, "north"}}};
+ const Names<RightStick> kRightSticks{
+     {{RightStick::Camera, "camera"}, {RightStick::DPad, "dpad"}, {RightStick::Off, "off"}}};
++const Names<input::PromptSetting> kPromptSettings{{{input::PromptSetting::Automatic, "auto"},
++                                                   {input::PromptSetting::Psp, "psp"},
++                                                   {input::PromptSetting::Xbox, "xbox"},
++                                                   {input::PromptSetting::PlayStation, "playstation"},
++                                                   {input::PromptSetting::Nintendo, "nintendo"}}};
+ // A trigger profile by the key the game gives it, or "standard" for L and R.
+ bool parse_trigger_profile(const std::string &text, std::uint32_t &out) {
+     if (text == "standard") {
+@@ -249,6 +254,12 @@ const std::vector<Field> &fields() {
+          },
+          [](const Settings &s) { return std::string(s.confirm_south ? "south" : "east"); },
+          [](Settings &s, const char *t) { s.confirm_south = std::strcmp(t, "xbox") == 0 || std::strcmp(t, "south") == 0; }},
++        {"input.button_prompts", "BUTTON_PROMPTS",
++         [](Settings &s, const std::string &t) { return kPromptSettings.parse(t, s.button_prompts); },
++         [](const Settings &s) { return kPromptSettings.format(s.button_prompts); },
++         [](Settings &s, const char *t) {
++             if (!kPromptSettings.parse(t, s.button_prompts)) s.button_prompts = input::PromptSetting::Automatic;
++         }},
+         {"input.dead_zone", "PAD_DEADZONE",
+          [](Settings &s, const std::string &t) { return parse_float(t, 0.0f, 0.9f, s.dead_zone); },
+          [](const Settings &s) { return format_float(s.dead_zone); },
+diff --git a/host/settings/settings.hpp b/host/settings/settings.hpp
+index 338e27d..cf064a0 100644
+--- a/host/settings/settings.hpp
++++ b/host/settings/settings.hpp
+@@ -1,6 +1,7 @@
+ #pragma once
+ 
+ #include "input/bindings.hpp"
++#include "input/button_prompts.hpp"
+ #include "input/tilt.hpp"
+ 
+ #include <cstdint>
+@@ -72,6 +73,9 @@ struct Settings {
+     // east one. The default follows the console the profile describes: south
+     // where cross confirms, east where circle does.
+     bool confirm_south{};
++    // What a game that draws its button symbols again (GameProfile::
++    // button_prompts) shows: the PSP's, or the buttons of the gamepad in use.
++    input::PromptSetting button_prompts{input::PromptSetting::Automatic};
+     float dead_zone{0.15f};
+     // The left stick's circle stretched to the PSP nub's square range, so a
+     // full diagonal reaches the corner (input/stick.hpp). Off passes the
+diff --git a/host/ui/menu.cpp b/host/ui/menu.cpp
+index 5119b3f..318c213 100644
+--- a/host/ui/menu.cpp
++++ b/host/ui/menu.cpp
+@@ -750,6 +750,17 @@ void Menu::controls() {
+         s.confirm_south = !s.confirm_south;
+         settings::save();
+     }
++    // Only a game that draws its button symbols again has anything to show.
++    if (portablekit::game().button_prompts) {
++        if (const int delta = choice_row("Button prompts", input::prompt_setting_label(s.button_prompts),
++                                         options_for("input.button_prompts",
++                                                     "The buttons the game's prompts show. Automatic: those of the "
++                                                     "gamepad in use, or the PSP's with none."))) {
++            s.button_prompts = static_cast<input::PromptSetting>(
++                cycle(static_cast<int>(s.button_prompts), delta, input::kPromptSettings));
++            settings::save();
++        }
++    }
+     int dead_zone = static_cast<int>(std::lround(s.dead_zone * 100.0f));
+     if (slider_row("Stick dead zone", dead_zone, 0, 50, 1, "%d%%",
+                    options_for("input.dead_zone", "How far the left stick moves before the game sees it. Raise it if "
+@@ -984,6 +995,7 @@ void Menu::controls() {
+             if (settings::overridden_by(key).empty()) value = fallback;
+         };
+         restore("input.confirm", s.confirm_south, d.confirm_south);
++        restore("input.button_prompts", s.button_prompts, d.button_prompts);
+         restore("input.dead_zone", s.dead_zone, d.dead_zone);
+         restore("input.stick_square", s.stick_square, d.stick_square);
+         restore("input.trigger", s.trigger, d.trigger);
+diff --git a/tests/input_tests.cpp b/tests/input_tests.cpp
+index f68357b..b8afbb5 100644
+--- a/tests/input_tests.cpp
++++ b/tests/input_tests.cpp
+@@ -1,6 +1,7 @@
+ // Keyboard and mouse bindings, and the stick's mapping to the PSP nub,
+ // without SDL or game data.
+ #include "input/bindings.hpp"
++#include "input/button_prompts.hpp"
+ #include "input/stick.hpp"
+ 
+ #include <algorithm>
+@@ -249,7 +250,41 @@ void test_keep_saved() {
+     check(all, "every key a game's keyboard defaults name by name is known");
+ }
+ 
++void test_button_prompts() {
++    // A western game (cross confirms) with the default Confirm button: cross
++    // on the bottom button, circle on the right.
++    ButtonPrompts p = button_prompts(PromptSetting::Automatic, PadKind::Xbox, true, true);
++    check(p.style == PromptStyle::Xbox && p.cross == FaceButton::South && p.circle == FaceButton::East,
++          "an Xbox pad shows its own buttons, cross on the bottom one");
++    check(p.square == FaceButton::West && p.triangle == FaceButton::North && !p.numbered_shoulders,
++          "square and triangle stay left and top");
++    p = button_prompts(PromptSetting::Automatic, PadKind::Xbox, false, true);
++    check(p.cross == FaceButton::East && p.circle == FaceButton::South,
++          "Confirm on the right button moves cross there");
++    p = button_prompts(PromptSetting::Automatic, PadKind::Xbox, false, false);
++    check(p.cross == FaceButton::South && p.circle == FaceButton::East,
++          "a Japanese game confirming on the right keeps cross on the bottom button");
++    check(button_prompts(PromptSetting::Automatic, PadKind::None, true, true).style == PromptStyle::Psp,
++          "with no gamepad the game's own symbols stay");
++    check(button_prompts(PromptSetting::Automatic, PadKind::PlayStation, true, true).style == PromptStyle::PlayStation,
++          "a PlayStation pad shows PlayStation buttons");
++    check(button_prompts(PromptSetting::Automatic, PadKind::Nintendo, true, true).style == PromptStyle::Nintendo,
++          "a Nintendo pad shows Nintendo buttons");
++    p = button_prompts(PromptSetting::Automatic, PadKind::SteamDeck, true, true);
++    check(p.style == PromptStyle::Xbox && p.numbered_shoulders, "a Steam Deck shows A B X Y and L1 R1");
++    check(!button_prompts(PromptSetting::Xbox, PadKind::SteamDeck, true, true).numbered_shoulders,
++          "Xbox chosen by name keeps LB and RB");
++    check(button_prompts(PromptSetting::Psp, PadKind::Xbox, true, true).style == PromptStyle::Psp,
++          "PSP chosen keeps the game's symbols with any pad");
++    check(button_prompts(PromptSetting::Nintendo, PadKind::None, true, true).style == PromptStyle::Nintendo,
++          "a chosen style needs no pad");
++    check(std::string(prompt_setting_label(PromptSetting::PlayStation)) == "PlayStation" &&
++              std::string(prompt_style_name(PromptStyle::Nintendo)) == "nintendo",
++          "the menu and the log name each one");
++}
++
+ int main() {
++    test_button_prompts();
+     test_keep_saved();
+     test_names();
+     test_settings_spelling();
+-- 
+2.53.0.windows.1
+

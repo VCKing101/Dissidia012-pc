@@ -177,6 +177,12 @@ disassembler and the new `tools/port/` scripts cover the analysis.
   battle or a replay, and who fights whom, over Discord's local connection (a named pipe or socket, no SDK). The
   FIELD object's mode `+0x4C` (0 to 14) and each side's character ID at battle setup `+0x1058`.
 
+## Button prompts (10 November 2026)
+
+- [Button prompts](button-prompts.md): the game's PSP button symbols drawn as Xbox, PlayStation or Nintendo
+  buttons, following the gamepad in use and the Confirm button. The nine textures that hold them, drawn again at
+  four times their size as they load (PortableKit's `GameProfile::edited_textures`, patch 0100).
+
 ## Next steps
 
 1. ~~Read PortableKit's sources.~~ Done; see above.

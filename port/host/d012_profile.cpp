@@ -13,6 +13,7 @@
 
 #include "gpu/frame_interpolation.hpp"
 
+#include "d012_button_prompts.hpp"
 #include "d012_cheats.hpp"
 #include "d012_hle.hpp"
 #include "d012_version.hpp"
@@ -185,6 +186,12 @@ const GameProfile &game() {
         .confirm_button = 1u,
 
         .sharp_textures = kSharpTextures,
+
+        // The game's button symbols drawn as the gamepad's: Controls > Button
+        // prompts (d012_button_prompts.cpp).
+        .edited_textures = d012::button_prompt_textures(),
+        .edit_texture = &d012::draw_button_prompts,
+        .button_prompts = true,
 
         .cheats = d012::builtin_cheats(),
     };
