@@ -1162,6 +1162,41 @@ Not checked:
   stopped on a white screen before Quick Battle, with the row made twice (its hooks also ran in the test's copy of
   the game). Not this change's; not looked into further.
 
+## 7.17 The row after a Battle Mode destination (10 November 2026)
+
+A tester: the versus row "sometimes disappears" after Quick Battle (1-on-1) against the CPU or Quick Battle (Party).
+It went every time the menu came back from a Battle Mode destination, and came back when Battle Mode was left and
+opened again.
+
+- **The cause** (V). As the start menu begins (`menu:0x089E4328`), after the row is made (the text attach calls at
+  `0x089E44D0` to `0x089E4524`), its only call to `0x089E5A04` (at `0x089E4550`) brings back the submenu the menu was
+  left from (`state+0xA2C`: 1 Battle Mode, last row 2 or 3 by `state+4 & 0x10`; 2 Communications, last row 4; 4,
+  last row 1 or 0 by `& 0x80`). It sets that submenu's cursor through `main:0x088D46E4` on the row saved at
+  `0x09B6D834`, which Battle Mode's handler stores for every row chosen, the versus row too. Then `0x089E23C8` shows
+  the submenu, `0x089E2A24` swaps the help and `0x089E2AEC` puts the hand on the row. The port's cursor hook acted
+  only on the main row's call (`0x089E45E8`), so the menu came back in Battle Mode on the game's own tables.
+- **After a versus battle** it was worse: the saved row is the versus row's index, 3, and the game's rows table has
+  Labyrinth there (the fourth row, hidden with three rows). The hand pointed at an empty slot under Arcade Mode, with
+  Labyrinth's help and name showing. Choosing it was not tried.
+- **The fix** (`run_cursor`): the hook also acts on the call from `0x089E5A04` to `0x089E5C18` when `state+0xA2C` is
+  Battle Mode: one more row, and the row's tables, before `0x089E23C8` shows the submenu. Both calls take the same
+  branch, so a second versus row changes them in one place.
+- **Checked** (clang build, data copy `build/port/data-versus-rowrestore` of `data-versus-rows`, three rows unless
+  said; captures, logs and routes in `build/port/versus/rowrestore/`):
+  - Before the fix (`stock_qb2`, `party_old`, `vs_old`): back from a finished Quick Battle (1-on-1) against the CPU
+    and from a finished Quick Battle (Party), Battle Mode had the game's three rows; back from a versus battle, the
+    empty slot with Labyrinth's help. Backing out of Quick Battle's Player Select did the same (`explore1`).
+  - With it (`qb_fix`, `party_fix`, `vs_fix`, `fix_back`): the row is there in each case, the cursor on the row the
+    menu was left from. After a versus battle it is on the versus row, lit, with its help; up and down move the light
+    and the help, and the cursor wraps.
+  - Four rows (`D012_TEST_FOUR_ROWS=1`; `back4_fix`, `vs4_fix`): five rows after a back-out; after a versus battle the
+    cursor on the versus row in slot 0, lit, with its help, and up to Labyrinth with Labyrinth's help.
+  - Unchanged: the stock Quick Battle (1-on-1) and Quick Battle (Party), against the CPU with rewards and no split
+    view or "versus chosen" in the log; opening Battle Mode from its main row. From a Battle Mode brought back this
+    way the versus row turns versus on, backing out of its room turns it off, and Quick Battle (1-on-1) opens the
+    stock room (`fix_choose`).
+  - Battles were ended with `D012_TEST_LOW_HP` (1 in the stock battles, 2 in versus).
+
 ## 8. For later: two copies over the game's ad hoc versus
 
 The owner wants this route for online play and matchmaking, much later. What was found:
