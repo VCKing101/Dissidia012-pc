@@ -44,7 +44,10 @@ struct CallState {
 
 // Integer64: a 64-bit result in $v0:$v1, both compared.
 enum class Returns { Nothing, Integer, Float, Integer64 };
-enum class Module { Main, BattleOverlay };
+// The overlays share the overlay window: an override of one is registered
+// each time that overlay is installed, and the next install of another takes
+// its address back.
+enum class Module { Main, BattleOverlay, MenuOverlay };
 
 // Runs the decompiled function on `g` with the arguments in `in`; puts what
 // it returns in `out` (v0/v1/f0).

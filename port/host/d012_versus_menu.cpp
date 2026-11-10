@@ -18,9 +18,11 @@
 // "not allowed" sound for the row, and the port takes it from there; its help
 // is shown and hidden through text 0, which no other Battle Mode row uses.
 //
-// Nothing in the menu overlay can be overridden (the harness takes the main
-// module and the battle overlay), so every hook is a main function the menu
-// calls, told apart by its caller:
+// Every hook here is a main function the menu calls, told apart by its
+// caller. They were made when the harness took overrides in the main module
+// and the battle overlay only; it takes the menu overlay's too now (player
+// 2's pick in d012_versus.cpp), but a function called from its own 16 KiB
+// unit still runs the original:
 //
 //   - main 0x088D3B88 (make parts from a table), at the menu's start (menu
 //     0x089E4328): the submenu tables go back to the game's;

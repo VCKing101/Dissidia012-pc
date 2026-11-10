@@ -11,6 +11,7 @@
 #include "d012_json.hpp"
 #include "d012_mod_manifest.hpp"
 #include "d012_update_rules.hpp"
+#include "d012_versus_rules.hpp"
 #include "model.hpp"
 #include "names.hpp"
 #include "psp_iso.hpp"
@@ -929,6 +930,99 @@ void test_discord_rules() {
     expect(rules::read_answer("not json").event.empty(), "what is not JSON is nothing");
 }
 
+// Local versus: player 2's Customize (host/d012_versus_rules.cpp).
+void test_versus_rules() {
+    namespace rules = d012::versus_rules;
+    using rules::Pad;
+    using Trip = rules::Trip;
+    using From = Trip::From;
+
+    // Whose pad the game reads in the character room.
+    const Trip none;
+    expect(rules::room_pad(5, none) == Pad::Player1, "player 1's pick is player 1's");
+    for (std::uint32_t state = 8; state <= 11; ++state)
+        expect(rules::room_pad(state, none) == Pad::Player2, "player 2's pick is player 2's");
+    expect(rules::room_pad(13, none) == Pad::Player1, "the setup screen is player 1's");
+    expect(rules::room_pad(52, none) == Pad::Player1 && rules::room_pad(0, none) == Pad::Player1,
+           "player 1's Customize is player 1's");
+
+    // Player 2's Customize from their pick, as the room goes there and back.
+    Trip trip{From::Pick};
+    const std::uint32_t from_pick[] = {9, 9, 10, 11, 50, 51, 52, 52, 52, 0};
+    for (const std::uint32_t state : from_pick) {
+        rules::step(trip, true, state);
+        expect(trip.active() && rules::room_pad(state, trip) == Pad::Player2,
+               "player 2's pad from their pick to Customize and back, state " + std::to_string(state));
+    }
+    rules::step(trip, true, 8);
+    expect(!trip.active() && rules::room_pad(8, trip) == Pad::Player2, "back at player 2's pick, the trip is over");
+
+    // From the setup screen: player 1's pad again when the setup is back.
+    trip = Trip{From::Setup};
+    const std::uint32_t from_setup[] = {13, 14, 15, 50, 51, 52, 1, 2};
+    for (const std::uint32_t state : from_setup) rules::step(trip, true, state);
+    expect(trip.active() && trip.opened && rules::room_pad(52, trip) == Pad::Player2 &&
+               rules::room_pad(0, trip) == Pad::Player2,
+           "player 2's pad in Customize from the setup screen");
+    expect(rules::room_pad(13, trip) == Pad::Player1, "the setup's own fade stays player 1's");
+    rules::step(trip, true, 12);
+    expect(!trip.active() && rules::room_pad(12, trip) == Pad::Player1, "back at the setup, player 1's pad");
+
+    // A trip that goes somewhere else ends there; so does one without the room.
+    trip = Trip{From::Pick};
+    rules::step(trip, true, 4);
+    expect(!trip.active(), "player 2's trip ends if the room goes to player 1's pick instead");
+    trip = Trip{From::Setup};
+    rules::step(trip, true, 9);
+    expect(!trip.active(), "a trip from the setup screen does not pass through player 2's pick");
+    trip = Trip{From::Pick};
+    rules::step(trip, true, 52);
+    rules::step(trip, false, 0);
+    expect(!trip.active(), "no room, no trip");
+
+    // Which cells Customize takes, as player 1's pick decides.
+    expect(rules::customizable(13, 13) && rules::customizable(31, 31), "Cloud and Lightning can be customised");
+    expect(!rules::customizable(rules::kChaos, rules::kChaos) &&
+               !rules::customizable(rules::kFeralChaosCell, rules::kFeralChaosCell) &&
+               !rules::customizable(rules::kLockedCell, 5) && !rules::customizable(rules::kRandomCell, 5) &&
+               !rules::customizable(0, 0),
+           "Chaos, Feral Chaos, a locked cell, the random cell and no character are refused");
+    expect(rules::grid_takes_triangle(rules::kGridInput, 0, 0u), "a grid at rest takes triangle");
+    expect(!rules::grid_takes_triangle(400u, 0, 0u) && !rules::grid_takes_triangle(rules::kGridInput, 3, 0u) &&
+               !rules::grid_takes_triangle(rules::kGridInput, 0, 0x1000u) &&
+               !rules::grid_takes_triangle(rules::kGridInput, 0, 0x4000u),
+           "a grid leaving, busy or without input takes nothing");
+
+    // Player 2's pick update: the grid's Customize result is started once.
+    expect(rules::pick_customize(0u, 9u, rules::kGridCustomize), "result 5 on player 2's pick is Customize");
+    expect(!rules::pick_customize(rules::kFlagFading, 9u, rules::kGridCustomize), "not again while fading out");
+    expect(!rules::pick_customize(0u, 10u, rules::kGridCustomize), "not once the pick has moved on");
+    expect(!rules::pick_customize(0u, 9u, 2u) && !rules::pick_customize(0u, 9u, 4u),
+           "a pick and back are the game's own");
+
+    // The setup screen: player 2's triangle, pressed, is the setup's Customize.
+    const std::uint32_t tri = rules::kTriangle;
+    expect(rules::setup_triangle(13u, 0u, tri, 0u, 0u), "player 2 presses triangle on the setup screen");
+    expect(!rules::setup_triangle(13u, 0u, tri, tri, 0u), "held, not pressed again");
+    expect(!rules::setup_triangle(13u, 0u, tri, 0u, tri), "player 1's own triangle is player 1's");
+    expect(!rules::setup_triangle(13u, rules::kFlagFading, tri, 0u, 0u), "not while the setup fades out");
+    expect(!rules::setup_triangle(9u, 0u, tri, 0u, 0u) && !rules::setup_triangle(5u, 0u, tri, 0u, 0u),
+           "only on the setup screen");
+    expect(rules::setup_chose_customize(0u, rules::kSetupCustomize), "the setup chose its Customize from the press");
+    expect(!rules::setup_chose_customize(0u, 0u) && !rules::setup_chose_customize(0u, 1u),
+           "nothing chosen, or Enter Battle, is no Customize");
+    expect(!rules::setup_chose_customize(rules::kSetupCustomize, rules::kSetupCustomize),
+           "a Customize chosen before the press is not player 2's");
+    expect(rules::setup_took_customize(0u, rules::kFlagCustomize | rules::kFlagFading, rules::kBackToSetup),
+           "the room took it as Customize");
+    expect(!rules::setup_took_customize(0u, 0u, rules::kBackToSetup), "the setup did not take it");
+    expect(!rules::setup_took_customize(rules::kFlagCustomize, rules::kFlagCustomize, rules::kBackToSetup),
+           "a Customize already under way is not player 2's");
+    expect(!rules::setup_took_customize(0u, rules::kFlagCustomize | rules::kFlagRuleset, rules::kBackToSetup) &&
+               !rules::setup_took_customize(0u, rules::kFlagCustomize, 4u),
+           "the ruleset, or a Customize going elsewhere, is not the setup's");
+}
+
 
 } // namespace
 
@@ -949,6 +1043,7 @@ int main(int argc, char **argv) {
     test_psp_iso();
     test_update_rules();
     test_discord_rules();
+    test_versus_rules();
     if (g_failures == 0) std::cout << "all passed\n";
     return g_failures == 0 ? 0 : 1;
 }

@@ -100,7 +100,7 @@ disassembler and the new `tools/port/` scripts cover the analysis.
 - [Local split-screen versus](local-versus.md): a scope for a Quick Battle (Player vs Player) entry with a second
   controller and a split screen. Route chosen: one copy of the game, with player 2 on the opponent's pad and the
   battle's draw tasks run a second time from player 2's camera. Two copies over ad hoc are kept for later online
-  play. Not started.
+  play. Built and released in v0.2.0; player 2's Customize on 10 November 2026 (section 7.16).
 
 ## Online play (30 October 2026)
 
