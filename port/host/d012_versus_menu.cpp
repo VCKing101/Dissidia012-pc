@@ -28,8 +28,9 @@
 //     Battle Mode's text table: the row's parts and texts are made;
 //   - main 0x088D3C24 (release parts by a table), at the menu's end (menu
 //     0x089E17F8): the row's parts and texts are released;
-//   - main 0x088D46E4 (a cursor), when Battle Mode opens (menu 0x089E45E8):
-//     one more row, and the submenu pointed at the row's tables;
+//   - main 0x088D46E4 (a cursor), when Battle Mode opens (menu 0x089E45E8)
+//     and when the start menu comes back in it after a destination (menu
+//     0x089E5A04): one more row, and the submenu pointed at the row's tables;
 //   - main 0x0887B924 / 0x0887B944 (show / hide a text), from the help line's
 //     swap (menu 0x089E2A24): the row's help, and its highlight;
 //   - main 0x088D4BF4 (a menu sound), from Battle Mode's handler: the row
@@ -389,12 +390,20 @@ void show_player2_level(Guest *g, gaddr cursor) {
     std::cout << "[versus] player 2's level on the setup screen: " << level << std::endl;
 }
 
+// As the start menu begins (menu 0x089E4328, after the row is made), menu
+// 0x089E5A04 brings back the submenu it was left from (state +0xA2C), its
+// cursor set here before 0x089E23C8 shows it: after any Battle Mode
+// destination, the menu comes back in Battle Mode without passing its main
+// row.
+constexpr std::uint32_t kSubmenuBack = 0x089E5A04u, kSubmenuBackEnd = 0x089E5C18u;
+
 void run_cursor(Guest *g, const decomp::CallState &in, GuestRegs &) {
     const gaddr cursor = in.gpr[4];
     std::int32_t last = static_cast<std::int32_t>(in.gpr[7]);
     if (last < 0) last = 0;
     const State &s = state();
-    if (s.menu != 0u && cursor == s.menu + kStateCursor && from(in, kMainRows, kMainRowsEnd) && menu_resident(g) &&
+    if (s.menu != 0u && cursor == s.menu + kStateCursor &&
+        (from(in, kMainRows, kMainRowsEnd) || from(in, kSubmenuBack, kSubmenuBackEnd)) && menu_resident(g) &&
         g_ld32(g, s.menu + kStateMainRow) == kBattleModeSubmenu) {
         last = static_cast<std::int32_t>(s.row);
         point_at_row(g);
