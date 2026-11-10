@@ -360,6 +360,10 @@ bool camera_stick(Guest *g, gaddr camera, float full, bool free, float &turn, fl
         y = stick.y;
     } else {
         if (battle) p.live_read = p.reads;
+    }
+    // The mouse turns the camera of the player who has the keyboard: player
+    // 2's when Controls > Player 2 is the keyboard and mouse.
+    if ((player == 1) == portablekit::hle_extension::second_pad().keyboard) {
         mouse().full = full * options().sensitivity;
         note_update();
         if (free) {

@@ -182,6 +182,9 @@ disassembler and the new `tools/port/` scripts cover the analysis.
 - [Button prompts](button-prompts.md): the game's PSP button symbols drawn as Xbox, PlayStation or Nintendo
   buttons, following the gamepad in use and the Confirm button. The nine textures that hold them, drawn again at
   four times their size as they load (PortableKit's `GameProfile::edited_textures`, patch 0100).
+- [Choosing each player's controller](controller-picker.md): the Controls page's Player 1 and Player 2, each
+  Automatic, the keyboard and mouse, or a controller by name; a controller held for player 2 moves up when player 1's
+  goes, outside a versus battle (patch 0101).
 
 ## Next steps
 
