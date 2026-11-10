@@ -196,6 +196,14 @@ if(D012_INSTALLER_BUILD)
                 "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_math.cpp" "${d012_sdk}"
         VERBATIM)
     add_dependencies(D012Native_installer_files psp_recomp D012Native)
+    # --compile-game's key names the recompiler by its SHA-256. lld writes the
+    # time of linking into a Windows program's header unless told not to, so
+    # without this every release, built in a fresh folder, would ship a
+    # recompiler with new bytes and every update would compile the game's
+    # code again.
+    if(WIN32 AND NOT MSVC)
+        target_link_options(psp_recomp PRIVATE -Wl,--no-insert-timestamp)
+    endif()
 endif()
 
 # Decompiled game functions (C), run as native overrides (port/decomp/). C is

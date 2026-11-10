@@ -41,11 +41,24 @@
 // would take the C runtime's (docs/port/communication-mode.md, section 13). The result is built
 // in game-code.new/ and replaces game-code/ only when everything succeeded.
 //
-// key.txt is a SHA-256 over everything the code is made from (the inputs'
-// hashes, the recompiler, the compiler, the headers, the dispatch calls, the
-// optimisation level and the ABI versions). A run whose key matches the
-// existing game-code/ does nothing, so the installer can run it after every
-// update and only a change to the game's code compiles again.
+// key.txt holds two SHA-256 keys, so the installer can run this after every
+// update and only a change to the game's code compiles again:
+//
+//   line 1     the input key: everything the code is made from (the inputs'
+//              hashes, the recompiler, the compiler, the sdk/ files, the
+//              optimisation level and the ABI versions). When it matches, the
+//              run stops after reading the disc, in about a second.
+//   source=    the source key: everything clang and the linker are given (each
+//              file psp_recomp wrote and the entry points beside it, the sdk/
+//              files, the compiler and its flags). When the input key differs
+//              but psp_recomp writes the same C++ as before (a new recompiler
+//              whose changes are to the runtime it shares with the program, not
+//              to the code it writes), the libraries stand and only key.txt is
+//              rewritten: the run costs the five recompiles only (64 s
+//              against 3 min 31 s for a whole compile, 10 November 2026).
+//
+// A key.txt of 0.7.0 or before has the first line only, so the first update
+// from one compiles in full.
 //
 // Progress goes to stdout and to game-code-status.txt beside the program
 // (key=value lines: state running|done|failed, step, done, total, message),
@@ -81,6 +94,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #if defined(_WIN32)
@@ -445,25 +459,64 @@ void check_inputs(const Paths &p) {
         if (!fs::is_regular_file(p.sdk / name, ec)) throw Error(text(p.sdk / name) + " is missing; reinstall the port");
 }
 
-// Everything the game's code is made from, as one SHA-256.
-std::string code_key(const Paths &p, const Options &options, const std::vector<std::string> &disc_hashes) {
-    std::ostringstream key;
-    key << "corpus-abi=" << psprecomp::kCorpusAbiVersion << "\noverlay-abi=" << portablekit::kOverlayAbiVersion
-        << "\nopt=" << options.opt << "\neboot=" << portablekit::game().executable_sha256 << "\n";
-    for (const std::string &hash : disc_hashes) key << "disc=" << hash << "\n";
-    key << "recompiler=" << psprecomp::sha256_file(p.recompiler) << "\ncompiler=" << psprecomp::sha256_file(p.compiler)
-        << "\n";
+// What clang is given for each unit, and the linker for each library, besides
+// the files' paths.
+std::vector<std::string> compile_flags(const Options &options) {
+    std::vector<std::string> flags{"-std=c++20", "-O" + std::to_string(options.opt), "-g0", "-fvisibility=hidden",
+                                   "-fvisibility-inlines-hidden", "-w", "-DNDEBUG"};
+#if !defined(_WIN32)
+    flags.push_back("-fPIC");
+#endif
+    return flags;
+}
+
+std::vector<std::string> link_flags() {
+#if defined(_WIN32)
+    return {"-shared", "-static", "-static-libgcc", "-static-libstdc++"};
+#else
+    // Its C++ runtime linked in and kept to itself, as PortableKit links a
+    // release's overlay libraries (cmake/PortableKit.cmake).
+    return {"-shared", "-fuse-ld=lld", "-static-libgcc", "-static-libstdc++", "-Wl,--exclude-libs,ALL"};
+#endif
+}
+
+// The files under a folder, by their paths relative to it with '/' between
+// names, in name order: the same list on every system and file system.
+std::vector<std::pair<std::string, fs::path>> files_under(const fs::path &folder) {
+    std::vector<std::pair<std::string, fs::path>> files;
+    for (const auto &entry : fs::recursive_directory_iterator(folder))
+        if (entry.is_regular_file()) {
+            const std::u8string relative = fs::relative(entry.path(), folder).generic_u8string();
+            files.emplace_back(std::string(relative.begin(), relative.end()), entry.path());
+        }
+    std::sort(files.begin(), files.end());
+    return files;
+}
+
+std::string sha256_text(const std::string &text) {
+    return psprecomp::sha256_bytes(std::span(reinterpret_cast<const std::uint8_t *>(text.data()), text.size()));
+}
+
+// The compiler, its configuration and sdk/, which both keys name.
+void add_tools(std::ostringstream &key, const Paths &p) {
+    key << "compiler=" << psprecomp::sha256_file(p.compiler) << "\n";
     // On Linux the compiler's target and sysroot come from the configuration
     // file beside it (tools/port/linux_toolchain.sh).
     std::error_code config_ec;
     if (const fs::path config = fs::path(p.compiler).concat(".cfg"); fs::is_regular_file(config, config_ec))
         key << "compiler-config=" << psprecomp::sha256_file(config) << "\n";
-    for (const auto &entry : fs::recursive_directory_iterator(p.sdk))
-        if (entry.is_regular_file())
-            key << "sdk " << text(fs::relative(entry.path(), p.sdk)) << "=" << psprecomp::sha256_file(entry.path())
-                << "\n";
-    const std::string all = key.str();
-    return psprecomp::sha256_bytes(std::span(reinterpret_cast<const std::uint8_t *>(all.data()), all.size()));
+    for (const auto &[name, path] : files_under(p.sdk)) key << "sdk " << name << "=" << psprecomp::sha256_file(path) << "\n";
+}
+
+// The input key: everything the game's code is made from, as one SHA-256.
+std::string code_key(const Paths &p, const Options &options, const std::vector<std::string> &disc_hashes) {
+    std::ostringstream key;
+    key << "corpus-abi=" << psprecomp::kCorpusAbiVersion << "\noverlay-abi=" << portablekit::kOverlayAbiVersion
+        << "\nopt=" << options.opt << "\neboot=" << portablekit::game().executable_sha256 << "\n";
+    for (const std::string &hash : disc_hashes) key << "disc=" << hash << "\n";
+    key << "recompiler=" << psprecomp::sha256_file(p.recompiler) << "\n";
+    add_tools(key, p);
+    return sha256_text(key.str());
 }
 
 struct Library {
@@ -472,6 +525,54 @@ struct Library {
     std::vector<std::string> include_dirs;
     std::vector<fs::path> objects;
 };
+
+// The source key: everything clang and the linker are given, as one SHA-256.
+// The same C++ compiled by the same compiler with the same flags and headers
+// is the same code, whatever wrote the C++.
+std::string source_key(const Paths &p, const Options &options, const std::vector<Library> &libraries) {
+    std::ostringstream key;
+    key << "corpus-abi=" << psprecomp::kCorpusAbiVersion << "\noverlay-abi=" << portablekit::kOverlayAbiVersion
+        << "\ncompile";
+    for (const std::string &flag : compile_flags(options)) key << " " << flag;
+    key << "\nlink";
+    for (const std::string &flag : link_flags()) key << " " << flag;
+    key << "\n";
+    add_tools(key, p);
+    for (const Library &library : libraries) {
+        key << "library " << library.name << "\n";
+        for (const auto &[name, path] : files_under(library.generated))
+            key << "  " << name << "=" << psprecomp::sha256_file(path) << "\n";
+    }
+    return sha256_text(key.str());
+}
+
+// game-code/key.txt: the input key on its first line, then source=<the
+// source key> (none in a key.txt of 0.7.0 or before).
+struct StoredKeys {
+    std::string input, source;
+};
+
+StoredKeys read_keys(const fs::path &file) {
+    StoredKeys keys;
+    std::ifstream in(file);
+    std::string line;
+    for (bool first = true; std::getline(in, line); first = false) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (first) keys.input = line;
+        else if (line.rfind("source=", 0) == 0) keys.source = line.substr(7);
+    }
+    return keys;
+}
+
+std::string keys_text(const std::string &input, const std::string &source) {
+    return input + "\nsource=" + source + "\n";
+}
+
+// A line of this run's own in game-code-build.log, among the tools' output.
+void note(const Paths &p, const std::string &line) {
+    std::ofstream log(p.log, std::ios::app);
+    log << "\n[compile-game] " << line << "\n";
+}
 
 int run(const Options &options) {
     const Paths p = find_paths(options);
@@ -520,15 +621,14 @@ int run(const Options &options) {
         }
 
         const std::string key = code_key(p, options, disc_hashes);
-        if (!options.force && fs::is_regular_file(p.out / (std::string("main") + kLibrary), ec)) {
-            std::ifstream existing(p.out / "key.txt");
-            std::string have;
-            std::getline(existing, have);
-            if (have == key) {
-                fs::remove_all(p.work, ec);
-                progress.finish("done", "The game's code is already compiled and up to date.");
-                return 0;
-            }
+        StoredKeys stored;
+        if (!options.force && fs::is_regular_file(p.out / (std::string("main") + kLibrary), ec))
+            stored = read_keys(p.out / "key.txt");
+        if (!stored.input.empty() && stored.input == key) {
+            note(p, "the input key matches game-code/key.txt: nothing to do");
+            fs::remove_all(p.work, ec);
+            progress.finish("done", "The game's code is already compiled and up to date.");
+            return 0;
         }
 
         // 2. The C++ code, from psp_recomp.
@@ -580,7 +680,28 @@ int run(const Options &options) {
             progress.advance();
         }
 
-        // 3. Compile every unit, in parallel.
+        // 3. The C++ as the existing game-code/ was compiled from: its
+        // libraries stand, and only key.txt changes.
+        const std::string source = source_key(p, options, libraries);
+        if (!stored.source.empty() && stored.source == source &&
+            std::all_of(libraries.begin(), libraries.end(), [&](const Library &library) {
+                std::error_code exists_ec;
+                return fs::is_regular_file(p.out / library.name, exists_ec);
+            })) {
+            const fs::path partial = p.out / "key.txt.partial";
+            write_all(partial, keys_text(key, source));
+            fs::rename(partial, p.out / "key.txt", ec);
+            if (ec) throw Error("cannot write " + text(p.out / "key.txt") + ": " + ec.message());
+            note(p, "the input key changed but the source key matches game-code/key.txt: the C++ is unchanged, "
+                    "so the libraries stand");
+            if (!options.keep_work) fs::remove_all(p.work, ec);
+            progress.finish("done", "The game's code is already compiled and up to date.");
+            return 0;
+        }
+        note(p, stored.source.empty() ? "no source key in game-code/key.txt: compiling"
+                                      : "the source key differs from game-code/key.txt: compiling");
+
+        // 4. Compile every unit, in parallel.
         struct Unit {
             fs::path source, object;
             const Library *library;
@@ -605,6 +726,7 @@ int run(const Options &options) {
                       static_cast<unsigned>(units.size()));
         const std::string compiler = text(p.compiler);
         const std::string sdk_include = text(p.sdk / "include");
+        const std::vector<std::string> flags = compile_flags(options);
         std::atomic<std::size_t> next{0};
         std::atomic<bool> failed{false};
         std::string failure;
@@ -614,13 +736,10 @@ int run(const Options &options) {
             workers.emplace_back([&] {
                 for (std::size_t i = next++; i < units.size() && !failed; i = next++) {
                     const Unit &unit = units[i];
-                    std::vector<std::string> args{compiler, "-std=c++20", "-O" + std::to_string(options.opt), "-g0",
-                                                  "-fvisibility=hidden", "-fvisibility-inlines-hidden", "-w",
-                                                  "-DNDEBUG", "-I", sdk_include, "-I", text(unit.library->generated)};
-#if !defined(_WIN32)
-                    args.push_back("-fPIC");
-#endif
-                    args.insert(args.end(), {"-c", text(unit.source), "-o", text(unit.object)});
+                    std::vector<std::string> args{compiler};
+                    args.insert(args.end(), flags.begin(), flags.end());
+                    args.insert(args.end(), {"-I", sdk_include, "-I", text(unit.library->generated), "-c",
+                                             text(unit.source), "-o", text(unit.object)});
                     const fs::path unit_log = p.work / "objects" / ("u" + std::to_string(i) + ".log");
                     const int code = run_program(args, unit_log);
                     if (code != 0) {
@@ -639,9 +758,10 @@ int run(const Options &options) {
         for (std::thread &worker : workers) worker.join();
         if (failed) throw Error(failure);
 
-        // 4. Link: every library on its own, with its own C++ runtime.
+        // 5. Link: every library on its own, with its own C++ runtime.
         progress.step("Linking the game's code", static_cast<unsigned>(libraries.size()));
         fs::create_directories(p.work / "result" / "overlays", ec);
+        const std::vector<std::string> linking = link_flags();
         for (const Library &library : libraries) {
             const fs::path rsp = p.work / "objects" / (fs::path(library.name).stem().string() + ".rsp");
             {
@@ -652,22 +772,15 @@ int run(const Options &options) {
                     out << '"' << name << "\"\n";
                 }
             }
-#if defined(_WIN32)
-            run_checked({compiler, "-shared", "-static", "-static-libgcc", "-static-libstdc++", "-o",
-                         text(p.work / "result" / library.name), "@" + text(rsp)},
-                        p, "linking " + library.name);
-#else
-            // Its C++ runtime linked in and kept to itself, as PortableKit
-            // links a release's overlay libraries (cmake/PortableKit.cmake).
-            run_checked({compiler, "-shared", "-fuse-ld=lld", "-static-libgcc", "-static-libstdc++",
-                         "-Wl,--exclude-libs,ALL", "-o", text(p.work / "result" / library.name), "@" + text(rsp)},
-                        p, "linking " + library.name);
-#endif
+            std::vector<std::string> args{compiler};
+            args.insert(args.end(), linking.begin(), linking.end());
+            args.insert(args.end(), {"-o", text(p.work / "result" / library.name), "@" + text(rsp)});
+            run_checked(args, p, "linking " + library.name);
             progress.advance();
         }
-        write_all(p.work / "result" / "key.txt", key + "\n");
+        write_all(p.work / "result" / "key.txt", keys_text(key, source));
 
-        // 5. Replace game-code/ with the result.
+        // 6. Replace game-code/ with the result.
         const fs::path old = p.folder / "game-code.old";
         fs::remove_all(old, ec);
         if (fs::exists(p.out, ec)) {
