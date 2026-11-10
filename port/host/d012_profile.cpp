@@ -192,6 +192,8 @@ const GameProfile &game() {
         .edited_textures = d012::button_prompt_textures(),
         .edit_texture = &d012::draw_button_prompts,
         .button_prompts = true,
+        // Local versus: Controls > Player 2 (d012_versus.cpp).
+        .second_player = true,
 
         .cheats = d012::builtin_cheats(),
     };

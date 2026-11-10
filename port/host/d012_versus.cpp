@@ -112,6 +112,8 @@ struct State {
     std::uint32_t camera_live_read = 0xFFFF0000u;
     ext::SecondPad pad;
     bool wanted = false;
+    // Told to PortableKit: player 2's gamepad stays player 2's while versus is on.
+    bool playing = false;
     bool connected = false;
     bool picking = false;
     bool announced_human = false;
@@ -119,7 +121,8 @@ struct State {
     // away in battle, and the game's pause, as player 2's, waits for it.
     std::uint32_t pause_reads = 0;
     // The same for player 1's gamepad, on the game's own pad. A player on the
-    // keyboard has no gamepad to lose.
+    // keyboard (player 1's, or player 2's by Controls > Player 2) has no
+    // gamepad to lose.
     bool first_connected = false;
     std::uint32_t pause1_reads = 0;
     // Whose controller went away in this battle (kLostPlayer1, kLostPlayer2),
@@ -585,8 +588,11 @@ void notice_draw() {
                         : lost == (kLostPlayer1 | kLostPlayer2) ? "Controllers 1 and 2 disconnected"
                         : (lost & kLostPlayer1) != 0u           ? "Controller 1 disconnected"
                                                                 : "Controller 2 disconnected";
-    const char *hint = lost == 0u                    ? "Player 2 plays on the second gamepad"
+    // Player 1 can go on on the keyboard unless it is player 2's.
+    const bool keyboard2 = ext::second_pad().keyboard;
+    const char *hint = lost == 0u                    ? "Or give Player 2 the keyboard in Controls"
                        : (lost & kLostPlayer2) != 0u ? "Connect it again to go on"
+                       : keyboard2                   ? "Connect it again to go on"
                                                      : "Connect it again, or play on the keyboard";
     // Under the pause menu's rows (the game's pause, which the loss opened).
     const float top = 150.0f;
@@ -841,6 +847,12 @@ void read_pads(const portablekit::HleFunction &previous, psprecomp::Runtime &rt,
     if (want != s.wanted) {
         s.wanted = want;
         ext::want_second_pad(want);
+    }
+    // On the start menu a gamepad held for player 2 moves to player 1 when
+    // player 1's goes; in versus it stays player 2's.
+    if (active() != s.playing) {
+        s.playing = active();
+        ext::second_player_playing(s.playing);
     }
     previous(rt, ctx);
     ++s.reads;

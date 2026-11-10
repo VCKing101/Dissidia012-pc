@@ -63,6 +63,8 @@ online and test sessions. Bugs and crashes go in [GitHub issues](https://github.
   the game's own menu pieces, read from your disc, like its Data Config page, with its menu sounds.
 - **Button prompts for your controller**: the game's PSP buttons shown as Xbox, PlayStation or Nintendo buttons,
   following the controller in use (menu's Controls page, **Button prompts**).
+- **Choose each player's controller**: player 1 and player 2 each on a controller of your choice or on the keyboard
+  and mouse (menu's Controls page, **Player 1** and **Player 2**).
 - **Close the game from the title screen**: press circle there, then choose Yes.
 - **Cheats** on the menu's Cheats page: gil, KP, PP, items and battle cheats, and PPSSPP cheat files
   ([below](#cheats)).

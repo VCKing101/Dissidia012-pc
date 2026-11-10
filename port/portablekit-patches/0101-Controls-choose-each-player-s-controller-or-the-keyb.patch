@@ -1,0 +1,1227 @@
+From 0908015a7befb35ba96b956d132ce7572cc76fd4 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Tue, 10 Nov 2026 21:22:48 +1030
+Subject: [PATCH] Controls: choose each player's controller, or the keyboard
+
+Player 1 was always the keyboard and the first gamepad connected, and
+player 2 the next, by the order they arrived. With DS4Windows that gave
+the real pad to player 1 and its virtual one to player 2. And a pad
+held for player 2 never moved up: DS4Windows connects its new virtual
+pad before it removes the old, so a switch of its output left player 1
+with no gamepad.
+
+The Controls page now has Player 1 and Player 2 (input.player1,
+input.player2; <prefix>_PLAYER1, <prefix>_PLAYER2), or one Controller
+row for a profile without GameProfile::second_player: Automatic, the
+keyboard and mouse, or a gamepad by its USB vendor and product ids, the
+same over USB and Bluetooth. Automatic says what it picked; a chosen
+gamepad not connected leaves the player on Automatic and the row says
+what it is using. Who gets which pad is worked out in one place
+(input/players.*, no SDL, unit-tested), and the renderer opens the pads
+it gives each player and closes the rest, on every pad connected or
+gone, every change in the menu, and every change of what the port
+wants. Each player keeps the pad it has while it can.
+
+The keyboard and mouse buttons go to player 2's pad when chosen, while a
+second player is wanted, and the mouse camera of a PortableKit camera
+profile stays out of player 1's stick then. A pad held for player 2
+moves to player 1, who has none, unless the port says player 2 is in the
+game (hle_extension::second_player_playing, interface 8, with
+SecondPad::keyboard at the end of the struct).
+<prefix>_PLAYER2_PAD_STAYS=1 keeps it player 2's, as before.
+
+Tested with Dissidia 012 on Windows (clang build): scripted runs beside a
+DualSense (Automatic, every row cycled, a chosen pad not connected, a
+versus battle with player 2 on the keyboard and mouse, a one-player
+battle), and the owner cycling Player 1 with a DualSense. The move up
+from player 2 with real pads only by the unit tests. Not verified:
+DS4Windows, two identical pads, Linux, the Steam Deck, another game.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ CMakeLists.txt                        |   1 +
+ cmake/PortableKit.cmake               |   1 +
+ docs/DESKTOP_APP.md                   |   2 +-
+ docs/HLE_EXTENSIONS.md                |   2 +
+ docs/PROFILE_GUIDE.md                 |   2 +
+ host/gpu/vulkan_renderer.cpp          | 327 +++++++++++++++-----------
+ host/gpu/vulkan_renderer.hpp          |  21 +-
+ host/hle/hle_common.hpp               |   4 +
+ host/hle/hle_extension_host.cpp       |   6 +-
+ host/hle/hle_media.cpp                |  21 +-
+ host/input/players.cpp                | 137 +++++++++++
+ host/input/players.hpp                |  75 ++++++
+ host/profile.hpp                      |   7 +
+ host/settings/settings.cpp            |  12 +
+ host/settings/settings.hpp            |   6 +
+ host/ui/menu.cpp                      |  85 ++++++-
+ include/portablekit/hle_extension.hpp |  27 ++-
+ tests/input_tests.cpp                 |  76 ++++++
+ 18 files changed, 652 insertions(+), 160 deletions(-)
+ create mode 100644 host/input/players.cpp
+ create mode 100644 host/input/players.hpp
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 3607135..c5250d9 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -438,6 +438,7 @@ if(PSPRECOMP_BUILD_TESTS)
+         "${PORTABLEKIT_ROOT}/tests/input_tests.cpp"
+         "${PORTABLEKIT_ROOT}/host/input/bindings.cpp"
+         "${PORTABLEKIT_ROOT}/host/input/button_prompts.cpp"
++        "${PORTABLEKIT_ROOT}/host/input/players.cpp"
+         "${PORTABLEKIT_ROOT}/host/input/stick.cpp")
+     target_include_directories(portablekit_input_tests PRIVATE "${PORTABLEKIT_ROOT}/host")
+     set_target_properties(portablekit_input_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+diff --git a/cmake/PortableKit.cmake b/cmake/PortableKit.cmake
+index 1d41e6a..9733b4c 100644
+--- a/cmake/PortableKit.cmake
++++ b/cmake/PortableKit.cmake
+@@ -40,6 +40,7 @@ set(PORTABLEKIT_HOST_SOURCES
+     host/gpu/texture_decode.cpp
+     host/input/bindings.cpp
+     host/input/button_prompts.cpp
++    host/input/players.cpp
+     host/input/stick.cpp
+     host/input/touch_controls.cpp
+     host/input/tilt.cpp
+diff --git a/docs/DESKTOP_APP.md b/docs/DESKTOP_APP.md
+index 25ed478..68821d6 100644
+--- a/docs/DESKTOP_APP.md
++++ b/docs/DESKTOP_APP.md
+@@ -83,7 +83,7 @@ Today a port is a `GameProfile` written in C++ ([`host/profile.hpp`](../host/pro
+ | `save_game_name`, `save_folders` | the disc id. The game names its folders itself when it saves; the save screen's labels are generic ("Game data") | the main one; the others only by running |
+ | `adhoc_product_code` | the disc id | a guess that holds for most games |
+ | `app_name`, `project_name`, `env_prefix`, data names | the app's own (`portablekit`, `PORTABLEKIT_*`) | — |
+-| `register_extra_hle`, `patch_loaded_image`, `camera`, `view_aspect_frame`, `interpolation_thresholds`, `glyph_cache`, `trigger_profiles`, `other_releases`, `sharp_textures`, `edited_textures`, `cheats` | none: the framework's defaults | these are what hand profiles are for |
++| `register_extra_hle`, `patch_loaded_image`, `camera`, `view_aspect_frame`, `interpolation_thresholds`, `glyph_cache`, `trigger_profiles`, `other_releases`, `sharp_textures`, `edited_textures`, `second_player`, `cheats` | none: the framework's defaults | these are what hand profiles are for |
+ 
+ The entry point, the code ranges, the imports and relocations are read from the ELF by the framework already; the recompiler finds the code by its own analysis (`psp_recomp --auto`). Modules the game loads from its disc that the framework implements as HLE (`libfont.prx`, `psmf.prx` and the like) are recognised by name at run time.
+ 
+diff --git a/docs/HLE_EXTENSIONS.md b/docs/HLE_EXTENSIONS.md
+index 333b114..767ca52 100644
+--- a/docs/HLE_EXTENSIONS.md
++++ b/docs/HLE_EXTENSIONS.md
+@@ -76,6 +76,8 @@ Everything a module may rely on is in `include/portablekit/hle_extension.hpp`. `
+ | `read_open_file(fd, offset, bytes)` | The raw bytes of an open guest file, without moving its position. |
+ | `set_file_filter(fd, filter)` | What the game reads from an open file instead of its bytes (see [Filtered files](#filtered-files)). |
+ | `add_file_provider(provider)` | A file the host serves at a guest path, in place of the file there or where there is none (see [Served files](#served-files)). Since interface version 4. |
++| `want_second_pad(wanted)`, `second_pad()`, `first_pad_connected()`, `first_pad_now()` | A second player's pad, for a local multiplayer mode (`GameProfile::second_player`). While wanted, player 2's device is read into `second_pad()`, never into the game's own pad: the one the Controls page's **Player 2** names (a gamepad, or the keyboard and mouse, which player 1 then does not have), or on Automatic a gamepad other than player 1's. `SecondPad::keyboard` says player 2 is on the keyboard. `first_pad_connected()`: player 1 has a gamepad, not only the keyboard. `first_pad_now()`: player 1's pad sampled at the call. Since interface versions 6 and 7. |
++| `second_player_playing(playing)` | Player 2 is in the game: a gamepad of player 2's then stays player 2's when player 1's goes. Otherwise it moves to player 1, who has none, and player 2 waits for another (a controller swapped on the start menu). `<prefix>_PLAYER2_PAD_STAYS=1` keeps it player 2's always. Since interface version 8, with `SecondPad::keyboard`. |
+ | `extra_buttons()` | The extra buttons (`kExtraL2`, `kExtraR2`, `kExtraL3`, `kExtraR3`: the triggers and stick clicks a PSP lacks, or the keys bound to them) held when the game last read its pad. The game never sees them; a port names the ones it uses in `GameProfile::extra_buttons` and gives them a meaning of its own. Since interface version 5. |
+ 
+ Handlers run on the emulation thread, one at a time. A module may include PortableKit's `host/` headers to reach further than this, but those change without notice; a need that comes up twice belongs in the header instead.
+diff --git a/docs/PROFILE_GUIDE.md b/docs/PROFILE_GUIDE.md
+index c18ca63..1fc25d7 100644
+--- a/docs/PROFILE_GUIDE.md
++++ b/docs/PROFILE_GUIDE.md
+@@ -79,6 +79,8 @@ For a picture of the port's own beside one of the game's screens, such as a hint
+ 
+ `sharp_textures` lists pixel art to draw with nearest filtering whatever the Texture filter setting says, for a sprite that smoothing blurs at a higher resolution. Each is a `SharpTexture`: its key as **Dump textures** names the file (the address ignored, xxh64), and its width and height. Only a texture of a listed size is hashed, when it is uploaded, so the list costs nothing for the others. A key covers one texture with one palette, so a sprite sheet loaded with another palette, or as a different part of its picture, has a key of its own: dump each scene it appears in. `<prefix>_NO_SHARP_PIXEL_ART=1` draws them as the setting says, for a comparison. A texture pack's image for a listed texture keeps the pack's own filtering. Without any, the setting decides for every texture.
+ 
++`second_player` says the port has a local second player (`hle_extension::want_second_pad`): the Controls page then offers **Player 1** and **Player 2**, each Automatic, Keyboard and mouse, or a gamepad by name (`input.player1`, `input.player2`; `<prefix>_PLAYER1`, `<prefix>_PLAYER2`). Without it the page offers one **Controller** row. A gamepad is named by its USB vendor and product ids, so it is the same over USB and Bluetooth, and two alike are one choice that each player can take. On Automatic, player 1 has the keyboard and mouse and the first gamepad free, player 2 the next. A chosen gamepad that is not connected leaves that player on Automatic until it is. The port says when player 2 is in the game (`second_player_playing`); otherwise a gamepad held for player 2 moves to player 1 when player 1's goes.
++
+ `edited_textures` lists textures the profile draws again as they load, with `edit_texture` doing the drawing: the game's button symbols in the style of the gamepad in use, for one. Each is an `EditedTexture`, named and found as a `SharpTexture` is. `edit_texture` gets the game's decoded picture (RGBA8) and a `TextureEditContext`, and returns its own picture, the same shape at any size (four times gives room for sharp detail), drawn with the same texture coordinates as a texture pack's image; false keeps the game's. The context holds what the picture may depend on: Button prompts with the gamepad in use and the Confirm button setting (`input::ButtonPrompts`: the style, and which face button sends each of the PSP's), and whether Texture filter is Sharp. When it changes, the cached textures are dropped and the listed ones drawn again. Set `button_prompts` when they are the game's button symbols, and the Controls page offers Button prompts (Automatic, PSP, Xbox, PlayStation, Nintendo; Automatic follows the pad, the PSP's with none). A texture pack's image for one is drawn instead. `<prefix>_NO_TEXTURE_EDITS=1` draws the game's own, for a comparison. Keep the game's pixels out of the profile: draw over the picture it is given.
+ 
+ `cheats` lists cheats the port offers on the menu's Cheats page, beside the player's own PPSSPP cheat file (`PSP/Cheats/<disc id>.ini` on the memory stick, `host/cheats/cheats.hpp`). Each is a `BuiltinCheat`: a key for settings.ini, the heading it goes under, a name, a sentence for the footer, and its choices, each a label and its CWCheat code lines (what a cheat file has after `_L`). One choice makes a switch; several make Off and each. They run through the same engine as the file, before it, every 77 ms of the game's time, so a code written as a player would write it gives the same result. A write into recompiled code is left out, as for the file; such a code needs the interpreter, which cheats do not reach yet. Test each against the game's own screens before listing it: a public list's codes can name an address the game no longer reads. Without any, the page has only the switch and the file.
+diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
+index 5e94908..63d18f7 100644
+--- a/host/gpu/vulkan_renderer.cpp
++++ b/host/gpu/vulkan_renderer.cpp
+@@ -2344,131 +2344,167 @@ struct VulkanRenderer::Impl {
+     std::uint64_t frames{};
+     std::uint64_t draws{};
+ 
+-    // Only the first pad is used; a second one arriving is ignored rather than
+-    // stealing the stick from whoever is already playing.
+-    void open_gamepad(SDL_JoystickID id) {
+-        if ((gamepad != nullptr && id == gamepad_id) || (gamepad2 != nullptr && id == gamepad2_id)) return;
+-        // The script's two virtual pads by their joystick names: SDL may give
+-        // both the first one's gamepad name.
+-        if (const char *id_name = SDL_GetJoystickNameForID(id); second_pad_wanted) {
+-            // The input script's second virtual pad is always player 2's;
+-            // any other pad is player 2's once player 1 has one.
+-            const bool script2 = id_name != nullptr && std::strcmp(id_name, portablekit::kInputScriptName2) == 0;
+-            const bool script1 = id_name != nullptr && std::strcmp(id_name, portablekit::kInputScriptName) == 0;
+-            if (script2 || (gamepad != nullptr && !script1)) {
+-                open_second_gamepad(id, script2);
+-                return;
++    // Which gamepad each player has (input/players.hpp; Controls > Player 1
++    // and Player 2), opened and closed to match: when a gamepad comes or
++    // goes, when the menu changes a player's device, and when the port starts
++    // or stops wanting player 2 or says whether player 2 is playing. A gamepad
++    // nobody has is not opened.
++    bool keyboard_player2{};
++    bool second_playing{};
++    input::PlayerDevice applied1;
++    input::PlayerDevice applied2;
++    // Gamepads that could not be opened, or (Android) are a keyboard's D-pad.
++    std::vector<SDL_JoystickID> refused;
++
++    // A gamepad's model: its USB vendor and product ids.
++    static std::string pad_model(SDL_JoystickID id) {
++        return input::gamepad_model(SDL_GetGamepadVendorForID(id), SDL_GetGamepadProductForID(id));
++    }
++
++    void assign_gamepads() {
++        for (int tries = 0; tries < 4 && !assign_gamepads_once(); ++tries) {
++        }
++    }
++
++    // False when a gamepad could not be opened: it is left out, and
++    // assign_gamepads() tries again without it.
++    bool assign_gamepads_once() {
++        std::vector<input::ConnectedPad> pads;
++        int count = 0;
++        if (SDL_JoystickID *ids = SDL_GetGamepads(&count); ids != nullptr) {
++            for (int i = 0; i < count; ++i) {
++                const SDL_JoystickID id = ids[i];
++                if (std::find(refused.begin(), refused.end(), id) != refused.end()) continue;
++                // The script's two virtual pads by their joystick names: SDL
++                // may give both the first one's gamepad name.
++                const char *name = SDL_GetJoystickNameForID(id);
++                const bool script1 = name != nullptr && std::strcmp(name, portablekit::kInputScriptName) == 0;
++                const bool script2 = name != nullptr && std::strcmp(name, portablekit::kInputScriptName2) == 0;
++                pads.push_back({static_cast<std::uint32_t>(id), pad_model(id), script1, script2});
+             }
+-        } else if (id_name != nullptr && std::strcmp(id_name, portablekit::kInputScriptName2) == 0) {
+-            return;  // only ever player 2's
+-        }
+-        if (gamepad != nullptr) {
+-            // The virtual pad of <prefix>_INPUT_SCRIPT takes over from a real
+-            // one, so a controller within reach does not steal a scripted run.
+-            const char *name = SDL_GetJoystickNameForID(id);
+-            if (name == nullptr || std::strcmp(name, portablekit::kInputScriptName) != 0) return;
+-            SDL_CloseGamepad(gamepad);
+-            gamepad = nullptr;
+-        }
+-        SDL_Gamepad *device = SDL_OpenGamepad(id);
+-        if (device == nullptr) {
+-            std::cout << "[pad] SDL_OpenGamepad failed: " << SDL_GetError() << "\n";
+-            return;
++            SDL_free(ids);
+         }
++        const settings::Settings &player = settings::current();
++        applied1 = player.player1;
++        applied2 = player.player2;
++        // <prefix>_PLAYER2_PAD_STAYS=1: player 2's gamepad never moves to
++        // player 1, as before the Player 1 and Player 2 rows.
++        static const bool stays = portablekit::env_set("PLAYER2_PAD_STAYS");
++        const input::PadAssignment chosen = input::assign_pads(
++            {pads, player.player1, player.player2, second_pad_wanted, second_playing || stays,
++             gamepad != nullptr ? static_cast<std::uint32_t>(gamepad_id) : 0u,
++             gamepad2 != nullptr ? static_cast<std::uint32_t>(gamepad2_id) : 0u});
++        SDL_Gamepad *const old1 = gamepad;
++        SDL_Gamepad *const old2 = gamepad2;
++        const SDL_JoystickID old1_id = gamepad_id;
++        const SDL_JoystickID old2_id = gamepad2_id;
++        std::vector<SDL_Gamepad *> opened;
++        bool failed = false;
++        const auto handle = [&](std::uint32_t id) -> SDL_Gamepad * {
++            if (id == 0u) return nullptr;
++            if (old1 != nullptr && id == old1_id) return old1;
++            if (old2 != nullptr && id == old2_id) return old2;
++            SDL_Gamepad *device = SDL_OpenGamepad(static_cast<SDL_JoystickID>(id));
++            if (device == nullptr) std::cout << "[pad] SDL_OpenGamepad failed: " << SDL_GetError() << "\n";
+ #if defined(__ANDROID__)
+-        // Android reports a keyboard with arrow keys (the emulator's qwerty2,
+-        // many tablets' keyboards) as a D-pad device, and SDL lists it as a
+-        // gamepad. It has no sticks; taking it as the pad would leave a real
+-        // controller connected later unused. Its keys still reach the game
+-        // through the keyboard.
+-        if (SDL_GetNumJoystickAxes(SDL_GetGamepadJoystick(device)) <= 0) {
+-            const char *skipped = SDL_GetGamepadName(device);
+-            std::cout << "[pad] " << (skipped != nullptr ? skipped : "gamepad")
+-                      << " has no sticks (a keyboard's D-pad), ignored\n";
+-            SDL_CloseGamepad(device);
+-            return;
+-        }
++            // Android reports a keyboard with arrow keys (the emulator's qwerty2,
++            // many tablets' keyboards) as a D-pad device, and SDL lists it as a
++            // gamepad. It has no sticks; taking it as the pad would leave a real
++            // controller connected later unused. Its keys still reach the game
++            // through the keyboard.
++            if (device != nullptr && SDL_GetNumJoystickAxes(SDL_GetGamepadJoystick(device)) <= 0) {
++                const char *skipped = SDL_GetGamepadName(device);
++                std::cout << "[pad] " << (skipped != nullptr ? skipped : "gamepad")
++                          << " has no sticks (a keyboard's D-pad), ignored\n";
++                SDL_CloseGamepad(device);
++                device = nullptr;
++            }
+ #endif
+-        gamepad = device;
+-        gamepad_id = id;
+-        input::motion::gamepad_changed(device);
+-        const char *name = SDL_GetGamepadName(device);
+-        const PadTuning tuning = pad_tuning();
+-        std::cout << "[pad] " << (name != nullptr ? name : "gamepad") << " connected; confirm ("
+-                  << (confirm_button_bit() == 0x4000u ? "cross" : "circle") << ") on the "
+-                  << (tuning.confirm_south ? "south" : "east") << " button, right stick "
+-                  << (tuning.right_stick_mode == settings::RightStick::DPad     ? "as D-pad"
+-                      : tuning.right_stick_mode == settings::RightStick::Camera ? "as camera"
+-                                                                                : "off")
+-                  << "\n";
++            if (device == nullptr) {
++                refused.push_back(static_cast<SDL_JoystickID>(id));
++                failed = true;
++                return nullptr;
++            }
++            opened.push_back(device);
++            return device;
++        };
++        SDL_Gamepad *const new1 = handle(chosen.player1);
++        SDL_Gamepad *const new2 = handle(chosen.player2);
++        if (failed) {
++            for (SDL_Gamepad *device : opened) SDL_CloseGamepad(device);
++            return false;
++        }
++        if (old1 != nullptr && old1 != new1 && old1 != new2) SDL_CloseGamepad(old1);
++        if (old2 != nullptr && old2 != new1 && old2 != new2) SDL_CloseGamepad(old2);
++        gamepad = new1;
++        gamepad_id = new1 != nullptr ? static_cast<SDL_JoystickID>(chosen.player1) : 0;
++        gamepad2 = new2;
++        gamepad2_id = new2 != nullptr ? static_cast<SDL_JoystickID>(chosen.player2) : 0;
++        const bool keyboard_was2 = keyboard_player2;
++        keyboard_player2 = chosen.keyboard_player2;
++        const auto listed = [&](SDL_JoystickID id) {
++            return std::any_of(pads.begin(), pads.end(), [&](const input::ConnectedPad &p) { return p.id == id; });
++        };
++        if (new1 != old1) {
++            input::motion::gamepad_changed(new1);
++            if (new1 != nullptr) {
++                const char *name = SDL_GetGamepadName(new1);
++                const PadTuning tuning = pad_tuning();
++                std::cout << "[pad] " << (name != nullptr ? name : "gamepad") << " connected; confirm ("
++                          << (confirm_button_bit() == 0x4000u ? "cross" : "circle") << ") on the "
++                          << (tuning.confirm_south ? "south" : "east") << " button, right stick "
++                          << (tuning.right_stick_mode == settings::RightStick::DPad     ? "as D-pad"
++                              : tuning.right_stick_mode == settings::RightStick::Camera ? "as camera"
++                                                                                        : "off")
++                          << "\n";
++            } else {
++                std::cout << (listed(old1_id) ? "[pad] player 1 has no gamepad\n" : "[pad] gamepad disconnected\n");
++            }
++        }
++        if (new2 != old2) {
++            if (new2 != nullptr) {
++                const char *name = SDL_GetGamepadName(new2);
++                std::cout << "[pad] player 2: " << (name != nullptr ? name : "gamepad") << " connected\n";
++            } else {
++                std::cout << (listed(old2_id) ? "[pad] player 2 has no gamepad\n"
++                                              : "[pad] player 2's gamepad disconnected\n");
++            }
++        }
++        if (keyboard_player2 != keyboard_was2)
++            std::cout << (keyboard_player2 ? "[pad] player 2: the keyboard and mouse\n"
++                                           : "[pad] the keyboard and mouse are player 1's\n");
++        if (new2 == nullptr && !keyboard_player2) pad2 = PadState{};
++        return true;
+     }
+ 
+-    // Picks up a pad that was already plugged in before the window existed, and
+-    // falls back to a still-connected second pad when the first one is unplugged.
++    // Picks up the gamepads already plugged in before the window existed,
++    // and says why there is none rather than staying silent.
+     void scan_gamepads() {
+-        int count = 0;
+-        SDL_JoystickID *ids = SDL_GetGamepads(&count);
+-        if (ids != nullptr) {
+-            // With a second player wanted, every pad is offered: the input
+-            // script's second pad takes player 2's place from a real one
+-            // found earlier, as its first pad does player 1's.
+-            for (int i = 0; i < count && (gamepad == nullptr || second_pad_wanted); ++i) open_gamepad(ids[i]);
+-            SDL_free(ids);
+-        }
+-        if (gamepad != nullptr) return;
+-        // Say why there is no pad rather than staying silent: a stick with no
+-        // entry in SDL's mapping database enumerates as a joystick only, which
+-        // looks identical to "nothing plugged in" from the player's side.
++        assign_gamepads();
++        if (gamepad == nullptr) report_no_gamepad();
++    }
++
++    void report_no_gamepad() {
++        // A stick with no entry in SDL's mapping database enumerates as a
++        // joystick only, which looks identical to "nothing plugged in" from
++        // the player's side.
+         int joysticks = 0;
+         SDL_JoystickID *sticks = SDL_GetJoysticks(&joysticks);
+         if (sticks != nullptr) {
+             for (int i = 0; i < joysticks; ++i) {
+                 if (SDL_IsGamepad(sticks[i])) continue;
+                 const char *name = SDL_GetJoystickNameForID(sticks[i]);
+-                std::cout << "[pad] " << (name != nullptr ? name : "joystick")
+-                          << " has no gamepad mapping, ignored\n";
++                std::cout << "[pad] " << (name != nullptr ? name : "joystick") << " has no gamepad mapping, ignored\n";
+             }
+             SDL_free(sticks);
+         }
+         if (joysticks == 0) std::cout << "[pad] no gamepad connected, keyboard only\n";
+     }
+ 
+-    // Player 2's pad; a scripted one takes over from a real one, as for
+-    // player 1.
+-    void open_second_gamepad(SDL_JoystickID id, bool scripted) {
+-        if (gamepad2 != nullptr) {
+-            if (!scripted) return;
+-            SDL_CloseGamepad(gamepad2);
+-            gamepad2 = nullptr;
+-        }
+-        SDL_Gamepad *device = SDL_OpenGamepad(id);
+-        if (device == nullptr) {
+-            std::cout << "[pad] SDL_OpenGamepad failed: " << SDL_GetError() << "\n";
+-            return;
+-        }
+-        gamepad2 = device;
+-        gamepad2_id = id;
+-        const char *name = SDL_GetGamepadName(device);
+-        std::cout << "[pad] player 2: " << (name != nullptr ? name : "gamepad") << " connected\n";
+-    }
+-
+-    void close_gamepad(SDL_JoystickID id) {
+-        if (gamepad2 != nullptr && id == gamepad2_id) {
+-            SDL_CloseGamepad(gamepad2);
+-            gamepad2 = nullptr;
+-            gamepad2_id = 0;
+-            pad2 = PadState{};
+-            std::cout << "[pad] player 2's gamepad disconnected\n";
+-            scan_gamepads();
+-            return;
+-        }
+-        if (gamepad == nullptr || id != gamepad_id) return;
+-        input::motion::gamepad_changed(nullptr);
+-        SDL_CloseGamepad(gamepad);
+-        gamepad = nullptr;
+-        gamepad_id = 0;
+-        std::cout << "[pad] gamepad disconnected\n";
+-        scan_gamepads();
++    void gamepad_removed(SDL_JoystickID id) {
++        const bool players = gamepad != nullptr && id == gamepad_id;
++        assign_gamepads();
++        if (players && gamepad == nullptr) report_no_gamepad();
+     }
+ 
+     [[nodiscard]] std::uint32_t find_memory_type(std::uint32_t mask, VkMemoryPropertyFlags properties) const {
+@@ -7081,8 +7117,8 @@ bool VulkanRenderer::pump_events() {
+         if (event.type == SDL_EVENT_QUIT || event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) impl_->quit = true;
+         // Hot-plug is handled before the text-input branch below, which skips
+         // every other event while the on-screen keyboard is up.
+-        if (event.type == SDL_EVENT_GAMEPAD_ADDED) impl_->open_gamepad(event.gdevice.which);
+-        if (event.type == SDL_EVENT_GAMEPAD_REMOVED) impl_->close_gamepad(event.gdevice.which);
++        if (event.type == SDL_EVENT_GAMEPAD_ADDED) impl_->assign_gamepads();
++        if (event.type == SDL_EVENT_GAMEPAD_REMOVED) impl_->gamepad_removed(event.gdevice.which);
+         // F3 toggles the performance overlay. No pad combination: L3+R3 is
+         // reserved for the in-game menu.
+         if (event.type == SDL_EVENT_WINDOW_DISPLAY_CHANGED) impl_->update_display_info();
+@@ -7121,6 +7157,10 @@ bool VulkanRenderer::pump_events() {
+     // lost stays down in SDL's snapshot, which the guest sees as a held
+     // direction it can never release.
+     const bool focused = (SDL_GetWindowFlags(impl_->window) & SDL_WINDOW_INPUT_FOCUS) != 0u;
++    // Controls > Player 1 or Player 2 changed in the menu.
++    if (const settings::Settings &player = settings::current();
++        player.player1 != impl_->applied1 || player.player2 != impl_->applied2)
++        impl_->assign_gamepads();
+     impl_->update_pointer(focused);
+     impl_->sample_pad(focused);
+     impl_->note_window_size();
+@@ -7156,32 +7196,40 @@ void VulkanRenderer::Impl::sample_pad(bool focused) {
+         return position >= 0 && ((focused && position < SDL_SCANCODE_COUNT && keys[position]) ||
+                                  impl_->scripted_keys[static_cast<std::size_t>(position)]);
+     });
++    // The keys and mouse buttons into a player's pad: player 1's, or player
++    // 2's when Controls > Player 2 is the keyboard.
++    const auto add_typed = [&](PadState &target, int &offset_x, int &offset_y) {
++        target.buttons |= typed.buttons;
++        target.extra |= typed.extra;
++        // Keys push the stick to the end of the nub's range each way: 0 or 255.
++        offset_x += input::stick::nub_offset(static_cast<float>(typed.stick_x) / 127.0f);
++        offset_y += input::stick::nub_offset(static_cast<float>(typed.stick_y) / 127.0f);
++        // Camera keys push the second stick fully, as a right stick would: in
++        // the D-pad mode they press the D-pad instead, and with it off, nothing.
++        if (player.right_stick == settings::RightStick::Camera) {
++            target.right_x = static_cast<std::uint8_t>(0x80 + typed.camera_x);
++            target.right_y = static_cast<std::uint8_t>(0x80 + typed.camera_y);
++        } else if (player.right_stick == settings::RightStick::DPad) {
++            if (typed.camera_x < 0) target.buttons |= 0x0080u;
++            if (typed.camera_x > 0) target.buttons |= 0x0020u;
++            if (typed.camera_y < 0) target.buttons |= 0x0010u;
++            if (typed.camera_y > 0) target.buttons |= 0x0040u;
++        }
++    };
+     PadState pad{};
+-    pad.buttons = typed.buttons;
+-    pad.extra = typed.extra;
+-    // Keys push the stick to the end of the nub's range each way: 0 or 255.
+-    int analog_x = input::stick::nub_offset(static_cast<float>(typed.stick_x) / 127.0f);
+-    int analog_y = input::stick::nub_offset(static_cast<float>(typed.stick_y) / 127.0f);
+-    // Camera keys push the second stick fully, as a right stick would: in
+-    // the D-pad mode they press the D-pad instead, and with it off, nothing.
+-    if (player.right_stick == settings::RightStick::Camera) {
+-        pad.right_x = static_cast<std::uint8_t>(0x80 + typed.camera_x);
+-        pad.right_y = static_cast<std::uint8_t>(0x80 + typed.camera_y);
+-    } else if (player.right_stick == settings::RightStick::DPad) {
+-        if (typed.camera_x < 0) pad.buttons |= 0x0080u;
+-        if (typed.camera_x > 0) pad.buttons |= 0x0020u;
+-        if (typed.camera_y < 0) pad.buttons |= 0x0010u;
+-        if (typed.camera_y > 0) pad.buttons |= 0x0040u;
+-    }
++    int analog_x = 0;
++    int analog_y = 0;
++    if (!impl_->keyboard_player2) add_typed(pad, analog_x, analog_y);
+ 
+     // The gamepad adds to the same bits and offsets, so both sources are live.
+     if (impl_->gamepad != nullptr) read_gamepad(impl_->gamepad, pad, analog_x, analog_y);
+-    // Player 2's gamepad is a pad of its own.
++    // Player 2's gamepad, or the keyboard, is a pad of its own.
+     PadState second{};
+-    if (impl_->gamepad2 != nullptr) {
++    if (impl_->gamepad2 != nullptr || impl_->keyboard_player2) {
+         int second_x = 0;
+         int second_y = 0;
+-        read_gamepad(impl_->gamepad2, second, second_x, second_y);
++        if (impl_->keyboard_player2) add_typed(second, second_x, second_y);
++        if (impl_->gamepad2 != nullptr) read_gamepad(impl_->gamepad2, second, second_x, second_y);
+         second.analog_x = static_cast<std::uint8_t>(std::clamp(0x80 + second_x, 0, 255));
+         second.analog_y = static_cast<std::uint8_t>(std::clamp(0x80 + second_y, 0, 255));
+     }
+@@ -7252,17 +7300,22 @@ PadState VulkanRenderer::pad() const noexcept { return impl_ ? impl_->pad : PadS
+ void VulkanRenderer::set_second_pad_wanted(bool wanted) {
+     if (!impl_ || impl_->second_pad_wanted == wanted) return;
+     impl_->second_pad_wanted = wanted;
+-    if (wanted) {
+-        impl_->scan_gamepads();
+-    } else if (impl_->gamepad2 != nullptr) {
+-        SDL_CloseGamepad(impl_->gamepad2);
+-        impl_->gamepad2 = nullptr;
+-        impl_->gamepad2_id = 0;
+-        impl_->pad2 = PadState{};
+-    }
++    impl_->assign_gamepads();
+ }
+ 
+-bool VulkanRenderer::second_pad_connected() const noexcept { return impl_ && impl_->gamepad2 != nullptr; }
++void VulkanRenderer::set_second_player_playing(bool playing) {
++    if (!impl_ || impl_->second_playing == playing) return;
++    impl_->second_playing = playing;
++    impl_->assign_gamepads();
++}
++
++bool VulkanRenderer::second_pad_connected() const noexcept {
++    return impl_ && (impl_->gamepad2 != nullptr || impl_->keyboard_player2);
++}
++
++bool VulkanRenderer::keyboard_player2() const noexcept { return impl_ && impl_->keyboard_player2; }
++
++bool VulkanRenderer::second_pad_wanted() const noexcept { return impl_ && impl_->second_pad_wanted; }
+ 
+ bool VulkanRenderer::first_pad_connected() const noexcept { return impl_ && impl_->gamepad != nullptr; }
+ 
+@@ -7398,6 +7451,8 @@ std::array<float, 4> VulkanRenderer::game_picture() const noexcept {
+ std::string VulkanRenderer::device_name() const { return impl_ ? impl_->device_name : std::string{}; }
+ SDL_Gamepad *VulkanRenderer::gamepad() const noexcept { return impl_ ? impl_->gamepad : nullptr; }
+ 
++SDL_Gamepad *VulkanRenderer::second_gamepad() const noexcept { return impl_ ? impl_->gamepad2 : nullptr; }
++
+ std::optional<TextureEditContext> VulkanRenderer::texture_edit_context() const {
+     return impl_ ? impl_->edit_context : std::nullopt;
+ }
+diff --git a/host/gpu/vulkan_renderer.hpp b/host/gpu/vulkan_renderer.hpp
+index bb03487..c4beda1 100644
+--- a/host/gpu/vulkan_renderer.hpp
++++ b/host/gpu/vulkan_renderer.hpp
+@@ -102,13 +102,24 @@ public:
+     bool pump_events();
+     [[nodiscard]] PadState pad() const noexcept;
+     // A second player's gamepad, for a port's local multiplayer: while
+-    // wanted, a gamepad other than player 1's is opened as player 2's and
+-    // read into second_pad() with the same bindings and tuning, never into
+-    // pad(). Off by default, so a second pad otherwise stays a spare for
+-    // player 1 as before.
++    // wanted, player 2's device (Controls > Player 2: on Automatic a gamepad
++    // other than player 1's, or the keyboard and mouse) is read into
++    // second_pad() with the same bindings and tuning, never into pad(). Off
++    // by default, so a second pad otherwise stays a spare for player 1 as
++    // before.
+     void set_second_pad_wanted(bool wanted);
++    // Player 2 is playing: when player 1's gamepad goes, player 2's stays
++    // player 2's. Otherwise it moves to player 1, and player 2 waits for
++    // another.
++    void set_second_player_playing(bool playing);
++    // Player 2 has a device: a gamepad, or the keyboard.
+     [[nodiscard]] bool second_pad_connected() const noexcept;
++    // The port wants a second player's pad now (set_second_pad_wanted).
++    [[nodiscard]] bool second_pad_wanted() const noexcept;
+     [[nodiscard]] PadState second_pad() const noexcept;
++    // The keyboard and mouse are player 2's (Controls > Player 2, while a
++    // second player is wanted), not player 1's.
++    [[nodiscard]] bool keyboard_player2() const noexcept;
+     // Player 1 has a gamepad (pad() reads one, not only the keyboard).
+     [[nodiscard]] bool first_pad_connected() const noexcept;
+     // Reads the keyboard, mouse buttons and gamepad again for pad() without
+@@ -277,6 +288,8 @@ public:
+     [[nodiscard]] std::string device_name() const;
+     // The pad the game reads, or null.
+     [[nodiscard]] SDL_Gamepad *gamepad() const noexcept;
++    // Player 2's gamepad while a second player is wanted, or null.
++    [[nodiscard]] SDL_Gamepad *second_gamepad() const noexcept;
+     // What the profile's textures drawn again were last drawn for
+     // (GameProfile::edited_textures), so the port's own screens can show the
+     // same button prompts. None before the first frame, or without such
+diff --git a/host/hle/hle_common.hpp b/host/hle/hle_common.hpp
+index d5d1fa4..90912ab 100644
+--- a/host/hle/hle_common.hpp
++++ b/host/hle/hle_common.hpp
+@@ -82,6 +82,8 @@ std::int64_t read_guest_file(const std::string &path, std::uint64_t offset, std:
+ // Player 2's gamepad (gpu::VulkanRenderer::set_second_pad_wanted), for the
+ // extension interface's second_pad().
+ void want_second_pad(bool wanted);
++// Player 2 is playing (gpu::VulkanRenderer::set_second_player_playing).
++void second_player_playing(bool playing);
+ struct SecondPadSample {
+     bool connected{};
+     std::uint32_t buttons{};
+@@ -90,6 +92,8 @@ struct SecondPadSample {
+     std::uint8_t analog_y{0x80u};
+     std::uint8_t right_x{0x80u};
+     std::uint8_t right_y{0x80u};
++    // Player 2 plays on the keyboard and mouse (second_pad_sample only).
++    bool keyboard{};
+ };
+ [[nodiscard]] SecondPadSample second_pad_sample();
+ // Player 1's pad sampled now, as the game's own read would get it, without
+diff --git a/host/hle/hle_extension_host.cpp b/host/hle/hle_extension_host.cpp
+index 07ecc00..10febe2 100644
+--- a/host/hle/hle_extension_host.cpp
++++ b/host/hle/hle_extension_host.cpp
+@@ -117,10 +117,12 @@ std::uint32_t extra_buttons() { return ::portablekit::pad_extra_buttons(); }
+ 
+ void want_second_pad(bool wanted) { ::portablekit::want_second_pad(wanted); }
+ 
++void second_player_playing(bool playing) { ::portablekit::second_player_playing(playing); }
++
+ SecondPad second_pad() {
+     const SecondPadSample sample = ::portablekit::second_pad_sample();
+-    return SecondPad{sample.connected, sample.buttons,  sample.extra,  sample.analog_x,
+-                     sample.analog_y,  sample.right_x, sample.right_y};
++    return SecondPad{sample.connected, sample.buttons,  sample.extra,   sample.analog_x,
++                     sample.analog_y,  sample.right_x, sample.right_y, sample.keyboard};
+ }
+ 
+ bool first_pad_connected() { return ::portablekit::first_pad_connected(); }
+diff --git a/host/hle/hle_media.cpp b/host/hle/hle_media.cpp
+index 8ac62ae..4f47df3 100644
+--- a/host/hle/hle_media.cpp
++++ b/host/hle/hle_media.cpp
+@@ -438,6 +438,8 @@ CtrlSample sample_ctrl() {
+         static const bool at_flip = portablekit::env("PAD_AT_FLIP") != nullptr;
+         if (!at_flip) media().renderer->sample_pad();
+         const gpu::PadState pad = media().renderer->pad();
++        // The mouse is player 2's with the keyboard (Controls > Player 2).
++        const bool mouse = !media().renderer->keyboard_player2();
+         sample.buttons = pad.buttons;
+         sampled_extra() = pad.extra;
+         stall_watchdog::note_pad(sample.buttons);
+@@ -460,10 +462,10 @@ CtrlSample sample_ctrl() {
+             // direction stands in for it.
+             int dx = static_cast<int>(sample.right_x) - 0x80;
+             int dy = static_cast<int>(sample.right_y) - 0x80;
+-            if (dx == 0 && dy == 0) {
+-                if (const auto mouse = camera::game_camera_mouse_aim()) {
+-                    dx = static_cast<int>(std::lround(mouse->x * 127.0f));
+-                    dy = static_cast<int>(std::lround(mouse->y * 127.0f));
++            if (dx == 0 && dy == 0 && mouse) {
++                if (const auto aim = camera::game_camera_mouse_aim()) {
++                    dx = static_cast<int>(std::lround(aim->x * 127.0f));
++                    dy = static_cast<int>(std::lround(aim->y * 127.0f));
+                 }
+             }
+             const float length = std::sqrt(static_cast<float>(dx * dx + dy * dy));
+@@ -471,7 +473,7 @@ CtrlSample sample_ctrl() {
+                 sample.right_x = static_cast<std::uint8_t>(std::clamp(0x80 + static_cast<int>(std::lround(dx * 127.0f / length)), 0, 255));
+                 sample.right_y = static_cast<std::uint8_t>(std::clamp(0x80 + static_cast<int>(std::lround(dy * 127.0f / length)), 0, 255));
+             }
+-        } else if (sample.right_x == 0x80u && sample.right_y == 0x80u &&
++        } else if (mouse && sample.right_x == 0x80u && sample.right_y == 0x80u &&
+                    settings::current().right_stick == settings::RightStick::Camera) {
+             // The game's own camera: the mouse switches its turn on while
+             // it moves sideways. Not in the D-pad mode, where the same
+@@ -1165,12 +1167,21 @@ void want_second_pad(bool wanted) {
+ #endif
+ }
+ 
++void second_player_playing(bool playing) {
++#if defined(PORTABLEKIT_HAS_RENDERER)
++    if (media().renderer && media().renderer->available()) media().renderer->set_second_player_playing(playing);
++#else
++    (void)playing;
++#endif
++}
++
+ SecondPadSample second_pad_sample() {
+     SecondPadSample sample;
+ #if defined(PORTABLEKIT_HAS_RENDERER)
+     if (media().renderer && media().renderer->available()) {
+         const gpu::PadState pad = media().renderer->second_pad();
+         sample.connected = media().renderer->second_pad_connected();
++        sample.keyboard = media().renderer->keyboard_player2();
+         sample.buttons = pad.buttons;
+         sample.extra = pad.extra;
+         sample.analog_x = pad.analog_x;
+diff --git a/host/input/players.cpp b/host/input/players.cpp
+new file mode 100644
+index 0000000..47a90f8
+--- /dev/null
++++ b/host/input/players.cpp
+@@ -0,0 +1,137 @@
++#include "input/players.hpp"
++
++#include <algorithm>
++#include <cstdio>
++
++namespace portablekit::input {
++
++std::string gamepad_model(std::uint16_t vendor, std::uint16_t product) {
++    char text[16];
++    std::snprintf(text, sizeof text, "%04x%04x", static_cast<unsigned>(vendor), static_cast<unsigned>(product));
++    return text;
++}
++
++std::string format_player_device(const PlayerDevice &device) {
++    switch (device.choice) {
++    case DeviceChoice::Keyboard: return "keyboard";
++    case DeviceChoice::Gamepad: return "pad:" + device.model + ":" + device.name;
++    case DeviceChoice::Automatic: break;
++    }
++    return "auto";
++}
++
++bool parse_player_device(std::string_view text, PlayerDevice &device) {
++    if (text == "auto") {
++        device = PlayerDevice{};
++        return true;
++    }
++    if (text == "keyboard") {
++        device = PlayerDevice{DeviceChoice::Keyboard, {}, {}};
++        return true;
++    }
++    constexpr std::string_view kPad = "pad:";
++    if (!text.starts_with(kPad)) return false;
++    text.remove_prefix(kPad.size());
++    const std::size_t colon = text.find(':');
++    const std::string_view model = text.substr(0, colon);
++    if (model.empty()) return false;
++    device = PlayerDevice{DeviceChoice::Gamepad, std::string(model),
++                          colon == std::string_view::npos ? std::string{} : std::string(text.substr(colon + 1))};
++    return true;
++}
++
++namespace {
++
++struct Pool {
++    std::span<const ConnectedPad> pads;
++    std::uint32_t taken1{};
++    std::uint32_t taken2{};
++
++    [[nodiscard]] bool connected(std::uint32_t id) const {
++        return id != 0u && std::any_of(pads.begin(), pads.end(), [&](const ConnectedPad &p) { return p.id == id; });
++    }
++    [[nodiscard]] bool free(std::uint32_t id) const { return connected(id) && id != taken1 && id != taken2; }
++
++    // The gamepad of kind `model`: `keep` if it is one, else the first free.
++    [[nodiscard]] std::uint32_t by_model(const std::string &model, std::uint32_t keep) const {
++        for (const ConnectedPad &p : pads)
++            if (p.id == keep && p.model == model && free(p.id)) return p.id;
++        for (const ConnectedPad &p : pads)
++            if (p.model == model && free(p.id)) return p.id;
++        return 0u;
++    }
++};
++
++} // namespace
++
++PadAssignment assign_pads(const PadSituation &s) {
++    PadAssignment out;
++    Pool pool{s.pads};
++    const bool p1_keyboard = s.player1.choice == DeviceChoice::Keyboard;
++    out.keyboard_player2 = s.second_wanted && s.player2.choice == DeviceChoice::Keyboard && !p1_keyboard;
++
++    // Gamepads chosen by name first: they are that player's even while the
++    // other is on Automatic. Player 2's is kept for player 2 while player 2
++    // is not wanted, though not read.
++    if (s.player1.choice == DeviceChoice::Gamepad) pool.taken1 = pool.by_model(s.player1.model, s.current1);
++    std::uint32_t reserved2 = 0u;
++    if (s.player2.choice == DeviceChoice::Gamepad) {
++        reserved2 = pool.by_model(s.player2.model, s.current2);
++        pool.taken2 = reserved2;
++    }
++
++    // Player 1 on Automatic, or a chosen gamepad not connected.
++    if (pool.taken1 == 0u && !p1_keyboard) {
++        const auto script = std::find_if(s.pads.begin(), s.pads.end(),
++                                         [&](const ConnectedPad &p) { return p.script1 && pool.free(p.id); });
++        const auto own = [&](std::uint32_t id) {
++            const auto pad = std::find_if(s.pads.begin(), s.pads.end(), [&](const ConnectedPad &p) { return p.id == id; });
++            return pad != s.pads.end() && !pad->script2 && pool.free(id);
++        };
++        if (script != s.pads.end()) {
++            pool.taken1 = script->id;
++        } else if (own(s.current1)) {
++            pool.taken1 = s.current1;
++        } else {
++            // A gamepad nobody has; then, unless player 2 is playing,
++            // player 2's own.
++            const bool player2s_own = s.second_wanted && s.current2 != 0u && s.player2.choice != DeviceChoice::Gamepad;
++            for (const ConnectedPad &p : s.pads)
++                if (own(p.id) && !(player2s_own && p.id == s.current2)) {
++                    pool.taken1 = p.id;
++                    break;
++                }
++            // An input script's second pad too: it was player 2's, and is
++            // only moving up.
++            if (pool.taken1 == 0u && player2s_own && !s.second_playing && pool.free(s.current2))
++                pool.taken1 = s.current2;
++        }
++    }
++    out.player1 = pool.taken1;
++
++    if (!s.second_wanted) return out;
++    out.player2 = reserved2;
++    // Player 2 on Automatic, or a chosen gamepad not connected.
++    if (out.player2 == 0u && !out.keyboard_player2) {
++        const auto script = std::find_if(s.pads.begin(), s.pads.end(),
++                                         [&](const ConnectedPad &p) { return p.script2 && pool.free(p.id); });
++        const auto own = [&](std::uint32_t id) {
++            const auto pad = std::find_if(s.pads.begin(), s.pads.end(), [&](const ConnectedPad &p) { return p.id == id; });
++            return pad != s.pads.end() && !pad->script1 && pool.free(id);
++        };
++        if (script != s.pads.end()) {
++            out.player2 = script->id;
++        } else if (own(s.current2)) {
++            out.player2 = s.current2;
++        } else {
++            for (const ConnectedPad &p : s.pads)
++                if (own(p.id)) {
++                    out.player2 = p.id;
++                    break;
++                }
++        }
++    }
++    return out;
++}
++
++} // namespace portablekit::input
+diff --git a/host/input/players.hpp b/host/input/players.hpp
+new file mode 100644
+index 0000000..191ddf0
+--- /dev/null
++++ b/host/input/players.hpp
+@@ -0,0 +1,75 @@
++#pragma once
++
++// Which device each player plays on (Controls > Player 1 and Player 2,
++// input.player1 and input.player2): the gamepads the renderer finds, and the
++// keyboard with the mouse. No SDL here: the renderer lists the pads it sees
++// and opens the ones assign_pads() gives each player.
++
++#include <cstdint>
++#include <span>
++#include <string>
++#include <string_view>
++
++namespace portablekit::input {
++
++// A player's choice. Automatic: player 1 gets the keyboard and the first
++// gamepad free, player 2 the next gamepad. Keyboard: the keyboard and mouse
++// alone. Gamepad: a gamepad of that model, the first of them free when two
++// are alike; while none is connected, the player is on Automatic.
++enum class DeviceChoice : std::uint8_t { Automatic, Keyboard, Gamepad };
++
++struct PlayerDevice {
++    DeviceChoice choice{DeviceChoice::Automatic};
++    // Gamepad: its USB vendor and product ids, 8 hex digits ("054c0ce6"), the
++    // same over USB and Bluetooth.
++    std::string model;
++    std::string name;  // Gamepad: its name, shown while it is not connected
++    bool operator==(const PlayerDevice &) const = default;
++};
++
++// A gamepad's model as PlayerDevice::model holds it.
++[[nodiscard]] std::string gamepad_model(std::uint16_t vendor, std::uint16_t product);
++
++// "auto", "keyboard", or "pad:<model>:<name>" (the name may hold colons).
++[[nodiscard]] std::string format_player_device(const PlayerDevice &device);
++[[nodiscard]] bool parse_player_device(std::string_view text, PlayerDevice &device);
++
++// A gamepad connected, in the order SDL lists them.
++struct ConnectedPad {
++    std::uint32_t id{};  // SDL_JoystickID, never 0
++    std::string model;
++    // An input script's virtual pad (ui/input_script.hpp): its first is
++    // player 1's and its second player 2's over any real pad, unless the
++    // player chose a gamepad by name.
++    bool script1{};
++    bool script2{};
++};
++
++struct PadSituation {
++    std::span<const ConnectedPad> pads;
++    PlayerDevice player1;
++    PlayerDevice player2;
++    // The port wants a second player's pad (VulkanRenderer::set_second_pad_wanted).
++    bool second_wanted{};
++    // Player 2 is playing (set_second_player_playing): player 2's gamepad
++    // stays player 2's when player 1's goes. Otherwise it moves to player 1,
++    // who has none, as a gamepad does when player 2 is not wanted.
++    bool second_playing{};
++    // The gamepads each player has now (0 for none), kept while they can be.
++    std::uint32_t current1{};
++    std::uint32_t current2{};
++};
++
++struct PadAssignment {
++    std::uint32_t player1{};  // 0: no gamepad
++    std::uint32_t player2{};  // 0: no gamepad
++    // The keyboard and mouse are player 2's, not player 1's. Only while a
++    // second player is wanted: otherwise they are player 1's whatever
++    // player 2's choice.
++    bool keyboard_player2{};
++    bool operator==(const PadAssignment &) const = default;
++};
++
++[[nodiscard]] PadAssignment assign_pads(const PadSituation &situation);
++
++} // namespace portablekit::input
+diff --git a/host/profile.hpp b/host/profile.hpp
+index 8a3a607..3d3a82e 100644
+--- a/host/profile.hpp
++++ b/host/profile.hpp
+@@ -391,6 +391,13 @@ struct GameProfile {
+     // offers Button prompts.
+     bool button_prompts = false;
+ 
++    // --- A second player -------------------------------------------------------
++    // The port has a local second player (hle_extension::want_second_pad): the
++    // Controls page offers Player 2 beside Player 1, each a gamepad or the
++    // keyboard (input.player1, input.player2). Otherwise it offers one
++    // Controller row.
++    bool second_player = false;
++
+     // --- Cheats ----------------------------------------------------------------
+     // The cheats the port offers on the Cheats page, besides the player's own
+     // cheat file (cheats/cheats.hpp). Empty: only the file's.
+diff --git a/host/settings/settings.cpp b/host/settings/settings.cpp
+index 43a98e3..7de240b 100644
+--- a/host/settings/settings.cpp
++++ b/host/settings/settings.cpp
+@@ -260,6 +260,18 @@ const std::vector<Field> &fields() {
+          [](Settings &s, const char *t) {
+              if (!kPromptSettings.parse(t, s.button_prompts)) s.button_prompts = input::PromptSetting::Automatic;
+          }},
++        {"input.player1", "PLAYER1",
++         [](Settings &s, const std::string &t) { return input::parse_player_device(t, s.player1); },
++         [](const Settings &s) { return input::format_player_device(s.player1); },
++         [](Settings &s, const char *t) {
++             if (!input::parse_player_device(t, s.player1)) s.player1 = input::PlayerDevice{};
++         }},
++        {"input.player2", "PLAYER2",
++         [](Settings &s, const std::string &t) { return input::parse_player_device(t, s.player2); },
++         [](const Settings &s) { return input::format_player_device(s.player2); },
++         [](Settings &s, const char *t) {
++             if (!input::parse_player_device(t, s.player2)) s.player2 = input::PlayerDevice{};
++         }},
+         {"input.dead_zone", "PAD_DEADZONE",
+          [](Settings &s, const std::string &t) { return parse_float(t, 0.0f, 0.9f, s.dead_zone); },
+          [](const Settings &s) { return format_float(s.dead_zone); },
+diff --git a/host/settings/settings.hpp b/host/settings/settings.hpp
+index cf064a0..d8ba379 100644
+--- a/host/settings/settings.hpp
++++ b/host/settings/settings.hpp
+@@ -2,6 +2,7 @@
+ 
+ #include "input/bindings.hpp"
+ #include "input/button_prompts.hpp"
++#include "input/players.hpp"
+ #include "input/tilt.hpp"
+ 
+ #include <cstdint>
+@@ -76,6 +77,11 @@ struct Settings {
+     // What a game that draws its button symbols again (GameProfile::
+     // button_prompts) shows: the PSP's, or the buttons of the gamepad in use.
+     input::PromptSetting button_prompts{input::PromptSetting::Automatic};
++    // The device each player plays on (input/players.hpp): Automatic, the
++    // keyboard and mouse, or a gamepad by name. Player 2's only for a port
++    // with a second player (GameProfile::second_player).
++    input::PlayerDevice player1;
++    input::PlayerDevice player2;
+     float dead_zone{0.15f};
+     // The left stick's circle stretched to the PSP nub's square range, so a
+     // full diagonal reaches the corner (input/stick.hpp). Off passes the
+diff --git a/host/ui/menu.cpp b/host/ui/menu.cpp
+index 318c213..8bc8652 100644
+--- a/host/ui/menu.cpp
++++ b/host/ui/menu.cpp
+@@ -119,6 +119,61 @@ std::vector<void (*)()> &port_system_rows() {
+ 
+ int cycle(int value, int delta, int count) { return ((value + delta) % count + count) % count; }
+ 
++// What a player can play on (Controls > Player 1 and Player 2): Automatic,
++// the keyboard and mouse, each model of gamepad connected, and the one
++// chosen while none of it is.
++struct DeviceOption {
++    input::PlayerDevice device;
++    std::string label;
++    bool missing{};  // a gamepad chosen and not connected
++};
++
++bool same_device(const input::PlayerDevice &a, const input::PlayerDevice &b) {
++    return a.choice == b.choice && (a.choice != input::DeviceChoice::Gamepad || a.model == b.model);
++}
++
++std::vector<DeviceOption> device_options(const input::PlayerDevice &chosen) {
++    std::vector<DeviceOption> list{{input::PlayerDevice{}, "Automatic"},
++                                   {input::PlayerDevice{input::DeviceChoice::Keyboard, {}, {}}, "Keyboard and mouse"}};
++    int count = 0;
++    if (SDL_JoystickID *ids = SDL_GetGamepads(&count); ids != nullptr) {
++        for (int i = 0; i < count; ++i) {
++            const char *name = SDL_GetGamepadNameForID(ids[i]);
++            input::PlayerDevice pad{input::DeviceChoice::Gamepad,
++                                    input::gamepad_model(SDL_GetGamepadVendorForID(ids[i]),
++                                                         SDL_GetGamepadProductForID(ids[i])),
++                                    name != nullptr ? name : "Gamepad"};
++            // Two alike are one choice: each player who chooses it gets one.
++            if (std::any_of(list.begin(), list.end(), [&](const DeviceOption &o) { return same_device(o.device, pad); }))
++                continue;
++            std::string label = pad.name;
++            list.push_back({std::move(pad), std::move(label)});
++        }
++        SDL_free(ids);
++    }
++    if (std::none_of(list.begin(), list.end(), [&](const DeviceOption &o) { return same_device(o.device, chosen); }))
++        list.push_back({chosen, (chosen.name.empty() ? std::string("Gamepad") : chosen.name) + " (not connected)", true});
++    return list;
++}
++
++// A player's device row. On Automatic, and for a gamepad not connected, it
++// says what the player has now (`now`: a gamepad's name, "keyboard and
++// mouse", "none", or empty while there is no such player).
++void device_row(const char *label, const char *key, input::PlayerDevice &device, const std::string &now,
++                std::string description) {
++    const std::vector<DeviceOption> options = device_options(device);
++    int at = 0;
++    for (std::size_t i = 0; i < options.size(); ++i)
++        if (same_device(options[i].device, device)) at = static_cast<int>(i);
++    std::string value = options[static_cast<std::size_t>(at)].label;
++    if (device.choice == input::DeviceChoice::Automatic && !now.empty()) value += ": " + now;
++    if (options[static_cast<std::size_t>(at)].missing && !now.empty() && now != "none") value += ", using " + now;
++    if (const int delta = choice_row(label, value, options_for(key, std::move(description)))) {
++        device = options[static_cast<std::size_t>(cycle(at, delta, static_cast<int>(options.size())))].device;
++        settings::save();
++    }
++}
++
+ // Percent-encodes a path for a file:// URL.
+ std::string file_url(const std::string &path) {
+     std::string url = "file://";
+@@ -736,10 +791,30 @@ void Menu::controls() {
+     settings::Settings &s = settings::current();
+     section("Gamepad");
+     {
+-        SDL_Gamepad *pad = renderer().gamepad();
+-        const char *name = pad != nullptr ? SDL_GetGamepadName(pad) : nullptr;
+-        info_row("Connected", pad == nullptr ? "No gamepad; the keyboard and mouse drive the game"
+-                                             : (name != nullptr ? name : "Gamepad"));
++        // What each player has now, shown beside Automatic.
++        const auto name_of = [](SDL_Gamepad *pad) {
++            const char *name = pad != nullptr ? SDL_GetGamepadName(pad) : nullptr;
++            return pad == nullptr ? std::string() : std::string(name != nullptr ? name : "Gamepad");
++        };
++        const bool keyboard2 = renderer().keyboard_player2();
++        std::string first = name_of(renderer().gamepad());
++        if (first.empty()) first = keyboard2 ? "none" : "keyboard and mouse";
++        if (portablekit::game().second_player) {
++            device_row("Player 1", "input.player1", s.player1, first,
++                       "The controller player 1 plays on. Automatic: the keyboard and mouse, and the first "
++                       "controller connected.");
++            // Nothing to say while the game has no second player.
++            std::string second = name_of(renderer().second_gamepad());
++            if (keyboard2) second = "keyboard and mouse";
++            if (second.empty() && renderer().second_pad_wanted()) second = "none";
++            device_row("Player 2", "input.player2", s.player2, second,
++                       "The controller player 2 plays on, in a mode for two. Automatic: the next controller "
++                       "connected. Keyboard and mouse: player 1 then plays on a controller.");
++        } else {
++            device_row("Controller", "input.player1", s.player1, first,
++                       "The controller the game reads. Automatic: the keyboard and mouse, and the first controller "
++                       "connected.");
++        }
+     }
+     const bool cross_confirms = portablekit::game().confirm_button == 1u;
+     if (choice_row("Confirm button", s.confirm_south ? "Bottom (Western)" : "Right (Japanese)",
+@@ -996,6 +1071,8 @@ void Menu::controls() {
+         };
+         restore("input.confirm", s.confirm_south, d.confirm_south);
+         restore("input.button_prompts", s.button_prompts, d.button_prompts);
++        restore("input.player1", s.player1, d.player1);
++        restore("input.player2", s.player2, d.player2);
+         restore("input.dead_zone", s.dead_zone, d.dead_zone);
+         restore("input.stick_square", s.stick_square, d.stick_square);
+         restore("input.trigger", s.trigger, d.trigger);
+diff --git a/include/portablekit/hle_extension.hpp b/include/portablekit/hle_extension.hpp
+index c445e1e..50715df 100644
+--- a/include/portablekit/hle_extension.hpp
++++ b/include/portablekit/hle_extension.hpp
+@@ -43,7 +43,8 @@
+ // 5: extra_buttons.
+ // 6: want_second_pad, second_pad.
+ // 7: first_pad_connected.
+-#define PORTABLEKIT_HLE_EXTENSION_INTERFACE 7
++// 8: second_player_playing, SecondPad::keyboard.
++#define PORTABLEKIT_HLE_EXTENSION_INTERFACE 8
+ 
+ namespace portablekit::hle_extension {
+ 
+@@ -292,13 +293,21 @@ inline constexpr std::uint32_t kExtraL3 = 1u << 2u;
+ inline constexpr std::uint32_t kExtraR3 = 1u << 3u;
+ [[nodiscard]] std::uint32_t extra_buttons();
+ 
+-// A second player's pad, for a port with a local multiplayer mode. While
+-// wanted, a gamepad other than player 1's (the second one connected) is
+-// player 2's: read with player 1's bindings and tuning, and never reaching
+-// the game's own pad (sceCtrl), which stays player 1's. The port gives it to
+-// the game itself. second_pad() is its state as of the game's last pad read:
+-// SceCtrlButtons bits, the extra buttons, the left stick (centre 0x80, the
+-// PSP nub's range) and the right stick. Not connected: all neutral.
++// A second player's pad, for a port with a local multiplayer mode
++// (GameProfile::second_player). While wanted, player 2's device is read: the
++// one Controls > Player 2 names, a gamepad or the keyboard and mouse, or on
++// Automatic a gamepad other than player 1's (the second one connected). It is
++// read with player 1's bindings and tuning, and never reaches the game's own
++// pad (sceCtrl), which stays player 1's. The port gives it to the game itself.
++// second_pad() is its state as of the game's last pad read: SceCtrlButtons
++// bits, the extra buttons, the left stick (centre 0x80, the PSP nub's range)
++// and the right stick. Not connected: all neutral. `keyboard`: player 2 is on
++// the keyboard and mouse, which player 1 then does not have (second_pad()
++// only).
++//
++// second_player_playing(true) while player 2 is in the game: a gamepad of
++// player 2's then stays player 2's when player 1's goes. Otherwise it moves
++// to player 1, who has none, and player 2 waits for another.
+ struct SecondPad {
+     bool connected{};
+     std::uint32_t buttons{};
+@@ -307,8 +316,10 @@ struct SecondPad {
+     std::uint8_t analog_y{0x80u};
+     std::uint8_t right_x{0x80u};
+     std::uint8_t right_y{0x80u};
++    bool keyboard{};
+ };
+ void want_second_pad(bool wanted);
++void second_player_playing(bool playing);
+ [[nodiscard]] SecondPad second_pad();
+ // Player 1 has a gamepad (not only the keyboard): for telling player 1 that
+ // it went away, as second_pad().connected tells it for player 2.
+diff --git a/tests/input_tests.cpp b/tests/input_tests.cpp
+index b8afbb5..d790989 100644
+--- a/tests/input_tests.cpp
++++ b/tests/input_tests.cpp
+@@ -2,6 +2,7 @@
+ // without SDL or game data.
+ #include "input/bindings.hpp"
+ #include "input/button_prompts.hpp"
++#include "input/players.hpp"
+ #include "input/stick.hpp"
+ 
+ #include <algorithm>
+@@ -12,6 +13,7 @@
+ #include <iostream>
+ #include <array>
+ #include <set>
++#include <vector>
+ 
+ namespace {
+ using namespace portablekit::input;
+@@ -283,7 +285,81 @@ void test_button_prompts() {
+           "the menu and the log name each one");
+ }
+ 
++// Which gamepad each player gets (Controls > Player 1 and Player 2).
++void test_players() {
++    PlayerDevice parsed;
++    check(parse_player_device("pad:054c0ce6:DualSense: Edge", parsed) &&
++              parsed.choice == DeviceChoice::Gamepad && parsed.model == "054c0ce6" &&
++              parsed.name == "DualSense: Edge" && format_player_device(parsed) == "pad:054c0ce6:DualSense: Edge",
++          "a gamepad by name reads back as written, colons in its name and all");
++    check(parse_player_device("keyboard", parsed) && parsed.choice == DeviceChoice::Keyboard &&
++              parse_player_device("auto", parsed) && parsed == PlayerDevice{} && !parse_player_device("pad:", parsed) &&
++              !parse_player_device("mouse", parsed),
++          "keyboard and auto read; a pad with no id and anything else do not");
++
++    const PlayerDevice automatic{};
++    const PlayerDevice keyboard{DeviceChoice::Keyboard, {}, {}};
++    const PlayerDevice dualsense{DeviceChoice::Gamepad, "ds", "DualSense"};
++    const PlayerDevice xbox{DeviceChoice::Gamepad, "xb", "Xbox"};
++    const ConnectedPad ds{1u, "ds"};
++    const ConnectedPad xb{2u, "xb"};
++    const ConnectedPad ds2{3u, "ds"};
++    const auto assign = [](std::initializer_list<ConnectedPad> list, PlayerDevice one, PlayerDevice two, bool wanted,
++                           bool playing, std::uint32_t current1, std::uint32_t current2) {
++        const std::vector<ConnectedPad> pads(list);
++        return assign_pads(PadSituation{pads, std::move(one), std::move(two), wanted, playing, current1, current2});
++    };
++
++    check(assign({ds, xb}, automatic, automatic, false, false, 0u, 0u) == PadAssignment{1u, 0u, false},
++          "alone, player 1 gets the first gamepad listed");
++    check(assign({ds, xb}, automatic, automatic, true, false, 0u, 0u) == PadAssignment{1u, 2u, false},
++          "with a second player wanted, player 2 gets the next");
++    check(assign({ds, xb}, automatic, automatic, true, false, 2u, 1u) == PadAssignment{2u, 1u, false},
++          "on Automatic each keeps the gamepad it has");
++    check(assign({ds, xb}, xbox, automatic, true, false, 1u, 2u) == PadAssignment{2u, 1u, false},
++          "player 1 choosing player 2's gamepad takes it, and player 2 gets the other");
++    check(assign({ds, xb}, automatic, dualsense, false, false, 0u, 0u) == PadAssignment{2u, 0u, false},
++          "a gamepad chosen for player 2 stays player 2's while player 2 is not wanted");
++    check(assign({xb}, dualsense, automatic, true, false, 0u, 0u) == PadAssignment{2u, 0u, false},
++          "a chosen gamepad not connected: that player is on Automatic");
++    check(assign({ds, ds2}, automatic, dualsense, true, false, 1u, 3u) == PadAssignment{1u, 3u, false},
++          "two alike: player 2 keeps the one of that kind it has");
++    check(assign({ds, ds2}, dualsense, dualsense, true, false, 0u, 0u) == PadAssignment{1u, 3u, false},
++          "two alike chosen by both: each gets one");
++
++    // The swap DS4Windows makes: its new virtual pad connects before the old
++    // one goes, so it is player 2's for a moment.
++    check(assign({ds}, automatic, automatic, true, false, 0u, 1u) == PadAssignment{1u, 0u, false},
++          "player 1's gamepad gone: player 2's moves to player 1 while player 2 is not playing");
++    check(assign({ds}, automatic, automatic, true, true, 0u, 1u) == PadAssignment{0u, 1u, false},
++          "while player 2 is playing, it stays player 2's");
++    check(assign({ds, xb}, automatic, automatic, true, false, 0u, 1u) == PadAssignment{2u, 1u, false},
++          "a gamepad nobody has goes to player 1 before player 2's would");
++
++    check(assign({ds, xb}, automatic, keyboard, true, false, 0u, 0u) == PadAssignment{1u, 0u, true},
++          "the keyboard player 2's: player 1 keeps a gamepad and player 2 gets none");
++    check(assign({ds}, automatic, keyboard, false, false, 0u, 0u) == PadAssignment{1u, 0u, false},
++          "while player 2 is not wanted the keyboard is player 1's");
++    check(assign({ds, xb}, keyboard, automatic, true, false, 0u, 0u) == PadAssignment{0u, 1u, false},
++          "player 1 on the keyboard alone, and player 2 gets the first gamepad");
++    check(assign({ds}, keyboard, keyboard, true, false, 0u, 0u) == PadAssignment{0u, 1u, false},
++          "both on the keyboard: player 1 keeps it");
++
++    const ConnectedPad script1{7u, "script", true, false};
++    const ConnectedPad script2{8u, "script2", false, true};
++    check(assign({ds, script1, script2}, automatic, automatic, true, false, 1u, 0u) == PadAssignment{7u, 8u, false},
++          "an input script's pads take over from a real one");
++    check(assign({ds, script1, script2}, PlayerDevice{DeviceChoice::Gamepad, "script2", ""},
++                 PlayerDevice{DeviceChoice::Gamepad, "script", ""}, true, false, 0u, 0u) == PadAssignment{8u, 7u, false},
++          "and are chosen by name like any other");
++    check(assign({script2}, automatic, automatic, false, false, 0u, 0u) == PadAssignment{0u, 0u, false},
++          "a script's second pad is never player 1's on Automatic");
++    check(assign({script2}, automatic, automatic, true, false, 0u, 8u) == PadAssignment{8u, 0u, false},
++          "but moves up from player 2 like any other when player 1's goes");
++}
++
+ int main() {
++    test_players();
+     test_button_prompts();
+     test_keep_saved();
+     test_names();
+-- 
+2.53.0.windows.1
+

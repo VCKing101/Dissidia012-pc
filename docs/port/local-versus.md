@@ -58,7 +58,8 @@ In:
   Burst and the ending (the victory on) go full screen; chases, the finishing blow and Bravery breaks stay split.
 - **Frame rate:** both halves at 60 fps.
 - **Controllers:** player 1 keeps the keyboard and the first gamepad; the second gamepad is player 2. With no
-  second gamepad, the row says "Connect a second controller" and goes nowhere.
+  second gamepad, the row says "Connect a second controller" and goes nowhere. Since 10 November the Controls page's
+  Player 1 and Player 2 choose them, the keyboard for either ([controller-picker.md](controller-picker.md)).
 - **Disconnects:** a controller lost mid-battle pauses the battle until a gamepad reconnects.
 - **Options and sound:** player 2 shares player 1's game options and controller settings. The sound listener stays
   on player 1's camera.
@@ -674,7 +675,8 @@ Left open at the time, all done since (7.8):
   gamepad, not only the keyboard). Losing it in a versus battle presses Start on the game's own pad for one read, as
   player 2's loss does on raw pad 1. Neither presses Start when the other's loss has paused the battle already
   (Start would resume). The input script gained `detach` / `attach` for its first virtual pad. Player 2's gamepad
-  never takes player 1's place: the scan keeps it as player 2's.
+  never takes player 1's place: the scan keeps it as player 2's. (Since 10 November that holds in versus; on the
+  start menu it moves to player 1, [controller-picker.md](controller-picker.md).)
 - **Player 2's EX Burst** (`p2burst/`, `D012_TEST_EX_FULL=2` keeps both gauges full): EX Mode, the burst landing on
   player 1, its stages full screen (7.5), player 1's defence prompt, and the damage.
 - **A battle player 2 wins** (`p2results4/`): the finishing blow full screen, then the game's own ending for player 1
