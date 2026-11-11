@@ -12,6 +12,7 @@
 #include "d012_mod_manifest.hpp"
 #include "d012_update_rules.hpp"
 #include "d012_versus_rules.hpp"
+#include "d012_voice_scenes.hpp"
 #include "model.hpp"
 #include "names.hpp"
 #include "psp_iso.hpp"
@@ -1024,6 +1025,206 @@ void test_versus_rules() {
 }
 
 
+// Story scenes with Japanese voices (host/d012_voice_scenes.cpp).
+void test_voice_scenes() {
+    namespace vs = d012::voice_scenes;
+    using Bytes = std::vector<std::uint8_t>;
+    const auto set32 = [](Bytes &b, std::size_t at, std::uint32_t v) {
+        if (b.size() < at + 4u) b.resize(at + 4u);
+        for (std::size_t i = 0; i < 4u; ++i) b[at + i] = static_cast<std::uint8_t>(v >> (8u * i));
+    };
+    const auto get32 = [](const Bytes &b, std::size_t at) {
+        return static_cast<std::uint32_t>(b[at]) | (static_cast<std::uint32_t>(b[at + 1u]) << 8u) |
+               (static_cast<std::uint32_t>(b[at + 2u]) << 16u) | (static_cast<std::uint32_t>(b[at + 3u]) << 24u);
+    };
+    const auto line = [](std::u16string_view words) { return std::u16string(words) + u'\0'; };
+
+    const auto scenes = vs::scenes();
+    expect(scenes.size() == 302u && std::is_sorted(scenes.begin(), scenes.end()), "302 story scenes, sorted");
+    for (const vs::VoiceName &v : vs::voice_names()) {
+        const std::string_view japanese(v.japanese), english(v.english);
+        expect(japanese.starts_with("voice/jp/") && english.starts_with("voice/jp/") && english.size() < 0x40u &&
+                   japanese != english,
+               std::string("a voice line's English name: ") + v.japanese);
+    }
+
+    // A language container, written and read back.
+    std::vector<std::vector<std::u16string>> tables(2, std::vector<std::u16string>(150));
+    tables[0][3] = line(u"Three");
+    tables[1][3] = line(u"Trois");
+    tables[0][149] = line(u"Last\nrow");
+    const Bytes container = vs::write_container(tables);
+    expect(vs::read_container(container) == tables, "a language container is read as it was written");
+
+    // The narration: a line holding what the English release split over two
+    // lines shows both, a row each; line 70 has line 72's words.
+    std::vector<std::vector<std::u16string>> narration(2, std::vector<std::u16string>(146));
+    for (auto &table : narration) {
+        table[94] = line(u"But to him, perhaps they are not comrades at all.");
+        table[95] = line(u"They may be mere strangers\naccidentally born in the same world.");
+        table[70] = line(u"She travels in search of her crystal.");
+        table[72] = line(u"The boy has spoken little.");
+    }
+    narration[1][95].clear();  // a language without the second part keeps its line
+    const auto fixed = vs::read_container(vs::fix_text_file("text/M_/event/MOVIE/M_000.bin", vs::write_container(narration)));
+    expect(fixed.size() == 2u && fixed[0][94] == line(u"But to him, perhaps they are not comrades at all.\nThey may be "
+                                                      u"mere strangers\naccidentally born in the same world."),
+           "a narration line holds the lines it was split into");
+    expect(fixed.size() == 2u && fixed[0][95] == narration[0][95], "the second part stays as it was");
+    expect(fixed.size() == 2u && fixed[0][70] == line(u"The boy has spoken little."), "line 70 has line 72's words");
+    expect(fixed.size() == 2u && fixed[1][94] == narration[1][94], "a part missing, the line stays");
+
+    // A line the Japanese script shows that has no English: the port's
+    // words, in a table where it has none.
+    std::vector<std::vector<std::u16string>> chapter(2, std::vector<std::u16string>(120));
+    chapter[0][71] = line(u"What!?");
+    chapter[1][70] = line(u"Hmm.");
+    const auto filled = vs::read_container(vs::fix_text_file("text/M_/event/RT/R_UP01.bin", vs::write_container(chapter)));
+    expect(filled.size() == 2u && filled[0][70] == line(u"Hmph.") && filled[0][71] == line(u"What!?"),
+           "a line with no English gets the port's words");
+    expect(filled.size() == 2u && filled[1][70] == line(u"Hmm."), "a line with words keeps them");
+    expect(vs::fix_text_file("text/M_/event/RT/R_UP01.bin", Bytes{1, 2, 3}).empty(), "not a container: nothing");
+
+    // A scene: the Japanese archive, the game's text, and the voice table's
+    // line the game has no name for named as voice_names() says.
+    const vs::VoiceName renamed = vs::voice_names().front();
+    Bytes script(0x4C0u + 2u * 0x40u, 0u);
+    for (std::size_t t = 0; t < 30u; ++t) set32(script, 0x408u + 4u * t, 0x48Cu);  // 30 empty tracks
+    set32(script, 0x484u, 0x4C0u);
+    const std::string kept = "voice/jp/event/up02/up02_103_001ti.at3";
+    std::copy_n(renamed.japanese, std::string_view(renamed.japanese).size(), script.begin() + 0x4C0);
+    std::copy(kept.begin(), kept.end(), script.begin() + 0x500);
+    std::vector<std::vector<std::u16string>> their_lines(1, std::vector<std::u16string>(80, line(u"jp")));
+    std::vector<std::vector<std::u16string>> our_lines(1, std::vector<std::u16string>(80, line(u"English")));
+    our_lines[0][78].clear();  // a line the English text lacks
+    const auto archive = [&](const Bytes &first, const Bytes &text) {
+        Bytes out = {'A', 'R', 'C', 1};
+        set32(out, 4u, 3u);
+        out.resize(16u + 3u * 16u);
+        const Bytes masw(12u, 7u);
+        const std::pair<const char *, const Bytes *> parts[] = {{"R_UP", &first}, {"text", &text}, {"masw", &masw}};
+        for (std::size_t i = 0; i < 3u; ++i) {
+            set32(out, 16u + 16u * i, 1u);
+            std::copy_n(parts[i].first, 4u, out.begin() + 16u + 16u * i + 4u);
+            set32(out, 16u + 16u * i + 8u, static_cast<std::uint32_t>(out.size()));
+            set32(out, 16u + 16u * i + 12u, static_cast<std::uint32_t>(parts[i].second->size()));
+            out.insert(out.end(), parts[i].second->begin(), parts[i].second->end());
+        }
+        return out;
+    };
+    const Bytes japanese = archive(script, vs::write_container(their_lines));
+    const Bytes own = archive(Bytes(40u, 9u), vs::write_container(our_lines));
+    std::vector<vs::Voice> voices;
+    const Bytes merged = vs::merge_scene(0x17C283AEu, japanese, own, voices);
+    expect(merged.size() > 64u && get32(merged, 4u) == 3u, "a merged scene has the Japanese archive's chunks");
+    if (merged.size() > 64u) {
+        const auto chunk = [&](std::size_t i) {
+            const std::uint32_t at = get32(merged, 16u + 16u * i + 8u), size = get32(merged, 16u + 16u * i + 12u);
+            return Bytes(merged.begin() + at, merged.begin() + at + size);
+        };
+        for (std::size_t i = 0; i < 3u; ++i)
+            expect(get32(merged, 16u + 16u * i + 8u) % 16u == 0u, "each chunk from a 16-byte boundary");
+        Bytes want = script;
+        std::fill(want.begin() + 0x4C0, want.begin() + 0x500, 0u);
+        std::copy_n(renamed.english, std::string_view(renamed.english).size(), want.begin() + 0x4C0);
+        expect(chunk(0) == want, "the Japanese script, its line named as the game has it");
+        const auto text = vs::read_container(chunk(1));
+        expect(text.size() == 1u && text[0][0] == line(u"English") && text[0][78] == line(u"Gaaah!"),
+               "the game's text, the line it lacks filled");
+        expect(chunk(2) == Bytes(12u, 7u), "the other chunks the Japanese archive's");
+    }
+    expect(voices.size() == 2u && voices[0].asked == renamed.english && voices[0].japanese == renamed.japanese &&
+               voices[1].asked == kept && voices[1].japanese == kept,
+           "the scene's voice lines, as the game asks for them and as the Japanese disc has them");
+    expect(vs::merge_scene(0x17C283AEu, japanese, archive(Bytes(40u, 9u), Bytes{1, 2}), voices).empty(),
+           "the game's text not a container: nothing");
+    expect(vs::merge_scene(0x17C283AEu, Bytes(japanese.begin(), japanese.begin() + 100), own, voices).empty(),
+           "a short archive: nothing");
+}
+
+// A story movie with the other disc's sound (host/d012_voice_scenes.cpp).
+void test_movie_splice() {
+    namespace vs = d012::voice_scenes;
+    using Bytes = std::vector<std::uint8_t>;
+    // A movie: a 2,048-byte header, then packs of a pack header and one PES
+    // packet each (video, or sound with its 4 bytes), padded to 2,048 bytes.
+    // `sound` is cut into packets of the sizes in `cuts`, between video packs.
+    const auto movie = [](const Bytes &sound, const std::vector<std::size_t> &cuts, std::uint8_t video) {
+        Bytes out(2048u, 0u);
+        std::copy_n("PSMF0015", 8u, out.begin());
+        out[10] = 0x08u;  // packs from 0x800
+        const auto pack = [&](std::uint8_t id, const Bytes &body) {
+            const std::size_t at = out.size();
+            out.resize(at + 2048u, 0u);
+            const std::uint8_t head[14] = {0, 0, 1, 0xBA, 0x44, 0, 4, 0, 4, 1, 1, 0x89, 0xC3, 0xF8};
+            std::copy_n(head, 14u, out.begin() + at);
+            std::size_t i = at + 14u;
+            const auto pes = [&](std::uint8_t pes_id, const Bytes &data) {
+                out[i] = 0; out[i + 1] = 0; out[i + 2] = 1; out[i + 3] = pes_id;
+                out[i + 4] = static_cast<std::uint8_t>(data.size() >> 8u);
+                out[i + 5] = static_cast<std::uint8_t>(data.size());
+                std::copy(data.begin(), data.end(), out.begin() + i + 6);
+                i += 6u + data.size();
+            };
+            pes(id, body);
+            pes(0xBE, Bytes(at + 2048u - i - 6u, 0xFFu));  // padding to the pack's end
+        };
+        std::size_t taken = 0, number = 0;
+        for (const std::size_t cut : cuts) {
+            pack(0xE0, Bytes(300u + 7u * number, video));
+            Bytes body = {0x81, 0x80, 5, 0x21, 0, 1, 0, static_cast<std::uint8_t>(++number)};
+            const Bytes four = {0, static_cast<std::uint8_t>(number), 0, 0xF3};
+            body.insert(body.end(), four.begin(), four.end());
+            body.insert(body.end(), sound.begin() + taken, sound.begin() + taken + cut);
+            taken += cut;
+            pack(0xBD, body);
+        }
+        const std::uint8_t end[4] = {0, 0, 1, 0xB9};
+        out.insert(out.end(), end, end + 4);
+        return out;
+    };
+    Bytes ours_sound(3000u), their_sound(3010u);
+    for (std::size_t i = 0; i < ours_sound.size(); ++i) ours_sound[i] = static_cast<std::uint8_t>(i % 7u);
+    for (std::size_t i = 0; i < their_sound.size(); ++i) their_sound[i] = static_cast<std::uint8_t>(100u + i % 101u);
+    const Bytes ours = movie(ours_sound, {1000, 1000, 1000}, 0x11);
+    const Bytes theirs = movie(their_sound, {700, 1500, 800, 10}, 0x22);  // a frame longer, cut elsewhere
+    const auto reader = [](const Bytes &file) {
+        return [&file](std::uint64_t at, std::span<std::uint8_t> out) -> std::size_t {
+            if (at >= file.size()) return 0u;
+            const std::size_t n = std::min<std::size_t>(out.size(), file.size() - at);
+            std::copy_n(file.begin() + static_cast<std::ptrdiff_t>(at), n, out.begin());
+            return n;
+        };
+    };
+    auto splice = vs::MovieSplice::open(reader(ours), reader(theirs));
+    expect(splice != nullptr, "two movies open for a splice");
+    if (!splice) return;
+    // Read as a player would, in uneven pieces.
+    Bytes spliced;
+    for (std::uint64_t at = 0; at < ours.size();) {
+        Bytes piece(std::min<std::size_t>(777u + at % 1000u, ours.size() - at));
+        const std::size_t got = splice->read(at, piece);
+        spliced.insert(spliced.end(), piece.begin(), piece.begin() + static_cast<std::ptrdiff_t>(got));
+        at += got;
+        if (got == 0u) break;
+    }
+    expect(!splice->broken(), "the movie's packs are as expected");
+    expect(spliced.size() == ours.size(), "the spliced movie is the game's size");
+    // Where each packet's sound is in the game's file: the same places hold
+    // their sound, and every other byte is the game's.
+    Bytes want = ours;
+    std::size_t taken = 0;
+    for (std::size_t at = 2048u; at + 2048u <= ours.size(); at += 2048u) {
+        if (ours[at + 17u] != 0xBDu) continue;
+        const std::size_t length = (std::size_t(ours[at + 18u]) << 8u) | ours[at + 19u];
+        const std::size_t sound = at + 14u + 9u + 5u + 4u, end = at + 14u + 6u + length;
+        for (std::size_t i = sound; i < end; ++i) want[i] = their_sound[taken++];
+    }
+    expect(taken == ours_sound.size() && spliced == want,
+           "the game's movie with their sound byte for byte, each packet's 4 bytes the game's");
+    expect(vs::MovieSplice::open(reader(ours), reader(Bytes(4096u, 0u))) == nullptr, "not a movie: no splice");
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -1044,6 +1245,8 @@ int main(int argc, char **argv) {
     test_update_rules();
     test_discord_rules();
     test_versus_rules();
+    test_voice_scenes();
+    test_movie_splice();
     if (g_failures == 0) std::cout << "all passed\n";
     return g_failures == 0 ? 0 : 1;
 }

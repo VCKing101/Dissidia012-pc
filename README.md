@@ -153,6 +153,9 @@ The North American and European discs have English voices only. With your own co
 1. In the game's **Options**, select **Japanese Voice Disc** (under Voice) and choose the Japanese ISO.
 2. **Voice Language** appears under it: set it to **Japanese**. It takes effect when you leave Options.
 
+Story scenes then play as the Japanese release has them, so each line has time for its Japanese voice, and the
+story movies keep their English picture.
+
 Both settings are kept in `settings.ini`, not in the game's save ([notes](docs/port/japanese-voices.md)).
 
 <p>

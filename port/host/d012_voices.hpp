@@ -12,8 +12,10 @@
 // knowing the name; that pairs the files of the two discs. The game then
 // reads its own index of PACKAGE.BIN with each paired English record
 // pointing at the Japanese file instead, served from the Japanese disc after
-// the end of PACKAGE.BIN. Story movies whose picture is the same on both
-// discs (the same size) play the Japanese file, whose sound is Japanese.
+// the end of PACKAGE.BIN. Story scenes whose script differs between the
+// discs play as the Japanese disc has them, with the game's text
+// (d012_voice_scenes.hpp), and the story movies play the game's picture
+// with the Japanese sound.
 //
 // The player chooses the disc and the voices in the game's own Options
 // (d012_voices_menu.cpp): settings.ini's voices.japanese_disc and

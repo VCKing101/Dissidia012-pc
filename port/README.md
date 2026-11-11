@@ -32,6 +32,8 @@ the menus to Quick Battles, with the HUD's HP bars, billboarded particles and si
 | `host/d012_button_prompts.cpp`, `.hpp` | Button prompts: the game's button symbols drawn again as the gamepad's (Xbox, PlayStation, Nintendo; L and R as the triggers with Swap shoulders and triggers), as their textures load, and for the port's dialogs ([docs/port/button-prompts.md](../docs/port/button-prompts.md)) |
 | `host/d012_crash_report.cpp` | The crash report, always on: an unhandled exception or an abort logs the exception, its module and offset, and the stack, and writes a minidump to `data/logs/D012Native-crash.dmp` (`D012_CRASH_DUMP=<dir>`: one per run in that folder) ([docs/port/quit-crash.md](../docs/port/quit-crash.md)) |
 | `host/d012_decomp_harness.cpp`, `.hpp`, `host/d012_decomp_bgm.cpp` | Decompiled functions as native overrides (in the main module, the battle overlay and the menu overlay), and the differential test against the recompiled originals |
+| `host/d012_voices.cpp`, `.hpp`, `host/d012_voices_menu.cpp` | Japanese voices from the player's Japanese disc image: the sound files paired by name, the story scenes and text files of `d012_voice_scenes`, the movies with the Japanese sound, served after `PACKAGE.BIN`; the two rows in the game's Options ([docs/port/japanese-voices.md](../docs/port/japanese-voices.md)) |
+| `host/d012_voice_scenes.cpp`, `.hpp`, `_data.inc` | Story scenes with Japanese voices: a scene of the Japanese disc with the game's text, the text lines fixed for the Japanese scripts, a movie with the other disc's sound; no game memory, so `d012_tests` checks it. The data file (302 scenes, 125 voice names) is written by `tools/port/jp_story_scenes.py` ([japanese-voices.md](../docs/port/japanese-voices.md#story-scenes-issue-18), issue 18) |
 | `host/d012_versus_rules.cpp`, `.hpp` | Local versus: the rules of player 2's Customize (whose pad the menus read, which presses start it), with no game memory, so `d012_tests` checks them ([docs/port/local-versus.md](../docs/port/local-versus.md), 7.16) |
 | `decomp/` | The decompiled BGM functions (C) |
 | `examples/mods/example-tones/` | An example mod: a manifest and a script that writes its generated test tones (no audio files are kept) |
@@ -151,6 +153,11 @@ The profile's own switches:
 | `D012_CRASH_DUMP=<dir>` | On a crash, write the minidump to `<dir>/crash_<pid>.dmp` instead of `<data>/logs/D012Native-crash.dmp` (the logged stack has names from `D012Native.pdb` when the build links with `/DEBUG`, else module+offset) |
 | `D012_BRAVE_POOL_GUARD=0` | The Brave numbers' pool is left as it is (`port/host/d012_brave_pool_guard.cpp`): a slot holding something that is not an entry crashes the battle, as in issue 16 |
 | `D012_TEST_CRASH=<s>[,abort]` | Test only: a thread reads address 0 (or calls `abort()`) that many seconds after start, to check the crash report |
+| `D012_JAPANESE_VOICES=<image>` or `0` | Japanese voices from that image for this run, or English, whatever Options says (nothing is saved) |
+| `D012_JAPANESE_SCENES=0` | With Japanese voices, the game's own story scenes and text, as before issue 18's fix (lines run into each other) |
+| `D012_TEST_SCENE=<hash>=<hash>[,...]` | Test only: with Japanese voices, the second story scene plays where the game asks for the first (`3DE35414` and `3843E88D` are the Prologue's) |
+| `D012_TEST_MOVIE=<name>` | Test only: that movie (`UP_END.PMF`) plays wherever the game opens one, with Japanese voices or without |
+| `D012_TRACE_VOICES=1` | Log every Japanese sound file the game reads, by the hash of the name it asked for |
 
 And the framework changes' off switches, each restoring the old behaviour: `D012_PLAYER2_PAD_STAYS=1` (player 2's
 controller never moves to player 1 when player 1's goes), `D012_NO_TEXTURE_EDITS=1` (the game's
