@@ -94,18 +94,32 @@ generated tones.
 
 ## Local split-screen versus
 
-Battle Mode has a new row, **Quick Battle (Player vs Player)**: a 1-on-1 between two players on one PC, the second
-on a second controller. Player 2 picks the opponent with their own controller, from player 1's roster, and fights with
-player 1's saved build for that character (level, equipment, abilities, look and set); the battle setup drops the
-CPU's rows. Player 2 can change that build in Customization with △ on their own controller, on their pick or on the
-battle setup screen. In battle the screen is split down the middle, each half from its player's own camera and at 60 fps, with
-the game's HUD across both and each player's own command prompts. Chases stay split; EX Bursts and the victory play
-full screen. A versus battle gives no rewards and leaves no records in the save. Either player can pause, and a
-controller that goes away pauses the battle until it comes back ([notes](docs/port/local-versus.md)).
+Battle Mode has two new rows for two players on one PC, the second on a second controller:
+
+- **Player vs Player (1-on-1)**: player 2 picks the opponent with their own controller, from player 1's roster, and
+  fights with player 1's saved build for that character (level, equipment, abilities, look and set); the battle setup
+  drops the CPU's rows. Player 2 can change that build in Customization with △ on their own controller, on their pick
+  or on the battle setup screen.
+- **Player vs Player (Party)**: the game's Quick Battle (Party), with player 2 in the CPU party's place. Player 1 picks
+  a party as usual; player 2 then picks theirs, one to five, on their own controller, each with player 1's saved
+  build. Player 1 sets the format (Tournament or Round-Robin) and each fight's stage and rules; the CPU's settings
+  are not shown. Each fight is a split-screen versus fight, the VS screens and the results say Player 1 and Player 2,
+  and after the last fight the winner of the party battle is shown.
+
+In battle the screen is split down the middle, each half from its player's own camera and at 60 fps, with the
+game's HUD across both and each player's own command prompts. Chases stay split; EX Bursts and the victory play full
+screen. A versus battle gives no rewards and leaves no records in the save. Either player can pause, and a
+controller that goes away pauses the battle until it comes back, also between the fights of a party battle
+([notes](docs/port/local-versus.md)).
 
 <p>
-  <img src="docs/images/versus-menu-row.png" width="49%" alt="Battle Mode's rows with Quick Battle (Player vs Player) highlighted under Arcade Mode, and its help line: Fight a friend on a second controller, on a split screen">
+  <img src="docs/images/versus-menu-row.png" width="49%" alt="Battle Mode's rows with Player vs Player (1-on-1) and Player vs Player (Party) under Arcade Mode, the Party row highlighted, and its help line: Party battles against a friend on a second controller, on a split screen">
   <img src="docs/images/versus-battle-setup.png" width="49%" alt="The battle setup with Enter Battle, Stage, Rules and Judgment only, and a GUEST badge on player 2's name plate instead of CPU">
+</p>
+
+<p>
+  <img src="docs/images/versus-party-round.png" width="49%" alt="A party battle's Round 3 VS screen: Player 1's Vaan against Player 2's Laguna">
+  <img src="docs/images/versus-party-results.png" width="49%" alt="A party battle's final results: Tournament, Player 1 1 - 2 Player 2, and a Player 2 wins banner">
 </p>
 
 ![A split-screen battle: player 1's view on the left, player 2's on the right, each with its own lock-on cursor, and the HUD across both](docs/images/versus-split-battle.png)
@@ -115,7 +129,7 @@ Each player's camera keeps both fighters inside their own half of the screen. To
 is kept as `game.versus_fov` in `settings.ini`.
 
 `game.local_versus=0` in `settings.ini` (in the data folder, next to your saves' `ms0`) leaves the game as it was,
-without the row; set it back to `1` to bring it back. `D012_LOCAL_VERSUS=0` does the same for one run.
+without the rows; set it back to `1` to bring them back. `D012_LOCAL_VERSUS=0` does the same for one run.
 
 ## Online play (experimental)
 

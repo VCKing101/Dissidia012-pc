@@ -2,7 +2,8 @@
 
 > Written 25 October 2026, after a Reddit reader asked for local split-screen 1v1, as a scope; sections 0 to 6 are
 > that scope, kept as written apart from 0.1's later decisions, and section 7 is the log of what was built and
-> checked. Section 0.2 is the scope of the party mode, Player vs Player (Party), agreed 10 November 2026. V = seen in the disassembly, the Ghidra pseudocode or PortableKit's source; I = inferred.
+> checked. Section 0.2 is the scope of the party mode, Player vs Player (Party), agreed 10 November 2026, and 7.18
+> its build log. V = seen in the disassembly, the Ghidra pseudocode or PortableKit's source; I = inferred.
 > All addresses are main unless marked `battle:` or `menu:`.
 >
 > **Route chosen by the owner (25 October 2026): one copy of the game, drawn twice (section 1 onward).** Two copies
@@ -10,6 +11,10 @@
 >
 > **Status, 27 October 2026:** the first release (0.1) is built and was played by the owner on two controllers; ready
 > to merge (7.13). Untested and unsupported: the Steam Deck. `game.local_versus=0` in `settings.ini` turns it off.
+>
+> **Status, 11 November 2026:** Player vs Player (Party) (0.2) is built on branch `claude/pvp-party-scope-a3bae5` and
+> checked in scripted runs (7.18); not yet played by the owner, uncommitted. Left out of it: player 2's Customize on
+> their party pick, and "GUEST" on the party setup's right plate (7.18).
 
 The request: a **Quick Battle (Player vs Player)** entry under Battle Mode on the main menu. It works like 1-on-1,
 except that a second controller picks the opponent in place of the CPU. In battle the screen is split vertically,
@@ -39,6 +44,7 @@ In:
 
 - **Battle type:** Quick Battle 1-on-1 only, assists as normal.
 - **Entry:** a new Battle Mode row, "Quick Battle (Player vs Player)". It appears only when everything below works.
+  Renamed "Player vs Player (1-on-1)" on 10 November 2026, beside "Player vs Player (Party)" (0.2).
 - **Characters:** player 2 picks from player 1's save on their own controller. Level, equipment, abilities,
   accessories, look and set are player 1's saved build for that character (changed 27 October 2026, section 7.12;
   first planned as Quick Battle's opponent settings, which the setup screen no longer shows). Since 10 November 2026
@@ -82,7 +88,8 @@ PortableKit clone, cut from `dissidia`, merged when the first release is done. T
 
 ### 0.2 Player vs Player (Party) (decided with the owner, 10 November 2026)
 
-A tester (TEEMAD) asked for party battles in local versus. The owner wants them. Scope only: nothing is built yet.
+A tester (TEEMAD) asked for party battles in local versus. The owner wants them. The scope below is as agreed; it
+was built on 10 and 11 November 2026, with what was found and what was left out in 7.18.
 
 **What the game's Quick Battle (Party) does** (V from the captures of 5 November 2026 in `build/port/gfx-triage/party/`,
 and from Group Battle's runs in [Communication Mode](communication-mode.md) 18.4):
@@ -145,19 +152,21 @@ Out:
 - Online party versus: Group Battle covers it.
 - A player 2 save, and rewards and records (as 0.1).
 
-To find out when building (I or not looked at):
+Found while building (7.18), in place of the questions this list had:
 
-- The room's states for the CPU party's pick (1-on-1's opponent pick is states 8 to 11, 1.3), and how its header
-  table (`menu:0x08AA3C98`, by mode) treats Party.
-- Quick Battle (Party)'s FIELD mode. 1-on-1's AI override and the side builder check Quick Battle's (`FIELD+0x4C`
-  is 4, `d012_versus.cpp`), and run once a fight for side 1.
-- Whether the battle overlay stays loaded between fights (1-on-1's tags and save guard follow it), and where the
-  score screen's "Party A" and "Enemy Party" texts come from.
-- The formats Quick Battle (Party) offers; what jobs do, and whether the CPU's party has any; whether the party
-  setup screen offers Customize.
-- Whether a moved row's hand pointer works below slot 0 (its slot is in the row's entry, 7.6).
-- 1-on-1's other open branch: the versus row going missing when the menu comes back into Battle Mode after a battle
-  (the restore path, `menu:0x089E5A04`). The Party row goes through the same fix.
+- Player 2's pick is the room's states 18 to 22 (21 the update), and its "CPU Select" header is the party grid's own
+  (kind 3), covered by the "Player 2 Select" plate as in 1-on-1.
+- Quick Battle (Party)'s fights are FIELD mode 4, as Quick Battle's, so 1-on-1's player 2 (the AI mode, the build
+  from player 1's save, the split view, no rewards, the save guard) works in every fight as it is. The battle
+  overlay stays loaded from the first fight to the last.
+- The formats are Tournament and Round-Robin (the setup's "Swap format"). Jobs are a per-member choice on player 1's
+  pick ("Freelancer: no bonus effects" and others); the CPU's members show Freelancer. The party setup offers no
+  Customize.
+- "Enemy Party" is a message of a table that stays loaded; "Party A" is player 1's party's name, in the battle request
+  and a copy of it. Both are reworded (7.18).
+- The hand pointer follows the Party row below slot 0. The row-restore fix (7.17) covers both rows.
+- Not built: player 2's Customize on their party pick (the party grid's character cursor was not found), and
+  "GUEST" on the setup's right plate (its "CPU" is a picture, not a message).
 
 ## 1. Player 2's controls
 
@@ -1280,6 +1289,140 @@ opened again.
     way the versus row turns versus on, backing out of its room turns it off, and Quick Battle (1-on-1) opens the
     stock room (`fix_choose`).
   - Battles were ended with `D012_TEST_LOW_HP` (1 in the stock battles, 2 in versus).
+
+## 7.18 Player vs Player (Party) (10 and 11 November 2026)
+
+The scope of 0.2, built on branch `claude/pvp-party-scope-a3bae5` (off main `a6454fe`, with 7.16 and 7.17). V unless
+marked. Runs local, recompiled clang build `tools/local/port/build-d012-party`, data `build/port/data-versus-party`
+(a copy of `data-versus-rowrestore`, its save restored before each run), captures and logs in
+`build/port/versus/party/`.
+
+**How the game's Quick Battle (Party) goes** (`D012_TRACE_PARTY=1`, new: the character room's states, the start
+menu's destination, the battle's FIELD mode and phases, the side set-ups and the battle request, each as it changes):
+
+- Battle Mode's Quick Battle (Party) is destination 3. The character room runs player 1's party in states 16 and 17
+  (17 the update, menu `0x08A9ECB8`: the five saved parties, Party A to E; their members, 1st to 5th; then each
+  member's job, "Freelancer: no bonus effects" and others), the CPU's party in 18 to 22 (21 the update, menu
+  `0x08A98A08`), and the battle setup in 28 and 29 (29 the update, menu `0x08A9F190`). State 19 waits for a fade
+  and goes to the state at `+0x914`.
+- The setup's "Swap format" is Tournament or Round-Robin. Each fight's row opens a dialog of the game's battle setup
+  family (menu `0x08AA9634`).
+- The fights are FIELD mode 4, Quick Battle's. The battle request (`*0x089D8508`) has five entries a side: player 1's
+  type 0 (their save), the CPU's type 5, built with main `0x088FA2AC` for side 1. The battle overlay stays loaded
+  from the first fight to the last. So 1-on-1's player 2 works in every fight unchanged: the AI mode made player
+  2's, the build from player 1's save (7.12), the split view, player 2's cursor, prompts, guide and chase, no
+  rewards, and the save guard (kept at the first fight's phase 0, put back at each save and when the overlay goes).
+- After each fight: phase 14, the menu after player 1's defeat ("Proceed to next battle", "Return to Battle Setup"),
+  or 16, after player 1's win or after the last fight, which goes on by itself (17, then the next fight's 0). After
+  the last fight the battle overlay goes and the final results are the menu overlay's ("Tournament, Party A 0 - 2
+  Enemy Party, DEFEATED..."); then the setup again. "Return to Battle Setup" (from a 14) takes the overlay away too,
+  without results. The VS screen before each fight ("Round 2", the two fighters, their jobs) is the battle overlay's.
+
+**What the port does:**
+
+- **The rows** (`d012_versus_menu.cpp`). "Player vs Player (1-on-1)" (the old row, renamed) and "Player vs Player
+  (Party)", parts 71/72 and 73/74, after the game's rows. Both are row type 19 (type 4, tried first, is a main-menu
+  row the game enables from the save), so the help line's swap of text 0 is told apart by the cursor's row: a show
+  lights the row the cursor is on; a hide puts out every versus row but the one the same swap has just lit (the
+  cursor still names the old row when Battle Mode is left). The menu's texts array has no free id for the Party
+  row's two labels, so they are texts of the port's own, shown and hidden with the 1-on-1 row's labels and placed
+  on their parts whenever the menu places the rows' texts (a text takes its part's place once, main `0x088D4584`).
+  With four game rows the Party row and, on it, the hand pointer (the hand is attached again every frame from menu
+  `0x089E1E5C`) are put one row below slot 0, carried on from slots 1 and 0. Chosen, the Party row leaves for
+  destination 3 with versus on; `versus::party()` is versus with that destination.
+- **Player 2's party.** The game's pad read gets player 2's pad in states 18 to 22 (19 only on the way in), as in 8
+  to 11 for 1-on-1 (`d012_versus_rules`, tested in `d012_tests`). The "Player 2 Select" plate covers the party grid's
+  "CPU Select". The pick's "Create a party to fight. *Set CPU strength and levels on the next screen." is reworded as
+  the player's own "Please choose a member. A party can consist of one or more members." (below).
+  - Tried and dropped: making player 2's grid a player's (kind 1, menu `0x08B2B824`). It brought "Player Select",
+    the player's wording, Customization and the job step, but it is player 1's saved parties' grid: player 2's
+    members went into player 1's Party A.
+- **A fight's settings.** The dialog's offline layout (`0x08AB02B0`) has Stage, Strength (CPU), Level (CPU), Type
+  (CPU), Rules and a hidden Judgment. Each frame as it attaches its parts again (main `0x088D3F00` from menu
+  `0x08AA9898`), the three CPU rows' parts are hidden and its cursor (`+0x5CC` of its work area) is given rows 1 to
+  3 to pass over (the game's cursor skips the rows listed at its `+0x28`, count `+0x1C`, main `0x088D3558`). Stage
+  and Rules stay, with a gap between them. The online layout (Stage, Rules, Judgment) is chosen by an online flag that
+  some 30 places read, so it is not used. (Layout `0x08B2F564`, which looked like the dialog in a first trace, is the
+  party picks' list of slots, 1st to 5th.)
+- **Player 1 and Player 2.** "Enemy Party" is a message in a table that stays loaded (`0x098F9B70` here); while a
+  party versus lasts it reads "Player 2" (the message's own bytes, its byte count kept, put back afterwards if they
+  still read as written). Player 1's side is their party's name: in the battle request (each side's `+0x4C`, 14 UTF-16
+  units; the CPU's empty) and a copy the room makes in the block after the side set-ups (`0x09AFDFB4` here), which
+  the first fight's VS screen reads. Once the room has made the request, the request's two names are written as
+  "Player 1" and "Player 2" and the copy as "Player 1" (put back when versus is over). So every fight's VS screen and
+  the final results say Player 1 and Player 2. The messages are found by their English words; in another language
+  they stay (three searches, then no more).
+- **The banners.** Each fight's "Player 1 wins" / "Player 2 wins" / "Draw" as in 1-on-1, until the battle goes on
+  (phase 17), so not on the next VS screen. The 1P / 2P tags only while a fight is played. A tally counts each
+  fight's winner; when the battle overlay goes after a phase 16, the party battle is over, and its winner is shown
+  under the final results' score: the other side if one side lost every member's fight (Tournament), otherwise the
+  side with more wins, or "Draw" (Round-Robin).
+- **A controller lost between fights.** The notice shows on the menu, the VS screen and the Opponent Info; when the
+  next fight starts (player 1's fighter played) with it still gone, START is pressed for the lost player 45 reads
+  later, once the fight takes it, so the fight opens paused as a loss in a fight does.
+- `D012_TEST_LOW_HP=3` (new) lowers both fighters' maximum HP, so either side's HP attack ends a fight.
+
+**Checked** (live runs driven through `D012_INPUT_LIVE` with scratch scripts `drive.py` / `live.py`; parties of two:
+player 1 Lightning and Vaan from Party A, player 2 Lightning and Laguna):
+
+| Run | What it showed |
+| --- | --- |
+| `menu3`, `fin_four` | Three game rows: both rows, each lit with its own help; the wrap; the Party row opens Quick Battle (Party). Four rows: the Party row and the hand below the 1-on-1 row |
+| `party2b`, `live2` | Player 2's pick on controller 2 only, two members; player 1's saved Party A unchanged; the setup with both parties |
+| `live6`, `live8`, `live9` | Tournament: fight 1 player 2, fight 2 player 1 (the battle goes on by itself), fight 3 player 2; every VS screen "Player 1" / "Player 2"; the final results "Player 1 1 - 2 Player 2", DEFEATED and "Player 2 wins"; then the setup again |
+| `live8` | Controller 2 pulled at the menu after fight 1: the notice there and on the Opponent Info, fight 2 opened paused with the notice, and resumed with player 2's START once it was back |
+| `live10` | Round-Robin, 1 - 1: the game's DRAW and the banner's "Draw" |
+| `dlg1`, `live9` | The fight dialog with Stage and Rules only; down and up go between them; Rules still changes (Official brings the setup's "View Ruleset") |
+| `vs1check` | The first fight's VS screen: "Player 1" against "Player 2" |
+| `fin_vs1`, `fin_stock` | Unchanged: 1-on-1 versus (player 1 wins; leaving Battle Mode from the versus row leaves the main menu's own help, and coming back lights only the cursor's row); the stock Quick Battle (Party) against the CPU, "Party A" and "Enemy Party", the red CPU plate |
+
+**Not built, from 0.2:**
+
+- **Player 2's Customize on their party pick.** The pick's update takes a Customize (its result 3) as player 1's
+  does, but the CPU's party grid (kind 3) never gives one, and its character cursor is not the room's character grid
+  (`+0x92C` is empty here) nor anything found in the party grid object or the room's work area. Without the
+  character under the cursor the port cannot start it. Player 2 can still customise a character from the 1-on-1
+  picks; the build is player 1's for both modes.
+- **"GUEST" on the setup's right plate.** Its red "CPU" is not a message (every "CPU" among them is part of a longer
+  one), so it is a picture of the setup's layout, not found.
+
+**Not checked:** a party of three to five; parties of different sizes; Round-Robin with a winner; "Return to Battle
+Setup" between fights and a rematch after one; player 1's controller lost between fights; the game in another
+language (the messages stay worded for the CPU); the Steam Deck. The setup's banner still shows player 2's members as
+"Lv???" (the CPU's level, Auto): their level is player 1's record's, as the VS screen and the Opponent Info show.
+
+## 7.19 Player 2's freerun markers (11 November 2026)
+
+The owner, testing the party build: "Wall running does not seem to work on Player 2". V unless marked.
+
+- **The wall run works for player 2.** Freerunning (triangle by a wall, a rail or a ledge) takes the map action
+  that the fighter update (battle `0x08B37604`) finds for **every** fighter each frame: battle `0x08ACC874` keeps it
+  at fighter `+0x6E0` (-1 none, 0 a wall, 1 and 2 rails and ledges, 3 a held one), and triangle starts it (battle
+  `0x08ACBD58` from the input step `0x08B3526C`; a wall is state 0x0C, a rail 0x0D). Traced on Old Chaos Shrine
+  (`D012_TRACE_VERSUS` now prints both fighters' map action, state and local flag): player 2 by the hall's wall,
+  action 0, triangle, state 0x0C, from height 0 to 23, as player 1's run up the same kind of wall.
+- **What player 2 lacked: the markers.** The fighter's local-only update (battle `0x08B2D3BC`, vtable `+0x34`, run
+  for both fighters) runs two helpers only for the local fighter (vtable `+0x144`, fighter `+0x5B0` bit 4): battle
+  `0x08ACBF20`, the yellow arrows at the map action that show where triangle freeruns (an effect kept at `+0x738`,
+  with option 6 on), and battle `0x08ACF6B4`, the blue pointer toward the opponent at the fighter's shoulder (an
+  effect at `+0x760`, option 8). Player 2 had neither, and player 1's showed in player 2's half too.
+- **The port** (`d012_split_view.cpp`, `run_local_update`, `markers_view1`, `markers_view2`):
+  - an override of `0x08B2D3BC` makes player 2's fighter local for that update only, so the game makes and moves
+    player 2's arrows and pointer as it does player 1's;
+  - each player's two effects are left out of the other player's half: the hide bit (bit 0 of `+0x0A`) on every node
+    under the effect's library object (effect `+0xCC`, its `+0x10`; main `0x0894D964` walks them the same way), set
+    before the view and put back after it;
+  - player 2's are shown in player 2's half: the effect update culls every effect against the on-screen camera,
+    player 1's (main `0x088A6DA0`, the same bit), so player 2's markers were hidden there (the trace showed their
+    nodes' flags 0001).
+  - `D012_NO_MARKERS_PLAYER2=1` leaves them as they were; `D012_TRACE_MARKERS_FREERUN=1` traces both fighters'
+    actions, effects and hide bits every 60 frames.
+- **Checked** (party fights, `build/port/versus/party/wall*`): player 2's pointer at their shoulder in their half
+  and their yellow arrows beside them (`wall10/m2`); neither in player 1's half, and player 1's not in player 2's
+  (`wall8`, `wall10`); player 1's own unchanged. A 1-on-1 versus fight to "Player 1 wins" and a rematch (`reg_vs2`)
+  and the stock Quick Battle (Party) against the CPU (`reg_stock2`, player 1's arrows and pointer, no versus lines)
+  as before. **Not checked:** `D012_NO_MARKERS_PLAYER2=1`; real controllers; a marker over a wall in player 2's
+  half (the arrows seen were a rail's).
 
 ## 8. For later: two copies over the game's ad hoc versus
 

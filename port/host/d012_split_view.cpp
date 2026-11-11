@@ -164,6 +164,9 @@ struct State {
     gaddr chase_lines_system = 0;
     std::array<std::array<std::uint8_t, 0x40>, 3> chase_lines_saved{};
     std::uint16_t chase_lines_flags = 0;
+    // The freerun markers' nodes a view draws without (markers_hide): each
+    // node and its flags to put back.
+    std::vector<std::pair<gaddr, std::uint16_t>> markers_hidden;
     // The most each view has used of its display list (view2_list).
     std::uint32_t peak1 = 0;
     std::uint32_t peak2 = 0;
@@ -492,6 +495,169 @@ void chase_lines_view2(Guest *g, const std::uint8_t *view1, gaddr manager) {
     }
 }
 
+// The freerun markers. The fighter's local-only update (battle 0x08B2D3BC,
+// through the fighter's vtable at +0x34) runs two helpers for the local
+// fighter only (vtable +0x144: fighter +0x5B0 bit 4, player 1's):
+// - battle 0x08ACBF20 on the map action at fighter +0x6E0: the yellow arrows
+//   that show where triangle freeruns (up a wall, along a rail, ...), an
+//   effect kept at +0x738 (+0x6E0 + 0x58), with option 6 on;
+// - battle 0x08ACF6B4 on fighter +0x760: the blue pointer toward the
+//   opponent, an effect kept at +0x760, with option 8 on.
+// The map action itself is found for every fighter (battle 0x08ACC874, from
+// the fighter update 0x08B37604), so player 2's triangle already ran up walls;
+// player 2 only had no arrows to show where. In versus, player 2's fighter now
+// counts as local for that update too (run_local_update), and each player's
+// two effects are left out of the other player's half: the hide bit (bit 0 of
+// +0x0A) on each node under the effect's library object (effect +0xCC, its
+// +0x10), the bit the game's own culling sets (main 0x088A47E4, 0x0894D964),
+// put back after that half. Player 2's are shown in player 2's half, as the
+// game's culling is against player 1's camera (markers_view2).
+// D012_NO_MARKERS_PLAYER2=1 leaves them as they were.
+constexpr std::uint32_t kLocalUpdate = 0x08B2D3BCu;
+constexpr std::uint32_t kMarkerEffects[] = {0x738u, 0x760u};  // the arrows', the pointer's
+constexpr std::uint8_t kListNode = 'l';
+
+bool markers_off() {
+    static const bool off = [] {
+        const char *text = std::getenv("D012_NO_MARKERS_PLAYER2");
+        return text != nullptr && *text != '\0' && std::strcmp(text, "0") != 0;
+    }();
+    return off;
+}
+
+bool guest_ram(gaddr address) { return address >= 0x08800000u && address < 0x0A000000u; }
+
+// An effect's nodes in the effect library: its library object at +0xCC (as
+// the chase lines' and main 0x088A6CB8's), whose +0x10 is the root node.
+gaddr effect_nodes(Guest *g, gaddr effect) {
+    const gaddr object = g_ld32(g, effect + 0xCCu);
+    return guest_ram(object) ? g_ld32(g, object + 0x10u) : 0u;
+}
+
+// The node and the nodes under it, as main 0x0894D964 walks them: a list node
+// ('l') has its count at +4 and its children's table at +0x30; any other is
+// drawn, and its +0x0A bit 0 keeps it from being drawn. Each node's flags are
+// kept in `kept` to put back.
+void set_nodes(Guest *g, gaddr node, bool hide, int depth, std::vector<std::pair<gaddr, std::uint16_t>> &kept) {
+    if (!guest_ram(node) || depth > 8 || kept.size() >= 512u) return;
+    if (g_ld8(g, node) == kListNode) {
+        const std::uint32_t count = static_cast<std::uint16_t>(g_ld16s(g, node + 4u));
+        const gaddr children = g_ld32(g, node + 0x30u);
+        if (!guest_ram(children) || count > 128u) return;
+        for (std::uint32_t i = 0; i < count; ++i) set_nodes(g, g_ld32(g, children + 4u * i), hide, depth + 1, kept);
+        return;
+    }
+    const std::uint16_t flags = static_cast<std::uint16_t>(g_ld16s(g, node + 0x0Au));
+    kept.emplace_back(node, flags);
+    g_st16(g, node + 0x0Au, static_cast<std::uint16_t>(hide ? flags | 1u : flags & ~1u));
+}
+
+// D012_TRACE_MARKERS_FREERUN=1: every 60 split tasks, each fighter's map
+// action, its two effects, their places (+0x00) and hide bits, and how many
+// nodes each view left out last.
+std::size_t markers_hidden_view[2] = {};
+
+void trace_freerun_markers(Guest *g) {
+    static const bool on = [] {
+        const char *text = std::getenv("D012_TRACE_MARKERS_FREERUN");
+        return text != nullptr && *text != '\0' && std::strcmp(text, "0") != 0;
+    }();
+    if (!on || state().frames % 60u != 0u) return;
+    const gaddr field = g_ld32(g, kBattleManager);
+    if (field == 0u) return;
+    for (std::uint32_t slot = 0; slot < 2u; ++slot) {
+        const gaddr fighter = g_ld32(g, field + 0x38u + 4u * slot);
+        if (!guest_ram(fighter)) continue;
+        float at[3];
+        std::memcpy(at, g_ptr(g, fighter + 0x30u, 12u), 12u);
+        std::printf("[markers] split %llu player %u at (%.1f, %.1f, %.1f) action %d local %u",
+                    static_cast<unsigned long long>(state().frames), slot + 1u, at[0], at[1], at[2],
+                    g_ld32s(g, fighter + 0x6E0u), (g_ld8(g, fighter + 0x5B0u) >> 2u) & 1u);
+        for (std::uint32_t off : kMarkerEffects) {
+            const gaddr effect = g_ld32(g, fighter + off);
+            float place[3] = {};
+            if (guest_ram(effect)) std::memcpy(place, g_ptr(g, effect, 12u), 12u);
+            const gaddr node = guest_ram(effect) ? effect_nodes(g, effect) : 0u;
+            std::printf(" | effect +%X %08X at (%.1f, %.1f, %.1f) node %08X type %02X flags %04X", off, effect,
+                        place[0], place[1], place[2], node, guest_ram(node) ? g_ld8(g, node) : 0u,
+                        guest_ram(node) ? static_cast<std::uint16_t>(g_ld16s(g, node + 0x0Au)) : 0u);
+        }
+        std::printf("\n");
+    }
+    std::printf("[markers] split %llu nodes left out: view 1 %zu, view 2 %zu\n",
+                static_cast<unsigned long long>(state().frames), markers_hidden_view[0], markers_hidden_view[1]);
+    std::fflush(stdout);
+}
+
+void markers_back(Guest *g) {
+    auto &hidden = state().markers_hidden;
+    for (auto it = hidden.rbegin(); it != hidden.rend(); ++it) g_st16(g, it->first, it->second);
+    hidden.clear();
+}
+
+// One player's markers hidden or shown for the view about to be drawn (`slot`
+// 0 player 1's, 1 player 2's).
+std::size_t markers_set(Guest *g, std::uint32_t slot, bool hide) {
+    const gaddr field = g_ld32(g, kBattleManager);
+    const gaddr fighter = field != 0u ? g_ld32(g, field + 0x38u + 4u * slot) : 0u;
+    if (!guest_ram(fighter)) return 0u;
+    const std::size_t before = state().markers_hidden.size();
+    for (std::uint32_t at : kMarkerEffects) {
+        const gaddr effect = g_ld32(g, fighter + at);
+        if (guest_ram(effect)) set_nodes(g, effect_nodes(g, effect), hide, 0, state().markers_hidden);
+    }
+    return state().markers_hidden.size() - before;
+}
+
+// Before player 1's view: player 2's markers left out.
+void markers_view1(Guest *g) {
+    if (markers_off()) return;
+    markers_hidden_view[0] = markers_set(g, 1u, true);
+}
+
+// Before player 2's view: player 1's markers left out, and player 2's shown.
+// The effect update culls every effect against the on-screen camera, player
+// 1's (main 0x088A6DA0, the same hide bit), so player 2's markers, next to
+// player 2's fighter, were mostly hidden from player 2's own view.
+void markers_view2(Guest *g) {
+    if (markers_off()) return;
+    markers_hidden_view[1] = markers_set(g, 0u, true);
+    markers_set(g, 1u, false);
+}
+
+void run_local_update(Guest *g, const decomp::CallState &in, GuestRegs &) {
+    const gaddr fighter = in.gpr[4];
+    const gaddr field = g_ld32(g, kBattleManager);
+    const gaddr p2 = field != 0u ? g_ld32(g, field + 0x3Cu) : 0u;
+    const std::uint8_t local = guest_ram(fighter) ? g_ld8(g, fighter + 0x5B0u) : 0u;
+    const bool lend = versus::active() && !markers_off() && guest_ram(fighter) && fighter == p2 && (local & 4u) == 0u;
+    if (lend) g_st8(g, fighter + 0x5B0u, static_cast<std::uint8_t>(local | 4u));
+    GuestRegs regs{};
+    for (int i = 0; i < 8; ++i) regs.a[i] = in.gpr[4 + i];
+    decomp::call_original(g, kLocalUpdate, regs);
+    if (lend)
+        g_st8(g, fighter + 0x5B0u, static_cast<std::uint8_t>((g_ld8(g, fighter + 0x5B0u) & ~4u) | (local & 4u)));
+    // Which fighters it is called for, once each (D012_TRACE_VERSUS).
+    static const bool trace = [] {
+        const char *text = std::getenv("D012_TRACE_VERSUS");
+        return text != nullptr && *text != '\0' && std::strcmp(text, "0") != 0;
+    }();
+    static gaddr seen[4] = {};
+    if (trace && versus::active()) {
+        bool known = false;
+        for (gaddr s : seen) known = known || s == fighter;
+        for (gaddr &s : seen)
+            if (!known && s == 0u) {
+                s = fighter;
+                std::printf("[versus] the local-only update for fighter %08X (%s, local flag %u)%s\n", fighter,
+                            fighter == p2 ? "player 2's" : "not player 2's", (local >> 2u) & 1u,
+                            lend ? ", player 2's as local" : "");
+                std::fflush(stdout);
+                break;
+            }
+    }
+}
+
 void run_chase_local(Guest *g, const decomp::CallState &in, GuestRegs &out) {
     // While a check is asked again for one player: that player.
     static gaddr asking_for = 0u;
@@ -714,6 +880,9 @@ void run_camera_draw_thunk(Guest *g, const decomp::CallState &, GuestRegs &) {
     g_call1(g, kCameraDraw, g_ld32(g, kCameraManager));
     if (!state().running && versus::active()) {
         chase_lines_view1(g);
+        // Player 2's freerun markers left out of player 1's half, when the
+        // last frame was split.
+        if (state().split_active) markers_view1(g);
         add_task(g);
     }
 }
@@ -1537,6 +1706,8 @@ void run_split_task(Guest *g, const decomp::CallState &in, GuestRegs &) {
     if (versus::active()) trace_guide(g);
     if (versus::active()) place_chase_prompt(g);
     chase_lines_back(g);
+    markers_back(g);
+    if (versus::active()) trace_freerun_markers(g);
     if (!versus::active() || manager == 0u || graphics == 0u) return;
     // When the frame stays one full view, with player 2's cursor hidden:
     // - an EX Burst, from its start (run_ex_burst_start) until the
@@ -1711,6 +1882,7 @@ void run_split_task(Guest *g, const decomp::CallState &in, GuestRegs &) {
     const std::uint32_t effects = g_ld32(g, kEffectManager);
     if (effects != 0u) g_call3(g, kEffectCamera, effects, manager, manager + 0xC0u);
     chase_lines_view2(g, saved_view, manager);
+    markers_view2(g);
 
     // The graphics manager's camera from view 2, then the frame's starting
     // render state (with the screen cleared and the lights that follow the
@@ -1838,6 +2010,7 @@ void run_split_task(Guest *g, const decomp::CallState &in, GuestRegs &) {
     }
 
     chase_lines_back(g);
+    markers_back(g);
     std::memcpy(g_ptr(g, manager, kManagerView), saved_view, kManagerView);
     std::memcpy(g_ptr(g, graphics + kGraphicsCamera, kGraphicsCameraSize), saved_camera, kGraphicsCameraSize);
     if (effects != 0u) g_call3(g, kEffectCamera, effects, manager, manager + 0xC0u);
@@ -2073,6 +2246,8 @@ struct Install {
             {kProjectionSetFov, "versus_projection_set_fov", decomp::Module::Main, decomp::Returns::Nothing,
              &run_projection_set_fov},
             {kLocalFighter, "versus_chase_local", decomp::Module::Main, decomp::Returns::Integer, &run_chase_local},
+            {kLocalUpdate, "versus_local_update", decomp::Module::BattleOverlay, decomp::Returns::Nothing,
+             &run_local_update},
         };
         decomp::add_overrides(overrides, sizeof overrides / sizeof overrides[0], true);
         // Overrides that only trace, there only with their switch.

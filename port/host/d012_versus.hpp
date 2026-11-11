@@ -22,6 +22,13 @@ namespace d012::versus {
 // start menu comes back), or forced.
 [[nodiscard]] bool active();
 void set_chosen(bool chosen);
+// The versus battle is Player vs Player (Party): Quick Battle (Party) with
+// player 2 in the CPU party's place (docs/port/local-versus.md 0.2). As of
+// the game's last pad read.
+[[nodiscard]] bool party();
+// In Player vs Player (Party), the character room is on the party's battle
+// setup (room states 28 and 29), as of the game's last pad read.
+[[nodiscard]] bool party_setup();
 // The start menu is up: player 2's gamepad is looked for, so that the row
 // knows whether there is one.
 void note_start_menu();

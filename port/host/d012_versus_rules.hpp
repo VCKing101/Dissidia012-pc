@@ -11,6 +11,17 @@
 //   4 to 7    player 1's pick (5 the update, menu 0x08A9E0E8)
 //   8 to 11   player 2's pick (9 the update, menu 0x08A984BC)
 //   12 to 15  the battle setup (13 the update, menu 0x08A9E5E0)
+//   16, 17    Quick Battle (Party): player 1's party (17 the update, menu
+//             0x08A9ECB8: the saved parties, the members, their jobs)
+//   18 to 22  Quick Battle (Party): the CPU's party, player 2's in versus
+//             (18 starts it, 20 builds its grid, menu 0x08A9ACAC, 21 the
+//             update, menu 0x08A98A08, 22 leaves it for the state at +0x914)
+//   19        waits for a fade, then goes to the state at +0x914 (on the way
+//             into the CPU's party, 20; out of it, 28 the setup, 16 back to
+//             player 1's party, 50 Customize; player 2's Customize there is
+//             not built, see local-versus.md 7.18)
+//   28, 29    Quick Battle (Party): the battle setup (29 the update, menu
+//             0x08A9F190)
 //   50 to 52  Customize: 50 and 51 take the room down, 52 starts the game's
 //             Customize (menu 0x08AF3130) for the character at +0x8048 and
 //             waits, paused, until it closes; its callback (menu 0x08A9A52C)
@@ -26,6 +37,11 @@ inline constexpr std::uint32_t kPlayer1PickUpdate = 5u;
 inline constexpr std::uint32_t kPlayer2PickFirst = 8u;
 inline constexpr std::uint32_t kPlayer2PickUpdate = 9u;
 inline constexpr std::uint32_t kPlayer2PickLast = 11u;
+inline constexpr std::uint32_t kPartyPickFirst = 18u;
+inline constexpr std::uint32_t kPartyPickWait = 19u;
+inline constexpr std::uint32_t kPartyPickBuild = 20u;
+inline constexpr std::uint32_t kPartyPickUpdate = 21u;
+inline constexpr std::uint32_t kPartyPickLeave = 22u;
 inline constexpr std::uint32_t kSetupUpdate = 13u;
 inline constexpr std::uint32_t kSetupLast = 15u;
 inline constexpr std::uint32_t kCustomizeFirst = 50u;
@@ -74,16 +90,21 @@ struct Trip {
     [[nodiscard]] bool active() const { return from != From::None; }
 };
 
+// Whether the room in `state` (its next state after a wait, +0x914, in
+// `next`) is on player 2's pick: states 8 to 11, or the party's 18 to 22 (19
+// only on the way in).
+[[nodiscard]] bool player2_pick(std::uint32_t state, std::uint32_t next);
+
 // Whose pad the game's own pad read gets while the character room is in
-// `state`: player 2's on their pick (states 8 to 11) and on their way to
-// Customize, in it and back; player 1's otherwise.
-[[nodiscard]] Pad room_pad(std::uint32_t state, const Trip &trip);
+// `state`: player 2's on their pick and on their way to Customize, in it and
+// back; player 1's otherwise.
+[[nodiscard]] Pad room_pad(std::uint32_t state, std::uint32_t next, const Trip &trip);
 
 // The trip after a pad read with the room in `state` (`room` false: the
 // room is gone). It ends when the room is somewhere it does not pass
 // through on the way: back at a pick or the setup once Customize was up, or
 // anywhere else before.
-void step(Trip &trip, bool room, std::uint32_t state);
+void step(Trip &trip, bool room, std::uint32_t state, std::uint32_t next);
 
 // Whether the character under player 2's cursor can be customised, from the
 // grid's cell (menu 0x08A7F104(grid, 2, -1)) and character (menu

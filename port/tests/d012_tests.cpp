@@ -939,47 +939,55 @@ void test_versus_rules() {
 
     // Whose pad the game reads in the character room.
     const Trip none;
-    expect(rules::room_pad(5, none) == Pad::Player1, "player 1's pick is player 1's");
+    expect(rules::room_pad(5, 0u, none) == Pad::Player1, "player 1's pick is player 1's");
     for (std::uint32_t state = 8; state <= 11; ++state)
-        expect(rules::room_pad(state, none) == Pad::Player2, "player 2's pick is player 2's");
-    expect(rules::room_pad(13, none) == Pad::Player1, "the setup screen is player 1's");
-    expect(rules::room_pad(52, none) == Pad::Player1 && rules::room_pad(0, none) == Pad::Player1,
+        expect(rules::room_pad(state, 0u, none) == Pad::Player2, "player 2's pick is player 2's");
+    expect(rules::room_pad(13, 0u, none) == Pad::Player1, "the setup screen is player 1's");
+    expect(rules::room_pad(52, 0u, none) == Pad::Player1 && rules::room_pad(0, 0u, none) == Pad::Player1,
            "player 1's Customize is player 1's");
 
     // Player 2's Customize from their pick, as the room goes there and back.
     Trip trip{From::Pick};
     const std::uint32_t from_pick[] = {9, 9, 10, 11, 50, 51, 52, 52, 52, 0};
     for (const std::uint32_t state : from_pick) {
-        rules::step(trip, true, state);
-        expect(trip.active() && rules::room_pad(state, trip) == Pad::Player2,
+        rules::step(trip, true, state, 0u);
+        expect(trip.active() && rules::room_pad(state, 0u, trip) == Pad::Player2,
                "player 2's pad from their pick to Customize and back, state " + std::to_string(state));
     }
-    rules::step(trip, true, 8);
-    expect(!trip.active() && rules::room_pad(8, trip) == Pad::Player2, "back at player 2's pick, the trip is over");
+    rules::step(trip, true, 8, 0u);
+    expect(!trip.active() && rules::room_pad(8, 0u, trip) == Pad::Player2, "back at player 2's pick, the trip is over");
 
     // From the setup screen: player 1's pad again when the setup is back.
     trip = Trip{From::Setup};
     const std::uint32_t from_setup[] = {13, 14, 15, 50, 51, 52, 1, 2};
-    for (const std::uint32_t state : from_setup) rules::step(trip, true, state);
-    expect(trip.active() && trip.opened && rules::room_pad(52, trip) == Pad::Player2 &&
-               rules::room_pad(0, trip) == Pad::Player2,
+    for (const std::uint32_t state : from_setup) rules::step(trip, true, state, 0u);
+    expect(trip.active() && trip.opened && rules::room_pad(52, 0u, trip) == Pad::Player2 &&
+               rules::room_pad(0, 0u, trip) == Pad::Player2,
            "player 2's pad in Customize from the setup screen");
-    expect(rules::room_pad(13, trip) == Pad::Player1, "the setup's own fade stays player 1's");
-    rules::step(trip, true, 12);
-    expect(!trip.active() && rules::room_pad(12, trip) == Pad::Player1, "back at the setup, player 1's pad");
+    expect(rules::room_pad(13, 0u, trip) == Pad::Player1, "the setup's own fade stays player 1's");
+    rules::step(trip, true, 12, 0u);
+    expect(!trip.active() && rules::room_pad(12, 0u, trip) == Pad::Player1, "back at the setup, player 1's pad");
 
     // A trip that goes somewhere else ends there; so does one without the room.
     trip = Trip{From::Pick};
-    rules::step(trip, true, 4);
+    rules::step(trip, true, 4, 0u);
     expect(!trip.active(), "player 2's trip ends if the room goes to player 1's pick instead");
     trip = Trip{From::Setup};
-    rules::step(trip, true, 9);
+    rules::step(trip, true, 9, 0u);
     expect(!trip.active(), "a trip from the setup screen does not pass through player 2's pick");
     trip = Trip{From::Pick};
-    rules::step(trip, true, 52);
-    rules::step(trip, false, 0);
+    rules::step(trip, true, 52, 0u);
+    rules::step(trip, false, 0, 0u);
     expect(!trip.active(), "no room, no trip");
 
+    // Quick Battle (Party): the CPU's party is player 2's pick, 19 only on the way in.
+    for (const std::uint32_t state : {18u, 20u, 21u, 22u})
+        expect(rules::room_pad(state, 0u, none) == Pad::Player2, "the party's pick is player 2's, state " + std::to_string(state));
+    expect(rules::room_pad(19, 20, none) == Pad::Player2, "the wait into the party's pick is player 2's");
+    expect(rules::room_pad(19, 28, none) == Pad::Player1 && rules::room_pad(19, 16, none) == Pad::Player1,
+           "the wait out of it, to the setup or back to player 1's party, is player 1's");
+    expect(rules::room_pad(17, 0, none) == Pad::Player1 && rules::room_pad(29, 0, none) == Pad::Player1,
+           "player 1's party and the party setup are player 1's");
     // Which cells Customize takes, as player 1's pick decides.
     expect(rules::customizable(13, 13) && rules::customizable(31, 31), "Cloud and Lightning can be customised");
     expect(!rules::customizable(rules::kChaos, rules::kChaos) &&
