@@ -29,6 +29,7 @@ the menus to Quick Battles, with the HUD's HP bars, billboarded particles and si
 | `host/d012_loading_layout.cpp`, `.hpp` | The loading screen's right-half pages moved down and made shorter for the track wheel, by checked edits of the screen's layout data in memory (section 11) |
 | `host/d012_test_switches.cpp`, `.hpp` | Test switches, off by default: `D012_TEST_UNLOCK_FIGHTERS`, `D012_TEST_EX_FULL` ([docs/port/graphics-triage.md](../docs/port/graphics-triage.md)) |
 | `host/d012_brave_pool_guard.cpp` | In battle, the pool of flying Brave numbers is put right before each update: a slot holding anything but one of its entries gets a free entry, or none, instead of crashing the game ([issue 16](https://github.com/VCKing101/Dissidia012-pc/issues/16)) |
+| `host/d012_object_name_guard.cpp` | Loading a character whose costume row was changed by DLC or a cheat so that the game's own lookup of it finds nothing: the missing row's name is read as empty, as on PPSSPP, instead of crashing the game ([issue 19](https://github.com/VCKing101/Dissidia012-pc/issues/19)); reached through `config/dispatch-calls.txt` |
 | `host/d012_button_prompts.cpp`, `.hpp` | Button prompts: the game's button symbols drawn again as the gamepad's (Xbox, PlayStation, Nintendo; L and R as the triggers with Swap shoulders and triggers), as their textures load, and for the port's dialogs ([docs/port/button-prompts.md](../docs/port/button-prompts.md)) |
 | `host/d012_crash_report.cpp` | The crash report, always on: an unhandled exception or an abort logs the exception, its module and offset, and the stack, and writes a minidump to `data/logs/D012Native-crash.dmp` (`D012_CRASH_DUMP=<dir>`: one per run in that folder) ([docs/port/quit-crash.md](../docs/port/quit-crash.md)) |
 | `host/d012_decomp_harness.cpp`, `.hpp`, `host/d012_decomp_bgm.cpp` | Decompiled functions as native overrides (in the main module, the battle overlay and the menu overlay), and the differential test against the recompiled originals |
@@ -150,6 +151,8 @@ The profile's own switches:
 | `D012_TEST_EX_FULL=1` | Test only: in battle the player's EX gauge is kept full (R + square enters EX Mode; the next HP attack that lands is an EX Burst) |
 | `D012_CRASH_DUMP=<dir>` | On a crash, write the minidump to `<dir>/crash_<pid>.dmp` instead of `<data>/logs/D012Native-crash.dmp` (the logged stack has names from `D012Native.pdb` when the build links with `/DEBUG`, else module+offset) |
 | `D012_BRAVE_POOL_GUARD=0` | The Brave numbers' pool is left as it is (`port/host/d012_brave_pool_guard.cpp`): a slot holding something that is not an entry crashes the battle, as in issue 16 |
+| `D012_OBJECT_NAME_GUARD=0` | An object's file name is built as the game builds it (`port/host/d012_object_name_guard.cpp`): a costume row that the game's lookup cannot find crashes the game, as in issue 19 |
+| `D012_TRACE_OBJECT_NAMES=1` | Log every object file name the game builds (`obj/<name>.<ext>`), with the object's id, name, character, costume and flags when the object loader asks (with the guard above on) |
 | `D012_TEST_CRASH=<s>[,abort]` | Test only: a thread reads address 0 (or calls `abort()`) that many seconds after start, to check the crash report |
 
 And the framework changes' off switches, each restoring the old behaviour: `D012_PLAYER2_PAD_STAYS=1` (player 2's

@@ -7,4 +7,5 @@
 #
 # module  address     function
 main      0x08872138  # PadMgr_applyDeadZone (pad module): the port keeps a radial-dead-zone stick beside it
+main      0x08844FA4  # an object's file name, obj/<name>.<ext>: a missing costume row's name reads as empty (issue 19)
 battle    0x08B38A0C  # the world map walker's input direction: the port's analog walk
