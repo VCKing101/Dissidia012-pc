@@ -116,8 +116,6 @@ constexpr std::uint32_t kRoomStates = 0x08AA3F48u;
 constexpr std::uint32_t kRoomStateSignature[] = {0x08A9DA38u, 0x08A98188u, 0x08A9DD14u};
 constexpr std::uint32_t kRoomWork = 0x154u;
 constexpr std::uint32_t kRoomState = 0x910u;
-constexpr std::uint32_t kFirstOpponentState = 8u;
-constexpr std::uint32_t kLastOpponentState = 11u;
 // The room's work area: where it goes after Customize, its flags, the pick
 // grid, the character Customize opens, the opponent's character, and the
 // settings handed to Customize.
@@ -188,7 +186,32 @@ struct State {
     // trip), and since when, for its "Player 2" plate.
     bool customizing = false;
     std::chrono::steady_clock::time_point customizing_time;
+    // Player vs Player (Party): versus is on and the start menu left for
+    // Quick Battle (Party) (its destination, main 0x09B6D838, is 3 until the
+    // menu leaves for another).
+    bool party = false;
+    // The party battle: each side's members (the battle request's entries),
+    // fights won, whether this fight's winner is counted, how the last fight
+    // went on (its phase 14 or 16), the battle overlay at the last read, and
+    // once the battle is over (the game's final results) its winner: 1 player
+    // 1, 2 player 2, 3 a draw.
+    std::uint32_t party_members[2] = {};
+    std::uint32_t party_wins[2] = {};
+    bool fight_counted = false;
+    std::uint32_t fight_went_on = 0;
+    bool party_in_battle = false;
+    std::uint32_t party_winner = 0;
+    // A fight played at the last read, for the pause of a fight that starts
+    // with a controller gone (lost between fights), and the reads left until
+    // it is paused (the game takes START once the fight is under way).
+    bool was_fighting = false;
+    std::uint32_t pause_in = 0;
+    // The room is on the party's battle setup (states 28 and 29).
+    bool party_setup = false;
 };
+
+constexpr std::uint32_t kDestination = 0x09B6D838u;
+constexpr std::uint32_t kDestinationParty = 3u;
 
 constexpr std::uint32_t kLostPlayer1 = 1u;
 constexpr std::uint32_t kLostPlayer2 = 2u;
@@ -226,6 +249,7 @@ bool battle_resident(psprecomp::GuestMemory &memory) {
 struct Room {
     bool present = false;
     std::uint32_t work = 0, state = 0, flags = 0;
+    std::uint32_t next = 0;  // +0x914, where the waiting state 19 goes
 };
 
 Room read_room(psprecomp::GuestMemory &memory) {
@@ -235,7 +259,7 @@ Room read_room(psprecomp::GuestMemory &memory) {
     if (!user_ram(room)) return {};
     const std::uint32_t work = memory.load32(room + kRoomWork);
     if (!user_ram(work)) return {};
-    return {true, work, memory.load32(work + kRoomState), memory.load32(work + kRoomFlags)};
+    return {true, work, memory.load32(work + kRoomState), memory.load32(work + kRoomFlags), memory.load32(work + 0x914u)};
 }
 
 // The setup screen's result (rules::kSetupCustomize), or 0 with no setup.
@@ -246,10 +270,9 @@ std::uint32_t setup_result(psprecomp::GuestMemory &memory, const Room &room) {
     return user_ram(state) ? memory.load32(state + kSetupResult) : 0u;
 }
 
-// The character room is on screen and picking the opponent.
-bool picking_opponent(const Room &room) {
-    return room.present && room.state >= kFirstOpponentState && room.state <= kLastOpponentState;
-}
+// The character room is on screen and picking the opponent: the 1-on-1's, or
+// the party's (Quick Battle (Party), the CPU's party).
+bool picking_opponent(const Room &room) { return room.present && rules::player2_pick(room.state, room.next); }
 
 // The game's character ids that Customize takes (d012_versus_rules.hpp).
 bool customizable_character(std::uint32_t character) {
@@ -433,14 +456,458 @@ void trace_fighters(psprecomp::GuestMemory &memory, const State &s) {
     float e1[4], e2[4];
     eye(player, e1);
     eye(opponent, e2);
+    // Each fighter's map action (+0x6E0: -1 none, 0 a wall, 1 and 2 other
+    // freerun places, 3 a held one) and its state (*(+0x3A4)).
+    const auto action = [&](std::uint32_t fighter) { return static_cast<int>(memory.load32(fighter + 0x6E0u)); };
+    const auto state = [&](std::uint32_t fighter) {
+        const std::uint32_t at = memory.load32(fighter + 0x3A4u);
+        return user_ram(at) ? static_cast<int>(memory.load32(at)) : -1;
+    };
     std::printf("[versus] read %u p1 (%.2f, %.2f, %.2f) p2 (%.2f, %.2f, %.2f) p2 ai %d pad1 0x%04X %u,%u "
-                "eye1 (%.2f, %.2f, %.2f) d %.2f eye2 (%.2f, %.2f, %.2f) d %.2f\n",
+                "eye1 (%.2f, %.2f, %.2f) d %.2f eye2 (%.2f, %.2f, %.2f) d %.2f action %d/%d state 0x%X/0x%X "
+                "local 0x%02X/0x%02X\n",
                 s.reads, f(player + 0x30u), f(player + 0x34u), f(player + 0x38u), f(opponent + 0x30u),
                 f(opponent + 0x34u), f(opponent + 0x38u),
                 user_ram(ai) ? static_cast<int>(memory.load32(ai + 0x54u)) : -1,
                 memory.load32(kRawPad1 + kRawInjectButtons), memory.load8(kRawPad1 + kRawInjectStick),
-                memory.load8(kRawPad1 + kRawInjectStick + 1u), e1[0], e1[1], e1[2], e1[3], e2[0], e2[1], e2[2], e2[3]);
+                memory.load8(kRawPad1 + kRawInjectStick + 1u), e1[0], e1[1], e1[2], e1[3], e2[0], e2[1], e2[2], e2[3],
+                action(player), action(opponent), state(player), state(opponent), memory.load8(player + 0x5B0u),
+                memory.load8(opponent + 0x5B0u));
     std::fflush(stdout);
+}
+
+// D012_TRACE_PARTY=1, versus chosen or not: the character room's state and a
+// few of its fields, the start menu's destination, the battle's FIELD mode
+// and phase, and the side set-ups' characters and controller types, each
+// logged as it changes (for Player vs Player (Party), local-versus.md 0.2).
+bool trace_party_on() {
+    static const bool on = [] {
+        const char *text = std::getenv("D012_TRACE_PARTY");
+        return text != nullptr && *text != '\0' && std::strcmp(text, "0") != 0;
+    }();
+    return on;
+}
+
+void trace_party(psprecomp::GuestMemory &memory, const State &s, bool battle) {
+    if (!trace_party_on()) return;
+    constexpr std::uint32_t kSides = 0x09AFB8A0u, kSideSize = 0x1060u, kSideControl = 0xF34u;
+    static std::uint32_t last_room = 0xFFFFFFFFu, last_destination = 0xFFFFFFFFu, last_mode = 0xFFFFFFFFu;
+    static std::uint32_t last_phase = 0xFFFFFFFFu, last_sides = 0xFFFFFFFFu;
+    static bool last_battle = false;
+    bool menu = true;
+    for (std::uint32_t i = 0; i < 3u; ++i)
+        if (memory.load32(kRoomStates + 8u * i + 4u) != kRoomStateSignature[i]) menu = false;
+    std::uint32_t room = 0xFFFFFFFFu, work = 0u;
+    if (menu) {
+        const std::uint32_t object = memory.load32(kRoomObject);
+        work = user_ram(object) ? memory.load32(object + kRoomWork) : 0u;
+        if (user_ram(work)) room = memory.load32(work + kRoomState);
+    }
+    if (room != last_room) {
+        last_room = room;
+        if (room != 0xFFFFFFFFu)
+            std::printf("[party] read %u room state %u (+0x914 %u, +0x918 %u, +0x91C 0x%X, +0x970 %u, +0x8048 %d, "
+                        "+0x804C %d, +0x8050 %d, +0x8058 %u, +0x81B4 0x%X)\n",
+                        s.reads, room, memory.load32(work + 0x914u), memory.load32(work + 0x918u),
+                        memory.load32(work + 0x91Cu), memory.load8(work + 0x970u),
+                        static_cast<std::int32_t>(memory.load32(work + 0x8048u)),
+                        static_cast<std::int32_t>(memory.load32(work + 0x804Cu)),
+                        static_cast<std::int32_t>(memory.load32(work + 0x8050u)), memory.load8(work + 0x8058u),
+                        memory.load32(work + 0x81B4u));
+        else
+            std::printf("[party] read %u room gone\n", s.reads);
+    }
+    const std::uint32_t destination = memory.load32(0x09B6D838u);
+    if (destination != last_destination) {
+        last_destination = destination;
+        std::printf("[party] read %u destination %u\n", s.reads, destination);
+    }
+    if (battle != last_battle) {
+        last_battle = battle;
+        std::printf("[party] read %u battle overlay %s\n", s.reads, battle ? "in" : "out");
+    }
+    const std::uint32_t field = battle ? memory.load32(kBattleManager) : 0u;
+    const std::uint32_t mode = user_ram(field) ? memory.load32(field + kFieldMode) : 0xFFFFFFFFu;
+    if (mode != last_mode) {
+        last_mode = mode;
+        if (mode != 0xFFFFFFFFu)
+            std::printf("[party] read %u FIELD mode %u (+0x50 %u, +0x54 %u, fighters 0x%08X 0x%08X)\n", s.reads, mode,
+                        memory.load32(field + 0x50u), memory.load32(field + 0x54u), memory.load32(field + 0x38u),
+                        memory.load32(field + 0x3Cu));
+    }
+    const std::uint32_t flow = battle ? memory.load32(0x08B0CF20u) : 0u;
+    const std::uint32_t phase = user_ram(flow) ? memory.load32(flow + 8u) : 0xFFFFFFFFu;
+    if (phase != last_phase) {
+        last_phase = phase;
+        if (phase < 64u) std::printf("[party] read %u battle phase %u\n", s.reads, phase);
+    }
+    // The side set-ups: character id (+0), level (+1), controller type (+0xF34).
+    std::uint32_t sides = 0u;
+    for (std::uint32_t i = 0; i < 2u; ++i)
+        sides = sides * 31u + memory.load8(kSides + i * kSideSize) + 7u * memory.load16(kSides + i * kSideSize + kSideControl);
+    if (sides != last_sides) {
+        last_sides = sides;
+        std::printf("[party] read %u sides:", s.reads);
+        for (std::uint32_t i = 0; i < 2u; ++i) {
+            const std::uint32_t setup = kSides + i * kSideSize;
+            std::printf(" %u:%d/L%u/c%d", i, static_cast<std::int8_t>(memory.load8(setup)), memory.load8(setup + 1u),
+                        static_cast<std::int16_t>(memory.load16(setup + kSideControl)));
+        }
+        std::printf("\n");
+    }
+    // The battle request (*0x089D8508): per side 0xEA8 bytes, five entries
+    // of 0x2E8, each with its source type at +0x68 and arguments from +0x78
+    // (roster-and-save.md 1.7).
+    static std::uint32_t last_request = 0xFFFFFFFFu;
+    const std::uint32_t request = memory.load32(0x089D8508u);
+    if (user_ram(request)) {
+        std::uint32_t sum = request;
+        for (std::uint32_t side = 0; side < 2u; ++side)
+            for (std::uint32_t n = 0; n < 5u; ++n) {
+                const std::uint32_t entry = request + side * 0xEA8u + n * 0x2E8u;
+                sum = sum * 31u + memory.load32(entry + 0x68u) * 7u + memory.load32(entry + 0x78u);
+            }
+        if (sum != last_request) {
+            last_request = sum;
+            std::printf("[party] read %u request 0x%08X:", s.reads, request);
+            for (std::uint32_t side = 0; side < 2u; ++side) {
+                std::printf(" side %u", side);
+                for (std::uint32_t n = 0; n < 5u; ++n) {
+                    const std::uint32_t entry = request + side * 0xEA8u + n * 0x2E8u;
+                    std::printf(" [%u: %08X %08X %08X]", n, memory.load32(entry + 0x68u), memory.load32(entry + 0x78u),
+                                memory.load32(entry + 0x7Cu));
+                }
+            }
+            std::printf("\n");
+        }
+    }
+    std::fflush(stdout);
+}
+
+// ---- Player vs Player (Party): the game's words for the parties ----------
+//
+// The party screens are worded for player 1 against the CPU. Their words are
+// the game's messages, decoded in RAM once their table is loaded (a table:
+// u16 count, u16 offsets, then each message: a u16 byte count with the
+// terminator, maybe a few control units, UTF-16 text, 0). In Player vs Player
+// (Party) these are put in the messages' own places, the bytes kept and put
+// back afterwards (only where they still read as written):
+//
+//   - "Enemy Party" (a table loaded for good, at 0x098F9B70 on the US disc),
+//     the right side's name on each fight's VS screen and the final results,
+//     as "Player 2";
+//   - "Create a party to fight. *Set CPU strength and levels on the next
+//     screen." (the menu overlay's), on player 2's pick, as the player's own
+//     "Please choose a member. A party can consist of one or more members.".
+//
+// They are found by their English words, so with the game in another
+// language they stay as they are (a few searches, then no more). The red
+// "CPU" on the party setup's right plate is no message (every "CPU" among
+// them is part of a longer one) and stays.
+//
+// The left side's name on those screens is player 1's party's ("Party A"),
+// from the battle request (*0x089D8508, each side 0xEA8 bytes: the name at
+// +0x4C, 14 UTF-16 units; empty on the CPU's side, for which the screens use
+// "Enemy Party"); in versus it is written as "Player 1", and the right side's
+// as "Player 2", once the room has made the request. The first fight's VS
+// screen reads a copy the room has made by then, in the block after the two
+// side set-ups (main 0x09AFD960; the name at +0x654 on the US disc): there the
+// party's name is written as "Player 1" too, wherever it is in that block.
+constexpr std::uint32_t kRequest = 0x089D8508u;
+constexpr std::uint32_t kRequestSide = 0xEA8u;
+constexpr std::uint32_t kRequestName = 0x4Cu;
+constexpr std::uint32_t kRequestNameUnits = 14u;
+constexpr std::uint32_t kRequestEntry = 0x2E8u;
+constexpr std::uint32_t kRequestEntryType = 0x68u;
+constexpr std::uint32_t kUserRam = 0x08800000u, kUserRamEnd = 0x0A000000u;
+constexpr std::uint32_t kBattleSetupNames = 0x09AFD960u, kBattleSetupNamesSize = 0x1000u;
+
+struct MessagePatch {
+    const char *name = "";
+    std::uint32_t at = 0;  // the message's byte count
+    std::vector<std::uint8_t> original, patched;
+};
+
+std::vector<std::uint16_t> units(const char *text) {
+    std::vector<std::uint16_t> out;
+    for (const char *c = text; *c != '\0'; ++c) out.push_back(static_cast<std::uint8_t>(*c));
+    return out;
+}
+
+// The byte count of the message holding `text` at `hit` in `ram` (a copy of
+// guest memory from `base`): within three units before the text, with only
+// control units (0x8000 and up) between it and the text, its last unit the
+// terminator; with `whole`, the text ending the message's words (a
+// terminator or a control unit after it). 0 if `hit` is no message's.
+std::uint32_t message_at(const std::vector<std::uint8_t> &ram, std::uint32_t base, std::size_t hit, std::size_t length,
+                         bool whole) {
+    const auto unit = [&](std::size_t i) -> std::uint32_t { return i + 1u < ram.size() ? ram[i] | ram[i + 1u] << 8 : 0xFFFFFFFFu; };
+    if (whole) {
+        const std::uint32_t after = unit(hit + 2u * length);
+        if (after != 0u && after < 0x8000u) return 0u;
+    }
+    for (std::size_t back = 1; back <= 3u && hit >= 2u * back; ++back) {
+        const std::size_t count_at = hit - 2u * back;
+        bool controls = true;
+        for (std::size_t k = count_at + 2u; k < hit && controls; k += 2u) controls = unit(k) >= 0x8000u;
+        if (!controls) break;
+        const std::uint32_t bytes = unit(count_at);
+        if (bytes % 2u != 0u || bytes < 2u * length + 2u || bytes > 600u) continue;
+        const std::size_t end = count_at + 2u + bytes;
+        if (end < hit + 2u * length + 2u || unit(end - 2u) != 0u) continue;
+        return base + static_cast<std::uint32_t>(count_at);
+    }
+    return 0u;
+}
+
+// Where message `text` is in user RAM (its byte count), or 0.
+std::uint32_t find_message(psprecomp::GuestMemory &memory, const char *text, bool whole) {
+    static std::vector<std::uint8_t> ram;
+    ram.resize(kUserRamEnd - kUserRam - 0x1000u);
+    memory.copy_out(kUserRam, ram);
+    const std::vector<std::uint16_t> want = units(text);
+    for (std::size_t i = 2; i + 2u * want.size() < ram.size(); i += 2u) {
+        if (ram[i] != (want[0] & 0xFFu) || ram[i + 1u] != 0u) continue;
+        bool match = true;
+        for (std::size_t k = 1; k < want.size() && match; ++k)
+            match = ram[i + 2u * k] == want[k] && ram[i + 2u * k + 1u] == 0u;
+        if (!match) continue;
+        if (const std::uint32_t at = message_at(ram, kUserRam, i, want.size(), whole); at != 0u) return at;
+    }
+    return 0u;
+}
+
+// The message at `at` (its byte count) given `words` in place of its text,
+// its control units kept, the rest of it zeros. False if they do not fit.
+bool patch_message(psprecomp::GuestMemory &memory, MessagePatch &patch, std::uint32_t at, const std::vector<std::uint16_t> &words) {
+    const std::uint32_t bytes = memory.load16(at);
+    std::vector<std::uint8_t> original(2u + bytes);
+    memory.copy_out(at, original);
+    std::uint32_t text = at + 2u;
+    while (text < at + 2u + bytes && memory.load16(text) >= 0x8000u) text += 2u;
+    if (text + 2u * words.size() + 2u > at + 2u + bytes) return false;
+    for (std::uint32_t a = text; a < at + 2u + bytes; a += 2u) memory.store16(a, 0u);
+    for (std::size_t i = 0; i < words.size(); ++i) memory.store16(text + 2u * static_cast<std::uint32_t>(i), words[i]);
+    patch.at = at;
+    patch.original = std::move(original);
+    patch.patched.resize(patch.original.size());
+    memory.copy_out(at, patch.patched);
+    std::cout << "[versus] the message \"" << patch.name << "\" at 0x" << std::hex << at << std::dec << " reworded" << std::endl;
+    return true;
+}
+
+// The message put back, if it still reads as the port wrote it (its table may
+// be gone, with something else in its place).
+void unpatch_message(psprecomp::GuestMemory &memory, MessagePatch &patch) {
+    if (patch.at == 0u) return;
+    std::vector<std::uint8_t> now(patch.patched.size());
+    memory.copy_out(patch.at, now);
+    if (now == patch.patched) memory.copy_in(patch.at, patch.original);
+    patch.at = 0u;
+}
+
+// Whether a patch is in place and still reads as written.
+bool patched(psprecomp::GuestMemory &memory, const MessagePatch &patch) {
+    if (patch.at == 0u) return false;
+    std::vector<std::uint8_t> now(patch.patched.size());
+    memory.copy_out(patch.at, now);
+    return now == patch.patched;
+}
+
+struct PartyWords {
+    MessagePatch enemy{"Enemy Party"};
+    MessagePatch create{"Create a party to fight"};
+    // Searches made for each in this party battle (or this room visit), at
+    // most three, and the pad reads to the next search for "Enemy Party".
+    std::uint32_t enemy_searches = 0, enemy_wait = 0;
+    std::uint32_t room_searches = 0;
+    std::uint32_t named_request = 0;  // the request whose names were written
+    // The copy of player 1's party's name written as "Player 1", and what it
+    // read before, put back when versus is over.
+    std::uint32_t name_copy = 0;
+    std::vector<std::uint16_t> name_copy_before;
+};
+
+constexpr std::uint32_t kWordSearches = 3u;
+constexpr std::uint32_t kWordSearchReads = 300u;
+
+PartyWords &party_words() {
+    static PartyWords w;
+    return w;
+}
+
+// The player's own words for player 2's pick: the player's party pick's
+// message, as it is in the same table.
+std::vector<std::uint16_t> player_pick_words(psprecomp::GuestMemory &memory) {
+    const std::uint32_t at = find_message(memory, "Please choose a member", false);
+    if (at == 0u) return {};
+    const std::uint32_t bytes = memory.load16(at);
+    std::vector<std::uint16_t> words;
+    for (std::uint32_t a = at + 2u; a + 2u <= at + 2u + bytes; a += 2u) {
+        const std::uint16_t u = memory.load16(a);
+        if (u == 0u) break;
+        words.push_back(u);
+    }
+    return words;
+}
+
+void write_name(psprecomp::GuestMemory &memory, std::uint32_t at, const char *name) {
+    const std::vector<std::uint16_t> words = units(name);
+    for (std::uint32_t i = 0; i < kRequestNameUnits; ++i)
+        memory.store16(at + 2u * i, i < words.size() ? words[i] : 0u);
+}
+
+// Each pad read: the party's words in place while they are wanted.
+void party_wording(psprecomp::GuestMemory &memory, State &s, const Room &room, bool battle) {
+    PartyWords &w = party_words();
+    if (!s.party) {
+        unpatch_message(memory, w.enemy);
+        unpatch_message(memory, w.create);
+        w.named_request = 0u;
+        w.enemy_searches = w.enemy_wait = 0u;
+        if (w.name_copy != 0u) {
+            const std::vector<std::uint16_t> words = units("Player 1");
+            bool ours = memory.load16(w.name_copy + 2u * static_cast<std::uint32_t>(words.size())) == 0u;
+            for (std::size_t k = 0; k < words.size() && ours; ++k)
+                ours = memory.load16(w.name_copy + 2u * static_cast<std::uint32_t>(k)) == words[k];
+            if (ours)
+                for (std::size_t k = 0; k < w.name_copy_before.size(); ++k)
+                    memory.store16(w.name_copy + 2u * static_cast<std::uint32_t>(k), w.name_copy_before[k]);
+            w.name_copy = 0u;
+        }
+        return;
+    }
+    // "Enemy Party", for as long as the party battle lasts.
+    if (!patched(memory, w.enemy)) {
+        w.enemy.at = 0u;
+        if (w.enemy_wait != 0u) {
+            --w.enemy_wait;
+        } else if (w.enemy_searches < kWordSearches) {
+            ++w.enemy_searches;
+            w.enemy_wait = kWordSearchReads;
+            if (const std::uint32_t at = find_message(memory, "Enemy Party", true); at != 0u)
+                patch_message(memory, w.enemy, at, units("Player 2"));
+        }
+    }
+    // The menu overlay's, while the room is on player 2's pick or after it
+    // (the setup, the way to the battle); back on player 1's pick.
+    const bool wanted = room.present && room.state >= rules::kPartyPickFirst && room.state < rules::kCustomizeFirst;
+    if (!wanted) {
+        unpatch_message(memory, w.create);
+        w.room_searches = 0u;
+    } else if (!patched(memory, w.create) && w.room_searches < kWordSearches) {
+        ++w.room_searches;
+        w.create.at = 0u;
+        const std::vector<std::uint16_t> words = player_pick_words(memory);
+        if (const std::uint32_t at = find_message(memory, "Create a party to fight", false); at != 0u && !words.empty())
+            patch_message(memory, w.create, at, words);
+    }
+    // The request's names, once the room has made it as it goes (and again
+    // for a new one), before the battle copies them.
+    if (room.present) {
+        w.named_request = 0u;
+        return;
+    }
+    const std::uint32_t request = memory.load32(kRequest);
+    if (!user_ram(request) || request == w.named_request) return;
+    // Only a request the room has made (members on both sides).
+    std::uint32_t members[2] = {};
+    for (std::uint32_t side = 0; side < 2u; ++side)
+        for (std::uint32_t n = 0; n < 5u; ++n)
+            if (memory.load32(request + side * kRequestSide + n * kRequestEntry + kRequestEntryType) != 0xFFFFFFFFu)
+                ++members[side];
+    if (members[0] == 0u || members[1] == 0u) return;
+    w.named_request = request;
+    // Player 1's party's name, as the room wrote it, and its copy.
+    std::vector<std::uint16_t> name;
+    for (std::uint32_t i = 0; i < kRequestNameUnits; ++i) {
+        const std::uint16_t u = memory.load16(request + kRequestName + 2u * i);
+        if (u == 0u) break;
+        name.push_back(u);
+    }
+    if (!name.empty() && name != units("Player 1")) {
+        for (std::uint32_t at = kBattleSetupNames; at + 2u * kRequestNameUnits < kBattleSetupNames + kBattleSetupNamesSize;
+             at += 2u) {
+            bool match = memory.load16(at + 2u * static_cast<std::uint32_t>(name.size())) == 0u &&
+                         (at == kBattleSetupNames || memory.load16(at - 2u) == 0u);
+            for (std::size_t k = 0; k < name.size() && match; ++k)
+                match = memory.load16(at + 2u * static_cast<std::uint32_t>(k)) == name[k];
+            // "Player 1" and its terminator, where the units after the old
+            // name are free (the slot may be no longer than the name needs).
+            const std::vector<std::uint16_t> words = units("Player 1");
+            for (std::size_t k = name.size() + 1u; k <= words.size() && match; ++k)
+                match = memory.load16(at + 2u * static_cast<std::uint32_t>(k)) == 0u;
+            if (!match) continue;
+            if (w.name_copy == 0u) {
+                w.name_copy = at;
+                w.name_copy_before.clear();
+                for (std::size_t k = 0; k <= words.size(); ++k)
+                    w.name_copy_before.push_back(memory.load16(at + 2u * static_cast<std::uint32_t>(k)));
+            }
+            for (std::size_t k = 0; k <= words.size(); ++k)
+                memory.store16(at + 2u * static_cast<std::uint32_t>(k), k < words.size() ? words[k] : 0u);
+            std::cout << "[versus] the party's name at 0x" << std::hex << at << std::dec << " written as Player 1" << std::endl;
+            at += 2u * kRequestNameUnits;
+        }
+    }
+    for (std::uint32_t side = 0; side < 2u; ++side) {
+        s.party_members[side] = members[side];
+        write_name(memory, request + side * kRequestSide + kRequestName, side == 0u ? "Player 1" : "Player 2");
+    }
+    std::cout << "[versus] the party battle: " << s.party_members[0] << " against " << s.party_members[1]
+              << ", named Player 1 and Player 2" << std::endl;
+}
+
+// The party battle's tally, each read: each fight's winner as it is known
+// (read_fighting), and the battle's winner once the game goes to its final
+// results. After a fight the battle goes on in one of two ways: phase 14, the
+// menu ("Proceed to next battle" or "Return to Battle Setup"; the game's after
+// player 1's defeat, the port's after every fight but the last, see
+// run_winner_decision in d012_split_view.cpp), or phase 16, after the last
+// fight, which goes on by itself (17, then the final results). After the last
+// fight the battle overlay goes, and the final results are the menu
+// overlay's; after "Return to Battle Setup" (a 14) it goes too, with no
+// results. So the battle is over when the overlay goes after a 16.
+//
+// Who won: in a Tournament the side with no members left lost; in a
+// Round-Robin the side with more wins won, and equal wins are a draw. So: if
+// one side lost every member's fight, the other won; otherwise the wins.
+std::uint32_t party_battle_winner(const State &s) {
+    const bool out1 = s.party_members[0] != 0u && s.party_wins[1] >= s.party_members[0];
+    const bool out2 = s.party_members[1] != 0u && s.party_wins[0] >= s.party_members[1];
+    if (out1 != out2) return out1 ? 2u : 1u;
+    if (s.party_wins[0] != s.party_wins[1]) return s.party_wins[0] > s.party_wins[1] ? 1u : 2u;
+    return 3u;
+}
+
+void party_tally(psprecomp::GuestMemory &memory, State &s, const Room &room, bool battle) {
+    if (!s.party || room.present) {
+        s.party_wins[0] = s.party_wins[1] = 0u;
+        s.fight_counted = false;
+        s.fight_went_on = 0u;
+        s.party_in_battle = false;
+        s.party_winner = 0u;
+        return;
+    }
+    const bool left = s.party_in_battle && !battle;
+    s.party_in_battle = battle;
+    if (left && s.fight_went_on == 16u && s.party_winner == 0u) {
+        s.party_winner = party_battle_winner(s);
+        std::cout << "[versus] the party battle is over: "
+                  << (s.party_winner == 3u ? "a draw" : s.party_winner == 1u ? "player 1 won" : "player 2 won") << std::endl;
+    }
+    if (!battle) return;
+    const std::uint32_t flow = memory.load32(0x08B0CF20u);
+    const std::uint32_t phase = user_ram(flow) ? memory.load32(flow + 8u) : 0xFFFFFFFFu;
+    if (phase == 0u && s.fallen == 0u) s.fight_counted = false;
+    if (phase == 14u || phase == 16u) s.fight_went_on = phase;
+    if (s.fallen != 0u && !s.fight_counted) {
+        s.fight_counted = true;
+        s.fight_went_on = 0u;
+        if (s.fallen == 2u) ++s.party_wins[0];
+        if (s.fallen == 1u) ++s.party_wins[1];
+        std::cout << "[versus] party battle: " << s.party_wins[0] << " - " << s.party_wins[1] << std::endl;
+    }
 }
 
 // Whether player 1's fighter is played: the intro hands it to the CPU (its
@@ -483,6 +950,9 @@ void read_fighting(psprecomp::GuestMemory &memory, State &s, bool battle) {
     // battle 0x08B09D88). Not before, though a fighter's HP is 0: the fight
     // goes on until the final blow lands (an EX Burst on a fighter at 0 HP).
     if (phase == 0xFFFFFFFFu || phase < 9u || phase >= 32u) return;
+    // In a party battle, until the battle goes on (17): the next fight's VS
+    // screen is the same battle's.
+    if (s.party && phase >= 17u) return;
     const std::uint32_t winner = memory.load32(flow + 0x20u);
     if (winner != 0u && winner == player) {
         s.fallen = 2u;
@@ -509,6 +979,10 @@ void run_set_ai_mode(Guest *g, const decomp::CallState &in, GuestRegs &out) {
     std::uint32_t mode = in.gpr[5];
     const std::uint32_t caller = in.gpr[31];
     const gaddr field = g_ld32(g, kBattleManager);
+    if (trace_party_on())
+        std::printf("[party] set AI mode %u on 0x%08X from 0x%08X (FIELD mode %u, fighters 0x%08X 0x%08X)\n", mode, fighter,
+                    caller, field != 0u ? g_ld32(g, field + kFieldMode) : 0u, field != 0u ? g_ld32(g, field + 0x38u) : 0u,
+                    field != 0u ? g_ld32(g, field + kFieldOpponent) : 0u);
     if (mode == 0u && active() && caller >= kFieldSetup && caller < kFieldSetup + kFieldSetupSize && field != 0u &&
         g_ld32(g, field + kFieldMode) == kModeQuickBattle && g_ld32(g, field + kFieldOpponent) == fighter) {
         mode = kAiHuman;
@@ -608,6 +1082,9 @@ constexpr std::uint32_t kRecordCostume = 0x774u;
 
 void run_build_cpu_side(Guest *g, const decomp::CallState &in, GuestRegs &) {
     GuestRegs regs = arguments(in);
+    if (trace_party_on())
+        std::printf("[party] build CPU side %u character %d from 0x%08X\n", in.gpr[4], static_cast<std::int8_t>(in.gpr[5] & 0xFFu),
+                    in.gpr[31]);
     decomp::call_original(g, kBuildCpuSide, regs);
     const std::uint32_t side = in.gpr[4];
     if (!active() || side != 1u) return;
@@ -830,7 +1307,7 @@ void notice_draw() {
 // paradigm). Once a fighter has fallen, the winner instead.
 bool hud_visible() {
     const State &s = state();
-    return active() && ((s.fighting && split_now(s)) || s.fallen != 0u);
+    return active() && ((s.fighting && split_now(s)) || s.fallen != 0u || s.party_winner != 0u);
 }
 
 void hud_draw() {
@@ -850,12 +1327,22 @@ void hud_draw() {
         ImU32 colour;
     } tags[2] = {{38.0f, "1P", IM_COL32(70, 130, 255, 235)}, {442.0f, "2P", IM_COL32(235, 70, 70, 235)}};
     for (const auto &tag : tags) {
-        if (state().fallen != 0u) break;
+        if (state().fallen != 0u || !state().fighting) break;
         draw->AddRectFilled(at(tag.x - 11.0f, 190.0f), at(tag.x + 11.0f, 201.0f), tag.colour, 3.0f * sy);
         centred(8.5f, tag.x, 195.5f, IM_COL32(255, 255, 255, 255), tag.label);
     }
     // Once a fighter has fallen: who won, over the game's own ending (player
     // 1's results, or player 1's "Return to Battle Setup / Rematch").
+    // Player vs Player (Party): after the last fight, over the game's final
+    // results (worded from player 1's side), who won the party battle, under
+    // the score and the line-ups.
+    if (const std::uint32_t winner = state().party_winner; winner != 0u && state().fallen == 0u) {
+        const char *line = winner == 3u ? "Draw" : winner == 1u ? "Player 1 wins" : "Player 2 wins";
+        draw->AddRectFilled(at(150.0f, 150.0f), at(330.0f, 178.0f), IM_COL32(10, 14, 40, 215), 4.0f * sy);
+        draw->AddRect(at(150.0f, 150.0f), at(330.0f, 178.0f), IM_COL32(255, 196, 64, 255), 4.0f * sy, 0, 1.2f * sy);
+        centred(15.0f, 240.0f, 164.0f, IM_COL32(255, 222, 130, 255), line);
+        return;
+    }
     const std::uint32_t fallen = state().fallen;
     if (fallen != 0u) {
         const char *line = fallen == 3u ? "Draw" : fallen == 2u ? "Player 1 wins" : "Player 2 wins";
@@ -1033,6 +1520,10 @@ bool forced() {
 
 bool active() { return enabled() && (forced() || state().chosen); }
 
+bool party() { return active() && state().party; }
+
+bool party_setup() { return party() && state().party_setup; }
+
 void set_chosen(bool chosen) {
     State &s = state();
     if (s.chosen != chosen) std::cout << "[versus] " << (chosen ? "versus chosen" : "versus off") << std::endl;
@@ -1098,6 +1589,14 @@ void read_pads(const portablekit::HleFunction &previous, psprecomp::Runtime &rt,
     if (!battle) s.lost = 0u;
     if (!battle) set_opponent_header(memory);
     if (enabled()) repair_looks(memory, s, battle);
+    trace_party(memory, s, battle);
+    {
+        const bool party = active() && memory.load32(kDestination) == kDestinationParty;
+        if (party != s.party) {
+            s.party = party;
+            std::cout << "[versus] " << (party ? "Player vs Player (Party)" : "not a party battle") << std::endl;
+        }
+    }
     if (!active()) {
         save_before().clear();
         s.connected = s.pad.connected;
@@ -1113,6 +1612,12 @@ void read_pads(const portablekit::HleFunction &previous, psprecomp::Runtime &rt,
         return;
     }
     read_fighting(memory, s, battle);
+    {
+        const Room room = battle ? Room{} : read_room(memory);
+        party_wording(memory, s, room, battle);
+        party_tally(memory, s, room, battle);
+        s.party_setup = s.party && room.present && (room.state == 28u || room.state == 29u);
+    }
     guard_save(memory, battle);
     if (s.pad.connected != s.connected) {
         s.connected = s.pad.connected;
@@ -1127,6 +1632,24 @@ void read_pads(const portablekit::HleFunction &previous, psprecomp::Runtime &rt,
         }
     }
     if (s.connected) s.lost &= ~kLostPlayer2;
+    // A party battle's next fight starting while a controller is gone (lost
+    // between fights, at the menu or the VS screen, where START does nothing):
+    // it pauses as a loss in a fight does, once the fight is under way, as the
+    // lost player's pause (player 2's if both).
+    constexpr std::uint32_t kPauseDelayReads = 45u;
+    if (s.fighting && !s.was_fighting && s.party && !s.connected) s.lost |= kLostPlayer2;
+    if (s.fighting && !s.was_fighting && s.party && s.lost != 0u) {
+        s.pause_in = kPauseDelayReads;
+        std::cout << "[versus] the next fight pauses until the controller is back" << std::endl;
+    }
+    if (s.pause_in != 0u && --s.pause_in == 0u && s.fighting && s.lost != 0u) {
+        if ((s.lost & kLostPlayer2) != 0u)
+            s.pause_reads = 1u;
+        else
+            s.pause1_reads = 1u;
+    }
+    if (!s.fighting) s.pause_in = 0u;
+    s.was_fighting = s.fighting;
     const bool first = input::current().player1.connected;
     if (first != s.first_connected) {
         s.first_connected = first;
@@ -1201,12 +1724,12 @@ void read_pads(const portablekit::HleFunction &previous, psprecomp::Runtime &rt,
         }
     }
     const bool trip = s.trip.active();
-    rules::step(s.trip, room.present, room.state);
+    rules::step(s.trip, room.present, room.state, room.next);
     if (trip && !s.trip.active()) std::cout << "[versus] player 2's Customize closed" << std::endl;
     const bool customizing = s.trip.active() && room.state == rules::kCustomizeOpen;
     if (customizing && !s.customizing) s.customizing_time = std::chrono::steady_clock::now();
     s.customizing = customizing;
-    const bool player2_menu = room.present && rules::room_pad(room.state, s.trip) == rules::Pad::Player2;
+    const bool player2_menu = room.present && rules::room_pad(room.state, room.next, s.trip) == rules::Pad::Player2;
     if (player2_menu != s.player2_menu) {
         s.player2_menu = player2_menu;
         std::cout << "[versus] "

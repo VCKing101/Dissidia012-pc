@@ -12,7 +12,7 @@
 //       is an EX Burst. =2: the opponent's too, for player 2 in local versus.
 //   D012_TEST_LOW_HP=1           once a battle, the player's maximum HP set to
 //       50 (status block +0x0C), so the opponent wins at the next HP attack;
-//       =2 the opponent's.
+//       =2 the opponent's; =3 both (a party battle's fights won either way).
 //   D012_TEST_FOUR_ROWS=1        the save's flag for Battle Mode's fourth row
 //       set (kept by an autosave).
 //
@@ -100,7 +100,8 @@ void four_rows(Runtime &rt) {
 // set to 50, so that the opponent wins at the next HP attack (versus
 // endings); the HP is that less the damage taken (+0x08). =2: the opponent's.
 void lower_hp(Runtime &rt, std::uint32_t slot_offset) {
-    static std::uint32_t lowered = 0;  // the status block lowered last
+    static std::uint32_t lowered_by_slot[2] = {};  // the status block lowered last, per slot
+    std::uint32_t &lowered = lowered_by_slot[slot_offset == kOpponentFighter ? 1 : 0];
     const std::uint32_t manager = rt.memory().load32(kBattleManager);
     if (!user_ram(manager)) return;
     const std::uint32_t fighter = rt.memory().load32(manager + slot_offset);
@@ -151,7 +152,8 @@ void install(portablekit::HleRegistrar &hle) {
     const char *ex_text = portablekit::env("TEST_EX_FULL");
     const bool ex_both = ex_full && std::strcmp(ex_text, "2") == 0;
     const bool low_hp = flag("TEST_LOW_HP");
-    // D012_TEST_LOW_HP=2: the opponent's instead.
+    // D012_TEST_LOW_HP=2: the opponent's instead; =3 both.
+    const bool low_both = low_hp && std::strcmp(portablekit::env("TEST_LOW_HP"), "3") == 0;
     const std::uint32_t low_slot =
         low_hp && std::strcmp(portablekit::env("TEST_LOW_HP"), "2") == 0 ? kOpponentFighter : kPlayerFighter;
     const bool rows = flag("TEST_FOUR_ROWS");
@@ -161,12 +163,13 @@ void install(portablekit::HleRegistrar &hle) {
     for (const std::uint32_t nid : {0x46F186C3u, 0x984C27E7u}) {
         const portablekit::HleFunction previous = hle.bound_function("sceDisplay", nid);
         if (!previous) continue;
-        hle.bind("sceDisplay", nid, [previous, unlock, ex_full, ex_both, low_hp, low_slot, rows](Runtime &rt,
-                                                                                               AllegrexContext &ctx) {
+        hle.bind("sceDisplay", nid, [previous, unlock, ex_full, ex_both, low_hp, low_slot, low_both,
+                                     rows](Runtime &rt, AllegrexContext &ctx) {
             if (unlock) unlock_fighters(rt);
             if (rows) four_rows(rt);
             if (ex_full) fill_ex_gauges(rt, ex_both);
             if (low_hp) lower_hp(rt, low_slot);
+            if (low_both) lower_hp(rt, kOpponentFighter);
             previous(rt, ctx);
         });
     }

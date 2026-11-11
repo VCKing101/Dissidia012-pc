@@ -6,21 +6,25 @@
 namespace d012::versus_rules {
 namespace {
 
-bool on_player2_pick(std::uint32_t state) { return state >= kPlayer2PickFirst && state <= kPlayer2PickLast; }
-
 // Customize itself and the room's way back from it.
 bool in_customize(std::uint32_t state) { return state >= kCustomizeFirst && state <= kCustomizeOpen; }
 bool coming_up(std::uint32_t state) { return state <= kRoomComingUpLast; }
 
 } // namespace
 
-Pad room_pad(std::uint32_t state, const Trip &trip) {
-    if (on_player2_pick(state)) return Pad::Player2;
+bool player2_pick(std::uint32_t state, std::uint32_t next) {
+    if (state >= kPlayer2PickFirst && state <= kPlayer2PickLast) return true;
+    if (state == kPartyPickWait) return next == kPartyPickBuild;
+    return state >= kPartyPickFirst && state <= kPartyPickLeave;
+}
+
+Pad room_pad(std::uint32_t state, std::uint32_t next, const Trip &trip) {
+    if (player2_pick(state, next)) return Pad::Player2;
     if (trip.active() && (in_customize(state) || coming_up(state))) return Pad::Player2;
     return Pad::Player1;
 }
 
-void step(Trip &trip, bool room, std::uint32_t state) {
+void step(Trip &trip, bool room, std::uint32_t state, std::uint32_t next) {
     if (!trip.active()) return;
     if (!room) {
         trip = {};
@@ -37,6 +41,7 @@ void step(Trip &trip, bool room, std::uint32_t state) {
     }
     // On the way: the fade out of the screen it started from, then the
     // room taken down.
+    (void)next;
     const bool from_here = trip.from == Trip::From::Pick ? state >= kPlayer2PickUpdate && state <= kPlayer2PickLast
                                                          : state >= kSetupUpdate && state <= kSetupLast;
     if (!from_here && !in_customize(state)) trip = {};
