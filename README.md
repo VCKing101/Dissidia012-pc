@@ -63,6 +63,8 @@ online and test sessions. Bugs and crashes go in [GitHub issues](https://github.
   the game's own menu pieces, read from your disc, like its Data Config page, with its menu sounds.
 - **Button prompts for your controller**: the game's PSP buttons shown as Xbox, PlayStation or Nintendo buttons,
   following the controller in use (menu's Controls page, **Button prompts**).
+- **L and R on the triggers**: the PSP's L and R on LT/RT (L2/R2) instead of LB/RB (L1/R1), and the prompts to
+  match (menu's Controls page, **Swap shoulders and triggers**).
 - **Choose each player's controller**: player 1 and player 2 each on a controller of your choice or on the keyboard
   and mouse (menu's Controls page, **Player 1** and **Player 2**).
 - **Close the game from the title screen**: press circle there, then choose Yes.

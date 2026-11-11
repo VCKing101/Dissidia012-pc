@@ -19,6 +19,7 @@
 
 #if defined(PORTABLEKIT_HAS_RENDERER)
 #include "imgui.h"
+#include "settings/settings.hpp"
 #include "ui/ui.hpp"
 #endif
 
@@ -998,6 +999,10 @@ void wrap_pad_read(portablekit::HleRegistrar &hle) {
 }
 
 #if defined(PORTABLEKIT_HAS_RENDERER)
+// The pad's buttons for the focus switch (the extra buttons L2 and R2): the
+// shoulders with Controls > Swap shoulders and triggers.
+std::string switch_keys() { return portablekit::settings::current().swap_triggers ? "L1/R1" : "L2/R2"; }
+
 // Drawn over the game with the box's fade (its anchor's alpha), so it fades
 // with the screen. With the track list (the default) it stays while the
 // screen shows, input or not; the flat selector's hints only while the
@@ -1165,8 +1170,8 @@ void wheel_draw() {
     }
 
     // The keys, small, at the bottom right.
-    const std::string hint = lit ? "\xE2\x97\x80\xE2\x96\xB6 Series  \xE2\x96\xB2\xE2\x96\xBC Track  L2/R2 Done"
-                                 : "L2/R2  BGM";
+    const std::string hint = lit ? "\xE2\x97\x80\xE2\x96\xB6 Series  \xE2\x96\xB2\xE2\x96\xBC Track  " + switch_keys() + " Done"
+                                 : switch_keys() + "  BGM";
     const float hint_size = 6.0f * sy;
     const ImVec2 extent = font->CalcTextSizeA(hint_size, 1.0e9f, 0.0f, hint.c_str());
     draw->AddText(font, hint_size, ImVec2(at(box.right - 4.0f, kHintRow).x - extent.x, at(0.0f, kHintRow).y - extent.y * 0.5f),
@@ -1205,7 +1210,7 @@ void overlay_draw() {
                       line.c_str());
     };
     if (!o.bgm_focus) {
-        const std::string hint = "L2/R2  BGM by series";
+        const std::string hint = switch_keys() + "  BGM by series";
         const float size = 6.5f;
         const float width = font->CalcTextSizeA(size * sy, 1.0e9f, 0.0f, hint.c_str()).x / sx;
         draw->AddRectFilled(at(right - width - 6.0f, bottom + 2.0f), at(right, bottom + 10.0f),
@@ -1231,8 +1236,8 @@ void overlay_draw() {
     text(8.0f, centre, mid, rgba(255, 255, 255, a), "\xE2\x97\x80 " + o.series + " \xE2\x96\xB6", 0.5f);
     text(6.0f, centre + line_half - 4.0f, mid, rgba(255, 220, 140, a),
          std::to_string(o.position) + "/" + std::to_string(o.count), 1.0f);
-    text(6.0f, right - 3.0f, line_bottom + 5.0f, rgba(30, 40, 110, a), "\xE2\x96\xB2\xE2\x96\xBC Track   L2/R2 Done",
-         1.0f);
+    text(6.0f, right - 3.0f, line_bottom + 5.0f, rgba(30, 40, 110, a),
+         "\xE2\x96\xB2\xE2\x96\xBC Track   " + switch_keys() + " Done", 1.0f);
 }
 #endif
 

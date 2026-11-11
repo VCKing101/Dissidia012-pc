@@ -15,12 +15,39 @@ screens.
 | square | X | square | Y |
 | triangle | Y | triangle | X |
 | L / R | LB / RB (L1 / R1 on a Steam Deck) | L1 / R1 | L / R |
+| L / R with **Swap shoulders and triggers** | LT / RT (L2 / R2 on a Steam Deck) | L2 / R2 | ZL / ZR |
 | START | Menu | OPTIONS | + |
 | SELECT | View | SHARE | − |
 
 The table is for the default **Confirm button** (Bottom). The face buttons follow where the pad's buttons are, so
 a prompt shows the button that sends what the game asks for: with Confirm on the right, the game's cross is the
 right button (B on an Xbox pad, circle on a PlayStation pad) and its circle the bottom one.
+
+## L and R on the triggers
+
+> 11 November 2026, PortableKit patch 0102.
+
+The PSP's L and R are on the shoulders (LB/RB, L1/R1) by default. The Controls page's **Swap shoulders and
+triggers** puts them on the triggers (LT/RT, L2/R2), and the shoulders take the triggers' place: in this port, the
+BGM selector's switch between the menu and the BGM box. The two pairs trade places on every gamepad, player 2's too;
+the keyboard keeps its own keys, which Keyboard and mouse rebinds. The game's prompts then show the triggers, as in
+the table (the PSP style keeps L and R), and the BGM selector's hints say L1/R1 instead of L2/R2. The Trigger point
+setting still says how far a trigger travels before it presses. The menu itself keeps LB/RB for its sections.
+
+Tested on Windows with the clang build and the USA disc, the swap on and Button prompts on Xbox, the script's virtual
+gamepad pressing each trigger and shoulder in turn with `D012_TRACE_PAD=1`:
+
+- In a Quick Battle the left trigger sent L (L + circle with circle), the right trigger R, and LB and RB only the
+  extra buttons L2 and R2; with the swap off the same script sent the mirror. Lightning's hint read "Press RT while
+  holding LT to Change Paradigms!".
+- On the Opponent Info pages the BGM hint read "L1/R1 BGM", LB moved the focus to the BGM box ("L1/R1 Done") and back,
+  and LT and RT sent L and R.
+- The row turned on with the gamepad in the menu, was saved (`input.swap_triggers=1`), and the symbols were drawn again
+  at once.
+- Every L and R symbol of the nine sheets, drawn by the port's code from the dumped textures in each style (Xbox,
+  PlayStation, Nintendo, a Steam Deck) and looked at.
+
+Not tested: a real controller, the Linux build, the Steam Deck, the European disc.
 
 ## Where the symbols are
 
@@ -70,8 +97,9 @@ Nothing of the game's is in the port but where its symbols sit.
 
 - `D012_BUTTON_PROMPTS=auto|psp|xbox|playstation|nintendo`: the setting for this run (`input.button_prompts` in
   `settings.ini`).
+- `D012_SWAP_TRIGGERS=1`: Swap shoulders and triggers on for this run (`input.swap_triggers` in `settings.ini`).
 - `D012_NO_TEXTURE_EDITS=1`: the game's own symbols whatever the setting.
-- Each change of style is logged: `[render] button prompts: xbox`.
+- Each change of style is logged: `[render] button prompts: xbox` (`xbox, L and R on the triggers` with the swap).
 
 ## Tested
 

@@ -214,8 +214,8 @@ std::vector<Point> bowl(float top, float bottom, float reach) {
 }
 
 const Glyph *glyph(char c) {
-    static const std::array<Glyph, 15> glyphs = [] {
-        std::array<Glyph, 15> g{};
+    static const std::array<Glyph, 17> glyphs = [] {
+        std::array<Glyph, 17> g{};
         g[0] = {0.62f, {{{0.0f, 1.0f}, {0.31f, 0.0f}, {0.62f, 1.0f}}, {{0.105f, 0.66f}, {0.515f, 0.66f}}}};  // A
         g[1] = {0.56f, {{{0.0f, 0.0f}, {0.0f, 1.0f}}, bowl(0.0f, 0.47f, 0.52f), bowl(0.47f, 1.0f, 0.56f)}};    // B
         g[2] = {0.46f,
@@ -243,6 +243,14 @@ const Glyph *glyph(char c) {
         g[12] = {0.58f, {{{0.0f, 0.0f}, {0.58f, 1.0f}}, {{0.58f, 0.0f}, {0.0f, 1.0f}}}};                // X
         g[13] = {0.58f, {{{0.0f, 0.0f}, {0.29f, 0.52f}, {0.58f, 0.0f}}, {{0.29f, 0.52f}, {0.29f, 1.0f}}}};  // Y
         g[14] = {0.3f, {{{0.0f, 0.22f}, {0.3f, 0.0f}, {0.3f, 1.0f}}}};                                  // 1
+        {
+            std::vector<Point> two;  // 2: a hook over the top, then down to the foot
+            arc(two, 0.25f, 0.27f, 0.25f, 0.27f, 200.0f, 385.0f, 18);
+            two.push_back({0.0f, 1.0f});
+            two.push_back({0.52f, 1.0f});
+            g[15] = {0.52f, {two}};
+        }
+        g[16] = {0.5f, {{{0.02f, 0.0f}, {0.5f, 0.0f}, {0.0f, 1.0f}, {0.5f, 1.0f}}}};                    // Z
         return g;
     }();
     switch (c) {
@@ -261,6 +269,8 @@ const Glyph *glyph(char c) {
     case 'X': return &glyphs[12];
     case 'Y': return &glyphs[13];
     case '1': return &glyphs[14];
+    case '2': return &glyphs[15];
+    case 'Z': return &glyphs[16];
     default: return nullptr;
     }
 }
@@ -394,10 +404,17 @@ void plain_button(Canvas &canvas, const input::ButtonPrompts &prompts, Psp butto
     draw_face(canvas, face(prompts, button), {(x0 + x1) / 2.0f * S, (y0 + y1) / 2.0f * S}, r * S, true);
 }
 
-// The shoulders' names in a style.
+// The names, in a style, of the buttons that press the PSP's L and R: the
+// shoulders, or the triggers with Swap shoulders and triggers.
 std::string_view shoulder(const input::ButtonPrompts &prompts, bool right) {
+    const bool numbered = prompts.style == input::PromptStyle::PlayStation || prompts.numbered_shoulders;
+    if (prompts.l_r_on_triggers) {
+        if (prompts.style == input::PromptStyle::Nintendo) return right ? "ZR" : "ZL";
+        if (numbered) return right ? "R2" : "L2";
+        return right ? "RT" : "LT";
+    }
     if (prompts.style == input::PromptStyle::Nintendo) return right ? "R" : "L";
-    if (prompts.style == input::PromptStyle::PlayStation || prompts.numbered_shoulders) return right ? "R1" : "L1";
+    if (numbered) return right ? "R1" : "L1";
     return right ? "RB" : "LB";
 }
 
@@ -580,7 +597,8 @@ bool draw_button_prompts(std::size_t index, const std::uint32_t *pixels, std::ui
     out_width = width * kScale;
     out_height = height * kScale;
     Canvas canvas(out_width, out_height, out);
-    const bool nintendo = prompts.style == input::PromptStyle::Nintendo;
+    // Nintendo's shoulders are L and R already; its triggers are not.
+    const bool plain_l_r = prompts.style == input::PromptStyle::Nintendo && !prompts.l_r_on_triggers;
     switch (index) {
     case kGeneral:
         round_button(canvas, prompts, Psp::Triangle, {63.0f, 117.0f}, 4.7f);
@@ -613,14 +631,14 @@ bool draw_button_prompts(std::size_t index, const std::uint32_t *pixels, std::ui
         break;
     case kManual: manual_badge(canvas, prompts); break;
     case kLetters:
-        if (nintendo) return false;  // L and R already
+        if (plain_l_r) return false;
         shoulder_letters(canvas, pixels, width, 114, 54, 124, 66, shoulder(prompts, false));
         shoulder_letters(canvas, pixels, width, 114, 68, 125, 80, shoulder(prompts, true));
         shoulder_letters(canvas, pixels, width, 116, 80, 127, 93, shoulder(prompts, false));
         shoulder_letters(canvas, pixels, width, 116, 93, 128, 106, shoulder(prompts, true));
         break;
     case kPages:
-        if (nintendo) return false;
+        if (plain_l_r) return false;
         shoulder_letters(canvas, pixels, width, 97, 28, 108, 41, shoulder(prompts, false));
         shoulder_letters(canvas, pixels, width, 108, 28, 118, 41, shoulder(prompts, true));
         break;

@@ -1,0 +1,301 @@
+From 8fa18e8ceb885fd791ed83bbffec9a8266360eba Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 13:12:57 +1030
+Subject: [PATCH] Controls: swap the shoulders and the triggers
+
+A gamepad's shoulders always pressed the PSP's L and R, and the triggers
+their copies or a port's extra buttons, with no way to change it. A
+player who wanted L and R on the triggers could not.
+
+The Controls page now has Swap shoulders and triggers
+(input.swap_triggers, <prefix>_SWAP_TRIGGERS). On, LT/RT (L2/R2) press
+what LB/RB pressed and LB/RB what the triggers pressed: L and R move to
+the triggers, and the extra buttons L2 and R2 or a trigger profile's
+buttons move to the shoulders. It applies to every gamepad, player 2's
+too; the keyboard keeps its own bindings. Restore control defaults turns
+it off. The connect line in the log says so.
+
+input::ButtonPrompts::l_r_on_triggers carries it to a profile that draws
+the game's button symbols (button_prompts() takes the setting; never in
+the PSP style), so a change drops the cached textures and the symbols are
+drawn again. The input tests cover it.
+
+Tested with Dissidia 012 on Windows (clang build, USA disc): a scripted
+Quick Battle with the swap on and the pad traced (the left trigger sent
+L, with circle L + circle; the right trigger R; LB and RB only the extra
+buttons L2 and R2), the same run with it off, the row turned on with a
+gamepad in the menu and saved, and the game's L/R symbols drawn as the
+triggers. Not verified: a real controller, Linux, the Steam Deck,
+another game.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ docs/PROFILE_GUIDE.md         |  2 +-
+ host/gpu/vulkan_renderer.cpp  | 29 +++++++++++++++++++++--------
+ host/input/button_prompts.cpp |  5 ++++-
+ host/input/button_prompts.hpp |  9 +++++++--
+ host/settings/settings.cpp    |  4 ++++
+ host/settings/settings.hpp    |  3 +++
+ host/ui/menu.cpp              |  9 +++++++++
+ tests/input_tests.cpp         | 29 +++++++++++++++++++----------
+ 8 files changed, 68 insertions(+), 22 deletions(-)
+
+diff --git a/docs/PROFILE_GUIDE.md b/docs/PROFILE_GUIDE.md
+index 1fc25d7..711c650 100644
+--- a/docs/PROFILE_GUIDE.md
++++ b/docs/PROFILE_GUIDE.md
+@@ -81,7 +81,7 @@ For a picture of the port's own beside one of the game's screens, such as a hint
+ 
+ `second_player` says the port has a local second player (`hle_extension::want_second_pad`): the Controls page then offers **Player 1** and **Player 2**, each Automatic, Keyboard and mouse, or a gamepad by name (`input.player1`, `input.player2`; `<prefix>_PLAYER1`, `<prefix>_PLAYER2`). Without it the page offers one **Controller** row. A gamepad is named by its USB vendor and product ids, so it is the same over USB and Bluetooth, and two alike are one choice that each player can take. On Automatic, player 1 has the keyboard and mouse and the first gamepad free, player 2 the next. A chosen gamepad that is not connected leaves that player on Automatic until it is. The port says when player 2 is in the game (`second_player_playing`); otherwise a gamepad held for player 2 moves to player 1 when player 1's goes.
+ 
+-`edited_textures` lists textures the profile draws again as they load, with `edit_texture` doing the drawing: the game's button symbols in the style of the gamepad in use, for one. Each is an `EditedTexture`, named and found as a `SharpTexture` is. `edit_texture` gets the game's decoded picture (RGBA8) and a `TextureEditContext`, and returns its own picture, the same shape at any size (four times gives room for sharp detail), drawn with the same texture coordinates as a texture pack's image; false keeps the game's. The context holds what the picture may depend on: Button prompts with the gamepad in use and the Confirm button setting (`input::ButtonPrompts`: the style, and which face button sends each of the PSP's), and whether Texture filter is Sharp. When it changes, the cached textures are dropped and the listed ones drawn again. Set `button_prompts` when they are the game's button symbols, and the Controls page offers Button prompts (Automatic, PSP, Xbox, PlayStation, Nintendo; Automatic follows the pad, the PSP's with none). A texture pack's image for one is drawn instead. `<prefix>_NO_TEXTURE_EDITS=1` draws the game's own, for a comparison. Keep the game's pixels out of the profile: draw over the picture it is given.
++`edited_textures` lists textures the profile draws again as they load, with `edit_texture` doing the drawing: the game's button symbols in the style of the gamepad in use, for one. Each is an `EditedTexture`, named and found as a `SharpTexture` is. `edit_texture` gets the game's decoded picture (RGBA8) and a `TextureEditContext`, and returns its own picture, the same shape at any size (four times gives room for sharp detail), drawn with the same texture coordinates as a texture pack's image; false keeps the game's. The context holds what the picture may depend on: Button prompts with the gamepad in use and the Confirm button setting (`input::ButtonPrompts`: the style, which face button sends each of the PSP's, and whether L and R are on the triggers, which the Controls page's Swap shoulders and triggers does for every game), and whether Texture filter is Sharp. When it changes, the cached textures are dropped and the listed ones drawn again. Set `button_prompts` when they are the game's button symbols, and the Controls page offers Button prompts (Automatic, PSP, Xbox, PlayStation, Nintendo; Automatic follows the pad, the PSP's with none). A texture pack's image for one is drawn instead. `<prefix>_NO_TEXTURE_EDITS=1` draws the game's own, for a comparison. Keep the game's pixels out of the profile: draw over the picture it is given.
+ 
+ `cheats` lists cheats the port offers on the menu's Cheats page, beside the player's own PPSSPP cheat file (`PSP/Cheats/<disc id>.ini` on the memory stick, `host/cheats/cheats.hpp`). Each is a `BuiltinCheat`: a key for settings.ini, the heading it goes under, a name, a sentence for the footer, and its choices, each a label and its CWCheat code lines (what a cheat file has after `_L`). One choice makes a switch; several make Off and each. They run through the same engine as the file, before it, every 77 ms of the game's time, so a code written as a player would write it gives the same result. A write into recompiled code is left out, as for the file; such a code needs the interpreter, which cheats do not reach yet. Test each against the game's own screens before listing it: a public list's codes can name an address the game no longer reads. Without any, the page has only the switch and the file.
+ 
+diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
+index 63d18f7..ec542dc 100644
+--- a/host/gpu/vulkan_renderer.cpp
++++ b/host/gpu/vulkan_renderer.cpp
+@@ -705,6 +705,7 @@ struct PadTuning {
+     bool invert_x{};
+     bool invert_y{};
+     bool confirm_south{};
++    bool swap_triggers{};
+     settings::JumpButton jump{settings::JumpButton::Off};
+     bool trace{false};
+ };
+@@ -730,6 +731,7 @@ PadTuning pad_tuning() {
+     value.invert_y = player.invert_camera_y;
+     // Which face button presses the game's confirm button; see read_gamepad.
+     value.confirm_south = player.confirm_south;
++    value.swap_triggers = player.swap_triggers;
+     value.jump = player.jump_button;
+     value.trace = trace;
+     return value;
+@@ -767,8 +769,6 @@ void read_gamepad(SDL_Gamepad *device, PadState &pad, int &analog_x, int &analog
+     held(SDL_GAMEPAD_BUTTON_DPAD_RIGHT, 0x0020u);
+     held(SDL_GAMEPAD_BUTTON_DPAD_DOWN, 0x0040u);
+     held(SDL_GAMEPAD_BUTTON_DPAD_LEFT, 0x0080u);
+-    held(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, 0x0100u);
+-    held(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, 0x0200u);
+     held(SDL_GAMEPAD_BUTTON_START, 0x0008u);
+     held(SDL_GAMEPAD_BUTTON_BACK, 0x0001u);
+     held(SDL_GAMEPAD_BUTTON_NORTH, 0x1000u);
+@@ -801,11 +801,23 @@ void read_gamepad(SDL_Gamepad *device, PadState &pad, int &analog_x, int &analog
+     // gets the triggers as those instead, unless the player chose a profile.
+     const std::uint32_t extras = portablekit::active_extra_buttons();
+     const bool profiled = tuning.triggers != 0u && tuning.triggers <= profiles.size();
+-    if (axis(SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > tuning.trigger) {
++    bool left_shoulder = SDL_GetGamepadButton(device, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER);
++    bool right_shoulder = SDL_GetGamepadButton(device, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER);
++    bool left_pulled = axis(SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > tuning.trigger;
++    bool right_pulled = axis(SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > tuning.trigger;
++    // Swap shoulders and triggers: each pair does all the other would,
++    // the extra buttons L2 and R2 and a trigger profile included.
++    if (tuning.swap_triggers) {
++        std::swap(left_shoulder, left_pulled);
++        std::swap(right_shoulder, right_pulled);
++    }
++    if (left_shoulder) buttons |= 0x0100u;
++    if (right_shoulder) buttons |= 0x0200u;
++    if (left_pulled) {
+         pad.extra |= input::kExtraL2;
+         if (profiled || (extras & input::kExtraL2) == 0u) buttons |= left_trigger;
+     }
+-    if (axis(SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > tuning.trigger) {
++    if (right_pulled) {
+         pad.extra |= input::kExtraR2;
+         if (profiled || (extras & input::kExtraR2) == 0u) buttons |= right_trigger;
+     }
+@@ -2456,7 +2468,7 @@ struct VulkanRenderer::Impl {
+                           << (tuning.right_stick_mode == settings::RightStick::DPad     ? "as D-pad"
+                               : tuning.right_stick_mode == settings::RightStick::Camera ? "as camera"
+                                                                                         : "off")
+-                          << "\n";
++                          << (tuning.swap_triggers ? ", L and R on the triggers" : "") << "\n";
+             } else {
+                 std::cout << (listed(old1_id) ? "[pad] player 1 has no gamepad\n" : "[pad] gamepad disconnected\n");
+             }
+@@ -5183,14 +5195,15 @@ void VulkanRenderer::Impl::apply_texture_edits() {
+     if (off || profile.edit_texture == nullptr || profile.edited_textures.empty()) return;
+     const settings::Settings &s = settings::current();
+     TextureEditContext context;
+-    context.prompts =
+-        input::button_prompts(s.button_prompts, pad_kind(gamepad), s.confirm_south, profile.confirm_button == 1u);
++    context.prompts = input::button_prompts(s.button_prompts, pad_kind(gamepad), s.confirm_south,
++                                            profile.confirm_button == 1u, s.swap_triggers);
+     context.sharp_textures = sharp_textures;
+     if (edit_context && *edit_context == context) return;
+     const bool first = !edit_context;
+     edit_context = context;
+     if (profile.button_prompts)
+-        std::cout << "[render] button prompts: " << input::prompt_style_name(context.prompts.style) << "\n";
++        std::cout << "[render] button prompts: " << input::prompt_style_name(context.prompts.style)
++                  << (context.prompts.l_r_on_triggers ? ", L and R on the triggers" : "") << "\n";
+     if (first) return;
+     // Drawn again as they are next used.
+     device_wait_idle();
+diff --git a/host/input/button_prompts.cpp b/host/input/button_prompts.cpp
+index e556f17..0c1d35c 100644
+--- a/host/input/button_prompts.cpp
++++ b/host/input/button_prompts.cpp
+@@ -2,7 +2,8 @@
+ 
+ namespace portablekit::input {
+ 
+-ButtonPrompts button_prompts(PromptSetting setting, PadKind pad, bool confirm_south, bool cross_confirms) {
++ButtonPrompts button_prompts(PromptSetting setting, PadKind pad, bool confirm_south, bool cross_confirms,
++                             bool swap_triggers) {
+     ButtonPrompts prompts;
+     // South sends the confirm button when confirm_south is set, the back
+     // button otherwise (the renderer's read_gamepad), so it sends cross
+@@ -28,6 +29,8 @@ ButtonPrompts button_prompts(PromptSetting setting, PadKind pad, bool confirm_so
+     case PromptSetting::PlayStation: prompts.style = PromptStyle::PlayStation; break;
+     case PromptSetting::Nintendo: prompts.style = PromptStyle::Nintendo; break;
+     }
++    // The PSP's own symbols are L and R wherever they are pressed.
++    prompts.l_r_on_triggers = swap_triggers && prompts.style != PromptStyle::Psp;
+     return prompts;
+ }
+ 
+diff --git a/host/input/button_prompts.hpp b/host/input/button_prompts.hpp
+index 1fc20b3..2af8e0e 100644
+--- a/host/input/button_prompts.hpp
++++ b/host/input/button_prompts.hpp
+@@ -33,14 +33,19 @@ struct ButtonPrompts {
+     FaceButton triangle{FaceButton::North};
+     // Shoulders named L1 and R1 in the Xbox style, as a Steam Deck prints them.
+     bool numbered_shoulders{};
++    // The PSP's L and R are on the triggers (Swap shoulders and triggers), so
++    // they are shown as LT/RT, L2/R2 or ZL/ZR. Never in the PSP style.
++    bool l_r_on_triggers{};
+ 
+     bool operator==(const ButtonPrompts &) const = default;
+ };
+ 
+ // The prompts for `setting` with `pad` in use. `confirm_south` is the Confirm
+ // button setting; `cross_confirms` says the game confirms with cross
+-// (GameProfile::confirm_button == 1) rather than circle.
+-[[nodiscard]] ButtonPrompts button_prompts(PromptSetting setting, PadKind pad, bool confirm_south, bool cross_confirms);
++// (GameProfile::confirm_button == 1) rather than circle; `swap_triggers` is
++// the Swap shoulders and triggers setting.
++[[nodiscard]] ButtonPrompts button_prompts(PromptSetting setting, PadKind pad, bool confirm_south, bool cross_confirms,
++                                           bool swap_triggers);
+ 
+ // The menu's name for a setting: "Automatic", "PSP", "Xbox", ...
+ [[nodiscard]] const char *prompt_setting_label(PromptSetting setting);
+diff --git a/host/settings/settings.cpp b/host/settings/settings.cpp
+index 7de240b..70aa163 100644
+--- a/host/settings/settings.cpp
++++ b/host/settings/settings.cpp
+@@ -254,6 +254,10 @@ const std::vector<Field> &fields() {
+          },
+          [](const Settings &s) { return std::string(s.confirm_south ? "south" : "east"); },
+          [](Settings &s, const char *t) { s.confirm_south = std::strcmp(t, "xbox") == 0 || std::strcmp(t, "south") == 0; }},
++        {"input.swap_triggers", "SWAP_TRIGGERS",
++         [](Settings &s, const std::string &t) { return parse_bool(t, s.swap_triggers); },
++         [](const Settings &s) { return std::string(s.swap_triggers ? "1" : "0"); },
++         [](Settings &s, const char *t) { s.swap_triggers = variable_flag(t); }},
+         {"input.button_prompts", "BUTTON_PROMPTS",
+          [](Settings &s, const std::string &t) { return kPromptSettings.parse(t, s.button_prompts); },
+          [](const Settings &s) { return kPromptSettings.format(s.button_prompts); },
+diff --git a/host/settings/settings.hpp b/host/settings/settings.hpp
+index d8ba379..4ce5f66 100644
+--- a/host/settings/settings.hpp
++++ b/host/settings/settings.hpp
+@@ -74,6 +74,9 @@ struct Settings {
+     // east one. The default follows the console the profile describes: south
+     // where cross confirms, east where circle does.
+     bool confirm_south{};
++    // The shoulders and the triggers trade places: LT/RT (L2/R2) press the
++    // PSP's L and R, and LB/RB (L1/R1) what the triggers would.
++    bool swap_triggers{};
+     // What a game that draws its button symbols again (GameProfile::
+     // button_prompts) shows: the PSP's, or the buttons of the gamepad in use.
+     input::PromptSetting button_prompts{input::PromptSetting::Automatic};
+diff --git a/host/ui/menu.cpp b/host/ui/menu.cpp
+index 8bc8652..126f84e 100644
+--- a/host/ui/menu.cpp
++++ b/host/ui/menu.cpp
+@@ -825,6 +825,14 @@ void Menu::controls() {
+         s.confirm_south = !s.confirm_south;
+         settings::save();
+     }
++    if (toggle_row("Swap shoulders and triggers", s.swap_triggers,
++                   options_for("input.swap_triggers",
++                               std::string("LT/RT (L2/R2) press the PSP's L and R, and LB/RB (L1/R1) what the "
++                                           "triggers pressed.") +
++                                   (portablekit::game().button_prompts ? " The game's prompts show the triggers." : "")))) {
++        s.swap_triggers = !s.swap_triggers;
++        settings::save();
++    }
+     // Only a game that draws its button symbols again has anything to show.
+     if (portablekit::game().button_prompts) {
+         if (const int delta = choice_row("Button prompts", input::prompt_setting_label(s.button_prompts),
+@@ -1070,6 +1078,7 @@ void Menu::controls() {
+             if (settings::overridden_by(key).empty()) value = fallback;
+         };
+         restore("input.confirm", s.confirm_south, d.confirm_south);
++        restore("input.swap_triggers", s.swap_triggers, d.swap_triggers);
+         restore("input.button_prompts", s.button_prompts, d.button_prompts);
+         restore("input.player1", s.player1, d.player1);
+         restore("input.player2", s.player2, d.player2);
+diff --git a/tests/input_tests.cpp b/tests/input_tests.cpp
+index d790989..49c5973 100644
+--- a/tests/input_tests.cpp
++++ b/tests/input_tests.cpp
+@@ -255,31 +255,40 @@ void test_keep_saved() {
+ void test_button_prompts() {
+     // A western game (cross confirms) with the default Confirm button: cross
+     // on the bottom button, circle on the right.
+-    ButtonPrompts p = button_prompts(PromptSetting::Automatic, PadKind::Xbox, true, true);
++    ButtonPrompts p = button_prompts(PromptSetting::Automatic, PadKind::Xbox, true, true, false);
+     check(p.style == PromptStyle::Xbox && p.cross == FaceButton::South && p.circle == FaceButton::East,
+           "an Xbox pad shows its own buttons, cross on the bottom one");
+     check(p.square == FaceButton::West && p.triangle == FaceButton::North && !p.numbered_shoulders,
+           "square and triangle stay left and top");
+-    p = button_prompts(PromptSetting::Automatic, PadKind::Xbox, false, true);
++    p = button_prompts(PromptSetting::Automatic, PadKind::Xbox, false, true, false);
+     check(p.cross == FaceButton::East && p.circle == FaceButton::South,
+           "Confirm on the right button moves cross there");
+-    p = button_prompts(PromptSetting::Automatic, PadKind::Xbox, false, false);
++    p = button_prompts(PromptSetting::Automatic, PadKind::Xbox, false, false, false);
+     check(p.cross == FaceButton::South && p.circle == FaceButton::East,
+           "a Japanese game confirming on the right keeps cross on the bottom button");
+-    check(button_prompts(PromptSetting::Automatic, PadKind::None, true, true).style == PromptStyle::Psp,
++    check(button_prompts(PromptSetting::Automatic, PadKind::None, true, true, false).style == PromptStyle::Psp,
+           "with no gamepad the game's own symbols stay");
+-    check(button_prompts(PromptSetting::Automatic, PadKind::PlayStation, true, true).style == PromptStyle::PlayStation,
++    check(button_prompts(PromptSetting::Automatic, PadKind::PlayStation, true, true, false).style == PromptStyle::PlayStation,
+           "a PlayStation pad shows PlayStation buttons");
+-    check(button_prompts(PromptSetting::Automatic, PadKind::Nintendo, true, true).style == PromptStyle::Nintendo,
++    check(button_prompts(PromptSetting::Automatic, PadKind::Nintendo, true, true, false).style == PromptStyle::Nintendo,
+           "a Nintendo pad shows Nintendo buttons");
+-    p = button_prompts(PromptSetting::Automatic, PadKind::SteamDeck, true, true);
++    p = button_prompts(PromptSetting::Automatic, PadKind::SteamDeck, true, true, false);
+     check(p.style == PromptStyle::Xbox && p.numbered_shoulders, "a Steam Deck shows A B X Y and L1 R1");
+-    check(!button_prompts(PromptSetting::Xbox, PadKind::SteamDeck, true, true).numbered_shoulders,
++    check(!button_prompts(PromptSetting::Xbox, PadKind::SteamDeck, true, true, false).numbered_shoulders,
+           "Xbox chosen by name keeps LB and RB");
+-    check(button_prompts(PromptSetting::Psp, PadKind::Xbox, true, true).style == PromptStyle::Psp,
++    check(button_prompts(PromptSetting::Psp, PadKind::Xbox, true, true, false).style == PromptStyle::Psp,
+           "PSP chosen keeps the game's symbols with any pad");
+-    check(button_prompts(PromptSetting::Nintendo, PadKind::None, true, true).style == PromptStyle::Nintendo,
++    check(button_prompts(PromptSetting::Nintendo, PadKind::None, true, true, false).style == PromptStyle::Nintendo,
+           "a chosen style needs no pad");
++    p = button_prompts(PromptSetting::Automatic, PadKind::Xbox, true, true, true);
++    check(p.l_r_on_triggers && p.cross == FaceButton::South, "Swap shoulders and triggers shows L and R on the triggers");
++    check(!button_prompts(PromptSetting::Automatic, PadKind::Xbox, true, true, false).l_r_on_triggers,
++          "without it L and R stay on the shoulders");
++    check(!button_prompts(PromptSetting::Psp, PadKind::Xbox, true, true, true).l_r_on_triggers &&
++              !button_prompts(PromptSetting::Automatic, PadKind::None, true, true, true).l_r_on_triggers,
++          "the PSP's symbols stay L and R");
++    check(button_prompts(PromptSetting::Nintendo, PadKind::None, true, true, true).l_r_on_triggers,
++          "a chosen style shows the triggers with no pad");
+     check(std::string(prompt_setting_label(PromptSetting::PlayStation)) == "PlayStation" &&
+               std::string(prompt_style_name(PromptStyle::Nintendo)) == "nintendo",
+           "the menu and the log name each one");
+-- 
+2.53.0.windows.1
+
