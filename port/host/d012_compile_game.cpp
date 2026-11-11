@@ -151,6 +151,8 @@ struct Options {
     unsigned jobs = 0;
     bool force = false;
     bool keep_work = false;
+    // --prepare: RecompLauncher runs the setup, so progress is printed as "progress <0 to 1> <text>".
+    bool launcher = false;
 };
 
 struct Paths {
@@ -194,7 +196,7 @@ void write_all(const fs::path &path, std::string_view data) {
 // compile: the disc 2%, psp_recomp 25%, clang 70%, linking 3%.
 class Progress {
 public:
-    explicit Progress(fs::path status) : status_(std::move(status)) {}
+    Progress(fs::path status, bool launcher) : status_(std::move(status)), launcher_(launcher) {}
 
     void step(const std::string &name, unsigned total) {
         const std::lock_guard<std::mutex> guard(lock_);
@@ -214,7 +216,7 @@ public:
     void finish(const std::string &state, const std::string &message) {
         const std::lock_guard<std::mutex> guard(lock_);
         if (state == "done") start_ = 100, done_ = total_ = 0;
-        std::cout << "[compile-game] " << percent() << "% " << message << std::endl;
+        print_line(message);
         write_locked(state, message);
     }
 
@@ -226,9 +228,20 @@ private:
         return std::min(100u, start_ + (total_ == 0 ? 0u : weight * done_ / total_));
     }
     void print_locked() {
-        std::cout << "[compile-game] " << percent() << "% " << step_;
-        if (total_ > 1) std::cout << " (" << done_ << "/" << total_ << ")";
-        std::cout << std::endl;
+        std::string text = step_;
+        if (total_ > 1) text += " (" + std::to_string(done_) + "/" + std::to_string(total_) + ")";
+        print_line(text);
+    }
+    void print_line(const std::string &text) const {
+        if (!launcher_) {
+            std::cout << "[compile-game] " << percent() << "% " << text << std::endl;
+            return;
+        }
+        // The launcher's setup screen shows --install's share first (see prepare() below), then this.
+        const double fraction = (kInstallShare + (1.0 - kInstallShare) * percent() / 100.0);
+        char number[16];
+        std::snprintf(number, sizeof number, "%.3f", fraction);
+        std::cout << "progress " << number << " " << text << std::endl;
     }
     void write_locked(const std::string &state, const std::string &message) {
         std::ostringstream body;
@@ -243,7 +256,10 @@ private:
         fs::rename(partial, status_, ec);
     }
 
+    static constexpr double kInstallShare = 0.05;
+
     fs::path status_;
+    bool launcher_ = false;
     std::mutex lock_;
     std::string step_;
     unsigned done_ = 0, total_ = 0;
@@ -576,7 +592,7 @@ void note(const Paths &p, const std::string &line) {
 
 int run(const Options &options) {
     const Paths p = find_paths(options);
-    Progress progress(p.status);
+    Progress progress(p.status, options.launcher);
     const auto started = std::chrono::steady_clock::now();
     try {
         check_inputs(p);
@@ -825,6 +841,8 @@ int main(int argc, char **argv) {
             options.force = true;
         } else if (arg == "--keep-work") {
             options.keep_work = true;
+        } else if (arg == "--launcher-progress") {
+            options.launcher = true;
         } else {
             std::cerr << "--compile-game: unknown option " << arg
                       << "\nusage: D012Native --compile-game [--iso PATH] [--opt N] [--jobs N] [--force] [--keep-work]\n";
@@ -840,7 +858,37 @@ int main(int argc, char **argv) {
 // compiled as d012_portablekit_main (portablekit_add_game(... HOST_MAIN_NAME)).
 int d012_portablekit_main(int argc, char **argv);
 
+// `D012Native --prepare --game <iso>` is the setup RecompLauncher runs without a window (recomplauncher.json,
+// "prepare"): the two steps of the installer, `--install <iso> --in-place` and `--compile-game`, one after the other,
+// printing "progress <0 to 1> <text>" lines. Both are quick when nothing changed, so it runs again on every change
+// of the player's copy. Without --prepare nothing here is reached.
+static int prepare(int argc, char **argv) {
+    std::string iso;
+    for (int i = 2; i < argc; ++i) {
+        const std::string_view arg = argv[i];
+        if (arg == "--game" && i + 1 < argc) {
+            iso = argv[++i];
+        } else {
+            std::cerr << "usage: " << argv[0] << " --prepare --game <your ULUS10566 or ULES01505 .iso>\n";
+            return 2;
+        }
+    }
+    if (iso.empty()) {
+        std::cerr << "--prepare needs --game <your ULUS10566 or ULES01505 .iso>\n";
+        return 2;
+    }
+    std::cout << "progress 0.000 Reading your disc and decrypting the game's program" << std::endl;
+    std::vector<char *> install{argv[0], const_cast<char *>("--install"), iso.data(), const_cast<char *>("--in-place"),
+                                nullptr};
+    const int install_code = d012_portablekit_main(static_cast<int>(install.size()) - 1, install.data());
+    if (install_code != 0) return install_code;
+    std::vector<char *> compile{argv[0], const_cast<char *>("--compile-game"),
+                                const_cast<char *>("--launcher-progress"), nullptr};
+    return d012::compile_game::main(static_cast<int>(compile.size()) - 1, compile.data());
+}
+
 int main(int argc, char **argv) {
+    if (argc >= 2 && std::string_view(argv[1]) == "--prepare") return prepare(argc, argv);
     if (argc >= 2 && std::string_view(argv[1]) == "--compile-game") return d012::compile_game::main(argc, argv);
     return d012_portablekit_main(argc, argv);
 }
