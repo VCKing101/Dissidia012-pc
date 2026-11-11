@@ -858,6 +858,23 @@ int main(int argc, char **argv) {
 // compiled as d012_portablekit_main (portablekit_add_game(... HOST_MAIN_NAME)).
 int d012_portablekit_main(int argc, char **argv);
 
+// The installer's `--install <iso> --in-place`: decrypts the executable and remembers where the disc image is.
+static int install_from(char *program, std::string &iso) {
+    std::vector<char *> install{program, const_cast<char *>("--install"), iso.data(), const_cast<char *>("--in-place"),
+                                nullptr};
+    return d012_portablekit_main(static_cast<int>(install.size()) - 1, install.data());
+}
+
+// `D012Native --game <iso>` plays from that disc image wherever it is, for launchers, scripts and Steam shortcuts:
+// the setup's first step (quick when the image is the one already set up), then the game as usual. The game's
+// code must already be compiled (the setup, or --prepare, does that). Only this exact form is taken.
+static int play_from(char *program, std::string iso) {
+    const int install_code = install_from(program, iso);
+    if (install_code != 0) return install_code;
+    std::vector<char *> start{program, nullptr};
+    return d012_portablekit_main(1, start.data());
+}
+
 // `D012Native --prepare --game <iso>` is the setup RecompLauncher runs without a window (recomplauncher.json,
 // "prepare"): the two steps of the installer, `--install <iso> --in-place` and `--compile-game`, one after the other,
 // printing "progress <0 to 1> <text>" lines. Both are quick when nothing changed, so it runs again on every change
@@ -878,9 +895,7 @@ static int prepare(int argc, char **argv) {
         return 2;
     }
     std::cout << "progress 0.000 Reading your disc and decrypting the game's program" << std::endl;
-    std::vector<char *> install{argv[0], const_cast<char *>("--install"), iso.data(), const_cast<char *>("--in-place"),
-                                nullptr};
-    const int install_code = d012_portablekit_main(static_cast<int>(install.size()) - 1, install.data());
+    const int install_code = install_from(argv[0], iso);
     if (install_code != 0) return install_code;
     std::vector<char *> compile{argv[0], const_cast<char *>("--compile-game"),
                                 const_cast<char *>("--launcher-progress"), nullptr};
@@ -888,6 +903,7 @@ static int prepare(int argc, char **argv) {
 }
 
 int main(int argc, char **argv) {
+    if (argc == 3 && std::string_view(argv[1]) == "--game") return play_from(argv[0], argv[2]);
     if (argc >= 2 && std::string_view(argv[1]) == "--prepare") return prepare(argc, argv);
     if (argc >= 2 && std::string_view(argv[1]) == "--compile-game") return d012::compile_game::main(argc, argv);
     return d012_portablekit_main(argc, argv);
