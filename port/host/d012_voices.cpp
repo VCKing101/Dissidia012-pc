@@ -3,6 +3,7 @@
 
 #include "d012_voices.hpp"
 
+#include "d012_voice_scenes.hpp"
 #include "hle/hle_common.hpp"
 #include "install/user_data.hpp"
 #include "kernel/iso_image.hpp"
@@ -14,15 +15,20 @@
 #include <array>
 #include <cctype>
 #include <chrono>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <functional>
 #include <iostream>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <vector>
 
 namespace d012::voices {
@@ -153,12 +159,16 @@ struct Disc {
     std::vector<std::string> movies;  // lower case
 };
 
-// A Japanese file in place of one of the game's.
+// A Japanese file in place of one of the game's: a file of the Japanese
+// disc, or one the port made from both discs (a story scene, a text file).
 struct Pair {
+    enum class Kind { Sound, Scene, Text };
     std::size_t record;  // in the game's index
-    std::uint64_t disc;  // where the file is in the Japanese image
+    std::uint64_t disc;  // where the file is in the Japanese image, without `bytes`
     std::uint32_t size;
     std::uint64_t at;  // in the game's PACKAGE.BIN as it sees it
+    std::shared_ptr<const std::vector<std::uint8_t>> bytes{};
+    Kind kind{Kind::Sound};
 };
 
 struct State {
@@ -232,8 +242,167 @@ std::optional<Disc> open_disc(const std::filesystem::path &path, std::string &er
     return disc;
 }
 
-// Pairs the Japanese disc's sound files with the game's: the files from
-// pairs_from on in the game's PACKAGE.BIN.
+// Bytes of the game's PACKAGE.BIN as it is on the disc: what is read.
+std::size_t read_own(std::uint64_t offset, std::span<std::uint8_t> bytes) {
+    State &s = state();
+    const bool was_building = s.building;
+    s.building = true;
+    const std::int64_t got = portablekit::read_guest_file("disc0:/PSP_GAME/USRDIR/DATA/PACKAGE.BIN", offset,
+                                                          bytes.data(), bytes.size());
+    s.building = was_building;
+    return got < 0 ? 0u : static_cast<std::size_t>(got);
+}
+
+std::vector<std::uint8_t> own_file(std::size_t record) {
+    const Record &r = state().own[record];
+    std::vector<std::uint8_t> bytes(r.size & kSizeMask);
+    if (read_own(std::uint64_t(r.sector & kSectorMask) * kSector, bytes) != bytes.size()) bytes.clear();
+    return bytes;
+}
+
+// Files of one disc, by record: read in one pass where they lie together
+// (the story scenes do, on both discs), else one by one in their order.
+// `read` reads bytes at an offset of that disc's PACKAGE.BIN.
+std::map<std::uint32_t, std::vector<std::uint8_t>>
+read_files(const std::vector<const Record *> &records,
+           const std::function<std::size_t(std::uint64_t, std::span<std::uint8_t>)> &read) {
+    std::vector<const Record *> sorted = records;
+    std::sort(sorted.begin(), sorted.end(),
+              [](const Record *a, const Record *b) { return (a->sector & kSectorMask) < (b->sector & kSectorMask); });
+    std::map<std::uint32_t, std::vector<std::uint8_t>> files;
+    if (sorted.empty()) return files;
+    const auto start = [](const Record *r) { return std::uint64_t(r->sector & kSectorMask) * kSector; };
+    std::uint64_t first = start(sorted.front()), end = first;
+    for (const Record *r : sorted) end = std::max(end, start(r) + (r->size & kSizeMask));
+    constexpr std::uint64_t kOnePass = 64ull * 1024u * 1024u;
+    std::vector<std::uint8_t> span;
+    if (end - first <= kOnePass) {
+        span.resize(end - first);
+        span.resize(read(first, span));
+    }
+    for (const Record *r : sorted) {
+        std::vector<std::uint8_t> &bytes = files[r->hash];
+        bytes.resize(r->size & kSizeMask);
+        if (start(r) - first + bytes.size() <= span.size())
+            std::memcpy(bytes.data(), span.data() + (start(r) - first), bytes.size());
+        else if (read(start(r), bytes) != bytes.size())
+            bytes.clear();
+    }
+    return files;
+}
+
+// "voice/jp/..." as the game asks for it: in the English folder.
+std::string english_name(std::string_view path) {
+    std::string name(path);
+    if (name.starts_with("voice/jp/")) name.replace(6u, 2u, "en");
+    return name;
+}
+
+// The story scenes whose script differs between the discs, as the Japanese
+// disc has them with the game's text, the voice lines they play, and the
+// text files fixed for them (d012_voice_scenes.hpp): added to `chosen`, in
+// place of what the pairing by name found.
+void story(const std::vector<Record> &japanese, const std::map<std::uint32_t, std::size_t> &own_at,
+           std::map<std::size_t, Pair> &chosen) {
+    State &s = state();
+    std::map<std::uint32_t, const Record *> theirs;
+    for (const Record &r : japanese) theirs[r.hash] = &r;
+    const std::uint64_t base = std::uint64_t(s.disc->package.lba) * kSector;
+    const auto disc_offset = [&](const Record &r) { return base + std::uint64_t(r.sector & kSectorMask) * kSector; };
+    std::size_t scenes = 0, missing = 0, unlike = 0, lines = 0, texts = 0;
+    std::uint64_t bytes = 0;
+    std::vector<const Record *> our_records, their_records;
+    std::vector<voice_scenes::Voice> same_name, renamed;
+    for (const std::uint32_t hash : voice_scenes::scenes()) {
+        const auto mine = own_at.find(hash);
+        const auto other = theirs.find(hash);
+        if (mine == own_at.end() || other == theirs.end()) continue;
+        our_records.push_back(&s.own[mine->second]);
+        their_records.push_back(other->second);
+    }
+    const auto our_files = read_files(our_records, read_own);
+    const auto their_files = read_files(their_records, [&](std::uint64_t offset, std::span<std::uint8_t> out) {
+        std::lock_guard guard(s.lock);
+        return s.disc->image->read(base + offset, out);
+    });
+    for (const std::uint32_t hash : voice_scenes::scenes()) {
+        const auto mine = own_at.find(hash);
+        const auto other = theirs.find(hash);
+        if (mine == own_at.end() || other == theirs.end()) {
+            ++missing;
+            continue;
+        }
+        std::vector<voice_scenes::Voice> voices;
+        auto merged = voice_scenes::merge_scene(hash, their_files.at(hash), our_files.at(hash), voices);
+        if (merged.empty()) {
+            ++unlike;
+            continue;
+        }
+        bytes += merged.size();
+        const auto size = static_cast<std::uint32_t>(merged.size());
+        chosen[mine->second] = {mine->second, 0u, size, 0u,
+                                std::make_shared<const std::vector<std::uint8_t>>(std::move(merged)),
+                                Pair::Kind::Scene};
+        ++scenes;
+        for (const voice_scenes::Voice &v : voices) (v.asked == v.japanese ? same_name : renamed).push_back(v);
+    }
+    // Each line the Japanese file it is, whatever the pairing by name found
+    // for that name; a line served under another name last, so that no
+    // scene's table naming that file itself (a line it never plays) wins.
+    for (const auto *list : {&same_name, &renamed})
+        for (const voice_scenes::Voice &v : *list) {
+            const auto asked = own_at.find(name_hash(english_name(v.asked)));
+            const auto file = theirs.find(name_hash(v.japanese));
+            if (asked == own_at.end() || file == theirs.end()) continue;
+            if (!chosen.contains(asked->second) || chosen[asked->second].disc != disc_offset(*file->second)) ++lines;
+            chosen[asked->second] = {asked->second, disc_offset(*file->second), file->second->size & kSizeMask, 0u};
+        }
+    // Test only: <prefix>_TEST_SCENE=<scene>=<scene>[,...] plays the second
+    // merged scene where the game asks for the first (hashes in hex), to
+    // reach a scene from the start of Story Mode.
+    if (const char *swaps = portablekit::env("TEST_SCENE")) {
+        std::string_view rest(swaps);
+        while (!rest.empty()) {
+            const std::string_view item = rest.substr(0, rest.find(','));
+            rest = item.size() < rest.size() ? rest.substr(item.size() + 1u) : std::string_view{};
+            const std::size_t eq = item.find('=');
+            if (eq == std::string_view::npos) continue;
+            const auto hex = [](std::string_view text) {
+                return static_cast<std::uint32_t>(std::strtoul(std::string(text).c_str(), nullptr, 16));
+            };
+            const auto from = own_at.find(hex(item.substr(0, eq)));
+            const auto to = own_at.find(hex(item.substr(eq + 1u)));
+            if (from == own_at.end() || to == own_at.end() || !chosen.contains(to->second) ||
+                !chosen[to->second].bytes) {
+                std::cerr << "[voices] test scene " << item << ": not two scenes of the game's\n";
+                continue;
+            }
+            Pair swapped = chosen[to->second];
+            swapped.record = from->second;
+            chosen[from->second] = swapped;
+            std::cout << "[voices] test: scene " << item.substr(eq + 1u) << " plays where the game asks for "
+                      << item.substr(0, eq) << std::endl;
+        }
+    }
+    for (const std::string_view name : voice_scenes::text_files()) {
+        const auto mine = own_at.find(name_hash(name));
+        if (mine == own_at.end()) continue;
+        auto fixed = voice_scenes::fix_text_file(name, own_file(mine->second));
+        if (fixed.empty()) continue;
+        const auto size = static_cast<std::uint32_t>(fixed.size());
+        chosen[mine->second] = {mine->second, 0u, size, 0u,
+                                std::make_shared<const std::vector<std::uint8_t>>(std::move(fixed)), Pair::Kind::Text};
+        ++texts;
+    }
+    std::cout << "[voices] " << scenes << " story scenes as the Japanese disc has them (" << bytes / 1024u
+              << " KB), " << lines << " voice lines set by them, " << texts << " text files fixed for them";
+    if (missing != 0u) std::cout << "; " << missing << " scenes not on both discs";
+    if (unlike != 0u) std::cout << "; " << unlike << " not as expected, left English";
+    std::cout << std::endl;
+}
+
+// Pairs the Japanese disc's sound files with the game's, and adds the story
+// scenes: the files from pairs_from on in the game's PACKAGE.BIN.
 void pair() {
     State &s = state();
     s.pairs.clear();
@@ -304,22 +473,43 @@ void pair() {
     }
     const std::size_t sound = candidates.size();
 
-    std::uint64_t at = s.pairs_from;
+    // What each record of the game's becomes.
+    std::map<std::size_t, Pair> chosen;
     for (const Candidate &c : candidates) {
-        const std::uint32_t size = c.japanese->size & kSizeMask;
-        if (at + size > s.own_end + kRoom) {
+        const std::size_t record = own_at[c.own_hash];
+        chosen[record] = {record, base + std::uint64_t(c.japanese->sector & kSectorMask) * kSector,
+                          c.japanese->size & kSizeMask, 0u};
+    }
+    // <prefix>_JAPANESE_SCENES=0: the game's own scenes with the Japanese
+    // voices, as before (lines run into each other).
+    if (const char *scenes = portablekit::env("JAPANESE_SCENES"); scenes == nullptr || std::string_view(scenes) != "0")
+        story(*japanese, own_at, chosen);
+    else
+        std::cout << "[voices] the story scenes stay the game's own (" << portablekit::env_name("JAPANESE_SCENES")
+                  << "=0)" << std::endl;
+
+    // After the Options text: the Japanese disc's files in its order, then
+    // the port's.
+    std::vector<Pair> placed;
+    for (const auto &[record, p] : chosen) placed.push_back(p);
+    std::stable_sort(placed.begin(), placed.end(), [](const Pair &a, const Pair &b) {
+        return std::make_tuple(a.bytes != nullptr, a.disc) < std::make_tuple(b.bytes != nullptr, b.disc);
+    });
+    std::uint64_t at = s.pairs_from;
+    for (Pair &p : placed) {
+        if (at + p.size > s.own_end + kRoom) {
             std::cerr << "[voices] no more room after PACKAGE.BIN; the rest stay English\n";
             break;
         }
-        s.pairs.push_back(
-            {own_at[c.own_hash], base + std::uint64_t(c.japanese->sector & kSectorMask) * kSector, size, at});
-        at += whole_sectors(size);
+        p.at = at;
+        s.pairs.push_back(p);
+        at += whole_sectors(p.size);
     }
     s.read.assign(s.pairs.size(), false);
     const auto ms =
         std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count();
-    std::cout << "[voices] " << s.pairs.size() << " sound files of the Japanese disc paired with the English ones ("
-              << named << " files paired by name, " << sound << " of them sound), "
+    std::cout << "[voices] " << s.pairs.size() << " files of the Japanese disc in place of the English ones ("
+              << named << " sound files paired by name, " << sound << " of them sound), "
               << (at - s.pairs_from) / (1024u * 1024u) << " MB, in " << ms << " ms" << std::endl;
 }
 
@@ -459,30 +649,90 @@ private:
     std::vector<std::uint8_t> bytes_;
 };
 
-// A file of the Japanese disc, read whole in place of one of the game's.
-class DiscFileFilter final : public FileFilter {
+// A story movie with Japanese voices: the game's file, its picture and all,
+// with the sound of the Japanese disc's. The picture differs in some (the end
+// credits, for one), so the Japanese file cannot play as it is; the sound is
+// the same length, or a frame longer.
+class MovieFilter final : public FileFilter {
 public:
-    explicit DiscFileFilter(IsoImage::Entry entry) : entry_(entry) {}
-    std::uint64_t size() const override { return entry_.size; }
+    using Reader = voice_scenes::MovieSplice::Reader;
+    // `own` reads the game's movie; with `theirs` (the Japanese disc's) its
+    // sound is theirs, without it (a test) the movie is the game's alone.
+    // Null when either is not a movie as expected.
+    static std::shared_ptr<MovieFilter> open(Reader own, std::optional<IsoImage::Entry> theirs) {
+        std::unique_ptr<voice_scenes::MovieSplice> splice;
+        if (theirs) {
+            splice = voice_scenes::MovieSplice::open(
+                own, [entry = *theirs](std::uint64_t at, std::span<std::uint8_t> out) -> std::size_t {
+                    State &s = state();
+                    if (!s.disc || at >= entry.size) return 0u;
+                    std::lock_guard guard(s.lock);
+                    return s.disc->image->read(std::uint64_t(entry.lba) * kSector + at,
+                                               out.first(std::min<std::uint64_t>(out.size(), entry.size - at)));
+                });
+            if (!splice) return nullptr;
+        }
+        // Its size: the last byte there is.
+        std::uint64_t low = 0, high = 1;
+        std::uint8_t probe = 0;
+        while (own(high, {&probe, 1u}) == 1u && high < (1ull << 40u)) high *= 2u;
+        while (high - low > 1u) {
+            const std::uint64_t middle = low + (high - low) / 2u;
+            (own(middle, {&probe, 1u}) == 1u ? low : high) = middle;
+        }
+        if (own(0u, {&probe, 1u}) != 1u) return nullptr;
+        return std::make_shared<MovieFilter>(low + 1u, std::move(own), std::move(splice));
+    }
+
+    MovieFilter(std::uint64_t size, Reader own, std::unique_ptr<voice_scenes::MovieSplice> splice)
+        : size_(size), own_(std::move(own)), splice_(std::move(splice)) {}
+
+    std::uint64_t size() const override { return size_; }
+
     std::size_t read(std::uint64_t offset, std::uint8_t *destination, std::size_t length) override {
-        State &s = state();
-        if (offset >= entry_.size || !s.disc) return 0u;
-        const std::size_t n = std::min<std::uint64_t>(length, entry_.size - offset);
-        std::lock_guard guard(s.lock);
-        return s.disc->image->read(std::uint64_t(entry_.lba) * kSector + offset, {destination, n});
+        if (!splice_) return own_(offset, {destination, length});
+        const std::size_t got = splice_->read(offset, {destination, length});
+        if (!warned_ && splice_->broken()) {
+            warned_ = true;
+            std::cerr << "[voices] a movie's packs are not as expected; part of its sound may stay English\n";
+        }
+        return got;
     }
 
 private:
-    IsoImage::Entry entry_;
+    std::uint64_t size_;
+    Reader own_;
+    std::unique_ptr<voice_scenes::MovieSplice> splice_;
+    bool warned_{};
 };
 
 void note_read(std::size_t pair) {
     State &s = state();
     if (pair >= s.read.size() || s.read[pair]) return;
     s.read[pair] = true;
-    if (++s.files_read <= 3u || s.files_read % 100u == 0u)
+    const Pair &p = s.pairs[pair];
+    if (p.kind != Pair::Kind::Sound) {
+        char hash[16];
+        std::snprintf(hash, sizeof hash, "%08X", s.own[p.record].hash);
+        std::cout << "[voices] the game has read the "
+                  << (p.kind == Pair::Kind::Scene ? "story scene " : "text file ") << hash
+                  << (p.kind == Pair::Kind::Scene ? " of the Japanese disc" : " fixed for the Japanese scenes")
+                  << std::endl;
+        return;
+    }
+    // <prefix>_TRACE_VOICES=1: each one, by the hash of the name the game
+    // asked for and where it is on the Japanese disc.
+    static const bool trace = portablekit::env("TRACE_VOICES") != nullptr;
+    ++s.files_read;
+    if (trace) {
+        char line[96];
+        std::snprintf(line, sizeof line, "[voices] read %08X: the Japanese disc's file at byte %llu, %u bytes",
+                      s.own[p.record].hash, static_cast<unsigned long long>(p.disc), p.size);
+        std::cout << line << std::endl;
+    } else if (s.files_read <= 3u || s.files_read % 100u == 0u) {
         std::cout << "[voices] the game has read " << s.files_read << " Japanese sound file"
-                  << (s.files_read == 1u ? "" : "s") << " (the last " << s.pairs[pair].size << " bytes)" << std::endl;
+                  << (s.files_read == 1u ? "" : "s") << " (the last " << p.size << " bytes)" << std::endl;
+    }
 }
 
 // The game's PACKAGE.BIN, then the port's Options text and the paired
@@ -512,7 +762,11 @@ public:
                 auto next = std::upper_bound(s.pairs.begin(), s.pairs.end(), offset,
                                              [](std::uint64_t at, const Pair &p) { return at < p.at; });
                 const Pair *pair = next == s.pairs.begin() ? nullptr : &*std::prev(next);
-                if (pair != nullptr && offset < pair->at + pair->size && s.disc) {
+                if (pair != nullptr && offset < pair->at + pair->size && pair->bytes) {
+                    clip(pair->at + pair->size);
+                    note_read(static_cast<std::size_t>(pair - s.pairs.data()));
+                    std::memcpy(out, pair->bytes->data() + (offset - pair->at), want);
+                } else if (pair != nullptr && offset < pair->at + pair->size && s.disc) {
                     clip(pair->at + pair->size);
                     note_read(static_cast<std::size_t>(pair - s.pairs.data()));
                     std::lock_guard guard(s.lock);
@@ -549,18 +803,39 @@ std::shared_ptr<FileFilter> serve(std::string_view path, std::uint32_t fd) {
     }
     if (relative == kPackagePath) return s.own.empty() ? nullptr : std::make_shared<PackageFilter>(fd);
     if (relative.starts_with(kMovieFolder)) {
-        if (!s.want || !s.disc) return nullptr;
-        const std::string name = relative.substr(kMovieFolder.size());
-        if (std::find(s.disc->movies.begin(), s.disc->movies.end(), name) == s.disc->movies.end()) return nullptr;
-        const auto entry = s.disc->image->find("PSP_GAME/USRDIR/DATA/MOVIE/" + name);
-        // The same size, so the same picture: the game's file has a last
-        // byte where the Japanese one has, and none after it.
-        std::uint8_t probe = 0;
-        if (!entry || entry->size == 0u || portablekit::read_open_file(fd, entry->size - 1u, &probe, 1u) != 1u ||
-            portablekit::read_open_file(fd, entry->size, &probe, 1u) != 0u)
-            return nullptr;
-        portablekit::log_once("voices-movie-" + name, "[voices] " + std::string(path) + " plays the Japanese disc's");
-        return std::make_shared<DiscFileFilter>(*entry);
+        std::string name = relative.substr(kMovieFolder.size());
+        MovieFilter::Reader own = [fd](std::uint64_t at, std::span<std::uint8_t> out) {
+            return portablekit::read_open_file(fd, at, out.data(), out.size());
+        };
+        // Test only: <prefix>_TEST_MOVIE=<name> plays that movie wherever
+        // the game opens one, with Japanese voices or without.
+        static const char *test_movie = portablekit::env("TEST_MOVIE");
+        if (test_movie != nullptr) {
+            name = lower(test_movie);
+            own = [file = "disc0:/PSP_GAME/USRDIR/DATA/MOVIE/" + std::string(test_movie)](
+                      std::uint64_t at, std::span<std::uint8_t> out) -> std::size_t {
+                State &st = state();
+                const bool was_building = st.building;
+                st.building = true;
+                const std::int64_t got = portablekit::read_guest_file(file, at, out.data(), out.size());
+                st.building = was_building;
+                return got < 0 ? 0u : static_cast<std::size_t>(got);
+            };
+        }
+        std::optional<IsoImage::Entry> entry;
+        if (s.want && s.disc &&
+            std::find(s.disc->movies.begin(), s.disc->movies.end(), name) != s.disc->movies.end())
+            entry = s.disc->image->find("PSP_GAME/USRDIR/DATA/MOVIE/" + name);
+        if (entry && entry->size == 0u) entry.reset();
+        if (!entry && test_movie == nullptr) return nullptr;
+        auto movie = MovieFilter::open(own, entry);
+        portablekit::log_once("voices-movie-" + name,
+                              "[voices] " + std::string(path) +
+                                  (test_movie != nullptr ? " (test: " + name + ")" : std::string()) +
+                                  (!movie   ? " is not a movie as expected; it plays as it is"
+                                   : entry ? " plays with the Japanese disc's sound"
+                                           : " plays as the game has it"));
+        return movie;
     }
     return nullptr;
 }
