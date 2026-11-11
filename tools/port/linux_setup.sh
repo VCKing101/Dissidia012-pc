@@ -79,6 +79,8 @@ install -m 755 "$repo/tools/port/linux_setup/AppRun" "$appdir/AppRun"
 cp "$repo/tools/port/linux_setup/dissidia012-setup.desktop" "$repo/tools/port/linux_setup/dissidia012-setup.svg" "$appdir/"
 ln -s dissidia012-setup.svg "$appdir/.DirIcon"
 echo "$version" > "$appdir/VERSION"
+# RecompLauncher looks for this at the top of the AppImage.
+cp "$repo/recomplauncher.json" "$appdir/recomplauncher.json"
 cp -a "$root/setup/payload" "$appdir/payload"
 cp -a "$root/toolchain" "$appdir/payload/toolchain"
 cp "$root/toolchain/licenses/"* "$appdir/payload/licenses/"

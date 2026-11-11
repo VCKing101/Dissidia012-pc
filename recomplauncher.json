@@ -1,0 +1,99 @@
+{
+  "$schema": "https://recomplauncher.com/schema/recomplauncher.json",
+  "format": 1,
+  "name": "Dissidia 012 (PC port)",
+  "repo": "VCKing101/Dissidia012-pc",
+  "game": {
+    "kind": "iso",
+    "label": "Your disc image (.iso) of Dissidia 012 Duodecim Final Fantasy, USA (ULUS10566) or Europe (ULES01505), v1.00. The Japanese and Asian releases do not work.",
+    "check": { "iso9660": "UMD_DATA.BIN" }
+  },
+  "start": {
+    "program": ["D012Native.exe"]
+  },
+  "prepare": {
+    "program": ["D012Native.exe"],
+    "args": ["--prepare", "--game", "{game}"],
+    "label": "Your game's code, made on this PC from your disc",
+    "timeout": 3600
+  },
+  "config": [
+    {
+      "id": "main",
+      "format": "ini",
+      "file": [{ "path": "{install}/data/settings.ini" }]
+    }
+  ],
+  "folders": {
+    "saves": [{ "path": "{install}/data/ms0/PSP/SAVEDATA" }],
+    "logs": [{ "path": "{install}/data/logs" }],
+    "mods": [{ "path": "{install}/data/mods" }]
+  },
+  "saves": ["{install}/data/ms0/PSP/SAVEDATA"],
+  "settings": [
+    {
+      "id": "window",
+      "label": "Window",
+      "help": "Fullscreen fills your screen. Windowed plays in a window you can resize.",
+      "choices": [
+        { "label": "Fullscreen", "set": { "video.fullscreen": "1" } },
+        { "label": "Windowed", "set": { "video.fullscreen": "0" } }
+      ],
+      "defaults": { "video.fullscreen": "0" }
+    },
+    {
+      "id": "resolution",
+      "label": "Resolution",
+      "help": "What the game draws at. x1 is the PSP's own 480x272; each step adds 272 lines. Auto follows the window. Higher is sharper and needs a faster graphics card.",
+      "choices": [
+        { "label": "Auto", "set": { "video.internal_scale": "auto" } },
+        { "label": "x1", "set": { "video.internal_scale": "1" } },
+        { "label": "x2", "set": { "video.internal_scale": "2" } },
+        { "label": "x3", "set": { "video.internal_scale": "3" } },
+        { "label": "x4", "set": { "video.internal_scale": "4" } },
+        { "label": "x6", "set": { "video.internal_scale": "6" } }
+      ],
+      "defaults": { "video.internal_scale": "2" }
+    },
+    {
+      "id": "frame_rate",
+      "label": "Frame rate",
+      "help": "The game runs at 30. Higher rates blend its movement between frames, and step down by themselves rather than slow the game.",
+      "choices": [
+        { "label": "30", "set": { "video.frame_rate": "30" } },
+        { "label": "60", "set": { "video.frame_rate": "60" } },
+        { "label": "90", "set": { "video.frame_rate": "90" } },
+        { "label": "120", "set": { "video.frame_rate": "120" } },
+        { "label": "Screen's rate", "set": { "video.frame_rate": "display" } }
+      ],
+      "defaults": { "video.frame_rate": "30" }
+    },
+    {
+      "id": "aspect",
+      "label": "Picture shape",
+      "help": "Original keeps the PSP's 16:9. Stretch fills the window. Fill draws the picture to the window's shape.",
+      "choices": [
+        { "label": "Original", "set": { "video.aspect": "original" } },
+        { "label": "Stretch", "set": { "video.aspect": "stretch" } },
+        { "label": "Fill", "set": { "video.aspect": "fill" } }
+      ],
+      "defaults": { "video.aspect": "original" }
+    },
+    {
+      "id": "vsync",
+      "label": "V-Sync",
+      "help": "Vsync waits for the screen's refresh and never tears. Mailbox shows the newest frame without tearing. Immediate shows frames at once and can tear.",
+      "choices": [
+        { "label": "Vsync", "set": { "video.present_mode": "vsync" } },
+        { "label": "Mailbox", "set": { "video.present_mode": "mailbox" } },
+        { "label": "Immediate", "set": { "video.present_mode": "immediate" } }
+      ],
+      "defaults": { "video.present_mode": "vsync" }
+    }
+  ],
+  "actions": [
+    { "id": "saves", "label": "Saves", "help": "Your save data.", "open": "saves" },
+    { "id": "mods", "label": "Mods", "help": "Battle music mods go here.", "open": "mods" },
+    { "id": "logs", "label": "Logs", "help": "The log to attach to a crash report.", "open": "logs" }
+  ]
+}
