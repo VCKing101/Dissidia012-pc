@@ -4,6 +4,8 @@ A native PC port of *Dissidia 012 Duodecim Final Fantasy* (PSP, USA release ULUS
 v1.00), built by static recompilation on [PortableKit](https://github.com/TeamGDB/PortableKit), together with a
 matching decompilation of the game's executable and overlays.
 
+<a href="https://recomplauncher.com/game/dissidia012-pc"><picture><source media="(prefers-color-scheme: dark)" srcset="https://recomplauncher.com/assets/press/launcher/badge-light.svg"><img alt="Get it on RecompLauncher" src="https://recomplauncher.com/assets/press/launcher/badge-dark.svg" height="48"></picture></a>
+
 - **The port** (`port/`) recompiles the game's MIPS code to C++ and runs it on PortableKit's re-implemented PSP
   kernel, system modules and Vulkan renderer. Decompiled C replaces recompiled functions where an enhancement needs
   it.
@@ -178,6 +180,11 @@ Both settings are kept in `settings.ini`, not in the game's save ([notes](docs/p
 </p>
 
 ## Quick start (Windows)
+
+**Using [RecompLauncher](https://recomplauncher.com/game/dissidia012-pc)?** Install the port there and pick your
+ISO: it runs the same setup without a window (`D012Native.exe --prepare --game <your .iso>`), then starts the game.
+Its video settings show on the game's page. The release's portable zip, `Dissidia012-PC-<version>-Windows-x64.zip`,
+is what it installs; the steps below are for the setup program.
 
 **1. Download** `Dissidia012-PC-Setup-<version>.exe` from the
 [latest release](https://github.com/VCKing101/Dissidia012-pc/releases). Nothing else needs to be installed first.
