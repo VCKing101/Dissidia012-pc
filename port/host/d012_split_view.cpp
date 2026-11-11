@@ -152,9 +152,13 @@ struct State {
     // `ex_burst_since` counts split-task frames in state 1.
     std::uint32_t ex_burst = 0;
     std::uint32_t ex_burst_since = 0;
-    // Player 2's fighter made the local one for a battle player 2 won
-    // (run_winner_decision).
+    // Player 2 won this fight (run_winner_decision); player 2's fighter is
+    // made the local one from the white flash (`player2_local`, ending_local).
+    // Both cleared when a fight starts again (a rematch, a party battle's
+    // next fight), with the phase back at 0 (`last_phase`).
     bool player2_won = false;
+    bool player2_local = false;
+    std::uint32_t last_phase = 0xFFFFFFFFu;
     // Whose chase the chase prompt shows (run_chase_local): 1 or 2.
     std::uint32_t chase_slot = 1;
     // The chase lines while a view draws without them or moved
@@ -229,6 +233,8 @@ void add_task(Guest *g) {
     s.owner = owner;
     s.ex_burst = 0u;
     s.player2_won = false;
+    s.player2_local = false;
+    s.last_phase = 0xFFFFFFFFu;
     std::cout << "[versus] split-view task added to the battle's task list" << std::endl;
 }
 
@@ -794,29 +800,90 @@ std::uint32_t battle_phase(Guest *g) {
     return flow != 0u ? g_ld32(g, flow + 8u) : 0xFFFFFFFFu;
 }
 
-// battle 0x08B09D88 (flow, ...): at the final blow, the winner and the fighter
-// knocked out go to the flow, and whether the winner is the player's fighter
-// (main 0x08889E44) picks the victory pose or the player's defeat. In versus
-// a win of player 2's is player 2's victory: player 2's fighter is made the
-// local one (and player 1's not) for the rest of the battle, so the ending is
-// the winner's own, as player 1's is.
+// battle 0x08B09D88 (flow, won, forfeit, menu, ...): at the final blow, the
+// winner and the fighter knocked out go to the flow, and whether the winner is
+// the player's fighter (main 0x08889E44) picks the victory pose or the
+// player's defeat (kept at flow +0x0C). In versus a win of player 2's is
+// player 2's victory: player 2's fighter is the local one (and player 1's not)
+// for this call, so the ending is the winner's own, as player 1's is.
+//
+// Then player 1's is local again until the white flash (phase 8; see
+// ending_local): from the final blow the HUD lays out the local fighter on the
+// left, and the other one, player 1's, on the right without its portrait and
+// gauges, so player 2's gauges went for the final blow and its replay.
+//
+// `menu` (a3, kept at flow +0x10) has the results go to the menu after the
+// fight (phase 14, "Proceed to next battle" or "Return to Battle Setup")
+// instead of on by itself (16). In a party battle (the battle request
+// *0x089D8508 with its first byte 1) the battle update (main 0x0888C048) sets
+// it only when player 1 lost and the battle goes on: main 0x0891BDFC(request,
+// the winner's side, fighter +0x10CC) says whether the other side still has a
+// member to send (a Tournament) or the winner has not yet won most fights (a
+// Round-Robin). In Player vs Player (Party) a win of player 1's asks the same
+// for player 1's side, so the menu follows every fight but the last, whoever
+// won.
+constexpr std::uint32_t kBattleRequest = 0x089D8508u;   // -> the battle request
+constexpr std::uint32_t kBattleGoesOn = 0x0891BDFCu;    // (request, side) -> 1 while the battle goes on
 void run_winner_decision(Guest *g, const decomp::CallState &in, GuestRegs &) {
     State &s = state();
-    if (versus::active() && !s.player2_won) {
-        const gaddr field = g_ld32(g, kBattleManager);
-        const gaddr p1 = field != 0u ? g_ld32(g, field + 0x38u) : 0u;
-        const gaddr p2 = field != 0u ? g_ld32(g, field + 0x3Cu) : 0u;
-        if (p1 != 0u && p2 != 0u && fighter_hp(g, p1) <= 0 && fighter_hp(g, p2) > 0) {
-            set_local(g, p1, false);
-            set_local(g, p2, true);
-            s.player2_won = true;
-            std::cout << "[versus] player 2 won: the ending is player 2's" << std::endl;
-        }
+    const gaddr field = g_ld32(g, kBattleManager);
+    const gaddr p1 = field != 0u ? g_ld32(g, field + 0x38u) : 0u;
+    const gaddr p2 = field != 0u ? g_ld32(g, field + 0x3Cu) : 0u;
+    bool lend = false;
+    if (versus::active() && !s.player2_won && p1 != 0u && p2 != 0u && fighter_hp(g, p1) <= 0 &&
+        fighter_hp(g, p2) > 0) {
+        set_local(g, p1, false);
+        set_local(g, p2, true);
+        lend = true;
+        s.player2_won = true;
+        s.player2_local = false;
+        std::cout << "[versus] player 2 won: the ending is player 2's" << std::endl;
     }
     GuestRegs regs{};
     for (int i = 0; i < 8; ++i) regs.a[i] = in.gpr[4 + i];
     for (int i = 0; i < 4; ++i) regs.f[i] = in.fpr[12 + i];
     decomp::call_original(g, kWinnerDecision, regs);
+    if (lend) {
+        set_local(g, p2, false);
+        set_local(g, p1, true);
+    }
+    // The winner as the call left it in the flow (+0x20; a forfeit's too,
+    // which the battle state does not hold), and the menu after player 1's
+    // win while the battle goes on.
+    const gaddr flow = in.gpr[4];
+    if (versus::active() && versus::party() && p1 != 0u && flow != 0u) {
+        const gaddr request = g_ld32(g, kBattleRequest);
+        const gaddr winner = g_ld32(g, flow + 0x20u);
+        if (winner == p1 && g_ld32(g, flow + 0x10u) == 0u && request != 0u && g_ld8(g, request) == 1u) {
+            const std::uint32_t side = static_cast<std::uint32_t>(static_cast<std::int32_t>(g_ld16s(g, p1 + 0x10CCu)));
+            const bool goes_on = g_call2(g, kBattleGoesOn, request, side) != 0u;
+            std::cout << "[versus] player 1 won a party fight" << (in.gpr[6] & 0xFFu ? " (a forfeit)" : "") << ": "
+                      << (goes_on ? "the menu after it" : "the last fight") << std::endl;
+            if (goes_on) g_st32(g, flow + 0x10u, 1u);
+        }
+    }
+}
+
+// Each split task: player 2's fighter local from the white flash on (phase 8,
+// the HUD gone) when player 2 won, for the victory pose and the results; and
+// a fight that starts again (the phase back at 0) forgets the last one's
+// winner, so player 2's guide and ending work in every fight.
+void ending_local(Guest *g) {
+    State &s = state();
+    const std::uint32_t phase = battle_phase(g);
+    if (phase == 0u && s.last_phase != 0u && s.last_phase < 32u) {
+        s.player2_won = false;
+        s.player2_local = false;
+    }
+    if (phase < 32u) s.last_phase = phase;
+    if (!s.player2_won || s.player2_local || phase < 8u || phase >= 32u) return;
+    const gaddr field = g_ld32(g, kBattleManager);
+    const gaddr p1 = field != 0u ? g_ld32(g, field + 0x38u) : 0u;
+    const gaddr p2 = field != 0u ? g_ld32(g, field + 0x3Cu) : 0u;
+    if (p1 == 0u || p2 == 0u) return;
+    set_local(g, p1, false);
+    set_local(g, p2, true);
+    s.player2_local = true;
 }
 
 // battle 0x08A3EB70 (EX Burst object, fighter, ...): an EX Burst starts. Its
@@ -1708,6 +1775,7 @@ void run_split_task(Guest *g, const decomp::CallState &in, GuestRegs &) {
     chase_lines_back(g);
     markers_back(g);
     if (versus::active()) trace_freerun_markers(g);
+    if (versus::active()) ending_local(g);
     if (!versus::active() || manager == 0u || graphics == 0u) return;
     // When the frame stays one full view, with player 2's cursor hidden:
     // - an EX Burst, from its start (run_ex_burst_start) until the

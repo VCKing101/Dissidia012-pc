@@ -861,12 +861,13 @@ void party_wording(psprecomp::GuestMemory &memory, State &s, const Room &room, b
 // The party battle's tally, each read: each fight's winner as it is known
 // (read_fighting), and the battle's winner once the game goes to its final
 // results. After a fight the battle goes on in one of two ways: phase 14, the
-// menu that follows player 1's defeat ("Proceed to next battle" or "Return to
-// Battle Setup"), or phase 16, after player 1's win or the last fight, which
-// goes on by itself (17, then the next fight's 0). After the last fight the
-// battle overlay goes, and the final results are the menu overlay's; after
-// "Return to Battle Setup" (a 14) it goes too, with no results. So the battle
-// is over when the overlay goes after a 16.
+// menu ("Proceed to next battle" or "Return to Battle Setup"; the game's after
+// player 1's defeat, the port's after every fight but the last, see
+// run_winner_decision in d012_split_view.cpp), or phase 16, after the last
+// fight, which goes on by itself (17, then the final results). After the last
+// fight the battle overlay goes, and the final results are the menu
+// overlay's; after "Return to Battle Setup" (a 14) it goes too, with no
+// results. So the battle is over when the overlay goes after a 16.
 //
 // Who won: in a Tournament the side with no members left lost; in a
 // Round-Robin the side with more wins won, and equal wins are a draw. So: if

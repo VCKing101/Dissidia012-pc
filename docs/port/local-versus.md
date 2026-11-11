@@ -1424,6 +1424,46 @@ The owner, testing the party build: "Wall running does not seem to work on Playe
   as before. **Not checked:** `D012_NO_MARKERS_PLAYER2=1`; real controllers; a marker over a wall in player 2's
   half (the arrows seen were a rail's).
 
+## 7.20 The owner's party session: the final blow, the menu after each fight (11 November 2026)
+
+The owner, playing the party build: player 2's side of the HUD went during the slow-motion final blow when player 2
+won; a faded overlay at the final blow played across the middle instead of in each half (in 1-on-1 too); and player
+2's forfeit went straight to the next fight while player 1's brought the menu. The owner chose the menu after every
+fight. V unless marked.
+
+- **Player 2's HUD.** From the final blow the HUD lays out the local fighter (`+0x5B0` bit 4) on the left and the
+  other one on the right, without its portrait and gauges when that is player 1's. Player 2's fighter was made local
+  at the final blow for the rest of the battle (7.11), so player 2's plate moved left and the right showed only player
+  1's Brave and 0 HP. Battle `0x08B09D88` keeps its victory-or-defeat choice in the flow (`+0x0C`, with the voice and
+  the phase), so player 2 is now local for that call only, player 1 again until the white flash (phase 8, the HUD
+  gone), and player 2 from then on for the victory pose and the results (`ending_local`). Checked: player 2's final
+  blow and replay with player 1's plate red at 0 HP on the left and player 2's whole plate on the right, the mirror of
+  player 1's (`build/port/versus/party/fb3`); player 2's VICTORY, "Player 2 wins" and the menu; the same in 1-on-1
+  (`v1`).
+- **The winner forgotten between fights.** `player2_won` was cleared only when a battle overlay first got its split
+  task, so after a win of player 2's the next fight (a party battle's, or a 1-on-1 rematch) kept it: no command guide
+  for player 2 (`guide_for_player2` is skipped once it is set) and no hand-over at player 2's next win. It is now
+  cleared when the phase goes back to 0. Checked: player 2's guide line in the rematch after player 2's win (`v1`).
+- **The menu after every fight.** The battle update (main `0x0888C048`) passes the menu flag to `0x08B09D88` (a3, kept
+  at flow `+0x10`; 0 goes on by itself, phase 16, else the menu, phase 14). In a party battle (the request
+  `*0x089D8508` with first byte 1; FIELD `+0x740` is 0 here) it is set only when player 1 lost and main
+  `0x0891BDFC(request, side)` says the battle goes on (the other side has a member left; in a Round-Robin, no
+  majority yet). Player 1's wins never had the menu. After the call, when the flow's winner (`+0x20`, a forfeit's
+  too: the battle state holds none then) is player 1's, the port asks the same for player 1's side and sets the flag.
+  Checked (`mn4`): player 2's forfeit in fight 1, "Player 1 wins" with the menu; "Proceed to next battle", player 1's
+  Lightning against player 2's second, Laguna; player 1's win of that last fight, no menu, the final results 2 - 0.
+- **The faded overlay** (not fixed). It is the final blow's zoom blur: each pass draws the frame into a 256x128 copy
+  (`0x417C000`, and `0x418C000` back to back) and draws that copy back over the screen as a fan of 30 vertices. In
+  the second pass the haze covers view 2 only up to x 256 (screen x 480 to 752; with player 1's from x 224 it looks
+  like one square across the middle). Leaving task 85000 (main `0x0888B9EC`, the screen filter manager
+  `*0x08B54330`, whose active filter's draw is empty; it disables every GE state but depth test, blending and
+  texturing) out of the second pass removes the band, and so does `D012_NO_TARGET_DRAWN_AREA=1` (each half then has
+  its own haze). So the renderer's choice of target for that copy in the second pass (PortableKit
+  `find_framebuffer_texture()`, the drawn-area rule of patch 0044, graphics-triage.md) is where it goes wrong. That
+  switch is not a fix: the water sphere needs the rule. Ruled out on the way: the banner element, every HUD layout,
+  the screen tints (`0x08AEEE0C`, tasks 69650 and 100100), the alpha screen (86000), effects following a fighter or
+  the camera, frame-buffer snapshots. `D012_SPLIT_ONLY`/`D012_SPLIT_SKIP` bisected it to 85000.
+
 ## 8. For later: two copies over the game's ad hoc versus
 
 The owner wants this route for online play and matchmaking, much later. What was found:
