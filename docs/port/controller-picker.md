@@ -31,7 +31,7 @@ was player 2's, and before, player 1 was left with none until it was connected a
 controller stays player 2's, and the battle pauses for player 1's as before.
 
 Button prompts and the menu's own button names follow player 1's controller. With player 1 on the keyboard,
-Automatic shows the PSP's buttons.
+Automatic shows the keys (since 13 November, [keyboard-controls.md](keyboard-controls.md)).
 
 ## Settings and switches
 

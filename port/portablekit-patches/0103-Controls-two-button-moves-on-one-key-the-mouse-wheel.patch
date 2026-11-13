@@ -1,0 +1,987 @@
+From 81b777e1789a1e1496ce6c849cb15bc969841660 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Fri, 13 Nov 2026 19:50:05 +1030
+Subject: [PATCH] Controls: two-button moves on one key, the mouse wheel, key
+ prompts
+
+Keyboard players asked for three things: one key for a move the game
+makes from two buttons, the mouse wheel in the game's menus, and prompts
+that show their keys.
+
+A profile can list moves made from two of the PSP's buttons together
+(GameProfile::combos, a ComboControl each: the settings.ini key, the
+menu's label, the buttons and a default key). Keyboard and mouse lists a
+row for each after the PSP's controls (actions Combo1 to Combo8), and the
+key presses all of the move's buttons in the same read. A key that
+already belongs to another control moves as with any row; the classic
+layout keeps the combos' keys but for those it uses.
+
+Wheel Up and Wheel Down are bindings like a key (kWheelUp, kWheelDown),
+captured by turning the wheel. Each notch presses its control for two of
+the game's pad reads and lets it go for two (input::WheelPresses), so a
+list moves one row per notch however fast the wheel turns; at most four
+notches wait, and turning back drops them. <prefix>_WHEEL_HOLD and
+<prefix>_WHEEL_GAP change the reads. The wheel counts while the window
+has the pointer, as the mouse's buttons do. A settings.ini from before
+held every binding, so the wheel bindings of the defaults
+(keyboard_defaults) are added to it once, where their control has room
+and the wheel is bound nowhere else; settings.ini then carries
+input.bindings_version=2. The input script has a wheel step.
+
+Button prompts has a Keyboard style (PromptStyle, PromptSetting,
+PadKind). Automatic shows it when player 1 last pressed a bound key or
+mouse button rather than their gamepad, or has none (not on a phone
+without one, which is played on the screen). ButtonPrompts::keys holds
+the first key or mouse button bound to each of the PSP's buttons, so a
+profile drawing the game's symbols can show them, and a rebinding draws
+them again.
+
+Tested with Dissidia 012 on Windows (clang build, USA disc), keyboard
+only: each combo key sent its two buttons in one read and the game made
+the move; wheel notches moved the main menu one row each; an older
+settings.ini gained the wheel on D-pad up and down; rebinding triangle
+and square in the menu redrew the game's prompts with the new keys. The
+input tests cover the combos, the wheel's names, presses and migration,
+and the keyboard style; they, the settings tests and the profile tests
+pass. Not tested: a real wheel or a touchpad's fractional scrolling, the
+keyboard as player 2, Linux, Android, another game.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ docs/PROFILE_GUIDE.md         |  6 ++-
+ host/gpu/vulkan_renderer.cpp  | 67 +++++++++++++++++++++++++-
+ host/input/bindings.cpp       | 65 +++++++++++++++++++++++++
+ host/input/bindings.hpp       | 66 ++++++++++++++++++++++++--
+ host/input/button_prompts.cpp | 17 ++++++-
+ host/input/button_prompts.hpp | 30 +++++++++---
+ host/profile.cpp              | 16 +++++++
+ host/profile.hpp              | 19 ++++++++
+ host/settings/settings.cpp    | 43 ++++++++++++++---
+ host/ui/input_script.cpp      | 14 +++++-
+ host/ui/input_script.hpp      |  2 +
+ host/ui/layer.cpp             |  3 ++
+ host/ui/menu.cpp              | 28 ++++++++---
+ tests/input_tests.cpp         | 89 +++++++++++++++++++++++++++++++++++
+ 14 files changed, 435 insertions(+), 30 deletions(-)
+
+diff --git a/docs/PROFILE_GUIDE.md b/docs/PROFILE_GUIDE.md
+index 711c650..5ef3e3b 100644
+--- a/docs/PROFILE_GUIDE.md
++++ b/docs/PROFILE_GUIDE.md
+@@ -67,6 +67,10 @@ Two more are for a port that goes further than the PSP did, and both are null un
+ 
+ `extra_buttons` names the buttons a modern pad has and a PSP lacks (`input::kExtraL2`, `kExtraR2`, `kExtraL3`, `kExtraR3`) that the port itself gives a meaning, reading them with `hle_extension::extra_buttons()`; the game never sees them. With L2 or R2 named, the triggers press those instead of copies of L and R (a trigger profile the player picks still wins), and Keyboard and mouse lists bindings for the buttons named (`input.bind.l2` and so on; 1 and 3 are L2 and R2 by default). `<prefix>_NO_EXTRA_BUTTONS=1` treats it as empty. Without it the triggers press L and R and the menu lists none of them.
+ 
++`combos` are moves the game makes from two of the PSP's buttons together, each a `ComboControl`: the key settings.ini keeps it under (`input.bind.<key>`), the label the menu shows, the SceCtrlButtons it presses, and the key or mouse button bound to it until the player says otherwise. Keyboard and mouse lists one row each after the PSP's own controls, and the key presses all of its buttons in the same read, which a game that tests "R held and × pressed" takes as the move. At most `input::kCombos`. Dissidia 012 lists its dodge (R + ×), dash, EX Mode, summon and two assists.
++
++`keyboard_defaults` changes the framework's keyboard and mouse for a game played otherwise. Only bindings settings.ini does not hold are taken from it, with one exception: the mouse wheel. Wheel Up and Wheel Down are bindings like a key (each notch presses its control for two of the game's pad reads and lets go for two, `<prefix>_WHEEL_HOLD` and `<prefix>_WHEEL_GAP` change that), and a settings.ini from before they existed held every binding; so a file without `input.bindings_version=2` gets the defaults' wheel bindings added where their control has room and the wheel is bound nowhere else, once. Binding the wheel to D-pad up and down there makes it move through the game's lists.
++
+ For a picture of the port's own beside one of the game's screens, such as a hint by a menu the port extends, `ui::add_game_overlay` (`host/ui/ui.hpp`) draws with Dear ImGui over every game frame it asks for, `ui::game_picture()` says where the game's 480x272 picture is in the window, and `ui::game_text_font()` is the face the game's own text is drawn with.
+ 
+ `tilt` is for a game played by tilting its world, as LocoRoco is with L and R: the buttons that tilt left and right, whether the game eases its tilt towards the held side (then a small roll of the device presses the button for part of the frames and tilts the world part of the way), and a sentence for the menu. With it, Controls gets a Tilt controls section, off by default, and the motion sensors of a gamepad (DualShock 4, DualSense, Switch Pro, a Steam Deck seen through SDL's own driver) or of the phone itself press those buttons (`host/input/tilt.hpp` for the arithmetic, `host/input/motion.hpp` for the sensors). Find the buttons and the easing with the game's pad trace before filling it in. Without it, nothing opens a sensor and the menu has no such section.
+@@ -81,7 +85,7 @@ For a picture of the port's own beside one of the game's screens, such as a hint
+ 
+ `second_player` says the port has a local second player (`hle_extension::want_second_pad`): the Controls page then offers **Player 1** and **Player 2**, each Automatic, Keyboard and mouse, or a gamepad by name (`input.player1`, `input.player2`; `<prefix>_PLAYER1`, `<prefix>_PLAYER2`). Without it the page offers one **Controller** row. A gamepad is named by its USB vendor and product ids, so it is the same over USB and Bluetooth, and two alike are one choice that each player can take. On Automatic, player 1 has the keyboard and mouse and the first gamepad free, player 2 the next. A chosen gamepad that is not connected leaves that player on Automatic until it is. The port says when player 2 is in the game (`second_player_playing`); otherwise a gamepad held for player 2 moves to player 1 when player 1's goes.
+ 
+-`edited_textures` lists textures the profile draws again as they load, with `edit_texture` doing the drawing: the game's button symbols in the style of the gamepad in use, for one. Each is an `EditedTexture`, named and found as a `SharpTexture` is. `edit_texture` gets the game's decoded picture (RGBA8) and a `TextureEditContext`, and returns its own picture, the same shape at any size (four times gives room for sharp detail), drawn with the same texture coordinates as a texture pack's image; false keeps the game's. The context holds what the picture may depend on: Button prompts with the gamepad in use and the Confirm button setting (`input::ButtonPrompts`: the style, which face button sends each of the PSP's, and whether L and R are on the triggers, which the Controls page's Swap shoulders and triggers does for every game), and whether Texture filter is Sharp. When it changes, the cached textures are dropped and the listed ones drawn again. Set `button_prompts` when they are the game's button symbols, and the Controls page offers Button prompts (Automatic, PSP, Xbox, PlayStation, Nintendo; Automatic follows the pad, the PSP's with none). A texture pack's image for one is drawn instead. `<prefix>_NO_TEXTURE_EDITS=1` draws the game's own, for a comparison. Keep the game's pixels out of the profile: draw over the picture it is given.
++`edited_textures` lists textures the profile draws again as they load, with `edit_texture` doing the drawing: the game's button symbols in the style of the gamepad in use, for one. Each is an `EditedTexture`, named and found as a `SharpTexture` is. `edit_texture` gets the game's decoded picture (RGBA8) and a `TextureEditContext`, and returns its own picture, the same shape at any size (four times gives room for sharp detail), drawn with the same texture coordinates as a texture pack's image; false keeps the game's. The context holds what the picture may depend on: Button prompts with the gamepad in use and the Confirm button setting (`input::ButtonPrompts`: the style, which face button sends each of the PSP's, and whether L and R are on the triggers, which the Controls page's Swap shoulders and triggers does for every game), and whether Texture filter is Sharp. When it changes, the cached textures are dropped and the listed ones drawn again. Set `button_prompts` when they are the game's button symbols, and the Controls page offers Button prompts (Automatic, PSP, Xbox, PlayStation, Nintendo, Keyboard; Automatic follows player 1's pad, or the keyboard when that was played last or no pad is connected, and the PSP's on a phone without one). In the keyboard style `ButtonPrompts::keys` holds the first key or mouse button bound to each of the PSP's buttons (`input::PromptKey`), so the picture can show it; it is empty in the other styles. A texture pack's image for one is drawn instead. `<prefix>_NO_TEXTURE_EDITS=1` draws the game's own, for a comparison. Keep the game's pixels out of the profile: draw over the picture it is given.
+ 
+ `cheats` lists cheats the port offers on the menu's Cheats page, beside the player's own PPSSPP cheat file (`PSP/Cheats/<disc id>.ini` on the memory stick, `host/cheats/cheats.hpp`). Each is a `BuiltinCheat`: a key for settings.ini, the heading it goes under, a name, a sentence for the footer, and its choices, each a label and its CWCheat code lines (what a cheat file has after `_L`). One choice makes a switch; several make Off and each. They run through the same engine as the file, before it, every 77 ms of the game's time, so a code written as a player would write it gives the same result. A write into recompiled code is left out, as for the file; such a code needs the interpreter, which cheats do not reach yet. Test each against the game's own screens before listing it: a public list's codes can name an address the game no longer reads. Without any, the page has only the switch and the file.
+ 
+diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
+index ec542dc..89870db 100644
+--- a/host/gpu/vulkan_renderer.cpp
++++ b/host/gpu/vulkan_renderer.cpp
+@@ -739,6 +739,27 @@ PadTuning pad_tuning() {
+ 
+ // Adds one gamepad's state to the pad bits and to the analog offsets the
+ // keyboard path also writes, so the two sources simply OR together.
++// The mouse wheel's notches as presses. <prefix>_WHEEL_HOLD and
++// <prefix>_WHEEL_GAP: the game's pad reads a notch is held and let go, 2 each.
++input::WheelPresses make_wheel_presses() {
++    const auto reads = [](const char *name) {
++        const char *text = portablekit::env(name);
++        const int value = text != nullptr ? std::atoi(text) : 0;
++        return value > 0 ? std::min(value, 30) : 2;
++    };
++    return input::WheelPresses(reads("WHEEL_HOLD"), reads("WHEEL_GAP"));
++}
++
++// Any of the pad's buttons pressed, or a stick or trigger pushed past half
++// way: someone is playing on it.
++bool gamepad_touched(SDL_Gamepad *device) {
++    for (int b = 0; b < SDL_GAMEPAD_BUTTON_COUNT; ++b)
++        if (SDL_GetGamepadButton(device, static_cast<SDL_GamepadButton>(b))) return true;
++    for (int a = 0; a < SDL_GAMEPAD_AXIS_COUNT; ++a)
++        if (std::abs(static_cast<int>(SDL_GetGamepadAxis(device, static_cast<SDL_GamepadAxis>(a)))) > 16384) return true;
++    return false;
++}
++
+ void read_gamepad(SDL_Gamepad *device, PadState &pad, int &analog_x, int &analog_y) {
+     const PadTuning tuning = pad_tuning();
+     std::uint32_t &buttons = pad.buttons;
+@@ -1317,6 +1338,13 @@ struct VulkanRenderer::Impl {
+         touch_motion.y += drag.y / static_cast<float>(height);
+     }
+     std::array<bool, input::kKeyPositions> scripted_keys{};
++    // The mouse wheel's notches, one press each at the game's pad reads.
++    input::WheelPresses wheel = make_wheel_presses();
++    // Player 1 played last on the keyboard or the mouse's buttons rather than
++    // on their gamepad: Automatic button prompts show the keys.
++    bool keyboard_last{};
++    // The kind of pad Automatic button prompts follow.
++    [[nodiscard]] input::PadKind prompt_pad_kind() const;
+ 
+     // Captures the pointer for the game when everything allows it and frees
+     // it otherwise. Whatever the mouse did or held across a change is dropped,
+@@ -1339,6 +1367,7 @@ struct VulkanRenderer::Impl {
+         if (pad_tuning().trace) std::cout << "[pad] pointer " << (wanted ? "captured" : "free") << std::endl;
+         mouse_buttons = 0u;
+         mouse_motion = {};
++        wheel.clear();
+         if (wanted) suppress_held = true;
+     }
+ 
+@@ -5189,14 +5218,30 @@ input::PadKind pad_kind(SDL_Gamepad *pad) {
+ 
+ } // namespace
+ 
++input::PadKind VulkanRenderer::Impl::prompt_pad_kind() const {
++    // The keyboard is player 2's: player 1 has only the gamepad.
++    if (keyboard_player2) return pad_kind(gamepad);
++#if defined(__ANDROID__)
++    // A phone without a pad is played on its screen, whose controls are the PSP's.
++    const bool keyboard = keyboard_last;
++#else
++    const bool keyboard = keyboard_last || gamepad == nullptr;
++#endif
++    return keyboard ? input::PadKind::Keyboard : pad_kind(gamepad);
++}
++
+ void VulkanRenderer::Impl::apply_texture_edits() {
+     static const bool off = portablekit::env_set("NO_TEXTURE_EDITS");
+     const GameProfile &profile = portablekit::game();
+     if (off || profile.edit_texture == nullptr || profile.edited_textures.empty()) return;
+     const settings::Settings &s = settings::current();
+     TextureEditContext context;
+-    context.prompts = input::button_prompts(s.button_prompts, pad_kind(gamepad), s.confirm_south,
++    context.prompts = input::button_prompts(s.button_prompts, prompt_pad_kind(), s.confirm_south,
+                                             profile.confirm_button == 1u, s.swap_triggers);
++    // The keys shown in the keyboard style: the first bound to each button.
++    if (context.prompts.style == input::PromptStyle::Keyboard)
++        for (std::size_t i = 0; i < input::kPromptKeys; ++i)
++            context.prompts.keys[i] = s.bindings[static_cast<std::size_t>(input::prompt_key_action(i))][0];
+     context.sharp_textures = sharp_textures;
+     if (edit_context && *edit_context == context) return;
+     const bool first = !edit_context;
+@@ -7162,6 +7207,11 @@ bool VulkanRenderer::pump_events() {
+             impl_->mouse_buttons |= 1u << event.button.button;
+         if (event.type == SDL_EVENT_MOUSE_BUTTON_UP && event.button.button < 32u)
+             impl_->mouse_buttons &= ~(1u << event.button.button);
++        // The wheel, in notches away from the player, whichever way the
++        // system turns it.
++        if (event.type == SDL_EVENT_MOUSE_WHEEL && impl_->mouse_captured && event.wheel.which != SDL_TOUCH_MOUSEID &&
++            (!impl_->scripted_input || event.wheel.which == kScriptedMouse))
++            impl_->wheel.add(event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -event.wheel.y : event.wheel.y);
+         if (impl_->event_hook && impl_->event_hook(event)) continue;
+         if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_F3 && !event.key.repeat && impl_->overlay_ready)
+             impl_->overlay_visible = !impl_->overlay_visible;
+@@ -7186,6 +7236,9 @@ void VulkanRenderer::sample_pad() {
+     // and the interface's, wait for the next pump_events(). The keyboard's
+     // and the gamepads' state follow what was pumped.
+     SDL_PumpEvents();
++    // A wheel notch is held and let go over the game's reads, never the
++    // window's frames: the game sees each press whatever its frame rate.
++    impl_->wheel.advance();
+     impl_->sample_pad((SDL_GetWindowFlags(impl_->window) & SDL_WINDOW_INPUT_FOCUS) != 0u);
+ }
+ 
+@@ -7205,6 +7258,7 @@ void VulkanRenderer::Impl::sample_pad(bool focused) {
+     const input::PadInput typed = input::read(player.bindings, [&](input::Binding binding) {
+         if (const int button = input::mouse_button_of(binding))
+             return impl_->mouse_captured && (impl_->mouse_buttons & (1u << button)) != 0u;
++        if (const int wheel = input::wheel_of(binding)) return impl_->mouse_captured && impl_->wheel.held() == wheel;
+         const int position = input::key_position(binding);
+         return position >= 0 && ((focused && position < SDL_SCANCODE_COUNT && keys[position]) ||
+                                  impl_->scripted_keys[static_cast<std::size_t>(position)]);
+@@ -7212,7 +7266,8 @@ void VulkanRenderer::Impl::sample_pad(bool focused) {
+     // The keys and mouse buttons into a player's pad: player 1's, or player
+     // 2's when Controls > Player 2 is the keyboard.
+     const auto add_typed = [&](PadState &target, int &offset_x, int &offset_y) {
+-        target.buttons |= typed.buttons;
++        // The game's combos press their buttons together (GameProfile::combos).
++        target.buttons |= typed.buttons | portablekit::combo_buttons(typed.combos);
+         target.extra |= typed.extra;
+         // Keys push the stick to the end of the nub's range each way: 0 or 255.
+         offset_x += input::stick::nub_offset(static_cast<float>(typed.stick_x) / 127.0f);
+@@ -7233,6 +7288,14 @@ void VulkanRenderer::Impl::sample_pad(bool focused) {
+     int analog_x = 0;
+     int analog_y = 0;
+     if (!impl_->keyboard_player2) add_typed(pad, analog_x, analog_y);
++    // Which of player 1's devices was played last, for the button prompts.
++    if (!impl_->keyboard_player2) {
++        if (typed.buttons != 0u || typed.extra != 0u || typed.combos != 0u || typed.jump || typed.stick_x != 0 ||
++            typed.stick_y != 0 || typed.camera_x != 0 || typed.camera_y != 0)
++            impl_->keyboard_last = true;
++        else if (impl_->gamepad != nullptr && gamepad_touched(impl_->gamepad))
++            impl_->keyboard_last = false;
++    }
+ 
+     // The gamepad adds to the same bits and offsets, so both sources are live.
+     if (impl_->gamepad != nullptr) read_gamepad(impl_->gamepad, pad, analog_x, analog_y);
+diff --git a/host/input/bindings.cpp b/host/input/bindings.cpp
+index 91cd8d8..662e12e 100644
+--- a/host/input/bindings.cpp
++++ b/host/input/bindings.cpp
+@@ -45,6 +45,8 @@ constexpr KeyName kKeyNames[] = {
+     {231, "Right GUI"},
+ };
+ constexpr const char *kMouseNames[] = {"Mouse Left", "Mouse Middle", "Mouse Right", "Mouse 4", "Mouse 5"};
++constexpr const char *kWheelUpName = "Wheel Up";
++constexpr const char *kWheelDownName = "Wheel Down";
+ constexpr const char *kSeparator = " / ";
+ 
+ constexpr ActionInfo kInfo[kActions] = {
+@@ -57,12 +59,17 @@ constexpr ActionInfo kInfo[kActions] = {
+     {"camera_down", "Camera down"}, {"camera_right", "Camera right"}, {"jump", "Jump (L and R together)"},
+     {"l2", "L2"},                  {"r2", "R2"},                   {"l3", "L3 (left stick click)"},
+     {"r3", "R3 (right stick click)"},
++    // A profile's combos are named by the profile (GameProfile::combos).
++    {"combo1", "Combo 1"},         {"combo2", "Combo 2"},          {"combo3", "Combo 3"},
++    {"combo4", "Combo 4"},         {"combo5", "Combo 5"},          {"combo6", "Combo 6"},
++    {"combo7", "Combo 7"},         {"combo8", "Combo 8"},
+ };
+ 
+ // SceCtrlButtons for the actions that are buttons.
+ constexpr std::uint32_t kButtonBits[kActions] = {
+     0u, 0u, 0u, 0u, 0x1000u, 0x2000u, 0x4000u, 0x8000u, 0x0100u, 0x0200u, 0x0008u, 0x0001u,
+     0x0010u, 0x0080u, 0x0040u, 0x0020u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u,
++    0u,      0u,      0u,      0u,      0u, 0u, 0u, 0u,
+ };
+ static_assert(sizeof kButtonBits / sizeof kButtonBits[0] == kActions);
+ static_assert(sizeof kInfo / sizeof kInfo[0] == kActions);
+@@ -158,6 +165,22 @@ void keep_saved(Bindings &bindings, const std::array<bool, kActions> &saved) {
+     }
+ }
+ 
++void add_default_wheel(Bindings &bindings, const Bindings &defaults) {
++    for (std::size_t i = 0; i < kActions; ++i)
++        for (const Binding wheel : defaults[i]) {
++            if (wheel_of(wheel) == 0) continue;
++            bool bound = false;
++            for (const Slots &slots : bindings)
++                for (const Binding binding : slots) bound = bound || binding == wheel;
++            if (bound) continue;
++            for (Binding &slot : bindings[i])
++                if (slot == kNone) {
++                    slot = wheel;
++                    break;
++                }
++        }
++}
++
+ const Bindings &default_bindings() {
+     static const Bindings value = make_default();
+     return value;
+@@ -182,6 +205,7 @@ std::uint32_t extra_bit(Action action) {
+ 
+ std::string name(Binding binding) {
+     if (const int button = mouse_button_of(binding)) return kMouseNames[button - 1];
++    if (const int wheel = wheel_of(binding)) return wheel > 0 ? kWheelUpName : kWheelDownName;
+     const int position = key_position(binding);
+     if (position < 0) return {};
+     for (const KeyName &k : kKeyNames)
+@@ -193,6 +217,8 @@ Binding from_name(std::string_view text) {
+     text = trim(text);
+     for (std::size_t i = 0; i < std::size(kMouseNames); ++i)
+         if (equal_ignoring_case(text, kMouseNames[i])) return mouse_button(static_cast<int>(i) + 1);
++    if (equal_ignoring_case(text, kWheelUpName)) return kWheelUp;
++    if (equal_ignoring_case(text, kWheelDownName)) return kWheelDown;
+     for (const KeyName &k : kKeyNames)
+         if (equal_ignoring_case(text, k.name)) return key(k.position);
+     // SDL's own names for the two keys named differently here.
+@@ -262,6 +288,7 @@ PadInput read(const Bindings &bindings, const std::function<bool(Binding)> &held
+         if (on[i]) {
+             pad.buttons |= kButtonBits[i];
+             pad.extra |= extra_bit(static_cast<Action>(i));
++            if (const int combo = combo_index(static_cast<Action>(i)); combo >= 0) pad.combos |= 1u << combo;
+         }
+     }
+     const auto axis = [&](Action negative, Action positive) {
+@@ -275,6 +302,44 @@ PadInput read(const Bindings &bindings, const std::function<bool(Binding)> &held
+     return pad;
+ }
+ 
++void WheelPresses::add(float notches) {
++    if (notches == 0.0f) return;
++    // A turn the other way drops what is still waiting from the last one.
++    const int sign = notches > 0.0f ? 1 : -1;
++    if ((waiting_ != 0 && (waiting_ > 0) != (sign > 0)) || (partial_ != 0.0f && (partial_ > 0.0f) != (sign > 0))) {
++        waiting_ = 0;
++        partial_ = 0.0f;
++    }
++    partial_ += notches;
++    while (partial_ >= 1.0f) {
++        waiting_ = std::min(waiting_ + 1, limit_);
++        partial_ -= 1.0f;
++    }
++    while (partial_ <= -1.0f) {
++        waiting_ = std::max(waiting_ - 1, -limit_);
++        partial_ += 1.0f;
++    }
++}
++
++void WheelPresses::advance() {
++    if (phase_ > 0) {
++        if (--phase_ == 0) phase_ = -std::max(1, gap_);
++        return;
++    }
++    if (phase_ < 0 && ++phase_ != 0) return;
++    if (waiting_ == 0) return;
++    direction_ = waiting_ > 0 ? 1 : -1;
++    waiting_ -= direction_;
++    phase_ = std::max(1, hold_);
++}
++
++void WheelPresses::clear() {
++    partial_ = 0.0f;
++    waiting_ = 0;
++    direction_ = 0;
++    phase_ = 0;
++}
++
+ MouseTurn mouse_turn(float counts_x, float counts_y, float degrees_per_count, bool invert_x, bool invert_y,
+                      float scale) {
+     const float factor = degrees_per_count * scale;
+diff --git a/host/input/bindings.hpp b/host/input/bindings.hpp
+index 1588863..ff90ac9 100644
+--- a/host/input/bindings.hpp
++++ b/host/input/bindings.hpp
+@@ -47,17 +47,40 @@ enum class Action : std::uint8_t {
+     R2,
+     L3,
+     R3,
++    // Several of the PSP's buttons at once from one key, for a game whose
++    // moves take two together (GameProfile::combos says which). Only listed
++    // for such a game, as many as it names.
++    Combo1,
++    Combo2,
++    Combo3,
++    Combo4,
++    Combo5,
++    Combo6,
++    Combo7,
++    Combo8,
+     Count
+ };
+ inline constexpr std::size_t kActions = static_cast<std::size_t>(Action::Count);
+ // Every action takes up to two keys or buttons.
+ inline constexpr std::size_t kSlots = 2u;
++inline constexpr std::size_t kCombos = 8u;
++// Combo1 + index; the index of a combo action, or -1 for any other.
++[[nodiscard]] constexpr Action combo_action(std::size_t index) {
++    return static_cast<Action>(static_cast<std::size_t>(Action::Combo1) + index);
++}
++[[nodiscard]] constexpr int combo_index(Action action) {
++    const auto i = static_cast<std::size_t>(action), first = static_cast<std::size_t>(Action::Combo1);
++    return i >= first && i < first + kCombos ? static_cast<int>(i - first) : -1;
++}
+ 
+ // 0: none. 1-511: a key position. kMouse + 1..5: a mouse button, numbered as
+-// SDL numbers them (left, middle, right, back, forward).
++// SDL numbers them (left, middle, right, back, forward). kWheelUp and
++// kWheelDown: a notch of the mouse wheel, which presses its action briefly.
+ using Binding = std::uint16_t;
+ inline constexpr Binding kNone = 0u;
+ inline constexpr Binding kMouse = 0x200u;
++inline constexpr Binding kWheelUp = kMouse + 6u;
++inline constexpr Binding kWheelDown = kMouse + 7u;
+ inline constexpr std::uint16_t kKeyPositions = 512u;
+ [[nodiscard]] constexpr Binding key(std::uint16_t position) { return position; }
+ [[nodiscard]] constexpr Binding mouse_button(int button) { return static_cast<Binding>(kMouse + button); }
+@@ -65,10 +88,14 @@ inline constexpr std::uint16_t kKeyPositions = 512u;
+ [[nodiscard]] constexpr int key_position(Binding binding) {
+     return binding != kNone && binding < kKeyPositions ? binding : -1;
+ }
+-// The mouse button, 1-5, or 0 for a key or none.
++// The mouse button, 1-5, or 0 for a key, the wheel or none.
+ [[nodiscard]] constexpr int mouse_button_of(Binding binding) {
+     return binding > kMouse && binding <= kMouse + 5u ? binding - kMouse : 0;
+ }
++// 1 for Wheel Up, -1 for Wheel Down, 0 for anything else.
++[[nodiscard]] constexpr int wheel_of(Binding binding) {
++    return binding == kWheelUp ? 1 : binding == kWheelDown ? -1 : 0;
++}
+ 
+ // The extra buttons: controls a modern pad has and a PSP lacks. The game
+ // never sees them; a port reads them (hle_extension::extra_buttons) to give
+@@ -95,7 +122,8 @@ struct ActionInfo {
+ };
+ [[nodiscard]] const ActionInfo &info(Action action);
+ 
+-// "W", "Left Shift", "Mouse Left"; "Key 123" for a position without a name.
++// "W", "Left Shift", "Mouse Left", "Wheel Up"; "Key 123" for a position
++// without a name.
+ [[nodiscard]] std::string name(Binding binding);
+ // The reverse of name(), ignoring case. kNone if the name is not known.
+ [[nodiscard]] Binding from_name(std::string_view text);
+@@ -109,6 +137,11 @@ bool parse(std::string_view text, Slots &slots);
+ // already has, so a default added later cannot press two controls at once.
+ void keep_saved(Bindings &bindings, const std::array<bool, kActions> &saved);
+ 
++// For a settings.ini written before the mouse wheel could be bound, which
++// held every binding: each wheel binding of `defaults` is added to its
++// action where that has a free slot and the wheel is not bound elsewhere.
++void add_default_wheel(Bindings &bindings, const Bindings &defaults);
++
+ // The menu's way of changing a binding: pressing what is already bound to
+ // the action removes it; anything else is taken from any other action and
+ // added, replacing the second slot when both are full.
+@@ -123,9 +156,36 @@ struct PadInput {
+     int camera_y{};
+     bool jump{};              // Action::Jump held
+     std::uint32_t extra{};    // kExtra* bits of the extra buttons held
++    std::uint32_t combos{};   // bit n: combo action n held (its buttons are the profile's)
+ };
+ [[nodiscard]] PadInput read(const Bindings &bindings, const std::function<bool(Binding)> &held);
+ 
++// The mouse wheel's notches as presses. Each notch holds Wheel Up's or Wheel
++// Down's action for `hold` of the game's pad reads and lets go for `gap`, so
++// the game sees one press per notch however fast the wheel turns. Notches
++// turned the other way drop the ones still waiting, and at most `limit` wait,
++// so a fast spin stops soon after the wheel does.
++class WheelPresses {
++public:
++    explicit WheelPresses(int hold = 2, int gap = 2, int limit = 4) : hold_(hold), gap_(gap), limit_(limit) {}
++    // Wheel motion in notches, positive away from the player (up); fractions
++    // add up, as a touchpad or a free-spinning wheel sends them.
++    void add(float notches);
++    // At each of the game's pad reads, before held() is asked.
++    void advance();
++    // 1 while a notch up is pressed, -1 while one down is, 0 between.
++    [[nodiscard]] int held() const { return phase_ > 0 ? direction_ : 0; }
++    [[nodiscard]] int waiting() const { return waiting_; }
++    void clear();
++
++private:
++    int hold_, gap_, limit_;
++    float partial_{};  // motion short of a notch
++    int waiting_{};    // notches not yet pressed, signed by direction
++    int direction_{};  // the notch being pressed or let go
++    int phase_{};      // > 0: reads left pressed; < 0: reads left released
++};
++
+ // The mouse's motion as degrees for the camera: positive yaw turns right,
+ // positive pitch looks down, as camera_input expects. `counts` are relative
+ // motion; `scale` is what the current camera makes of it (1, or Aim speed's
+diff --git a/host/input/button_prompts.cpp b/host/input/button_prompts.cpp
+index 0c1d35c..1c0aad8 100644
+--- a/host/input/button_prompts.cpp
++++ b/host/input/button_prompts.cpp
+@@ -22,15 +22,19 @@ ButtonPrompts button_prompts(PromptSetting setting, PadKind pad, bool confirm_so
+             prompts.style = PromptStyle::Xbox;
+             prompts.numbered_shoulders = true;
+             break;
++        case PadKind::Keyboard: prompts.style = PromptStyle::Keyboard; break;
+         }
+         break;
+     case PromptSetting::Psp: prompts.style = PromptStyle::Psp; break;
+     case PromptSetting::Xbox: prompts.style = PromptStyle::Xbox; break;
+     case PromptSetting::PlayStation: prompts.style = PromptStyle::PlayStation; break;
+     case PromptSetting::Nintendo: prompts.style = PromptStyle::Nintendo; break;
++    case PromptSetting::Keyboard: prompts.style = PromptStyle::Keyboard; break;
+     }
+-    // The PSP's own symbols are L and R wherever they are pressed.
+-    prompts.l_r_on_triggers = swap_triggers && prompts.style != PromptStyle::Psp;
++    // The PSP's own symbols are L and R wherever they are pressed, and keys
++    // are keys.
++    prompts.l_r_on_triggers =
++        swap_triggers && prompts.style != PromptStyle::Psp && prompts.style != PromptStyle::Keyboard;
+     return prompts;
+ }
+ 
+@@ -41,6 +45,7 @@ const char *prompt_setting_label(PromptSetting setting) {
+     case PromptSetting::Xbox: return "Xbox";
+     case PromptSetting::PlayStation: return "PlayStation";
+     case PromptSetting::Nintendo: return "Nintendo";
++    case PromptSetting::Keyboard: return "Keyboard";
+     }
+     return "Automatic";
+ }
+@@ -51,8 +56,16 @@ const char *prompt_style_name(PromptStyle style) {
+     case PromptStyle::Xbox: return "xbox";
+     case PromptStyle::PlayStation: return "playstation";
+     case PromptStyle::Nintendo: return "nintendo";
++    case PromptStyle::Keyboard: return "keyboard";
+     }
+     return "psp";
+ }
+ 
++Action prompt_key_action(std::size_t key) {
++    static constexpr Action kActionsShown[kPromptKeys] = {Action::Cross, Action::Circle, Action::Square,
++                                                          Action::Triangle, Action::L, Action::R,
++                                                          Action::Start, Action::Select};
++    return key < kPromptKeys ? kActionsShown[key] : Action::Cross;
++}
++
+ } // namespace portablekit::input
+diff --git a/host/input/button_prompts.hpp b/host/input/button_prompts.hpp
+index 2af8e0e..b05bc6d 100644
+--- a/host/input/button_prompts.hpp
++++ b/host/input/button_prompts.hpp
+@@ -6,22 +6,35 @@
+ // (GameProfile::edit_texture) reads it from the TextureEditContext it is
+ // given. No SDL here: the renderer says what kind of pad is in use.
+ 
++#include "input/bindings.hpp"
++
++#include <array>
++#include <cstddef>
+ #include <cstdint>
+ 
+ namespace portablekit::input {
+ 
+-// The player's choice. Automatic follows the gamepad in use.
+-enum class PromptSetting : std::uint8_t { Automatic, Psp, Xbox, PlayStation, Nintendo };
+-inline constexpr int kPromptSettings = 5;
++// The player's choice. Automatic follows the gamepad in use, or the keyboard
++// when that was played last.
++enum class PromptSetting : std::uint8_t { Automatic, Psp, Xbox, PlayStation, Nintendo, Keyboard };
++inline constexpr int kPromptSettings = 6;
+ 
+-// What the symbols are drawn as.
+-enum class PromptStyle : std::uint8_t { Psp, Xbox, PlayStation, Nintendo };
++// What the symbols are drawn as. Keyboard: the key or mouse button bound to
++// each of the PSP's buttons (ButtonPrompts::keys).
++enum class PromptStyle : std::uint8_t { Psp, Xbox, PlayStation, Nintendo, Keyboard };
+ 
+ // A face button by where it sits on the pad.
+ enum class FaceButton : std::uint8_t { South, East, West, North };
+ 
+-// The kind of pad in use, as far as the names on its buttons go.
+-enum class PadKind : std::uint8_t { None, Xbox, PlayStation, Nintendo, SteamDeck };
++// The kind of pad in use, as far as the names on its buttons go. Keyboard:
++// the player plays on the keyboard and mouse.
++enum class PadKind : std::uint8_t { None, Xbox, PlayStation, Nintendo, SteamDeck, Keyboard };
++
++// The PSP buttons the keyboard style shows a key for, in ButtonPrompts::keys.
++enum class PromptKey : std::uint8_t { Cross, Circle, Square, Triangle, L, R, Start, Select };
++inline constexpr std::size_t kPromptKeys = 8u;
++// The bound action that presses a PromptKey.
++[[nodiscard]] Action prompt_key_action(std::size_t key);
+ 
+ struct ButtonPrompts {
+     PromptStyle style{PromptStyle::Psp};
+@@ -36,6 +49,9 @@ struct ButtonPrompts {
+     // The PSP's L and R are on the triggers (Swap shoulders and triggers), so
+     // they are shown as LT/RT, L2/R2 or ZL/ZR. Never in the PSP style.
+     bool l_r_on_triggers{};
++    // The keyboard style: the first key or mouse button bound to each
++    // PromptKey (kNone: none). Empty in the other styles.
++    std::array<Binding, kPromptKeys> keys{};
+ 
+     bool operator==(const ButtonPrompts &) const = default;
+ };
+diff --git a/host/profile.cpp b/host/profile.cpp
+index a081528..1e17c7a 100644
+--- a/host/profile.cpp
++++ b/host/profile.cpp
+@@ -24,6 +24,22 @@ std::uint32_t active_extra_buttons() {
+     return off ? 0u : game().extra_buttons;
+ }
+ 
++const ComboControl *combo_control(input::Action action) {
++    const int index = input::combo_index(action);
++    if (index < 0) return nullptr;
++    const std::span<const ComboControl> combos = game().combos;
++    if (static_cast<std::size_t>(index) >= combos.size() || combos[index].key == nullptr) return nullptr;
++    return &combos[index];
++}
++
++std::uint32_t combo_buttons(std::uint32_t combos) {
++    std::uint32_t buttons = 0u;
++    for (std::size_t i = 0; i < input::kCombos && combos != 0u; ++i, combos >>= 1u)
++        if ((combos & 1u) != 0u)
++            if (const ComboControl *combo = combo_control(input::combo_action(i))) buttons |= combo->buttons;
++    return buttons;
++}
++
+ namespace {
+ const ProfileVariant *g_active_variant = nullptr;
+ }
+diff --git a/host/profile.hpp b/host/profile.hpp
+index 3d3a82e..ce6ef94 100644
+--- a/host/profile.hpp
++++ b/host/profile.hpp
+@@ -50,6 +50,16 @@ struct TriggerProfile {
+     std::uint32_t right; // and R2
+ };
+ 
++// One key for a move the game makes from two buttons together, such as a
++// dodge on R and cross (GameProfile::combos).
++struct ComboControl {
++    const char *key;         // settings.ini, after "input.bind.", e.g. "dodge"
++    const char *label;       // the menu, e.g. "Dodge (R + ×)"
++    std::uint32_t buttons;   // the PSP buttons it presses, as SceCtrlButtons bits
++    input::Binding first{};  // what presses it until the player says otherwise
++    input::Binding second{};
++};
++
+ // A game played by tilting its world (LocoRoco tilts with L and R): what the
+ // device's roll presses when the player turns tilt controls on
+ // (input/tilt.hpp, input/motion.hpp).
+@@ -309,6 +319,10 @@ struct GameProfile {
+     // changes what it needs. Only what settings.ini does not hold is taken
+     // from here, so a player's own bindings stay. Null: the framework's.
+     void (*keyboard_defaults)(input::Bindings &bindings, bool &mouse) = nullptr;
++    // Moves the game makes from two of the PSP's buttons together that a key
++    // or a mouse button can press at once (Keyboard and mouse lists one row
++    // each after the PSP's controls), up to input::kCombos. Empty: none.
++    std::span<const ComboControl> combos = {};
+     // The extra buttons (input::kExtraL2 ... kExtraR3: controls a PSP lacks)
+     // that this port gives a meaning of its own, reading them through
+     // hle_extension::extra_buttons(); the game itself never sees them. With
+@@ -447,6 +461,11 @@ void set_active_region_release(const RegionRelease *release);
+ [[nodiscard]] std::span<const SaveFolder> active_save_folders();
+ // GameProfile::extra_buttons, or 0 with <prefix>_NO_EXTRA_BUTTONS set.
+ [[nodiscard]] std::uint32_t active_extra_buttons();
++// The game's combo a combo action stands for (GameProfile::combos), or null:
++// not a combo action, or one the game does not name.
++[[nodiscard]] const ComboControl *combo_control(input::Action action);
++// The PSP buttons the combo actions in `combos` (input::PadInput::combos) press.
++[[nodiscard]] std::uint32_t combo_buttons(std::uint32_t combos);
+ 
+ // getenv("<env_prefix>_" + name), so host code names the variable without the
+ // game's prefix: env("TRACE_GE") reads <prefix>_TRACE_GE in Yakumo.
+diff --git a/host/settings/settings.cpp b/host/settings/settings.cpp
+index 70aa163..f4ebdf4 100644
+--- a/host/settings/settings.cpp
++++ b/host/settings/settings.cpp
+@@ -125,7 +125,8 @@ const Names<input::PromptSetting> kPromptSettings{{{input::PromptSetting::Automa
+                                                    {input::PromptSetting::Psp, "psp"},
+                                                    {input::PromptSetting::Xbox, "xbox"},
+                                                    {input::PromptSetting::PlayStation, "playstation"},
+-                                                   {input::PromptSetting::Nintendo, "nintendo"}}};
++                                                   {input::PromptSetting::Nintendo, "nintendo"},
++                                                   {input::PromptSetting::Keyboard, "keyboard"}}};
+ // A trigger profile by the key the game gives it, or "standard" for L and R.
+ bool parse_trigger_profile(const std::string &text, std::uint32_t &out) {
+     if (text == "standard") {
+@@ -461,6 +462,10 @@ const std::vector<Field> &fields() {
+              return true;
+          },
+          [](const Settings &s) { return s.builtin_cheats; }, [](Settings &s, const char *t) { s.builtin_cheats = t; }},
++        // The bindings as this version writes them: 2 since the mouse wheel
++        // could be bound (load() adds the wheel to older files).
++        {"input.bindings_version", nullptr, [](Settings &, const std::string &) { return true; },
++         [](const Settings &) { return std::string("2"); }, nullptr},
+         {"ui.last_folder", nullptr,
+          [](Settings &s, const std::string &t) {
+              s.last_folder = t;
+@@ -471,6 +476,17 @@ const std::vector<Field> &fields() {
+     return table;
+ }
+ 
++// The settings.ini key of a bound action, "input.bind.triangle", or of one
++// of the game's combos, "input.bind.dodge"; empty for a combo it does not name.
++std::string binding_key(std::size_t i) {
++    const auto action = static_cast<input::Action>(i);
++    if (input::combo_index(action) >= 0) {
++        const ComboControl *combo = combo_control(action);
++        return combo != nullptr ? std::string("input.bind.") + combo->key : std::string{};
++    }
++    return std::string("input.bind.") + input::info(action).key;
++}
++
+ // One key per bound action, "input.bind.triangle=Mouse Left", after the
+ // fixed table.
+ const std::vector<Field> &all_fields() {
+@@ -479,7 +495,8 @@ const std::vector<Field> &all_fields() {
+         static std::vector<std::string> keys(input::kActions);
+         std::vector<Field> list = fields();
+         for (std::size_t i = 0; i < input::kActions; ++i) {
+-            keys[i] = std::string("input.bind.") + input::info(static_cast<input::Action>(i)).key;
++            keys[i] = binding_key(i);
++            if (keys[i].empty()) continue;
+             list.push_back(Field{keys[i].c_str(), nullptr,
+                                  [i](Settings &s, const std::string &t) { return input::parse(t, s.bindings[i]); },
+                                  [i](const Settings &s) { return input::format(s.bindings[i]); }, nullptr});
+@@ -529,15 +546,23 @@ void load(State &s) {
+     std::array<bool, input::kActions> saved{};
+     bool any_saved = false;
+     for (std::size_t i = 0; i < input::kActions; ++i) {
+-        saved[i] = s.file.count(std::string("input.bind.") + input::info(static_cast<input::Action>(i)).key) != 0u;
++        const std::string key = binding_key(i);
++        saved[i] = !key.empty() && s.file.count(key) != 0u;
+         any_saved = any_saved || saved[i];
+     }
+     if (any_saved) input::keep_saved(s.values.bindings, saved);
++    // A file from before the wheel could be bound saved every binding then:
++    // the wheel's defaults are added to it, once (save() writes version 2).
++    if (const auto version = s.file.find("input.bindings_version");
++        any_saved && (version == s.file.end() || std::atoi(version->second.c_str()) < 2))
++        input::add_default_wheel(s.values.bindings, defaults().bindings);
+     if (portablekit::env("TRACE_PAD") != nullptr) {
+         std::cout << "[pad] keyboard:";
+-        for (std::size_t i = 0; i < input::kActions; ++i)
+-            std::cout << " " << input::info(static_cast<input::Action>(i)).key << "="
+-                      << input::format(s.values.bindings[i]) << (saved[i] ? "" : "*");
++        for (std::size_t i = 0; i < input::kActions; ++i) {
++            const std::string key = binding_key(i);
++            if (key.empty()) continue;
++            std::cout << " " << key.substr(11) << "=" << input::format(s.values.bindings[i]) << (saved[i] ? "" : "*");
++        }
+         std::cout << " (* the game's default); mouse " << (s.values.mouse ? "on" : "off") << std::endl;
+     }
+     // A fixed name in the environment is meant for unattended runs, which
+@@ -567,7 +592,11 @@ Settings defaults_for(Platform platform) {
+     // Confirm where a console of the game's region has it: cross, the south
+     // button, outside Japan; circle, the east button, in Japan.
+     values.confirm_south = game().confirm_button == 1u;
+-    // The game's keyboard first; a phone then turns the mouse off either way.
++    // The game's combos and keyboard first; a phone then turns the mouse off
++    // either way.
++    for (std::size_t i = 0; i < input::kCombos; ++i)
++        if (const ComboControl *combo = combo_control(input::combo_action(i)))
++            values.bindings[static_cast<std::size_t>(input::combo_action(i))] = {combo->first, combo->second};
+     if (const auto keyboard = game().keyboard_defaults) keyboard(values.bindings, values.mouse);
+     if (platform == Platform::Android) {
+         values.aspect = Aspect::Fill;
+diff --git a/host/ui/input_script.cpp b/host/ui/input_script.cpp
+index b58cf36..2787ed7 100644
+--- a/host/ui/input_script.cpp
++++ b/host/ui/input_script.cpp
+@@ -109,7 +109,7 @@ std::pair<std::string, std::uint64_t> name_and_frames(const std::string &argumen
+     return {argument.substr(0, space), std::max<std::uint64_t>(1u, std::strtoull(last.c_str(), nullptr, 10))};
+ }
+ 
+-bool mouse_step(const std::string &action) { return action == "mouse" || action == "click"; }
++bool mouse_step(const std::string &action) { return action == "mouse" || action == "click" || action == "wheel"; }
+ 
+ bool sensor_step(const std::string &action) { return action == "tilt" || action == "gyro"; }
+ 
+@@ -140,6 +140,18 @@ void run(const Step &step) {
+         event.motion.xrel = dx;
+         event.motion.yrel = dy;
+         SDL_PushEvent(&event);
++    } else if (step.action == "wheel") {
++        float notches = 0.0f;
++        std::stringstream(step.argument) >> notches;
++        SDL_Event event{};
++        event.type = SDL_EVENT_MOUSE_WHEEL;
++        event.wheel.timestamp = SDL_GetTicksNS();
++        event.wheel.windowID = SDL_GetWindowID(Layer::get().renderer().window());
++        event.wheel.which = gpu::kScriptedMouse;
++        event.wheel.y = notches;
++        event.wheel.integer_y = static_cast<Sint32>(notches);
++        event.wheel.direction = SDL_MOUSEWHEEL_NORMAL;
++        SDL_PushEvent(&event);
+     } else if (step.action == "click") {
+         const auto [name, frames] = name_and_frames(step.argument, kHoldFrames);
+         static const std::pair<const char *, std::uint8_t> kButtons[] = {
+diff --git a/host/ui/input_script.hpp b/host/ui/input_script.hpp
+index 6019ec8..8ceb6a1 100644
+--- a/host/ui/input_script.hpp
++++ b/host/ui/input_script.hpp
+@@ -13,6 +13,8 @@
+ //   mouse DX DY       move the mouse by DX, DY counts
+ //   click BUTTON [N]  press a mouse button (left, middle, right, x1, x2) for N
+ //                     frames, 4 by default
++//   wheel N           turn the mouse wheel N notches, away from the player
++//                     when positive
+ //   pad BUTTON[+...] [N]  press buttons of a virtual gamepad and release them N
+ //                     frames later, 4 by default (SDL names: a, b, x, y, start,
+ //                     leftstick, rightstick, leftshoulder, dpup, dpdown, ...)
+diff --git a/host/ui/layer.cpp b/host/ui/layer.cpp
+index 58f490f..46d2f54 100644
+--- a/host/ui/layer.cpp
++++ b/host/ui/layer.cpp
+@@ -254,6 +254,9 @@ bool Layer::handle_event(const SDL_Event &event) {
+             return true;
+         else if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN && event.button.button >= 1u && event.button.button <= 5u)
+             pressed = input::mouse_button(event.button.button);
++        else if (event.type == SDL_EVENT_MOUSE_WHEEL && event.wheel.y != 0.0f)
++            pressed = (event.wheel.y > 0.0f) != (event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED) ? input::kWheelUp
++                                                                                                 : input::kWheelDown;
+         else if (event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN)
+             pressed = input::kNone;
+         if (pressed) {
+diff --git a/host/ui/menu.cpp b/host/ui/menu.cpp
+index 126f84e..af3b82d 100644
+--- a/host/ui/menu.cpp
++++ b/host/ui/menu.cpp
+@@ -838,7 +838,8 @@ void Menu::controls() {
+         if (const int delta = choice_row("Button prompts", input::prompt_setting_label(s.button_prompts),
+                                          options_for("input.button_prompts",
+                                                      "The buttons the game's prompts show. Automatic: those of the "
+-                                                     "gamepad in use, or the PSP's with none."))) {
++                                                     "gamepad in use, or the keys when the keyboard or mouse was "
++                                                     "used last."))) {
+             s.button_prompts = static_cast<input::PromptSetting>(
+                 cycle(static_cast<int>(s.button_prompts), delta, input::kPromptSettings));
+             settings::save();
+@@ -993,8 +994,8 @@ void Menu::controls() {
+     {
+         RowOptions o = options_for("input.mouse",
+                                    "While the game runs, the window takes the pointer: moving the mouse turns the "
+-                                   "camera and its buttons press what they are bound to. Esc opens this menu and "
+-                                   "gives the pointer back.");
++                                   "camera, and its buttons and wheel press what they are bound to. Esc opens this "
++                                   "menu and gives the pointer back.");
+         if (toggle_row("Mouse", s.mouse, o)) {
+             s.mouse = !s.mouse;
+             settings::save();
+@@ -1050,13 +1051,17 @@ void Menu::controls() {
+         if (const std::uint32_t extra = input::extra_bit(action);
+             extra != 0u && (portablekit::active_extra_buttons() & extra) == 0u)
+             continue;
++        // The combos the game names, under their own names.
++        const ComboControl *combo = portablekit::combo_control(action);
++        if (input::combo_index(action) >= 0 && combo == nullptr) continue;
+         std::string value = input::format(s.bindings[i]);
+         if (binding_ == action) value = "Press a key or a mouse button";
+         else if (value.empty()) value = "None";
+         const RowOptions o{false, {},
+-                           "Press a key or a mouse button to add it, or one it has already to remove it; Esc "
+-                           "cancels. A key taken from another control leaves that one."};
+-        std::string label = input::info(action).label;
++                           "Press a key or a mouse button, or turn the mouse wheel, to add it, or one it has "
++                           "already to remove it; Esc cancels. A key taken from another control leaves that one. "
++                           "A notch of the wheel is a short press."};
++        std::string label = combo != nullptr ? combo->label : input::info(action).label;
+         // The game's confirm and back buttons, as the console says.
+         const bool cross_confirms = portablekit::game().confirm_button == 1u;
+         if (action == input::Action::Circle) label += cross_confirms ? "  (back)" : "  (confirm)";
+@@ -1163,7 +1168,16 @@ void Menu::controls() {
+     if (button_row("Use the classic keyboard layout",
+                    {false, {}, "The keys of earlier versions, for play without a mouse: I J K L move, Z X A S are "
+                                "the face buttons, Q and W are L and R."})) {
+-        s.bindings = input::classic_bindings();
++        // The game's combos keep their keys, but for those the layout uses.
++        input::Bindings classic = input::classic_bindings();
++        std::array<bool, input::kActions> kept{};
++        for (std::size_t i = 0; i < input::kActions; ++i) {
++            const bool combo = input::combo_index(static_cast<input::Action>(i)) >= 0;
++            kept[i] = !combo;
++            if (combo) classic[i] = s.bindings[i];
++        }
++        input::keep_saved(classic, kept);
++        s.bindings = classic;
+         settings::save();
+     }
+ }
+diff --git a/tests/input_tests.cpp b/tests/input_tests.cpp
+index 49c5973..d54d87f 100644
+--- a/tests/input_tests.cpp
++++ b/tests/input_tests.cpp
+@@ -289,11 +289,99 @@ void test_button_prompts() {
+           "the PSP's symbols stay L and R");
+     check(button_prompts(PromptSetting::Nintendo, PadKind::None, true, true, true).l_r_on_triggers,
+           "a chosen style shows the triggers with no pad");
++    check(button_prompts(PromptSetting::Automatic, PadKind::Keyboard, true, true, true).style == PromptStyle::Keyboard &&
++              !button_prompts(PromptSetting::Automatic, PadKind::Keyboard, true, true, true).l_r_on_triggers,
++          "the keyboard in use shows the keys, never triggers");
++    check(button_prompts(PromptSetting::Keyboard, PadKind::Xbox, true, true, false).style == PromptStyle::Keyboard,
++          "Keyboard chosen shows the keys with a pad connected");
++    check(prompt_key_action(static_cast<std::size_t>(PromptKey::Triangle)) == Action::Triangle &&
++              prompt_key_action(static_cast<std::size_t>(PromptKey::Select)) == Action::Select,
++          "each key shown is the one bound to its button");
++    check(std::string(prompt_setting_label(PromptSetting::Keyboard)) == "Keyboard" &&
++              std::string(prompt_style_name(PromptStyle::Keyboard)) == "keyboard",
++          "the keyboard style has its names");
+     check(std::string(prompt_setting_label(PromptSetting::PlayStation)) == "PlayStation" &&
+               std::string(prompt_style_name(PromptStyle::Nintendo)) == "nintendo",
+           "the menu and the log name each one");
+ }
+ 
++// One key for two buttons together, and the mouse wheel as presses.
++void test_combos_and_wheel() {
++    check(combo_index(Action::Combo1) == 0 && combo_index(Action::Combo8) == 7 && combo_index(Action::R3) == -1 &&
++              combo_action(2) == Action::Combo3,
++          "combo actions are numbered from Combo1");
++    check(default_bindings()[static_cast<std::size_t>(Action::Combo1)][0] == kNone,
++          "the framework binds no combo: the game names them");
++    Bindings b = default_bindings();
++    b[static_cast<std::size_t>(Action::Combo2)] = {from_name("C"), kNone};
++    PadInput pad = read(b, [&](Binding x) { return x == from_name("C"); });
++    check(pad.combos == 2u && pad.buttons == 0u, "a combo key is reported as its combo, its buttons are the game's");
++    assign(b, Action::Combo1, from_name("C"));
++    check(slots_of(b, Action::Combo1)[0] == from_name("C") && slots_of(b, Action::Combo2)[0] == kNone,
++          "a key moves from one combo to another like any control");
++
++    check(name(kWheelUp) == "Wheel Up" && from_name("wheel down") == kWheelDown && wheel_of(kWheelUp) == 1 &&
++              wheel_of(kWheelDown) == -1 && mouse_button_of(kWheelUp) == 0 && key_position(kWheelDown) == -1,
++          "the wheel's two ways are bindings of their own");
++    Slots slots{};
++    check(parse("Up / Wheel Up", slots) && slots[1] == kWheelUp && format(slots) == "Up / Wheel Up",
++          "the wheel round-trips through settings.ini");
++    b = default_bindings();
++    b[static_cast<std::size_t>(Action::Down)] = {from_name("Down"), kWheelDown};
++    pad = read(b, [&](Binding x) { return x == kWheelDown; });
++    check(pad.buttons == 0x0040u, "Wheel Down presses what it is bound to");
++
++    // Two notches at once: pressed two reads, released two, pressed again.
++    WheelPresses wheel;
++    wheel.add(2.0f);
++    std::vector<int> seen;
++    for (int i = 0; i < 9; ++i) {
++        wheel.advance();
++        seen.push_back(wheel.held());
++    }
++    check(seen == std::vector<int>({1, 1, 0, 0, 1, 1, 0, 0, 0}), "each notch is its own press, with a release between");
++    wheel.clear();
++    wheel.add(0.4f);
++    wheel.add(0.4f);
++    wheel.advance();
++    check(wheel.held() == 0, "less than a notch presses nothing");
++    wheel.add(0.4f);
++    wheel.advance();
++    check(wheel.held() == 1, "fractions add up to a notch");
++    wheel.clear();
++    wheel.add(10.0f);
++    check(wheel.waiting() == 4, "a fast spin waits for at most four presses");
++    wheel.advance();
++    wheel.add(-1.0f);
++    check(wheel.waiting() == -1 && wheel.held() == 1, "turning back drops what waits; the press under way finishes");
++    wheel.advance();
++    wheel.advance();
++    wheel.advance();
++    wheel.advance();
++    check(wheel.held() == -1, "then the other way is pressed");
++    Bindings defaults = default_bindings();
++    defaults[static_cast<std::size_t>(Action::Up)][1] = kWheelUp;
++    defaults[static_cast<std::size_t>(Action::Down)][1] = kWheelDown;
++    Bindings saved = default_bindings();
++    saved[static_cast<std::size_t>(Action::Down)] = {from_name("Down"), from_name("PageDown")};
++    add_default_wheel(saved, defaults);
++    check(slots_of(saved, Action::Up)[1] == kWheelUp && slots_of(saved, Action::Down)[1] == from_name("PageDown"),
++          "an older file gains the wheel where its control has room");
++    saved = default_bindings();
++    saved[static_cast<std::size_t>(Action::CameraUp)] = {from_name("I"), kWheelUp};
++    add_default_wheel(saved, defaults);
++    check(slots_of(saved, Action::Up)[1] == kNone && slots_of(saved, Action::Down)[1] == kWheelDown,
++          "a wheel already bound elsewhere stays there");
++    WheelPresses longer(3, 1);
++    longer.add(1.0f);
++    seen.clear();
++    for (int i = 0; i < 5; ++i) {
++        longer.advance();
++        seen.push_back(longer.held());
++    }
++    check(seen == std::vector<int>({1, 1, 1, 0, 0}), "hold and gap are counted in reads");
++}
++
+ // Which gamepad each player gets (Controls > Player 1 and Player 2).
+ void test_players() {
+     PlayerDevice parsed;
+@@ -378,6 +466,7 @@ int main() {
+     test_read();
+     test_mouse_turn();
+     test_stick();
++    test_combos_and_wheel();
+     std::cout << (failures ? "FAIL" : "PASS") << ": input bindings (" << failures << " failures)\n";
+     return failures ? 1 : 0;
+ }
+-- 
+2.53.0.windows.1
+

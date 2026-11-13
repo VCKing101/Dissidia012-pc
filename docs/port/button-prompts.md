@@ -3,8 +3,9 @@
 > 10 November 2026. `port/host/d012_button_prompts.cpp`, PortableKit patch 0100. Windows, clang build, USA disc.
 
 The game's prompts show the PSP's buttons: cross, circle, triangle, square, L, R, SELECT and START. The menu's
-Controls page now has **Button prompts**: Automatic, PSP, Xbox, PlayStation or Nintendo. Automatic shows the
-buttons of the gamepad in use, and the PSP's with no gamepad. The game's own prompts change, the ones inside its
+Controls page now has **Button prompts**: Automatic, PSP, Xbox, PlayStation, Nintendo or Keyboard. Automatic shows the
+buttons of the gamepad in use, or the keys when the keyboard was played last or no gamepad is connected (see Keys
+on the keyboard, 13 November). The game's own prompts change, the ones inside its
 hints too ("Press RB while holding LB to Change Paradigms!"), and so do the port's message, save and keyboard
 screens.
 
@@ -48,6 +49,23 @@ gamepad pressing each trigger and shoulder in turn with `D012_TRACE_PAD=1`:
   PlayStation, Nintendo, a Steam Deck) and looked at.
 
 Not tested: a real controller, the Linux build, the Steam Deck, the European disc.
+
+## Keys on the keyboard
+
+> 13 November 2026, PortableKit patch 0103. [keyboard-controls.md](keyboard-controls.md) has the rest of the
+> keyboard work.
+
+The **Keyboard** style draws each of the PSP's buttons as the key or mouse button bound to it first (Controls >
+Keyboard and mouse): the game's silver key, the one its L and R already have, with the key's name in capitals
+(`SPACE`, `SHIFT`, `ENTER`, `BKSP`, `CTRL`, `TAB`, `PGDN`, `KP5` for the keypad, `F10`, any letter, digit or sign), an
+arrow for the arrow keys, or a mouse with the bound button or the wheel filled in. A round button becomes a key the
+size of the L and R keys, the SELECT and START pills carry the key's name, and so do the MANUAL badge and the plain
+L and R letters. A button with nothing bound keeps its PSP shape on the key, or its name (L, R, START, SELECT).
+
+Automatic shows the keys when player 1 last pressed a bound key or mouse button rather than the controller, or has
+none (on a phone without a controller, the PSP's: it is played on the screen). Moving the mouse alone does not
+switch. The port's dialogs answer Enter and Esc on the keyboard, so in this style their hints read "Enter: OK"
+and "Esc: Back"; the keyboard screen's keys come from the same sheet.
 
 ## Where the symbols are
 
@@ -95,7 +113,7 @@ Nothing of the game's is in the port but where its symbols sit.
 
 ## Switches
 
-- `D012_BUTTON_PROMPTS=auto|psp|xbox|playstation|nintendo`: the setting for this run (`input.button_prompts` in
+- `D012_BUTTON_PROMPTS=auto|psp|xbox|playstation|nintendo|keyboard`: the setting for this run (`input.button_prompts` in
   `settings.ini`).
 - `D012_SWAP_TRIGGERS=1`: Swap shoulders and triggers on for this run (`input.swap_triggers` in `settings.ini`).
 - `D012_NO_TEXTURE_EDITS=1`: the game's own symbols whatever the setting.

@@ -186,6 +186,9 @@ disassembler and the new `tools/port/` scripts cover the analysis.
 - [Choosing each player's controller](controller-picker.md): the Controls page's Player 1 and Player 2, each
   Automatic, the keyboard and mouse, or a controller by name; a controller held for player 2 moves up when player 1's
   goes, outside a versus battle (patch 0101).
+- [Keyboard and mouse](keyboard-controls.md) (13 November): one key each for the battle moves made from two
+  buttons (dodge, dash, EX Mode, summon, both assists), the mouse wheel as D-pad presses in the game's lists, and
+  prompts that show the bound keys; why clicking the game's menu items was not built (patch 0103).
 
 ## Next steps
 

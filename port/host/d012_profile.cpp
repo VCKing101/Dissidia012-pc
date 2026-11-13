@@ -123,6 +123,26 @@ constexpr SharpTexture kSharpTextures[] = {
     {"0000000042af9f8c2c87379b", 64u, 128u},
 };
 
+
+// Battle moves made from two buttons together, one key each (Controls >
+// Keyboard and mouse): the dodge, dash, EX Mode, summon and the two assists.
+constexpr std::uint32_t kL = 0x0100u, kR = 0x0200u, kTriangle = 0x1000u, kCircle = 0x2000u, kCross = 0x4000u,
+                        kSquare = 0x8000u;
+constexpr ComboControl kCombos[] = {
+    {"dodge", "Dodge (R + ×)", kR | kCross, input::key(6)},                  // C
+    {"dash", "Dash (R + △)", kR | kTriangle, input::key(21)},                // R
+    {"ex_mode", "EX Mode (R + □)", kR | kSquare, input::key(10)},            // G
+    {"summon", "Summon (R + ○)", kR | kCircle, input::key(25)},              // V
+    {"brave_assist", "Brave assist (L + ○)", kL | kCircle, input::key(29)},  // Z
+    {"hp_assist", "HP assist (L + □)", kL | kSquare, input::key(27)},        // X
+};
+
+// The mouse wheel moves through the game's lists, as D-pad up and down.
+void keyboard_defaults(input::Bindings &bindings, bool &) {
+    bindings[static_cast<std::size_t>(input::Action::Up)][1] = input::kWheelUp;
+    bindings[static_cast<std::size_t>(input::Action::Down)][1] = input::kWheelDown;
+}
+
 } // namespace
 
 const GameProfile &game() {
@@ -167,6 +187,11 @@ const GameProfile &game() {
         // and a North American one can find each other.
         .adhoc_product_code = "ULUS10566",
         .adhoc_group_name = adhoc_group_name,
+
+        // The keyboard: the mouse wheel on the D-pad, and a key each for the
+        // battle moves made from two buttons together.
+        .keyboard_defaults = &keyboard_defaults,
+        .combos = kCombos,
 
         // L2 and R2, which a PSP lacks, switch the loading screen's D-pad
         // between its menu and the battle music (d012_bgm_playlist.cpp); R3
