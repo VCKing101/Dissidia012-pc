@@ -364,7 +364,7 @@ Section 1 (`0x1CEAC` bytes), from main `0x088CB110` / `0x088CB210`:
 | `+0x0FD94` | `0x2644` | statistics: 19 u32, **35 x 200** per-ID records, 1 total record, **35 x 0x30**, 19 x 0x2C, 1 u32 |
 | `+0x123D8` | `0xCC` | 100 x 2 bytes + 4 |
 | `+0x124A4` | 31 x `0x57C` = `0xAA04` | per-character play-style records, slot order = list B; each is 5 x `0x118` + u32 |
-| `+0x1CEA8` | 4 | u32 |
+| `+0x1CEA8` | 4 | u32: **PP** (root `+0x1DE00`, main `0x08BCCB38`; seen in the port 12 Nov 2026, `docs/port/cheats.md`) |
 
 Character record (`0x778` bytes; initialiser main `0x088CBA10`, new-game fill main `0x088CBBB4`):
 
