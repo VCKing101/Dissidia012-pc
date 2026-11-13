@@ -13,13 +13,16 @@
 // takes (battle 0x089E82C8) and skips an empty slot.
 //
 // Issue 16 crashed there: a slot held 0x00004E20, which is not an entry, and
-// the reset wrote to guest address 0x4E28. What put it there is not known
-// (not reproduced: Quick Battle and Arcade, assists, falls to the stage's
-// bottom, versus battles first). PPSSPP lets such a write go by. This puts
-// the ring right before each update instead: a slot that holds anything but
-// 0 or an entry gets an entry that is neither in the ring nor in use, or 0,
-// so the take never resets something that is not an entry. In a sound ring
-// it writes nothing. Each repair is logged, at most four for a display.
+// the reset wrote to guest address 0x4E28. That is the PP cheat's 20,000: in
+// that battle slot 12 lies at 0x096B2DC0, the PP Catalog's copy of PP in the
+// menus, which the cheat wrote at all times (issue 20 is the same write
+// meeting Yuna's animations). The port's own cheat now writes the save's PP
+// (d012_cheats.cpp), but a cheat file can still carry the old code, and
+// PPSSPP lets such a write go by. So this puts the ring right before each
+// update: a slot that holds anything but 0 or an entry gets an entry that is
+// neither in the ring nor in use, or 0, so the take never resets something
+// that is not an entry. In a sound ring it writes nothing. Each repair is
+// logged, at most four for a display.
 //
 // The update is called from battle 0x089E7D60, in another generated unit, so
 // this override takes every call. D012_BRAVE_POOL_GUARD=0 turns it off.

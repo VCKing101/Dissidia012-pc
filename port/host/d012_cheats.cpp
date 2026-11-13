@@ -30,14 +30,24 @@ constexpr CheatChoice kGil[] = {
     {"1,000,000", "0x203BFA00 0x000F4240"},
     {"99,999,999", "0x203BFA00 0x05F5E0FF"},
 };
+// KP is the word at 0x08BEE31C, in the save. The list's 1,000,000 KP code
+// also writes 0x09692D14, in the game's pool, which other data uses in a
+// battle; all three choices write only 0x08BEE31C.
 constexpr CheatChoice kKp[] = {
     {"250", "0x003EE31C 0x000000FA"},
-    {"1,000,000", "0x203EE31C 0x000F4240\n0x20E92D14 0x000F4240"},
+    {"1,000,000", "0x203EE31C 0x000F4240"},
     {"99,999,999", "0x203EE31C 0x05F5E0FF"},
 };
+// PP is the word at 0x08BCCB38, in the save (root + 0x1DE00, the last word
+// of its first section); the PP Catalog copies it in when it opens and back
+// when it closes. The list's PP code writes the catalog's copy, 0x096B2DC0,
+// in the game's pool, which holds other data whenever the catalog is not
+// open: the save being loaded, an animation of Yuna's while a battle loads
+// (issue 20: the game crashed), the Brave numbers' list in a battle
+// (issue 16). So both choices write 0x08BCCB38.
 constexpr CheatChoice kPp[] = {
-    {"20,000", "0x20EB2DC0 0x00004E20"},
-    {"9,999,999", "0x20EB2DC0 0x0098967F"},
+    {"20,000", "0x203CCB38 0x00004E20"},
+    {"9,999,999", "0x203CCB38 0x0098967F"},
 };
 
 // --- Items -------------------------------------------------------------------
@@ -84,7 +94,7 @@ constexpr const char *kOpponent = "Opponent";
 constexpr BuiltinCheat kCheats[] = {
     {"gil", kMoney, "Gil", "Keeps your gil at this amount.", kGil},
     {"kp", kMoney, "KP", "Keeps your KP at this amount. Leave the KP shop and enter it again to see it.", kKp},
-    {"pp", kMoney, "PP", "Keeps your PP at this amount. Leave the PP Catalog and open it again to see it.", kPp},
+    {"pp", kMoney, "PP", "Keeps your PP at this amount. The PP Catalog shows it the next time you open it.", kPp},
     {"equipment", kItems, "All equipment ×99", "Keeps 99 of every piece of equipment.", kEquipment},
     {"accessories", kItems, "All accessories ×99", "Keeps 99 of every accessory.", kAccessories},
     {"mala_bestia", kItems, "Mala Bestia accessories ×99", "Keeps 99 of each Mala Bestia accessory.", kMalaBestia},
