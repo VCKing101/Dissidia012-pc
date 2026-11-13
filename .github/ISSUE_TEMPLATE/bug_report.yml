@@ -6,6 +6,8 @@ body:
     attributes:
       value: |
         Thanks for reporting. Please don't attach game files, extracted data or save files; see [CONTRIBUTING.md](https://github.com/VCKing101/Dissidia012-pc/blob/main/CONTRIBUTING.md).
+
+        **Using a modded ISO?** Try again with a clean ISO, a dump of your disc with nothing changed, before you report. A modded ISO changes the game's own files, so the bug may come from the mod.
   - type: dropdown
     id: install
     attributes:
@@ -31,6 +33,23 @@ body:
       label: System
       description: Windows version, GPU and, for source builds, the Visual Studio and Python versions.
       placeholder: Windows 11 24H2, RTX 3060, VS 2022 17.14, Python 3.12
+    validations:
+      required: true
+  - type: dropdown
+    id: cheats-mods
+    attributes:
+      label: Cheats and mods
+      description: Everything that was on when it happened. Name the cheats and mods under What happened.
+      multiple: true
+      options:
+        - No cheats or mods
+        - Cheats on the Cheats page
+        - A PPSSPP cheat file
+        - A texture pack
+        - Music mods (the mod folder)
+        - Fan costumes
+        - A modded ISO
+        - Something else
     validations:
       required: true
   - type: textarea
