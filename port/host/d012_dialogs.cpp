@@ -303,6 +303,12 @@ constexpr Piece kCircle{kSymbols, 75, 111, 12, 12};
 constexpr Piece kTriangle{kSymbols, 57, 111, 12, 12};
 constexpr Piece kSquare{kSymbols, 93, 111, 12, 12};
 constexpr Piece kStart{kSymbols, 40, 93, 29, 12};
+// The keyboard style draws each face button as a key the size of the game's L
+// and R (d012_button_prompts.cpp), wider than the round button.
+constexpr Piece kCrossKey{kSymbols, 108, 111, 18, 14};
+constexpr Piece kCircleKey{kSymbols, 72, 111, 18, 14};
+constexpr Piece kTriangleKey{kSymbols, 54, 111, 18, 14};
+constexpr Piece kSquareKey{kSymbols, 90, 111, 18, 14};
 // A plate's rows: 0-3 its top bevel, 4-15 its flat face, 16-19 its bottom
 // bevel. A cell's frame: 3 pixels at the left and top, 6 at the right and
 // bottom (the inner shading and the lower bevel).
@@ -787,10 +793,26 @@ void instruction(const Canvas &c, std::string_view text) {
 // With another pad's buttons (Controls > Button prompts), the symbol of the
 // button where it sits on the pad: the sheet's PSP button sent from there
 // shows that button.
+// A face button's piece, as a key in the keyboard style.
+const Piece &face_piece(const Piece &round) {
+    const auto context = prompts_now();
+    if (!context || context->prompts.style != portablekit::input::PromptStyle::Keyboard) return round;
+    if (&round == &kCross) return kCrossKey;
+    if (&round == &kCircle) return kCircleKey;
+    if (&round == &kTriangle) return kTriangleKey;
+    if (&round == &kSquare) return kSquareKey;
+    return round;
+}
 const Piece &symbol_at(const portablekit::input::ButtonPrompts &prompts, portablekit::input::FaceButton at) {
-    if (prompts.cross == at) return kCross;
-    if (prompts.circle == at) return kCircle;
-    return at == portablekit::input::FaceButton::West ? kSquare : kTriangle;
+    if (prompts.cross == at) return face_piece(kCross);
+    if (prompts.circle == at) return face_piece(kCircle);
+    return face_piece(at == portablekit::input::FaceButton::West ? kSquare : kTriangle);
+}
+// The keyboard style: the port's dialogs answer Enter and Esc on the keyboard,
+// so their hints name those keys.
+bool keyboard_hints() {
+    const auto context = prompts_now();
+    return context && context->prompts.style == portablekit::input::PromptStyle::Keyboard;
 }
 const Piece &confirm_symbol(bool south) {
     using portablekit::input::FaceButton;
@@ -928,7 +950,10 @@ void message(const ui::MessageSkinView &view, ui::SkinPointer &pointer) {
     }
 
     std::vector<Hint> items;
-    if (!view.question) {
+    if (keyboard_hints()) {
+        items.push_back({nullptr, view.question ? "Enter: Choose" : "Enter: OK"});
+        if (view.question && view.allow_back) items.push_back({nullptr, "Esc: Back"});
+    } else if (!view.question) {
         items.push_back({&confirm_symbol(view.confirm_south), "OK"});
     } else {
         items.push_back({&confirm_symbol(view.confirm_south), "Choose"});
@@ -1060,7 +1085,10 @@ void save_list(const ui::SaveListSkinView &view, ui::SkinPointer &pointer) {
         text_at(c, kPanelX + 10.0f, kPanelY + 114.0f + 13.0f * static_cast<float>(n), lines[n], detail);
     c.draw->PopClipRect();
 
-    hint_bar(c, {{&confirm_symbol(view.confirm_south), verb}, {&back_symbol(view.confirm_south), "Back"}});
+    if (keyboard_hints())
+        hint_bar(c, {{nullptr, std::string("Enter: ") + verb}, {nullptr, "Esc: Back"}});
+    else
+        hint_bar(c, {{&confirm_symbol(view.confirm_south), verb}, {&back_symbol(view.confirm_south), "Back"}});
 }
 
 // --- The keyboard -----------------------------------------------------------
@@ -1124,8 +1152,8 @@ void keyboard(const ui::KeyboardSkinView &view, ui::SkinPointer &pointer) {
     if (view.gamepad) {
         hint_bar(c, {{&confirm_symbol(south), "Type"},
                      {&back_symbol(south), "Delete"},
-                     {&kSquare, "Shift"},
-                     {&kTriangle, "Space"},
+                     {&face_piece(kSquare), "Shift"},
+                     {&face_piece(kTriangle), "Space"},
                      {&kStart, "OK"}});
     } else {
         hint_bar(c, {{nullptr, "Enter: OK"}, {nullptr, "Esc: Cancel"}, {nullptr, "Backspace: Delete"}});

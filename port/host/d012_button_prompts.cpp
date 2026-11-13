@@ -21,7 +21,9 @@
 #include <array>
 #include <cmath>
 #include <iterator>
+#include <string>
 #include <string_view>
+#include <utility>
 
 namespace d012 {
 namespace {
@@ -213,66 +215,146 @@ std::vector<Point> bowl(float top, float bottom, float reach) {
     return line;
 }
 
+// The stadium of O and 0, `w` wide.
+std::vector<Point> stadium(float w) {
+    const float r = w / 2.0f;
+    std::vector<Point> o;
+    arc(o, r, r, r, r, 180.0f, 360.0f);
+    arc(o, r, 1.0f - r, r, r, 0.0f, 180.0f);
+    o.push_back(o.front());
+    return o;
+}
+
+// The capitals, digits and signs keys are named with (the keyboard style),
+// by character; null for one not drawn.
 const Glyph *glyph(char c) {
-    static const std::array<Glyph, 17> glyphs = [] {
-        std::array<Glyph, 17> g{};
-        g[0] = {0.62f, {{{0.0f, 1.0f}, {0.31f, 0.0f}, {0.62f, 1.0f}}, {{0.105f, 0.66f}, {0.515f, 0.66f}}}};  // A
-        g[1] = {0.56f, {{{0.0f, 0.0f}, {0.0f, 1.0f}}, bowl(0.0f, 0.47f, 0.52f), bowl(0.47f, 1.0f, 0.56f)}};    // B
-        g[2] = {0.46f,
-                {{{0.46f, 0.0f}, {0.0f, 0.0f}, {0.0f, 1.0f}, {0.46f, 1.0f}}, {{0.0f, 0.5f}, {0.4f, 0.5f}}}};  // E
-        g[3] = {0.56f, {{{0.0f, 0.0f}, {0.0f, 1.0f}}, {{0.56f, 0.0f}, {0.56f, 1.0f}}, {{0.0f, 0.5f}, {0.56f, 0.5f}}}};  // H
-        g[4] = {0.0f, {{{0.0f, 0.0f}, {0.0f, 1.0f}}}};                                                   // I
-        g[5] = {0.44f, {{{0.0f, 0.0f}, {0.0f, 1.0f}, {0.44f, 1.0f}}}};                                   // L
-        g[6] = {0.56f, {{{0.0f, 1.0f}, {0.0f, 0.0f}, {0.56f, 1.0f}, {0.56f, 0.0f}}}};                    // N
+    static const std::array<Glyph, 128> glyphs = [] {
+        std::array<Glyph, 128> g{};
+        const auto set = [&](char ch, float width, std::vector<std::vector<Point>> lines) {
+            g[static_cast<unsigned char>(ch)] = {width, std::move(lines)};
+        };
+        set('A', 0.62f, {{{0.0f, 1.0f}, {0.31f, 0.0f}, {0.62f, 1.0f}}, {{0.105f, 0.66f}, {0.515f, 0.66f}}});
+        set('B', 0.56f, {{{0.0f, 0.0f}, {0.0f, 1.0f}}, bowl(0.0f, 0.47f, 0.52f), bowl(0.47f, 1.0f, 0.56f)});
         {
-            std::vector<Point> o;  // O: a stadium
-            arc(o, 0.3f, 0.3f, 0.3f, 0.3f, 180.0f, 360.0f);
-            arc(o, 0.3f, 0.7f, 0.3f, 0.3f, 0.0f, 180.0f);
-            o.push_back(o.front());
-            g[7] = {0.6f, {o}};
+            std::vector<Point> c;  // C: the stadium open at the right
+            arc(c, 0.3f, 0.3f, 0.3f, 0.3f, -28.0f, -180.0f, 12);
+            arc(c, 0.3f, 0.7f, 0.3f, 0.3f, 180.0f, 28.0f, 12);
+            set('C', 0.57f, {c});
         }
-        g[8] = {0.52f, {{{0.0f, 1.0f}, {0.0f, 0.0f}}, bowl(0.0f, 0.54f, 0.52f)}};  // P
-        g[9] = {0.56f, {{{0.0f, 1.0f}, {0.0f, 0.0f}}, bowl(0.0f, 0.52f, 0.52f), {{0.24f, 0.52f}, {0.56f, 1.0f}}}};
         {
-            std::vector<Point> s;  // S: two bowls meeting at the middle
-            arc(s, 0.26f, 0.25f, 0.26f, 0.25f, -25.0f, -270.0f, 20);
-            arc(s, 0.26f, 0.75f, 0.26f, 0.25f, -90.0f, 155.0f, 20);
-            g[10] = {0.52f, {s}};
+            std::vector<Point> d{{0.0f, 0.0f}, {0.2f, 0.0f}};  // D: a stem and one bowl
+            arc(d, 0.2f, 0.5f, 0.36f, 0.5f, -90.0f, 90.0f, 16);
+            d.push_back({0.0f, 1.0f});
+            d.push_back({0.0f, 0.0f});
+            set('D', 0.56f, {d});
         }
-        g[11] = {0.5f, {{{0.0f, 0.0f}, {0.5f, 0.0f}}, {{0.25f, 0.0f}, {0.25f, 1.0f}}}};                 // T
-        g[12] = {0.58f, {{{0.0f, 0.0f}, {0.58f, 1.0f}}, {{0.58f, 0.0f}, {0.0f, 1.0f}}}};                // X
-        g[13] = {0.58f, {{{0.0f, 0.0f}, {0.29f, 0.52f}, {0.58f, 0.0f}}, {{0.29f, 0.52f}, {0.29f, 1.0f}}}};  // Y
-        g[14] = {0.3f, {{{0.0f, 0.22f}, {0.3f, 0.0f}, {0.3f, 1.0f}}}};                                  // 1
+        set('E', 0.46f, {{{0.46f, 0.0f}, {0.0f, 0.0f}, {0.0f, 1.0f}, {0.46f, 1.0f}}, {{0.0f, 0.5f}, {0.4f, 0.5f}}});
+        set('F', 0.46f, {{{0.46f, 0.0f}, {0.0f, 0.0f}, {0.0f, 1.0f}}, {{0.0f, 0.48f}, {0.38f, 0.48f}}});
+        {
+            std::vector<Point> gg;  // G: C with a bar turned in
+            arc(gg, 0.3f, 0.3f, 0.3f, 0.3f, -28.0f, -180.0f, 12);
+            arc(gg, 0.3f, 0.7f, 0.3f, 0.3f, 180.0f, 0.0f, 12);
+            gg.push_back({0.6f, 0.53f});
+            gg.push_back({0.34f, 0.53f});
+            set('G', 0.6f, {gg});
+        }
+        set('H', 0.56f, {{{0.0f, 0.0f}, {0.0f, 1.0f}}, {{0.56f, 0.0f}, {0.56f, 1.0f}}, {{0.0f, 0.5f}, {0.56f, 0.5f}}});
+        set('I', 0.0f, {{{0.0f, 0.0f}, {0.0f, 1.0f}}});
+        {
+            std::vector<Point> j{{0.44f, 0.0f}};  // J: down and hooked left
+            arc(j, 0.22f, 0.72f, 0.22f, 0.28f, 0.0f, 180.0f, 12);
+            set('J', 0.44f, {j});
+        }
+        set('K', 0.54f, {{{0.0f, 0.0f}, {0.0f, 1.0f}}, {{0.52f, 0.0f}, {0.0f, 0.62f}}, {{0.2f, 0.44f}, {0.54f, 1.0f}}});
+        set('L', 0.44f, {{{0.0f, 0.0f}, {0.0f, 1.0f}, {0.44f, 1.0f}}});
+        set('M', 0.66f, {{{0.0f, 1.0f}, {0.0f, 0.0f}, {0.33f, 0.62f}, {0.66f, 0.0f}, {0.66f, 1.0f}}});
+        set('N', 0.56f, {{{0.0f, 1.0f}, {0.0f, 0.0f}, {0.56f, 1.0f}, {0.56f, 0.0f}}});
+        set('O', 0.6f, {stadium(0.6f)});
+        set('P', 0.52f, {{{0.0f, 1.0f}, {0.0f, 0.0f}}, bowl(0.0f, 0.54f, 0.52f)});
+        set('Q', 0.6f, {stadium(0.6f), {{0.34f, 0.74f}, {0.62f, 1.02f}}});
+        set('R', 0.56f, {{{0.0f, 1.0f}, {0.0f, 0.0f}}, bowl(0.0f, 0.52f, 0.52f), {{0.24f, 0.52f}, {0.56f, 1.0f}}});
+        {
+            std::vector<Point> sl;  // S: two bowls meeting at the middle
+            arc(sl, 0.26f, 0.25f, 0.26f, 0.25f, -25.0f, -270.0f, 20);
+            arc(sl, 0.26f, 0.75f, 0.26f, 0.25f, -90.0f, 155.0f, 20);
+            set('S', 0.52f, {sl});
+        }
+        set('T', 0.5f, {{{0.0f, 0.0f}, {0.5f, 0.0f}}, {{0.25f, 0.0f}, {0.25f, 1.0f}}});
+        {
+            std::vector<Point> u{{0.0f, 0.0f}, {0.0f, 0.7f}};
+            arc(u, 0.28f, 0.7f, 0.28f, 0.3f, 180.0f, 0.0f, 14);
+            u.push_back({0.56f, 0.0f});
+            set('U', 0.56f, {u});
+        }
+        set('V', 0.58f, {{{0.0f, 0.0f}, {0.29f, 1.0f}, {0.58f, 0.0f}}});
+        set('W', 0.78f, {{{0.0f, 0.0f}, {0.19f, 1.0f}, {0.39f, 0.28f}, {0.59f, 1.0f}, {0.78f, 0.0f}}});
+        set('X', 0.58f, {{{0.0f, 0.0f}, {0.58f, 1.0f}}, {{0.58f, 0.0f}, {0.0f, 1.0f}}});
+        set('Y', 0.58f, {{{0.0f, 0.0f}, {0.29f, 0.52f}, {0.58f, 0.0f}}, {{0.29f, 0.52f}, {0.29f, 1.0f}}});
+        set('Z', 0.5f, {{{0.02f, 0.0f}, {0.5f, 0.0f}, {0.0f, 1.0f}, {0.5f, 1.0f}}});
+        set('0', 0.54f, {stadium(0.54f)});
+        set('1', 0.3f, {{{0.0f, 0.22f}, {0.3f, 0.0f}, {0.3f, 1.0f}}});
         {
             std::vector<Point> two;  // 2: a hook over the top, then down to the foot
             arc(two, 0.25f, 0.27f, 0.25f, 0.27f, 200.0f, 385.0f, 18);
             two.push_back({0.0f, 1.0f});
             two.push_back({0.52f, 1.0f});
-            g[15] = {0.52f, {two}};
+            set('2', 0.52f, {two});
         }
-        g[16] = {0.5f, {{{0.02f, 0.0f}, {0.5f, 0.0f}, {0.0f, 1.0f}, {0.5f, 1.0f}}}};                    // Z
+        {
+            std::vector<Point> top, bottom;  // 3: two bowls open at the left
+            arc(top, 0.25f, 0.26f, 0.25f, 0.26f, -160.0f, 90.0f, 16);
+            arc(bottom, 0.25f, 0.76f, 0.27f, 0.24f, -90.0f, 160.0f, 16);
+            set('3', 0.52f, {top, bottom});
+        }
+        set('4', 0.56f, {{{0.4f, 1.0f}, {0.4f, 0.0f}, {0.0f, 0.68f}, {0.56f, 0.68f}}});
+        {
+            std::vector<Point> five{{0.48f, 0.0f}, {0.06f, 0.0f}, {0.03f, 0.46f}};
+            arc(five, 0.26f, 0.7f, 0.26f, 0.3f, -120.0f, 160.0f, 16);
+            set('5', 0.52f, {five});
+        }
+        {
+            std::vector<Point> loop;  // 6: a stroke down into a loop
+            arc(loop, 0.26f, 0.72f, 0.26f, 0.28f, 0.0f, 360.0f, 20);
+            set('6', 0.52f, {{{0.44f, 0.0f}, {0.04f, 0.62f}}, loop});
+        }
+        set('7', 0.5f, {{{0.0f, 0.0f}, {0.5f, 0.0f}, {0.16f, 1.0f}}});
+        {
+            std::vector<Point> top, bottom;
+            arc(top, 0.26f, 0.25f, 0.22f, 0.25f, 0.0f, 360.0f, 18);
+            arc(bottom, 0.26f, 0.74f, 0.26f, 0.26f, 0.0f, 360.0f, 18);
+            set('8', 0.52f, {top, bottom});
+        }
+        {
+            std::vector<Point> loop;  // 9: a loop with a stroke down from it
+            arc(loop, 0.26f, 0.28f, 0.26f, 0.28f, 0.0f, 360.0f, 20);
+            set('9', 0.52f, {loop, {{0.5f, 0.4f}, {0.12f, 1.0f}}});
+        }
+        set('-', 0.36f, {{{0.0f, 0.55f}, {0.36f, 0.55f}}});
+        set('=', 0.42f, {{{0.0f, 0.38f}, {0.42f, 0.38f}}, {{0.0f, 0.68f}, {0.42f, 0.68f}}});
+        set('+', 0.5f, {{{0.0f, 0.5f}, {0.5f, 0.5f}}, {{0.25f, 0.25f}, {0.25f, 0.75f}}});
+        set('*', 0.5f, {{{0.25f, 0.15f}, {0.25f, 0.65f}}, {{0.03f, 0.27f}, {0.47f, 0.53f}}, {{0.03f, 0.53f}, {0.47f, 0.27f}}});
+        set('[', 0.24f, {{{0.24f, 0.0f}, {0.0f, 0.0f}, {0.0f, 1.0f}, {0.24f, 1.0f}}});
+        set(']', 0.24f, {{{0.0f, 0.0f}, {0.24f, 0.0f}, {0.24f, 1.0f}, {0.0f, 1.0f}}});
+        set('/', 0.42f, {{{0.42f, 0.0f}, {0.0f, 1.0f}}});
+        set('\\', 0.42f, {{{0.0f, 0.0f}, {0.42f, 1.0f}}});
+        set('#', 0.56f, {{{0.18f, 0.05f}, {0.12f, 0.95f}}, {{0.44f, 0.05f}, {0.38f, 0.95f}},
+                         {{0.0f, 0.34f}, {0.56f, 0.34f}}, {{0.0f, 0.66f}, {0.56f, 0.66f}}});
+        set(';', 0.1f, {{{0.08f, 0.4f}}, {{0.08f, 0.84f}, {0.0f, 1.06f}}});
+        set(',', 0.08f, {{{0.08f, 0.84f}, {0.0f, 1.06f}}});
+        set('.', 0.0f, {{{0.0f, 1.0f}}});
+        set('\'', 0.0f, {{{0.0f, 0.0f}, {0.0f, 0.3f}}});
+        set('`', 0.14f, {{{0.0f, 0.0f}, {0.14f, 0.22f}}});
+        {
+            std::vector<Point> q;  // ?: a hook and a dot
+            arc(q, 0.25f, 0.25f, 0.25f, 0.25f, -170.0f, 60.0f, 14);
+            q.push_back({0.25f, 0.68f});
+            set('?', 0.5f, {q, {{0.25f, 1.0f}}});
+        }
         return g;
     }();
-    switch (c) {
-    case 'A': return &glyphs[0];
-    case 'B': return &glyphs[1];
-    case 'E': return &glyphs[2];
-    case 'H': return &glyphs[3];
-    case 'I': return &glyphs[4];
-    case 'L': return &glyphs[5];
-    case 'N': return &glyphs[6];
-    case 'O': return &glyphs[7];
-    case 'P': return &glyphs[8];
-    case 'R': return &glyphs[9];
-    case 'S': return &glyphs[10];
-    case 'T': return &glyphs[11];
-    case 'X': return &glyphs[12];
-    case 'Y': return &glyphs[13];
-    case '1': return &glyphs[14];
-    case '2': return &glyphs[15];
-    case 'Z': return &glyphs[16];
-    default: return nullptr;
-    }
+    const auto index = static_cast<unsigned char>(c);
+    if (index >= glyphs.size() || glyphs[index].lines.empty()) return nullptr;
+    return &glyphs[index];
 }
 
 struct TextStyle {
@@ -283,17 +365,24 @@ struct TextStyle {
 };
 
 // `text` centred on `centre` (pixels), its letters `height` pixels tall from
-// stroke edge to stroke edge, squeezed sideways to at most `max_width`.
-void text(Canvas &canvas, std::string_view text, Point centre, float height, float max_width, const TextStyle &style) {
-    const float radius = style.weight * height / 2.0f;
-    const float cap = height - 2.0f * radius;  // between the strokes' centre lines
-    if (cap <= 0.0f) return;
-    const float gap = 0.2f + 2.0f * radius / cap;
+// stroke edge to stroke edge, squeezed sideways to at most `max_width`. With
+// `min_squeeze`, letters that would be squeezed more are made smaller
+// instead, so a long word stays legible.
+void text(Canvas &canvas, std::string_view text, Point centre, float height, float max_width, const TextStyle &style,
+          float min_squeeze = 0.0f) {
+    // In units of the letters' height between the strokes' centre lines; the
+    // gap between letters grows with the stroke.
+    const float gap = 0.2f + style.weight / (1.0f - style.weight);
     float total = 0.0f;
     for (std::size_t i = 0; i < text.size(); ++i) {
         if (const Glyph *g = glyph(text[i])) total += g->width;
         if (i + 1u < text.size()) total += gap;
     }
+    if (min_squeeze > 0.0f && total > 0.0f)
+        height = std::min(height, max_width / (total * (1.0f - style.weight) * min_squeeze + style.weight));
+    const float radius = style.weight * height / 2.0f;
+    const float cap = height - 2.0f * radius;  // between the strokes' centre lines
+    if (cap <= 0.0f) return;
     const float squeeze = total > 0.0f ? std::min(1.0f, (max_width - 2.0f * radius) / (total * cap)) : 1.0f;
     float x = centre.x - total * cap * squeeze / 2.0f;
     const float top = centre.y - cap / 2.0f;
@@ -418,8 +507,8 @@ std::string_view shoulder(const input::ButtonPrompts &prompts, bool right) {
     return right ? "RB" : "LB";
 }
 
-// The game's silver L/R key (a box of its pixels), drawn again with `label`.
-void silver_key(Canvas &canvas, float x0, float y0, float x1, float y1, std::string_view label) {
+// The game's silver L/R key (a box of its pixels) drawn again, blank.
+void silver_key_body(Canvas &canvas, float x0, float y0, float x1, float y1) {
     canvas.clear(x0, y0, x1, y1);
     const float w = x1 - x0, h = y1 - y0;
     const Point c{(x0 + x1) / 2.0f * S, (y0 + y1) / 2.0f * S};
@@ -439,6 +528,13 @@ void silver_key(Canvas &canvas, float x0, float y0, float x1, float y1, std::str
     }
     strokes(canvas, {{{(x0 + 1.6f) * S, (y1 - 1.6f) * S}, {(x1 - 1.6f) * S, (y1 - 1.6f) * S}}}, 0.3f * S,
             rgb(0xDA, 0xD8, 0xE4));
+}
+
+// The game's silver L/R key (a box of its pixels), drawn again with `label`.
+void silver_key(Canvas &canvas, float x0, float y0, float x1, float y1, std::string_view label) {
+    silver_key_body(canvas, x0, y0, x1, y1);
+    const float w = x1 - x0, h = y1 - y0;
+    const Point c{(x0 + x1) / 2.0f * S, (y0 + y1) / 2.0f * S};
     TextStyle style{kKeyInk};
     style.weight = 0.17f;
     text(canvas, label, {c.x, c.y - 0.2f * S}, (h - 6.4f) * S, (w - 6.0f) * S, style);
@@ -551,6 +647,272 @@ void shoulder_letters(Canvas &canvas, const std::uint32_t *native, std::uint32_t
          (h - 2.6f) * S, (w - 1.4f) * S, style);
 }
 
+// --- Keys (the keyboard style) ------------------------------------------------------
+//
+// Each of the PSP's buttons shows the key or mouse button bound to it first
+// (input::ButtonPrompts::keys) on the game's own silver key, the one its L
+// and R already have.
+
+// What a key shows: its name, an arrow, or a mouse.
+struct KeyCap {
+    enum class Kind { None, Word, Arrow, Mouse } kind = Kind::None;
+    std::string word;  // Word: capitals, digits and the signs glyph() draws
+    int arrow = 0;     // Arrow: 0 up, 1 right, 2 down, 3 left
+    int mouse = 0;     // Mouse: 1 left, 2 middle, 3 right; 6 the wheel up, 7 down
+};
+
+KeyCap key_cap(input::Binding binding) {
+    KeyCap cap;
+    if (binding == input::kNone) return cap;
+    if (const int wheel = input::wheel_of(binding)) {
+        cap.kind = KeyCap::Kind::Mouse;
+        cap.mouse = wheel > 0 ? 6 : 7;
+        return cap;
+    }
+    if (const int button = input::mouse_button_of(binding)) {
+        if (button <= 3) {
+            cap.kind = KeyCap::Kind::Mouse;
+            cap.mouse = button;
+        } else {
+            cap.kind = KeyCap::Kind::Word;
+            cap.word = button == 4 ? "M4" : "M5";
+        }
+        return cap;
+    }
+    const std::string name = input::name(binding);
+    static constexpr std::pair<const char *, int> kArrows[] = {{"Up", 0}, {"Right", 1}, {"Down", 2}, {"Left", 3}};
+    for (const auto &[arrow_name, arrow] : kArrows)
+        if (name == arrow_name) {
+            cap.kind = KeyCap::Kind::Arrow;
+            cap.arrow = arrow;
+            return cap;
+        }
+    // The words printed on the keys, short enough for the game's key.
+    static constexpr std::pair<const char *, const char *> kWords[] = {
+        {"Space", "SPACE"},      {"Left Shift", "SHIFT"},  {"Right Shift", "SHIFT"},  {"Left Ctrl", "CTRL"},
+        {"Right Ctrl", "CTRL"},  {"Left Alt", "ALT"},      {"Right Alt", "ALT"},      {"Left GUI", "WIN"},
+        {"Right GUI", "WIN"},    {"Enter", "ENTER"},       {"Keypad Enter", "ENTER"}, {"Esc", "ESC"},
+        {"Backspace", "BKSP"},   {"Tab", "TAB"},           {"CapsLock", "CAPS"},      {"Insert", "INS"},
+        {"Delete", "DEL"},       {"Home", "HOME"},         {"End", "END"},            {"PageUp", "PGUP"},
+        {"PageDown", "PGDN"},    {"PrintScreen", "PRTSC"}, {"ScrollLock", "SCRLK"},   {"Pause", "PAUSE"},
+        {"Numlock", "NUM"},      {"Keypad Divide", "KP/"}, {"Keypad Multiply", "KP*"}, {"Keypad Minus", "KP-"},
+        {"Keypad Plus", "KP+"},  {"Keypad Period", "KP."}, {"NonUSBackslash", "\\"}};
+    cap.kind = KeyCap::Kind::Word;
+    for (const auto &[key_name, word] : kWords)
+        if (name == key_name) {
+            cap.word = word;
+            return cap;
+        }
+    if (name.rfind("Keypad ", 0) == 0) {
+        cap.word = "KP" + name.substr(7);
+        return cap;
+    }
+    for (const char c : name) {
+        const char upper = c >= 'a' && c <= 'z' ? static_cast<char>(c - 'a' + 'A') : c;
+        if (glyph(upper) != nullptr) cap.word += upper;
+    }
+    if (cap.word.empty() || name.rfind("Key ", 0) == 0) cap.word = "?";
+    return cap;
+}
+
+// An arrow pointing `direction` (0 up, then clockwise), centred on `c`, `h` long.
+void arrow(Canvas &canvas, Point c, float h, int direction, float radius, Colour colour) {
+    const auto turn = [&](float x, float y) {
+        switch (direction) {
+        case 1: return Point{c.x - y, c.y + x};
+        case 2: return Point{c.x - x, c.y - y};
+        case 3: return Point{c.x + y, c.y - x};
+        default: return Point{c.x + x, c.y + y};
+        }
+    };
+    const float a = 0.5f * h, b = 0.3f * h;
+    const Point tip = turn(0.0f, -a);
+    strokes(canvas, {{turn(0.0f, a), tip}, {turn(-b, -a + b), tip}, {turn(b, -a + b), tip}}, radius, colour);
+}
+
+// A mouse `h` tall centred on `c`, the button that is bound filled in.
+void mouse_icon(Canvas &canvas, Point c, float h, int button, Colour colour) {
+    const float bw = 0.3f * h, bh = 0.48f * h, r = 0.85f * bw;
+    const float t = std::max(1.2f, 0.085f * h);
+    const float top = c.y - bh, split = top + 0.84f * bh;
+    box_outline(canvas, c, bw - t / 2.0f, bh - t / 2.0f, r - t / 2.0f, t, colour);
+    // The line under the buttons and the one between them, inside the body.
+    const Segment under{{c.x - bw, split}, {c.x + bw, split}}, between{{c.x, top}, {c.x, split}};
+    canvas.fill(c.x - bw, top, c.x + bw, split + t, colour, [&](Point p) {
+        return std::max(std::min(distance_to(p, under), distance_to(p, between)) - t / 2.0f,
+                        round_box(p, c, bw, bh, r));
+    });
+    if (button == 1 || button == 3) {
+        const float side = button == 1 ? -1.0f : 1.0f;
+        canvas.fill(c.x - bw, top, c.x + bw, split, colour, [&](Point p) {
+            return std::max({round_box(p, c, bw, bh, r), p.y - split, side * (c.x - p.x)});
+        });
+        return;
+    }
+    // The wheel, and which way it turns.
+    const Point wheel{c.x, (top + split) / 2.0f};
+    box(canvas, wheel, 0.075f * h, 0.15f * h, 0.075f * h, colour);
+    if (button == 6 || button == 7)
+        arrow(canvas, {c.x, c.y + 0.42f * bh}, 0.36f * h, button == 6 ? 0 : 2, t / 2.0f, colour);
+}
+
+// What a key shows, centred on `c` (pixels) in a space `height` tall and
+// `max_width` wide. Nothing bound: the PSP's own symbol.
+void key_content(Canvas &canvas, const KeyCap &cap, Psp button, Point c, float height, float max_width,
+                 const TextStyle &style) {
+    switch (cap.kind) {
+    case KeyCap::Kind::Word: text(canvas, cap.word, c, height, max_width, style, 0.8f); return;
+    case KeyCap::Kind::Arrow: {
+        const float radius = style.weight * height / 2.0f;
+        if (style.outline > 0.0f) arrow(canvas, c, height, cap.arrow, radius + style.outline, style.outline_colour);
+        arrow(canvas, c, height, cap.arrow, radius, style.fill);
+        return;
+    }
+    case KeyCap::Kind::Mouse: mouse_icon(canvas, c, 1.25f * height, cap.mouse, style.fill); return;
+    case KeyCap::Kind::None: draw_face(canvas, {0, button, style.fill}, c, 0.6f * height, style.outline > 0.0f); return;
+    }
+}
+
+// The key bound to `key`; with none, the PSP's name for it (the face
+// buttons keep their shapes, key_content).
+KeyCap key_for(const input::ButtonPrompts &prompts, input::PromptKey key) {
+    KeyCap cap = key_cap(prompts.keys[static_cast<std::size_t>(key)]);
+    if (cap.kind != KeyCap::Kind::None) return cap;
+    switch (key) {
+    case input::PromptKey::L: cap.word = "L"; break;
+    case input::PromptKey::R: cap.word = "R"; break;
+    case input::PromptKey::Start: cap.word = "START"; break;
+    case input::PromptKey::Select: cap.word = "SELECT"; break;
+    default: return cap;
+    }
+    cap.kind = KeyCap::Kind::Word;
+    return cap;
+}
+
+input::PromptKey prompt_key(Psp button) {
+    switch (button) {
+    case Psp::Cross: return input::PromptKey::Cross;
+    case Psp::Circle: return input::PromptKey::Circle;
+    case Psp::Square: return input::PromptKey::Square;
+    case Psp::Triangle: return input::PromptKey::Triangle;
+    }
+    return input::PromptKey::Cross;
+}
+
+// A key in a box of the game's pixels: its silver key with what is bound to
+// `key` on it, or the PSP's `shape` with nothing bound.
+void key_in_box(Canvas &canvas, const input::ButtonPrompts &prompts, input::PromptKey key, Psp shape, float x0,
+                float y0, float x1, float y1) {
+    silver_key_body(canvas, x0, y0, x1, y1);
+    const float w = x1 - x0, h = y1 - y0;
+    // The face's middle, a little above the box's: the key's lip is below.
+    const Point c{(x0 + x1) / 2.0f * S, ((y0 + y1) / 2.0f - 0.1f * h / 7.0f) * S};
+    TextStyle style{kKeyInk};
+    style.weight = 0.17f;
+    key_content(canvas, key_for(prompts, key), shape, c, (0.54f * h) * S, (w - 4.4f) * S, style);
+}
+
+// A round button (its centre in the game's pixels) as a key `hw` by `hh`
+// either side of it, the size of the game's L and R where there is room:
+// the button and its glow cleared from `reach` round it.
+void round_key(Canvas &canvas, const input::ButtonPrompts &prompts, Psp button, Point centre, float hw, float hh,
+               float reach) {
+    canvas.clear(centre.x - reach, centre.y - reach, centre.x + reach, centre.y + reach);
+    key_in_box(canvas, prompts, prompt_key(button), button, centre.x - hw, centre.y - hh, centre.x + hw,
+               centre.y + hh);
+}
+
+// A symbol on its own (a box of the game's pixels) as a small key.
+void plain_key(Canvas &canvas, const input::ButtonPrompts &prompts, Psp button, float x0, float y0, float x1,
+               float y1) {
+    canvas.clear(x0, y0, x1, y1);
+    key_in_box(canvas, prompts, prompt_key(button), button, x0, y0 + 0.5f, x1, y1 - 0.5f);
+}
+
+// A SELECT or START pill (a box of the game's pixels) with the key on it.
+void key_pill(Canvas &canvas, const input::ButtonPrompts &prompts, float x0, float y0, float x1, float y1, bool start) {
+    canvas.clear(x0, y0, x1, y1);
+    const float w = x1 - x0, h = y1 - y0;
+    const Point c{(x0 + x1) / 2.0f * S, (y0 + y1) / 2.0f * S};
+    box(canvas, c, (w / 2.0f - 0.5f) * S, (h / 2.0f - 0.5f) * S, (h - 1.0f) / 2.0f * S, rgb(255, 255, 255, 0x45));
+    box(canvas, c, (w / 2.0f - 1.3f) * S, (h / 2.0f - 1.3f) * S, (h - 2.6f) / 2.0f * S, kPill);
+    TextStyle style{kInk};
+    style.weight = 0.2f;
+    key_content(canvas, key_for(prompts, start ? input::PromptKey::Start : input::PromptKey::Select), Psp::Cross, c,
+                0.46f * h * S, (w - 6.0f) * S, style);
+}
+
+// The game's L or R letters (a box of its pixels) as the key bound to them,
+// in the old letters' colour.
+void key_letters(Canvas &canvas, const input::ButtonPrompts &prompts, const std::uint32_t *native, std::uint32_t width,
+                 int x0, int y0, int x1, int y1, bool right) {
+    const Colour colour = letter_colour(native, width, x0, y0, x1, y1);
+    canvas.clear(static_cast<float>(x0), static_cast<float>(y0), static_cast<float>(x1), static_cast<float>(y1));
+    const float w = static_cast<float>(x1 - x0), h = static_cast<float>(y1 - y0);
+    TextStyle style{colour};
+    style.weight = 0.16f;
+    style.outline = 0.3f * S;
+    style.outline_colour = rgb(0x10, 0x0C, 0x30, 160);
+    key_content(canvas, key_for(prompts, right ? input::PromptKey::R : input::PromptKey::L), Psp::Cross,
+                {(static_cast<float>(x0) + w / 2.0f) * S, (static_cast<float>(y0) + h / 2.0f) * S}, (h - 2.6f) * S,
+                (w - 1.4f) * S, style);
+}
+
+// Every sheet in the keyboard style.
+bool draw_keys(std::size_t index, Canvas &canvas, const input::ButtonPrompts &prompts, const std::uint32_t *pixels,
+               std::uint32_t width) {
+    switch (index) {
+    case kGeneral:
+        round_key(canvas, prompts, Psp::Triangle, {63.0f, 118.0f}, 9.0f, 7.0f, 9.0f);
+        round_key(canvas, prompts, Psp::Circle, {81.0f, 118.0f}, 9.0f, 7.0f, 9.0f);
+        round_key(canvas, prompts, Psp::Square, {99.0f, 118.0f}, 9.0f, 7.0f, 9.0f);
+        round_key(canvas, prompts, Psp::Cross, {117.0f, 118.0f}, 9.0f, 7.0f, 9.0f);
+        key_pill(canvas, prompts, 3.0f, 92.0f, 34.0f, 106.0f, false);
+        key_pill(canvas, prompts, 39.0f, 92.0f, 70.0f, 106.0f, true);
+        key_in_box(canvas, prompts, input::PromptKey::L, Psp::Cross, 18.0f, 111.0f, 36.0f, 125.0f);
+        key_in_box(canvas, prompts, input::PromptKey::R, Psp::Cross, 36.0f, 111.0f, 54.0f, 125.0f);
+        break;
+    case kBattle: round_key(canvas, prompts, Psp::Cross, {79.0f, 19.0f}, 19.0f, 15.0f, 17.0f); break;
+    case kLook: round_key(canvas, prompts, Psp::Triangle, {80.5f, 70.5f}, 9.0f, 7.0f, 8.5f); break;
+    case kExDefense:
+        plain_key(canvas, prompts, Psp::Cross, 14.0f, 1.0f, 24.0f, 11.0f);
+        plain_key(canvas, prompts, Psp::Triangle, 25.0f, 0.0f, 36.0f, 10.0f);
+        plain_key(canvas, prompts, Psp::Square, 14.0f, 13.0f, 24.0f, 22.0f);
+        plain_key(canvas, prompts, Psp::Circle, 25.0f, 12.0f, 35.0f, 22.0f);
+        break;
+    case kBattleMenu:
+        round_key(canvas, prompts, Psp::Circle, {104.5f, 23.5f}, 7.8f, 6.5f, 8.0f);
+        round_key(canvas, prompts, Psp::Cross, {120.5f, 23.5f}, 7.8f, 6.5f, 8.0f);
+        break;
+    case kSmall:
+        plain_key(canvas, prompts, Psp::Cross, 23.0f, 17.0f, 32.0f, 26.0f);
+        plain_key(canvas, prompts, Psp::Triangle, 14.0f, 25.0f, 25.0f, 35.0f);
+        plain_key(canvas, prompts, Psp::Circle, 25.0f, 25.0f, 34.0f, 34.0f);
+        plain_key(canvas, prompts, Psp::Square, 34.0f, 25.0f, 43.0f, 34.0f);
+        key_in_box(canvas, prompts, input::PromptKey::R, Psp::Cross, 46.0f, 30.0f, 64.0f, 42.0f);
+        break;
+    case kManual: {
+        TextStyle style{kKeyInk};
+        style.weight = 0.2f;
+        key_content(canvas, key_for(prompts, input::PromptKey::Start), Psp::Cross, {39.0f * S, 12.0f * S}, 6.0f * S,
+                    33.0f * S, style);
+        break;
+    }
+    case kLetters:
+        key_letters(canvas, prompts, pixels, width, 114, 54, 124, 66, false);
+        key_letters(canvas, prompts, pixels, width, 114, 68, 125, 80, true);
+        key_letters(canvas, prompts, pixels, width, 116, 80, 127, 93, false);
+        key_letters(canvas, prompts, pixels, width, 116, 93, 128, 106, true);
+        break;
+    case kPages:
+        key_letters(canvas, prompts, pixels, width, 97, 28, 108, 41, false);
+        key_letters(canvas, prompts, pixels, width, 108, 28, 118, 41, true);
+        break;
+    default: return false;
+    }
+    return true;
+}
+
 // The game's picture at four times its size, sampled as the Texture filter
 // samples it: between pixels (Smooth) or the nearest (Sharp).
 void scale_up(const std::vector<std::uint32_t> &native, std::uint32_t width, std::uint32_t height, bool sharp,
@@ -597,6 +959,7 @@ bool draw_button_prompts(std::size_t index, const std::uint32_t *pixels, std::ui
     out_width = width * kScale;
     out_height = height * kScale;
     Canvas canvas(out_width, out_height, out);
+    if (prompts.style == input::PromptStyle::Keyboard) return draw_keys(index, canvas, prompts, pixels, width);
     // Nintendo's shoulders are L and R already; its triggers are not.
     const bool plain_l_r = prompts.style == input::PromptStyle::Nintendo && !prompts.l_r_on_triggers;
     switch (index) {
