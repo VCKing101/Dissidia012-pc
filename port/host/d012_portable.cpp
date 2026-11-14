@@ -48,6 +48,8 @@
 //
 // MIT licence; see port/README.md.
 
+#include "d012_portable.hpp"
+
 #include "app_paths.hpp"
 #include "install/user_data.hpp"
 
@@ -105,6 +107,10 @@ void set(const char *name, const std::string &value) {
 #endif
 }
 
+// The file what the program prints goes to, once this file has chosen one
+// (log_file(), for the message when the game cannot open its window).
+std::filesystem::path g_log_file;
+
 #if defined(D012_INSTALLER_BUILD) && defined(_WIN32)
 // A windowed program started from a shortcut has no standard output: keep
 // what it prints, for the player's bug reports. Output a parent redirected
@@ -123,6 +129,7 @@ void log_to_file_without_console(const std::filesystem::path &logs) {
     const std::filesystem::path log = logs / "D012Native.log";
     std::filesystem::rename(log, logs / "D012Native-previous.log", ec);
     if (std::freopen(log.string().c_str(), "w", stdout) == nullptr) return;
+    g_log_file = log;
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     if (std::freopen(log.string().c_str(), "a", stderr) != nullptr) {
         _dup2(_fileno(stdout), _fileno(stderr));
@@ -137,6 +144,7 @@ bool g_printing_to_log = false;
 // closed or crashed copy loses nothing.
 void print_to(const std::string &log) {
     g_printing_to_log = true;
+    g_log_file = std::filesystem::path(log);
     if (std::freopen(log.c_str(), "a", stdout) != nullptr) std::setvbuf(stdout, nullptr, _IONBF, 0);
     if (std::freopen(log.c_str(), "a", stderr) != nullptr) std::setvbuf(stderr, nullptr, _IONBF, 0);
 }
@@ -250,4 +258,7 @@ struct PortableLayout {
 const PortableLayout layout;
 
 } // namespace
+
+std::filesystem::path log_file() { return g_log_file; }
+
 } // namespace d012::portable

@@ -94,6 +94,8 @@ portablekit_add_game(D012Native ${d012_corpus}
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_cheats.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_ap_cheat.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_title_quit.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_no_window.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_no_window_rules.cpp"
             ${d012_game_code})
 target_include_directories(D012Native PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/host")
 # stb_image for the save icons the dialogs draw (host/d012_dialogs.cpp), from PortableKit.
@@ -174,7 +176,10 @@ if(PORTABLEKIT_RELEASE)
         COMPILE_DEFINITIONS D012_RELEASE_BUILD=1)
 endif()
 if(D012_INSTALLER_BUILD)
-    set_property(SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_portable.cpp" APPEND PROPERTY
+    # The setup's build also says why and ends when the game cannot open its
+    # window (host/d012_no_window.cpp); a developer's runs on without one.
+    set_property(SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_portable.cpp"
+                        "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_no_window.cpp" APPEND PROPERTY
         COMPILE_DEFINITIONS D012_INSTALLER_BUILD=1)
     # A windowed program: started from a shortcut, no console opens behind the
     # game. What it prints goes to data/logs/ then (host/d012_portable.cpp).
@@ -234,6 +239,7 @@ add_library(d012_manifest STATIC "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_json.cpp
                                  "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_update_rules.cpp"
                                  "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_discord_rules.cpp"
                                  "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_versus_rules.cpp"
+                                 "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_no_window_rules.cpp"
                                  "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_voice_scenes.cpp"
                                  "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_mod_manifest.cpp"
                                  "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_nintendo_stream.cpp"
