@@ -5,7 +5,7 @@
 // developer pipeline's generate step (tools/port/setup/build.py and
 // tools/port/overlay_meta.py), so the installer needs no Python, CMake or Git.
 //
-//   D012Native --compile-game [--iso PATH] [--opt N] [--jobs N] [--force] [--keep-work]
+//   D012Native --compile-game [--iso PATH] [--opt N] [--jobs N] [--force] [--keep-work] [--launcher-progress]
 //
 // --keep-work leaves game-code.new/ (the C++ and the objects), for comparing
 // with the developer pipeline's output.
@@ -151,6 +151,8 @@ struct Options {
     unsigned jobs = 0;
     bool force = false;
     bool keep_work = false;
+    // --prepare: RecompLauncher runs the setup, so progress is printed as "progress <0 to 1> <text>".
+    bool launcher = false;
 };
 
 struct Paths {
@@ -194,7 +196,7 @@ void write_all(const fs::path &path, std::string_view data) {
 // compile: the disc 2%, psp_recomp 25%, clang 70%, linking 3%.
 class Progress {
 public:
-    explicit Progress(fs::path status) : status_(std::move(status)) {}
+    Progress(fs::path status, bool launcher) : status_(std::move(status)), launcher_(launcher) {}
 
     void step(const std::string &name, unsigned total) {
         const std::lock_guard<std::mutex> guard(lock_);
@@ -214,7 +216,7 @@ public:
     void finish(const std::string &state, const std::string &message) {
         const std::lock_guard<std::mutex> guard(lock_);
         if (state == "done") start_ = 100, done_ = total_ = 0;
-        std::cout << "[compile-game] " << percent() << "% " << message << std::endl;
+        print_line(message);
         write_locked(state, message);
     }
 
@@ -226,9 +228,20 @@ private:
         return std::min(100u, start_ + (total_ == 0 ? 0u : weight * done_ / total_));
     }
     void print_locked() {
-        std::cout << "[compile-game] " << percent() << "% " << step_;
-        if (total_ > 1) std::cout << " (" << done_ << "/" << total_ << ")";
-        std::cout << std::endl;
+        std::string text = step_;
+        if (total_ > 1) text += " (" + std::to_string(done_) + "/" + std::to_string(total_) + ")";
+        print_line(text);
+    }
+    void print_line(const std::string &text) const {
+        if (!launcher_) {
+            std::cout << "[compile-game] " << percent() << "% " << text << std::endl;
+            return;
+        }
+        // The launcher's setup screen shows --install's share first (see prepare() below), then this.
+        const double fraction = (kInstallShare + (1.0 - kInstallShare) * percent() / 100.0);
+        char number[16];
+        std::snprintf(number, sizeof number, "%.3f", fraction);
+        std::cout << "progress " << number << " " << text << std::endl;
     }
     void write_locked(const std::string &state, const std::string &message) {
         std::ostringstream body;
@@ -243,7 +256,10 @@ private:
         fs::rename(partial, status_, ec);
     }
 
+    static constexpr double kInstallShare = 0.05;
+
     fs::path status_;
+    bool launcher_ = false;
     std::mutex lock_;
     std::string step_;
     unsigned done_ = 0, total_ = 0;
@@ -576,7 +592,7 @@ void note(const Paths &p, const std::string &line) {
 
 int run(const Options &options) {
     const Paths p = find_paths(options);
-    Progress progress(p.status);
+    Progress progress(p.status, options.launcher);
     const auto started = std::chrono::steady_clock::now();
     try {
         check_inputs(p);
@@ -825,9 +841,12 @@ int main(int argc, char **argv) {
             options.force = true;
         } else if (arg == "--keep-work") {
             options.keep_work = true;
+        } else if (arg == "--launcher-progress") {
+            options.launcher = true;
         } else {
             std::cerr << "--compile-game: unknown option " << arg
-                      << "\nusage: D012Native --compile-game [--iso PATH] [--opt N] [--jobs N] [--force] [--keep-work]\n";
+                      << "\nusage: D012Native --compile-game [--iso PATH] [--opt N] [--jobs N] [--force] [--keep-work] "
+                         "[--launcher-progress]\n";
             return 2;
         }
     }
@@ -840,7 +859,119 @@ int main(int argc, char **argv) {
 // compiled as d012_portablekit_main (portablekit_add_game(... HOST_MAIN_NAME)).
 int d012_portablekit_main(int argc, char **argv);
 
+namespace {
+
+// PortableKit's main restarts the program on Linux to raise the stack (host/main.cpp, ensure_main_stack), with the
+// arguments it was given. Called here with made-up arguments, that restart would become the whole run, so the marker
+// that says "already raised" is set around such a call and cleared before the game itself starts.
+void set_stack_marker(bool on) {
+#if defined(__linux__)
+    const std::string marker = portablekit::env_name("STACK_RAISED");
+    if (on) setenv(marker.c_str(), "1", 1);
+    else unsetenv(marker.c_str());
+#else
+    (void)on;
+#endif
+}
+
+// The same path, as the Windows setup compares them (AlreadyInstalledFrom in tools/port/installer/dissidia012.iss):
+// both made absolute and normal, and on Windows without regard to case.
+bool same_path(const std::filesystem::path &a, const std::filesystem::path &b) {
+    std::error_code ec;
+    const std::filesystem::path x = std::filesystem::absolute(a, ec).lexically_normal();
+    const std::filesystem::path y = std::filesystem::absolute(b, ec).lexically_normal();
+#if defined(_WIN32)
+    const std::wstring &l = x.native(), &r = y.native();
+    return CompareStringOrdinal(l.c_str(), static_cast<int>(l.size()), r.c_str(), static_cast<int>(r.size()), TRUE) ==
+           CSTR_EQUAL;
+#else
+    return x == y;
+#endif
+}
+
+// True when `--install` has already set up this disc image: data/EBOOT.ELF is there and settings.ini's disc_image
+// names this file. Then the install would only decrypt the same executable again.
+bool installed_from(const std::string &iso) {
+    try {
+        const auto installation =
+            portablekit::install::find_installation(portablekit::install::user_data_directory());
+        return installation && same_path(installation->disc_image, portablekit::install::path_from_utf8(iso));
+    } catch (const std::exception &) {
+        return false;
+    }
+}
+
+} // namespace
+
+// The installer's `--install <iso> --in-place`: decrypts the executable and remembers where the disc image is.
+// Skipped when that disc image is already the one set up.
+static int install_from(char *program, std::string &iso) {
+    if (installed_from(iso)) return 0;
+    std::vector<char *> install{program, const_cast<char *>("--install"), iso.data(), const_cast<char *>("--in-place"),
+                                nullptr};
+    set_stack_marker(true);
+    const int code = d012_portablekit_main(static_cast<int>(install.size()) - 1, install.data());
+    set_stack_marker(false);
+    return code;
+}
+
+// `D012Native --game <iso>` plays from that disc image wherever it is, for launchers, scripts and Steam shortcuts:
+// the setup's first step (skipped when the image is the one already set up), then the game as usual. The game's
+// code must already be compiled (the setup, or --prepare, does that). Only this exact form is taken. On Linux the
+// game's start may restart the program with the larger stack; it restarts as a plain start, which plays the copy
+// just set up.
+static int play_from(char *program, std::string iso) {
+    const int install_code = install_from(program, iso);
+    if (install_code != 0) return install_code;
+    std::vector<char *> start{program, nullptr};
+    return d012_portablekit_main(1, start.data());
+}
+
+// Launcher installs are updated by the launcher, so the game's own check at start, which points to the release
+// page and its setup, is turned off the first time. A choice the player makes in the game's options stays.
+static void leave_updates_to_the_launcher() {
+    try {
+        const std::filesystem::path dir = portablekit::install::user_data_directory();
+        portablekit::install::SettingsEntries entries = portablekit::install::read_settings_file(dir);
+        if (entries.contains("updates.check_at_start")) return;
+        entries["updates.check_at_start"] = "0";
+        portablekit::install::write_settings_file(dir, entries);
+    } catch (const std::exception &e) {
+        std::cerr << "--prepare: settings.ini not written for updates.check_at_start: " << e.what() << "\n";
+    }
+}
+
+// `D012Native --prepare --game <iso>` is the setup RecompLauncher runs without a window (recomplauncher.json,
+// "prepare"): the two steps of the installer, `--install <iso> --in-place` and `--compile-game`, one after the other,
+// printing "progress <0 to 1> <text>" lines. The first is skipped and the second quick when nothing changed, so it runs again on every change
+// of the player's copy. Without --prepare nothing here is reached.
+static int prepare(int argc, char **argv) {
+    std::string iso;
+    for (int i = 2; i < argc; ++i) {
+        const std::string_view arg = argv[i];
+        if (arg == "--game" && i + 1 < argc) {
+            iso = argv[++i];
+        } else {
+            std::cerr << "usage: " << argv[0] << " --prepare --game <your ULUS10566 or ULES01505 .iso>\n";
+            return 2;
+        }
+    }
+    if (iso.empty()) {
+        std::cerr << "--prepare needs --game <your ULUS10566 or ULES01505 .iso>\n";
+        return 2;
+    }
+    std::cout << "progress 0.000 Reading your disc and decrypting the game's program" << std::endl;
+    const int install_code = install_from(argv[0], iso);
+    if (install_code != 0) return install_code;
+    leave_updates_to_the_launcher();
+    std::vector<char *> compile{argv[0], const_cast<char *>("--compile-game"),
+                                const_cast<char *>("--launcher-progress"), nullptr};
+    return d012::compile_game::main(static_cast<int>(compile.size()) - 1, compile.data());
+}
+
 int main(int argc, char **argv) {
+    if (argc == 3 && std::string_view(argv[1]) == "--game") return play_from(argv[0], argv[2]);
+    if (argc >= 2 && std::string_view(argv[1]) == "--prepare") return prepare(argc, argv);
     if (argc >= 2 && std::string_view(argv[1]) == "--compile-game") return d012::compile_game::main(argc, argv);
     return d012_portablekit_main(argc, argv);
 }

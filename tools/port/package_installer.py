@@ -18,8 +18,9 @@ The version is tools/port/release-version.txt's unless --version gives another: 
      image);
    - a program bigger than one without the game's code, or naming a recompiled unit;
    - a path of this machine (the checkout, the user's home folder) in the port's own files.
-4. Compiles tools/port/installer/dissidia012.iss with Inno Setup (tools/local/innosetup/ISCC.exe) and writes
-   SHA256SUMS beside the setup.
+4. Compiles tools/port/installer/dissidia012.iss with Inno Setup (tools/local/innosetup/ISCC.exe), zips the same
+   folder as Dissidia012-PC-<version>-Windows-x64.zip (RecompLauncher installs this one: recomplauncher.json is at
+   its top) and writes SHA256SUMS beside both.
 5. Keeps the release's own programs in build/port/installer/symbols/<version>/ (never shipped): a player's crash
    report names a module and an offset, and llvm-symbolizer turns them into a function with the same file
    (docs/port/quit-crash.md).
@@ -199,6 +200,8 @@ def stage(portablekit, atracdenc):
     copy(ATRACDENC_EXE, STAGE / "atracdenc.exe")
 
     copy(INSTALLER / "README.txt", STAGE / "README.txt")
+    # RecompLauncher reads this from the top of the zip; the setup puts it beside the program too.
+    copy(ROOT / "recomplauncher.json", STAGE / "recomplauncher.json")
     copy(ROOT / "LICENSE", STAGE / "LICENSE.txt")
     licenses = STAGE / "licenses"
     copy(INSTALLER / "THIRD_PARTY_NOTICES.md", licenses / "THIRD_PARTY_NOTICES.md")
@@ -298,9 +301,27 @@ def compile_setup(version):
     run([ISCC, f"/DAppVersion={version}", f"/DStage={STAGE}", f"/DOutputDir={DIST}", "/Q",
          INSTALLER / "dissidia012.iss"])
     setup = DIST / f"Dissidia012-PC-Setup-{version}.exe"
-    digest = hashlib.sha256(setup.read_bytes()).hexdigest()
-    (DIST / "SHA256SUMS").write_text(f"{digest}  {setup.name}\n", encoding="ascii", newline="\n")
-    print(f"  {setup} ({setup.stat().st_size / 2**20:.0f} MB), SHA-256 {digest}")
+    print(f"  {setup} ({setup.stat().st_size / 2**20:.0f} MB)")
+    return setup
+
+
+def compile_zip(version):
+    """The portable zip RecompLauncher installs: the staged folder as it is, recomplauncher.json at its top.
+    The launcher then runs `D012Native.exe --prepare --game <iso>` for what the setup wizard does."""
+    DIST.mkdir(parents=True, exist_ok=True)
+    archive = DIST / f"Dissidia012-PC-{version}-Windows-x64.zip"
+    with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as out:
+        for path in sorted(STAGE.rglob("*")):
+            if path.is_file():
+                out.write(path, path.relative_to(STAGE).as_posix())
+    print(f"  {archive} ({archive.stat().st_size / 2**20:.0f} MB)")
+    return archive
+
+
+def write_sums(files):
+    lines = [f"{hashlib.sha256(f.read_bytes()).hexdigest()}  {f.name}\n" for f in files]
+    (DIST / "SHA256SUMS").write_text("".join(lines), encoding="ascii", newline="\n")
+    print("  " + "  ".join(line.strip() for line in lines))
 
 
 def keep_symbols(version):
@@ -331,8 +352,10 @@ def main():
         stage(portablekit, atracdenc)
         print("3. checking")
         check_stage(portablekit)
-        print("4. compiling the setup")
-        compile_setup(options.version)
+        print("4. compiling the setup and the zip")
+        setup = compile_setup(options.version)
+        archive = compile_zip(options.version)
+        write_sums([setup, archive])
         keep_symbols(options.version)
     except PackagingError as error:
         print(f"package_installer: {error}", file=sys.stderr)
