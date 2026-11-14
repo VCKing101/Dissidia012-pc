@@ -6,7 +6,8 @@ The owner asked for cheats that give the same results as PPSSPP's. The port's me
 **Cheats** page, between Network and System:
 
 - **Use cheats** turns every cheat on or off at once (`cheats.enabled`).
-- **The port's own cheats**, under Money and points, Items, Battle and Opponent. A cheat with several amounts is one
+- **The port's own cheats**, under Money and points, Items, Battle and Opponent (AP, under Money and points, is set
+  by the port itself rather than by a code: [AP after a battle](#ap-after-a-battle)). A cheat with several amounts is one
   row with Off and each amount. They are saved in `settings.ini` as `cheats.builtin=key=choice,...`.
 - **PPSSPP cheat file** opens a page of the cheats in the player's own PPSSPP cheat file, which turns them on and off
   and writes the file back, as PPSSPP's cheat screen does.
@@ -51,6 +52,7 @@ used or shipped.
 | Gil | 1,000,000 / 99,999,999 | `0x08BBFA00` | both, in Customization and on the world map |
 | KP | 250 / 1,000,000 / 99,999,999 | `0x08BEE31C` | all three, on the world map |
 | PP | 20,000 / 9,999,999 | `0x08BCCB38` | both, in the PP Catalog the first time it opens |
+| AP | 100 / 999 | no code: the battle's rewards, as the game works them out ([AP after a battle](#ap-after-a-battle)) | "Received 100 AP." and "Received 999 AP." where the battle gave 1 |
 | All equipment ×99 | on | a count of 99 every 4 bytes from `0x08BBE41A`, 677 of them | the Equip list, every item ×99 |
 | All accessories ×99 | on | the same from `0x08BBEEC6`, 589 | the accessory list, every item ×99 |
 | Mala Bestia accessories ×99 | on | 9 of those counts | Growth Egg, Valor Resin, Chocobo Down, Wing and Feather, Supershine, Mog's Amulet, Qu'Bia Tail ×99 |
@@ -76,7 +78,55 @@ The list's codes were changed in five places:
 Left out of the list: **CP Doesn't Matter** and **Remove Bloom** (they write the game's code; the port has its own
 Bloom switch), the **widescreen** and **frame rate** codes (the port's aspect ratio and frame rate settings do those,
 and the codes would fight them), the **Chaos** codes (a fan mod written as cheats; the owner chose to leave it out),
-and the **AP after battle** codes (`0x09AEA568`): with 255 chosen, a Quick Battle still gave 1 AP.
+and the **AP after battle** codes (`0x09AEA568`): with 255 chosen, a Quick Battle still gave 1 AP. The port's AP row
+does what they meant to (next section).
+
+## AP after a battle
+
+> 14 November 2026. `port/host/d012_ap_cheat.cpp`. Windows, clang build, USA disc.
+
+The **AP** row (Money and points: Off, 100, 999) makes a battle that gives AP give that much. It has no CWCheat
+code. The port sets the amount as the game works the rewards out, so the results screen, the abilities mastered and
+the save all agree.
+
+**How the game gives AP.** At a battle's end (battle `0x08B07324`), each side's rewards for the fight are worked out
+(battle `0x08B0AD88`) into a record at `FIELD + side × 0x1BD8 + fight × 0x948 + 0xD8`, through battle `0x08ADDCF8`
+(the record in `$a1`, the fighter in `$a2`, `$t2` = 1 when the battle gives AP). Battle `0x08ADDFE4` then fills it:
+
+| Record | What |
+| --- | --- |
+| `+0x170` | AP: the reward row's AP and the bonuses, times the accessories' AP bonus (battle `0x08ADE14C`) |
+| `+0x174` | gil |
+| `+0x000`, `+0x12C` | the abilities that AP masters, and how many (main `0x088B9998`) |
+| `+0x12E`, `+0x16E` | the abilities mastering them teaches, and how many (main `0x088B9BA0`) |
+
+The same call of `0x08B07324` then lists the rewards (battle `0x08B0B71C`: "Received N AP.", the sum of the fights'
+`+0x170`, then each ability mastered and learned). Later, battle `0x08B08C14` (from `0x08B07974`) adds each fight's
+AP to the abilities the fighter has on (main `0x088B8038`), each only up to the AP that masters it
+(main `0x088B7F58`).
+
+**Why the list's codes did nothing.** `0x09AEA568` is side 0's first record's `+0x170`. The game writes it and lists
+it in one call, so a cheat run every 77 ms cannot change what the results show.
+
+**What the port does.** It overrides battle `0x08ADDCF8` (called from `0x08B0AD88`, in another generated unit, so
+the override takes every call): the game's own runs first; then, for the player's fighter (the side at
+`*0x089D6A10 + 0x54`, its fighter at `+0x38`), in a battle that gave AP, it raises `+0x170` to the amount chosen and
+works out the two ability lists again as `0x08ADDFE4` does. A battle that gives no AP stays at none, and an amount
+the game gives above the one chosen is kept. With **Use cheats** off, or `D012_NO_CHEATS=1`, the game's own runs
+alone. The log says `[cheats] AP: 1 from the battle, 999 with the cheat (17 abilities mastered)`.
+
+**Checked** (Quick Battle, Lightning Lv5 against a Lv5 CPU Lightning, Sky Fortress Bahamut; a test save in
+`build/port/data-ap`, `D012_UNTHROTTLED=1`, won with Defeat with Select or with `D012_TEST_LOW_HP=2`):
+
+| Run | Results screen |
+| --- | --- |
+| AP row off | "Received 1 AP." |
+| AP 100 | "Received 100 AP." |
+| AP 999 | "Received 999 AP.", then "Mastered Launch!", "Mastered Blitz!" and on to "Mastered 17 of the abilities!" and "Learned Flourish of Steel!" |
+| AP 999 again, the same save | "Received 999 AP.", nothing left to master: the game had saved the first battle's abilities |
+| AP 999 with Use cheats off | "Received 1 AP." |
+
+Not checked: Story Mode, a party battle (several fights, one record each), the European disc, Linux and the Steam Deck.
 
 ## PP and the game's pool (issues 16 and 20)
 

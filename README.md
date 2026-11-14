@@ -70,7 +70,7 @@ online and test sessions. Bugs and crashes go in [GitHub issues](https://github.
 - **More for keyboard players**: one key each for dodge, dash, EX Mode, summon and both assists; the mouse wheel moves
   through menus and tilts the battle camera; the game's prompts show your keys (menu's Controls page).
 - **Close the game from the title screen**: press circle there, then choose Yes.
-- **Cheats** on the menu's Cheats page: gil, KP, PP, items and battle cheats, and PPSSPP cheat files
+- **Cheats** on the menu's Cheats page: gil, KP, PP, AP, items and battle cheats, and PPSSPP cheat files
   ([below](#cheats)).
 
 ## BGM playlist selector
@@ -380,7 +380,7 @@ an example pack, how to set the trace variable, memory use, and what was tested.
 
 Open the menu (Esc, or L3 + R3 on a controller) and go to **Cheats**:
 
-- **Money and points:** Gil, KP and PP, each at an amount you choose.
+- **Money and points:** Gil, KP and PP, each at an amount you choose, and the AP each battle gives (100 or 999).
 - **Items:** 99 of every piece of equipment and every accessory, 99 of each Mala Bestia accessory, and every
   summonstone with 10 uses.
 - **Battle:** Infinite HP, Max HP 999,999, Bravery 9,999, Infinite EX, Infinite Assist and Level 100 for you;
