@@ -93,6 +93,14 @@ class InlineSectionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Live allocated"):
             audit_inline_sections(self.elf, self.unit, {"another_units_helper"})
 
+    def test_rodata_needs_a_declaration(self):
+        self.elf.sections.append(Section(".rodata"))
+        self.elf.sections[-1].update(sh_flags=2, sh_size=32)
+        with self.assertRaisesRegex(ValueError, "Unexpected allocated source section: .rodata"):
+            audit_inline_sections(self.elf, self.unit)
+        self.unit["rodata"] = {"address": "0x08A65660", "size": 32}
+        self.assertEqual(len(audit_inline_sections(self.elf, self.unit)), 1)
+
     def test_helper_cannot_be_assigned_an_external_original_address(self):
         manifest = {"units": [self.unit], "symbols": {"helper": "0x088D9D24"}}
         with self.assertRaisesRegex(ValueError, "external address"):

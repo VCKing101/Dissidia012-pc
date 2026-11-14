@@ -5,6 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 
+import c_rodata
 from mips_relocations import configured_addresses, resolve_function
 from probe_compilers import functions_from_object
 from compiler_inline_sections import verify_inline_units, validate_inline_manifest
@@ -27,9 +28,20 @@ def verify(candidate):
     validate_inline_manifest(matches)
     addresses = configured_addresses(matches)
     linked = functions_from_object(ROOT / "build/ULUS10566/battle.linked.elf")
-    functions, identities, ranges = [], set(), []
+    functions, identities, ranges, rodata_ranges = [], set(), [], []
+
+    def reference_range(address, length):
+        if not base <= address < address+length <= base+size:
+            raise ValueError("Battle C read-only data is outside the payload")
+        return reference[offset+address-base:offset+address-base+length]
     for unit in matches["units"]:
-        raw = functions_from_object(ROOT / f"build/ULUS10566/battle_{unit['name']}.raw.o")
+        raw_path = ROOT / f"build/ULUS10566/battle_{unit['name']}.raw.o"
+        raw = functions_from_object(raw_path)
+        local, data = c_rodata.check_unit(raw_path, unit, addresses, reference_range)
+        # A jump to a label inside the unit (GCC "j", asm "j 1f") is relative to its own .text.
+        unit_addresses = {**addresses, **local, c_rodata.TEXT: int(unit["functions"][0]["address"], 16)}
+        if data:
+            rodata_ranges.append((data["start"], data["end"], unit["name"]))
         for function in unit["functions"]:
             address = int(function["address"], 16)
             end = address+function["size"]
@@ -39,14 +51,14 @@ def verify(candidate):
             ranges.append((address, end))
             expected = reference[offset+address-base:offset+end-base]
             original_object, linked_symbol = raw[function["name"]], linked[function["name"]]
-            if resolve_function(original_object, addresses) != expected:
+            if resolve_function(original_object, unit_addresses) != expected:
                 raise ValueError(f"Battle raw C object does not match: {function['name']}")
             if linked_symbol["address"] != address or linked_symbol["bytes"] != expected:
                 raise ValueError(f"Battle linked C address/bytes do not match: {function['name']}")
             functions.append(function)
-    ordered = sorted(ranges)
+    ordered = sorted(ranges + [(a, z) for a, z, _ in rodata_ranges])
     if any(z > a for (_, z), (a, _) in zip(ordered, ordered[1:])):
-        raise ValueError("Battle C functions overlap")
+        raise ValueError("Battle C functions or read-only data overlap")
     prepared = json.loads((ROOT / "build/ULUS10566/battle.prepare.json").read_text())
     inventory = json.loads((ROOT / "config/inventory/battle.json").read_text())
     if prepared["reference_sha256"] != spec["sha256"] or prepared["input_layout_sha256"] != layout_digest(inventory):
@@ -54,11 +66,16 @@ def verify(candidate):
     c_bytes = sum(f["size"] for f in functions)
     instruction_ranges = [(int(r["start"], 16), int(r["end"], 16)) for r in inventory["instruction_ranges"]]
     instruction_bytes = sum(z-a for a, z in instruction_ranges)
-    if prepared["inventory_instruction_bytes"] != instruction_bytes or prepared["opaque_original_bytes"] != size-instruction_bytes:
+    rodata_bytes = sum(z-a for a, z, _ in rodata_ranges)
+    if any(a < y and x < z for a, z, _ in rodata_ranges for x, y in instruction_ranges):
+        raise ValueError("Battle C read-only data overlaps inventory instructions")
+    if prepared["matching_c_rodata_bytes"] != rodata_bytes:
+        raise ValueError("Battle preparation C read-only data accounting differs")
+    if prepared["inventory_instruction_bytes"] != instruction_bytes or prepared["opaque_original_bytes"] != size-instruction_bytes-rodata_bytes:
         raise ValueError("Battle preparation code/opaque accounting differs from its input layout")
     if prepared["matching_c_bytes"] != c_bytes or prepared["payload_bytes"] != size:
         raise ValueError("Battle preparation C/payload accounting differs")
-    accounted = sum(prepared[k] for k in ("matching_c_bytes", "assembly_instruction_bytes", "raw_instruction_fallback_bytes", "opaque_original_bytes"))
+    accounted = sum(prepared[k] for k in ("matching_c_bytes", "matching_c_rodata_bytes", "assembly_instruction_bytes", "raw_instruction_fallback_bytes", "opaque_original_bytes"))
     if accounted != size or prepared["raw_instruction_fallback_bytes"] != 4*len(prepared["raw_instruction_fallbacks"]):
         raise ValueError("Battle preparation does not account for the complete payload")
     cursor = base
@@ -74,13 +91,14 @@ def verify(candidate):
         if int.from_bytes(expected, "little") != int(fallback["word"], 16):
             raise ValueError("Battle raw fallback differs from the original word")
     for part in prepared["parts"]:
-        if part.get("kind") not in ("inventory-instructions", "matching-c", "opaque-original-bytes"):
+        if part.get("kind") not in ("inventory-instructions", "matching-c", "matching-c-rodata", "opaque-original-bytes"):
             raise ValueError("Unknown battle preparation part kind")
         start, end = int(part["start"], 16), int(part["end"], 16)
         if start != cursor or end <= start:
             raise ValueError("Battle preparation regions have a gap or overlap")
         in_code = any(a <= start and end <= z for a, z in instruction_ranges)
-        if (part["kind"] in ("inventory-instructions", "matching-c")) != in_code:
+        if (part["kind"] in ("inventory-instructions", "matching-c")) != in_code or (
+                part["kind"] == "matching-c-rodata" and any(a < end and start < z for a, z in instruction_ranges)):
             raise ValueError("Battle preparation part differs from instruction layout")
         cursor = end
     if cursor != base+size:
@@ -92,12 +110,18 @@ def verify(candidate):
                             for p in prepared["parts"] if p["kind"] == "matching-c")
     if expected_c_parts != actual_c_parts:
         raise ValueError("Battle matching-C parts differ from manifest unit ranges/identities")
+    actual_rodata_parts = sorted((int(p["start"], 16), int(p["end"], 16), p.get("unit"))
+                                 for p in prepared["parts"] if p["kind"] == "matching-c-rodata")
+    if sorted(rodata_ranges) != actual_rodata_parts:
+        raise ValueError("Battle C read-only data parts differ from manifest declarations")
     discarded_inline = verify_inline_units(ROOT, "battle", matches["units"], linked, prepared)
     return {"version": spec["version"], "overlay": "OVL_BATTLE_APP.ELF", "file_bytes": len(rebuilt),
             "sha256": hashlib.sha256(rebuilt).hexdigest(), "byte_identical": True,
             "reconstructed_payload_bytes": size, "preserved_header_and_metadata_bytes": len(reference)-size,
             "discarded_inline_definitions": discarded_inline,
             "recovered_c_functions": len(functions), "recovered_c_bytes": c_bytes, "c_functions": functions,
+            "c_rodata_bytes": rodata_bytes,
+            "c_rodata": [{"unit": u, "address": f"0x{a:08X}", "size": z-a} for a, z, u in sorted(rodata_ranges)],
             "assembly_instruction_bytes": prepared["assembly_instruction_bytes"],
             "raw_instruction_fallback_bytes": prepared["raw_instruction_fallback_bytes"],
             "opaque_original_bytes": prepared["opaque_original_bytes"],

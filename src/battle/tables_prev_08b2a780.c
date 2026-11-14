@@ -1,0 +1,13 @@
+#include "battle/agent27_types.h"
+
+extern CtxEntry *func_088C92CC(BattleCtx *ctx);
+
+int func_08B2A780(ResTables *tables)
+{
+    CtxEntry *entry = func_088C92CC(tables->ctx);
+
+    if (entry == 0) {
+        return 0;
+    }
+    return entry->field_18;
+}

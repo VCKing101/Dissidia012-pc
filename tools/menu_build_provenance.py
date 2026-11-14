@@ -18,6 +18,7 @@ def fingerprint_menu_build():
              "tools/build_menu.py", "tools/build_menu.sh",
              "tools/prepare_menu.py", "tools/verify_menu.py", "tools/menu_build_provenance.py",
              "tools/compile_psp.py", "tools/mips_relocations.py", "tools/probe_compilers.py", "tools/compiler_inline_sections.py",
+             "tools/c_rodata.py",
              "include/main/drawing_record.h", "include/main/callback_runtime.h", "include/main/resource_descriptor.h",
              "include/main/presentation_channel.h",
              "config/menu-member-table-review.json", "tools/audit_menu_member_table.py",

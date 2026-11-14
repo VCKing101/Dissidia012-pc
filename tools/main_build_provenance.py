@@ -4,6 +4,8 @@ import hashlib
 import json
 from pathlib import Path
 
+from compile_psp import compiler_files
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -19,9 +21,11 @@ def fingerprint_main_build():
     paths = {"config/main.reference.json", "config/main.matches.json", "config/main.link.ld",
              "tools/build_main.py", "tools/build_main.sh", "tools/prepare_main.py", "tools/verify_main.py",
              "tools/main_build_provenance.py", "tools/compile_psp.py", "tools/mips_relocations.py",
-             "tools/probe_compilers.py", "tools/compiler_inline_sections.py", "tools/inspect_imports.py", matches["compiler"],
+             "tools/probe_compilers.py", "tools/compiler_inline_sections.py", "tools/c_rodata.py", "tools/inspect_imports.py", matches["compiler"],
              "config/presentation-callback-review.json", "tools/audit_presentation_callbacks.py", "tools/build_inventory.py",
              "tools/compilers/psp-gcc-1.3.1/bin/psp-as", "tools/local/wibo", "tools/local/allegrex-binutils/allegrex-objcopy"}
+    for profile in matches.get("profiles", {}).values():
+        paths.update(compiler_files(profile["compiler"]))
     paths.update(u["source"] for u in matches["units"])
     paths.update(p.relative_to(ROOT).as_posix() for p in (ROOT / "include/main").glob("*.h"))
     result = {p: hashlib.sha256((ROOT / p).read_bytes()).hexdigest() for p in sorted(paths)}

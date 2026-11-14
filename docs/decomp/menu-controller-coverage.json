@@ -6,11 +6,11 @@
   "dispatcher": "0x089DD5DC",
   "dispatcher_matching_source": true,
   "handler_count": 20,
-  "matching_handlers": 14,
-  "handler_count_percent": 70.0,
+  "matching_handlers": 15,
+  "handler_count_percent": 75.0,
   "reviewed_handler_bytes": 8188,
-  "matching_handler_bytes": 2688,
-  "handler_byte_percent": 32.8285,
+  "matching_handler_bytes": 2916,
+  "handler_byte_percent": 35.6131,
   "extent_checks": "Pinned direct table targets; contiguous inventory extents; terminal jr-ra/delay slot; next known entries; bounded relative branches; no overlaps.",
   "dependencies_included": false,
   "runtime_verified": false,
@@ -129,8 +129,8 @@
       "body_bytes": 228,
       "next_function": "0x089DE008",
       "member_record": "0x089E0A48",
-      "matching_source": false,
-      "source": null
+      "matching_source": true,
+      "source": "src/menu/title_wait_089ddf24.cpp"
     },
     {
       "record_index": 13,

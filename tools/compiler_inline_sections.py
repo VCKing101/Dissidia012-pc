@@ -69,9 +69,11 @@ def audit_inline_sections(elf, unit, forbidden_inline_symbols=()):
                      and isinstance(s["st_shndx"], int)}
     if defined_funcs != selected | set(allowed):
         raise ValueError("Source unit has unlisted function definitions")
+    # A declared .rodata (switch jump tables) is placed and checked by c_rodata.
+    allocated = (".text", ".reginfo", ".rodata") if unit.get("rodata") is not None else (".text", ".reginfo")
     for index, section in enumerate(sections):
         if (section["sh_flags"] & 2 and section["sh_size"] and
-                section.name not in (".text", ".reginfo") and index not in discarded):
+                section.name not in allocated and index not in discarded):
             raise ValueError(f"Unexpected allocated source section: {section.name}")
         if section["sh_type"] not in ("SHT_REL", "SHT_RELA"):
             continue

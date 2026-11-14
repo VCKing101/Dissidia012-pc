@@ -14,7 +14,8 @@ from pathlib import Path
 import rabbitizer
 from elftools.elf.elffile import ELFFile
 
-from compile_psp import compile_object
+import c_rodata
+from compile_psp import compile_object, prefetch_units, repair_local_symbol_count, unit_compiler
 from compiler_inline_sections import inspect_inline_object, validate_inline_manifest
 from mips_relocations import configured_addresses, resolve_function
 from probe_compilers import functions_from_object
@@ -67,6 +68,7 @@ def compile_units(matches, reference, segments):
     compiled = []
     forbidden_inline = validate_inline_manifest(matches)
     addresses = configured_addresses(matches)
+    prefetch_units(matches, units, lambda u: f"build/ULUS10566/main_{u['name']}.raw.o")
     for unit in units:
         name = unit["name"]
         if not re.fullmatch(r"[a-z_][a-z_0-9]*", name):
@@ -86,26 +88,38 @@ def compile_units(matches, reference, segments):
         previous_end = end
         raw = Path(f"build/ULUS10566/main_{name}.raw.o")
         obj = Path(f"build/ULUS10566/main_{name}.o")
-        process = compile_object(matches["compiler"], matches["flags"], unit["source"], raw)
+        compiler, flags = unit_compiler(matches, unit)
+        process = compile_object(compiler, flags, unit["source"], raw)
         (BUILD / f"main_{name}.compile.log").write_text(process.stdout + process.stderr, encoding="utf-8")
         if process.returncode:
             raise RuntimeError(f"Main compilation failed: {name}")
         symbols = functions_from_object(ROOT / raw)
         inline_definitions = inspect_inline_object(ROOT / raw, unit, forbidden_inline)
+        local, rodata = c_rodata.check_unit(ROOT / raw, unit, addresses,
+                                            lambda address, size: reference_bytes_at(reference, segments, address, size))
+        if rodata and rodata["start"] < IMPORT_END and IMPORT_START < rodata["end"]:
+            raise ValueError("Main C read-only data overlaps the SDK import stubs")
+        # A jump to a label inside the unit (GCC "j", asm "j 1f") is relative to its own .text.
+        unit_addresses = {**addresses, **local, c_rodata.TEXT: int(unit["functions"][0]["address"], 16)}
         for specification in specifications:
             symbol = symbols[specification["name"]]
             address = int(specification["address"], 16)
             if symbol["address"] != address-start:
                 raise ValueError("Main compiler changed C function order")
-            if resolve_function(symbol, addresses) != reference_bytes_at(reference, segments, address, specification["size"]):
+            if resolve_function(symbol, unit_addresses) != reference_bytes_at(reference, segments, address, specification["size"]):
                 raise ValueError(f"Main C symbol does not match: {specification['name']}")
         data = bytearray((ROOT / raw).read_bytes())
-        flags = struct.unpack_from("<I", data, 36)[0]
-        if flags & 0x00FF0000 != 0x00A20000:
-            raise ValueError("Unexpected SNC machine identifier")
-        struct.pack_into("<I", data, 36, (flags & ~0x00FF0000) | 0x00840000)
+        elf_flags = struct.unpack_from("<I", data, 36)[0]
+        # SNC's pspas and Sony GCC's psp-as both write machine 0xA2.
+        if elf_flags & 0x00FF0000 != 0x00A20000:
+            raise ValueError("Unexpected Sony assembler machine identifier")
+        struct.pack_into("<I", data, 36, (elf_flags & ~0x00FF0000) | 0x00840000)
+        if unit.get("profile"):
+            data = repair_local_symbol_count(data)
         (ROOT / obj).write_bytes(data)
-        compiled.append({"start": start, "end": end, "object": obj.as_posix(), "unit": name, "discarded_inline_definitions": inline_definitions})
+        compiled.append({"start": start, "end": end, "object": obj.as_posix(), "unit": name, "rodata": rodata,
+                         "profile": unit.get("profile", "default"),
+                         "discarded_inline_definitions": inline_definitions})
     return compiled
 
 
@@ -163,6 +177,12 @@ def prepare():
     for unit in compiled:
         if not any(start <= unit["start"] and unit["end"] <= end for start, end in ranges):
             raise ValueError("Main C unit extends beyond an inventory instruction range")
+        data = unit["rodata"]
+        if data and any(start < data["end"] and data["start"] < end for start, end in ranges):
+            raise ValueError("Main C read-only data overlaps an inventory instruction range")
+    claimed = sorted([(u["start"], u["end"]) for u in compiled] + [(u["rodata"]["start"], u["rodata"]["end"]) for u in compiled if u["rodata"]])
+    if any(previous_end > next_start for (_, previous_end), (next_start, _) in zip(claimed, claimed[1:])):
+        raise ValueError("Main C code and read-only data ranges overlap")
     rabbitizer.config.pseudos_enablePseudos = False
     rabbitizer.config.regNames_gprAbiNames = rabbitizer.Abi.NUMERIC
     rabbitizer.config.regNames_fprAbiNames = rabbitizer.Abi.NUMERIC
@@ -170,7 +190,7 @@ def prepare():
     lines = ["# Generated by tools/prepare_main.py; opaque ranges preserve original bytes.",
              ".set noreorder", ".set noat", ".set nomacro"]
     jumps, fallbacks, parts, segment_reports = {}, [], [], []
-    assembly_bytes = opaque_bytes = c_bytes = 0
+    assembly_bytes = opaque_bytes = c_bytes = rodata_bytes = 0
     for segment in segments:
         index = segment["index"]
         base = int(segment["address"], 16)
@@ -179,7 +199,9 @@ def prepare():
         (BUILD / f"main.original.segment{index}.bin").write_bytes(payload)
         selected_ranges = [(a, z) for a, z in ranges if base <= a < limit]
         selected_units = [u for u in compiled if base <= u["start"] < limit]
-        boundaries = sorted({base, limit, *(v for r in selected_ranges for v in r), *(v for u in selected_units for v in (u["start"], u["end"]))})
+        selected_data = [u for u in compiled if u["rodata"] and base <= u["rodata"]["start"] < limit]
+        boundaries = sorted({base, limit, *(v for r in selected_ranges for v in r), *(v for u in selected_units for v in (u["start"], u["end"])),
+                             *(v for u in selected_data for v in (u["rodata"]["start"], u["rodata"]["end"]))})
         sections, segment_parts = [], []
         for chunk, (start, end) in enumerate(zip(boundaries, boundaries[1:])):
             part = {"segment_index": index, "start": f"0x{start:08X}", "end": f"0x{end:08X}"}
@@ -192,6 +214,14 @@ def prepare():
                              f'ASSERT(ABSOLUTE(.) == 0x{end:08X}, "main C end {unit["unit"]}");']
                 c_bytes += end-start
                 part.update(kind="matching-c", unit=unit["unit"])
+            elif owner := next((u for u in selected_data if u["rodata"]["start"] <= start and end <= u["rodata"]["end"]), None):
+                if start != owner["rodata"]["start"] or end != owner["rodata"]["end"]:
+                    raise ValueError("Main C read-only data has an internal boundary")
+                sections += [f'ASSERT(ABSOLUTE(.) == 0x{start:08X}, "main C rodata start {owner["unit"]}");',
+                             f'{owner["object"]}(.rodata)',
+                             f'ASSERT(ABSOLUTE(.) == 0x{end:08X}, "main C rodata end {owner["unit"]}");']
+                rodata_bytes += end-start
+                part.update(kind="matching-c-rodata", unit=owner["unit"])
             else:
                 section = f".text.main.segment{index}.{chunk}"
                 lines.append(f'\n.section {section}, "ax", @progbits')
@@ -231,6 +261,9 @@ def prepare():
               "load_segments": segments, "segments": segment_reports,
               "payload_bytes": sum(s["file_bytes"] for s in segments),
               "reconstructed_load_bytes": sum(s["file_bytes"] for s in segments), "matching_c_bytes": c_bytes,
+              "matching_c_rodata_bytes": rodata_bytes,
+              "build_profiles": {name: sum(1 for u in compiled if u["profile"] == name)
+                                 for name in sorted({u["profile"] for u in compiled})},
               "inventory_instruction_bytes": assembly_bytes+c_bytes,
               "assembly_instruction_bytes": assembly_bytes-4*len(fallbacks),
               "raw_instruction_fallback_bytes": 4*len(fallbacks), "opaque_original_bytes": opaque_bytes,

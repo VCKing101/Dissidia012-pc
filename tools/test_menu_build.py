@@ -43,8 +43,11 @@ class MenuBuildChecks(unittest.TestCase):
 
     def test_discarded_inline_copies_receive_no_source_credit(self):
         report = verify(CANDIDATE)
-        self.assertEqual(len(report["discarded_inline_definitions"]), 2)
-        self.assertEqual(sum(h["bytes"] for h in report["discarded_inline_definitions"]), 32)
+        matches = json.loads((ROOT / "config/menu.matches.json").read_text())
+        listed = [name for unit in matches["units"] for name in unit.get("unused_inline_symbols", [])]
+        self.assertGreaterEqual(len(listed), 2)
+        self.assertEqual(sorted(h["name"] for h in report["discarded_inline_definitions"]), sorted(listed))
+        self.assertTrue(all(h["bytes"] > 0 and h["bytes"] % 4 == 0 for h in report["discarded_inline_definitions"]))
         self.assertEqual(sum(f["size"] for f in report["c_functions"]), configured_totals("menu")[1])
         self.assertFalse({h["name"] for h in report["discarded_inline_definitions"]} &
                          {f["name"] for f in report["c_functions"]})
@@ -131,9 +134,9 @@ class MenuBuildChecks(unittest.TestCase):
         self.assertIsNone(menu["audited_code_completion_percent"])
         self.assertIsNone(report["whole_game_audited_code_percent"])
         controller = report["local_source_scopes"][0]
-        self.assertEqual(controller["matching_handlers"], 14)
-        self.assertEqual(controller["handler_count_percent"], 70)
-        self.assertEqual(controller["matching_handler_bytes"], 2688)
+        self.assertEqual(controller["matching_handlers"], 15)
+        self.assertEqual(controller["handler_count_percent"], 75)
+        self.assertEqual(controller["matching_handler_bytes"], 2916)
         self.assertEqual(controller["reviewed_handler_bytes"], 8188)
 
 

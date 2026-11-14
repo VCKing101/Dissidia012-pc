@@ -8,6 +8,7 @@ from pathlib import Path
 from elftools.elf.elffile import ELFFile
 
 from main_build_provenance import layout_digest
+import c_rodata
 from mips_relocations import configured_addresses, resolve_function
 from probe_compilers import functions_from_object
 from compiler_inline_sections import verify_inline_units, validate_inline_manifest
@@ -68,9 +69,17 @@ def verify(candidate):
                   if s["sh_type"] != "SHT_NOBITS" and s["sh_flags"] & 4]
     import_stubs = [(int(f["address"], 16), int(f["address"], 16)+8)
                     for library in inspect_imports(ROOT / spec["path"])["libraries"] for f in library["functions"]]
-    functions, ranges, names = [], [], set()
+    functions, ranges, names, rodata_ranges = [], [], set(), []
     for unit in matches["units"]:
-        raw = functions_from_object(ROOT / f"build/ULUS10566/main_{unit['name']}.raw.o")
+        raw_path = ROOT / f"build/ULUS10566/main_{unit['name']}.raw.o"
+        raw = functions_from_object(raw_path)
+        local, data = c_rodata.check_unit(raw_path, unit, addresses, lambda a, n: reference_at(reference, segments, a, n))
+        # A jump to a label inside the unit (GCC "j", asm "j 1f") is relative to its own .text.
+        unit_addresses = {**addresses, **local, c_rodata.TEXT: int(unit["functions"][0]["address"], 16)}
+        if data:
+            if any(max(data["start"], x) < min(data["end"], y) for x, y in import_stubs + code):
+                raise ValueError("Main C read-only data overlaps instructions or import stubs")
+            rodata_ranges.append((data["start"], data["end"], unit["name"]))
         for f in unit["functions"]:
             a, z = int(f["address"], 16), int(f["address"], 16)+f["size"]
             if f["name"] in names or a % 4 or f["size"] <= 0 or f["size"] % 4 or not any(x <= a < z <= y for x, y in executable):
@@ -79,18 +88,21 @@ def verify(candidate):
                 raise ValueError("SDK import stubs cannot earn main C source credit")
             names.add(f["name"]); ranges.append((a, z))
             expected = reference_at(reference, segments, a, f["size"])
-            if resolve_function(raw[f["name"]], addresses) != expected:
+            if resolve_function(raw[f["name"]], unit_addresses) != expected:
                 raise ValueError(f"Main raw C object does not match: {f['name']}")
             if linked[f["name"]]["address"] != a or linked[f["name"]]["bytes"] != expected:
                 raise ValueError(f"Main linked C address/bytes do not match: {f['name']}")
             functions.append(f)
-    ordered = sorted(ranges)
+    ordered = sorted(ranges + [(a, z) for a, z, _ in rodata_ranges])
     if any(z > a for (_, z), (a, _) in zip(ordered, ordered[1:])):
         raise ValueError("Main C ranges overlap")
     c_bytes = sum(f["size"] for f in functions)
+    rodata_bytes = sum(z-a for a, z, _ in rodata_ranges)
+    if prepared["matching_c_rodata_bytes"] != rodata_bytes:
+        raise ValueError("Main preparation C read-only data accounting differs")
     if prepared["matching_c_bytes"] != c_bytes or prepared["reconstructed_load_bytes"] != loaded_bytes or prepared["inventory_instruction_bytes"] != instruction_bytes:
         raise ValueError("Main preparation source/load accounting differs")
-    if prepared["opaque_original_bytes"] != loaded_bytes-instruction_bytes or sum(prepared[k] for k in ("matching_c_bytes", "assembly_instruction_bytes", "raw_instruction_fallback_bytes", "opaque_original_bytes")) != loaded_bytes:
+    if prepared["opaque_original_bytes"] != loaded_bytes-instruction_bytes-rodata_bytes or sum(prepared[k] for k in ("matching_c_bytes", "matching_c_rodata_bytes", "assembly_instruction_bytes", "raw_instruction_fallback_bytes", "opaque_original_bytes")) != loaded_bytes:
         raise ValueError("Main preparation does not account for initialized load bytes")
     if len(prepared["segments"]) != len(segments):
         raise ValueError("Main preparation dropped a load segment")
@@ -106,10 +118,11 @@ def verify(candidate):
             a, z = int(part["start"], 16), int(part["end"], 16)
             if a != cursor or z <= a or z > int(expected["address"], 16)+expected["file_bytes"]:
                 raise ValueError("Main load parts overlap, have gaps or materialize memory-only bytes")
-            if part["kind"] not in ("inventory-instructions", "matching-c", "opaque-original-bytes"):
+            if part["kind"] not in ("inventory-instructions", "matching-c", "matching-c-rodata", "opaque-original-bytes"):
                 raise ValueError("Main preparation uses an unknown part kind")
             is_code = any(x <= a and z <= y for x, y in code)
-            if (part["kind"] in ("inventory-instructions", "matching-c")) != is_code:
+            if (part["kind"] in ("inventory-instructions", "matching-c")) != is_code or (
+                    part["kind"] == "matching-c-rodata" and any(x < z and a < y for x, y in code)):
                 raise ValueError("Main part differs from instruction layout")
             cursor = z
         if cursor != int(expected["address"], 16)+expected["file_bytes"]:
@@ -119,6 +132,9 @@ def verify(candidate):
     actual_c = sorted((int(p["start"], 16), int(p["end"], 16), p.get("unit")) for p in all_parts if p["kind"] == "matching-c")
     if actual_c != expected_c:
         raise ValueError("Main matching-C parts differ from manifest units")
+    actual_rodata = sorted((int(p["start"], 16), int(p["end"], 16), p.get("unit")) for p in all_parts if p["kind"] == "matching-c-rodata")
+    if actual_rodata != sorted(rodata_ranges):
+        raise ValueError("Main C read-only data parts differ from manifest declarations")
     fallback_addresses = set()
     for f in prepared["raw_instruction_fallbacks"]:
         a = int(f["address"], 16)
@@ -136,6 +152,8 @@ def verify(candidate):
             "memory_only_bytes": sum(s["memory_bytes"]-s["file_bytes"] for s in segments), "load_segments": segments,
             "discarded_inline_definitions": discarded_inline,
             "recovered_c_functions": len(functions), "recovered_c_bytes": c_bytes, "c_functions": functions,
+            "c_rodata_bytes": rodata_bytes,
+            "c_rodata": [{"unit": u, "address": f"0x{a:08X}", "size": z-a} for a, z, u in sorted(rodata_ranges)],
             **{k: prepared[k] for k in ("assembly_instruction_bytes", "raw_instruction_fallback_bytes", "opaque_original_bytes", "input_layout_sha256")},
             "runtime_verified": False, "method": "Fixed-address C/assembly per original initialized PT_LOAD; opaque data/raw words and all nonload file bytes preserved, BSS unmaterialized"}
 

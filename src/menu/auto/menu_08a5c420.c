@@ -1,0 +1,7 @@
+#include "menu/auto_region2.h"
+
+/* Action5C3CC: func_08A4D9D0(D_08A4FFF4, field_04). */
+void func_08A5C420(Action5C3CC *self)
+{
+    func_08A4D9D0(D_08A4FFF4, self->field_04);
+}

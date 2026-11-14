@@ -1,0 +1,14 @@
+/* func_0896D994: generated from provisional Ghidra pseudocode by tools/dc_auto.py;
+   byte-identical with SNC -O2 -g. Names are placeholders. */
+extern void func_0896D6AC(int param_1,float *param_2,float *param_3);
+
+void func_0896D994(int param_1,int param_2,int param_3)
+
+{
+  func_0896D6AC(param_2,param_3,
+               *(int *)(param_2 + 0x8c) +
+               (unsigned int)*(unsigned short *)
+                      (*(int *)(*(int *)(param_2 + 0x90) + 8) +
+                      *(int *)(*(int *)(param_2 + 0x90) + 4) * 2) + 0x60);
+  return;
+}

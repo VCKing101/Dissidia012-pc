@@ -19,7 +19,8 @@ def fingerprint_battle_build():
              "include/main/drawing_record.h", "tools/build_battle.py", "tools/build_battle.sh",
              "include/battle/oct13_source_views.h", "include/battle/oct13_activation_views.h",
              "tools/prepare_battle.py", "tools/verify_battle.py", "tools/battle_build_provenance.py",
-             "tools/compile_psp.py", "tools/mips_relocations.py", "tools/probe_compilers.py", "tools/compiler_inline_sections.py"}
+             "tools/compile_psp.py", "tools/mips_relocations.py", "tools/probe_compilers.py", "tools/compiler_inline_sections.py",
+             "tools/c_rodata.py"}
     paths.update({matches["compiler"], "tools/compilers/psp-gcc-1.3.1/bin/psp-as", "tools/local/wibo"})
     paths.update(unit["source"] for unit in matches["units"])
     result = {path: hashlib.sha256((ROOT / path).read_bytes()).hexdigest() for path in sorted(paths)}

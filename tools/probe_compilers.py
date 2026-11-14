@@ -39,8 +39,13 @@ def functions_from_object(path):
                     location = relocation["r_offset"]
                     base = address if elf["e_type"] != "ET_REL" else start
                     if base <= location < base + size:
-                        relocations.append({"offset": location - base, "type": relocation["r_info_type"],
-                                            "symbol": relocation_symbols.get_symbol(relocation["r_info_sym"]).name})
+                        target = relocation_symbols.get_symbol(relocation["r_info_sym"])
+                        name = target.name
+                        # Unnamed section symbols (a GCC "j" to a label in the
+                        # same .text) use the name tools/c_rodata.py gives them.
+                        if not name and target["st_info"]["type"] == "STT_SECTION" and isinstance(target["st_shndx"], int):
+                            name = "<section " + elf.get_section(target["st_shndx"]).name + ">"
+                        relocations.append({"offset": location - base, "type": relocation["r_info_type"], "symbol": name})
             functions[symbol.name] = {"bytes": elf.get_section(index).data()[start:start + size],
                                       "name": symbol.name,
                                       "address": address,

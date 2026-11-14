@@ -22,6 +22,8 @@ def verify(candidate):
         raise ValueError(f"Overlay mismatch at file offset 0x{first:X}; expected {len(original)} bytes, got {len(rebuilt)}")
     matches = json.loads((ROOT / "config/extra.matches.json").read_text())
     specifications = [function for unit in matches["units"] for function in unit["functions"]]
+    if any("rodata" in unit for unit in matches["units"]):
+        raise ValueError("The extra build cannot place C read-only data (switch jump tables) yet")
     raw_functions = {}
     for unit in matches["units"]:
         raw_functions.update(functions_from_object(ROOT / f"build/ULUS10566/{unit['name']}.raw.o"))

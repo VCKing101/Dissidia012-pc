@@ -7,7 +7,7 @@ from pathlib import Path
 
 from elftools.elf.elffile import ELFFile
 
-from compile_psp import compile_object
+from compile_psp import compile_object, prefetch
 from probe_compilers import functions_from_object
 from mips_relocations import configured_addresses, resolve_function
 
@@ -29,6 +29,7 @@ def prepare():
     reference = (ROOT / "orig/ULUS10566/PSP_GAME/USRDIR/DATA/OVL_EXTRA_APP.ELF").read_bytes()
     assembly = (ROOT / "asm/ULUS10566/extra/ovl_extra_app.s").read_text()
     units = sorted(matches["units"], key=lambda unit: int(unit["functions"][0]["address"], 16))
+    prefetch(matches["compiler"], matches["flags"], [(u["source"], f"build/ULUS10566/{u['name']}.raw.o") for u in units])
     remaining = []
     sections = []
     objects = []
@@ -38,6 +39,8 @@ def prepare():
         name = unit["name"]
         if not re.fullmatch(r"[a-z_]+", name):
             raise ValueError("Invalid C unit name")
+        if "rodata" in unit:
+            raise ValueError("The extra build cannot place C read-only data (switch jump tables) yet")
         functions = unit["functions"]
         first_address = int(functions[0]["address"], 16)
         last_end = first_address
