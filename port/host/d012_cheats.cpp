@@ -10,11 +10,19 @@
 // Left out: the list's code patches (CP Doesn't Matter, Remove Bloom), which
 // need the game's code changed; its widescreen and frame rate codes, which
 // the port's own settings do; its Chaos codes; and its AP codes (0x09AEA568),
-// which left the AP a Quick Battle gives unchanged.
+// which left the AP a Quick Battle gives unchanged. The AP row has no codes:
+// the port gives the AP itself (d012_ap_cheat.cpp).
 //
 // MIT licence; see port/README.md.
 
 #include "d012_cheats.hpp"
+
+#include "cheats/cheats.hpp"
+#include "settings/settings.hpp"
+
+#include <cstddef>
+#include <cstring>
+#include <iterator>
 
 namespace d012 {
 namespace {
@@ -49,6 +57,13 @@ constexpr CheatChoice kPp[] = {
     {"20,000", "0x203CCB38 0x00004E20"},
     {"9,999,999", "0x203CCB38 0x0098967F"},
 };
+// AP: no codes. The battle's ending works out the AP and lists it on the
+// results in one call, so a write every 77 ms comes too late; the port sets
+// it as the game works it out (d012_ap_cheat.cpp). kApAmounts holds each
+// choice's amount.
+constexpr CheatChoice kAp[] = {{"100", nullptr}, {"999", nullptr}};
+constexpr std::uint32_t kApAmounts[] = {100u, 999u};
+static_assert(std::size(kAp) == std::size(kApAmounts));
 
 // --- Items -------------------------------------------------------------------
 // Each writes a count into every fourth byte: equipment from 0x08BBE41A,
@@ -95,6 +110,7 @@ constexpr BuiltinCheat kCheats[] = {
     {"gil", kMoney, "Gil", "Keeps your gil at this amount.", kGil},
     {"kp", kMoney, "KP", "Keeps your KP at this amount. Leave the KP shop and enter it again to see it.", kKp},
     {"pp", kMoney, "PP", "Keeps your PP at this amount. The PP Catalog shows it the next time you open it.", kPp},
+    {"ap", kMoney, "AP", "Battles that give AP give this much.", kAp},
     {"equipment", kItems, "All equipment ×99", "Keeps 99 of every piece of equipment.", kEquipment},
     {"accessories", kItems, "All accessories ×99", "Keeps 99 of every accessory.", kAccessories},
     {"mala_bestia", kItems, "Mala Bestia accessories ×99", "Keeps 99 of each Mala Bestia accessory.", kMalaBestia},
@@ -115,5 +131,17 @@ constexpr BuiltinCheat kCheats[] = {
 } // namespace
 
 std::span<const portablekit::BuiltinCheat> builtin_cheats() { return kCheats; }
+
+std::uint32_t ap_after_battle() {
+    if (!portablekit::settings::current().cheats) return 0u;
+    const portablekit::cheats::Overview overview = portablekit::cheats::overview();
+    if (!overview.available) return 0u;
+    for (std::size_t i = 0; i < std::size(kCheats) && i < overview.builtin.size(); ++i) {
+        if (std::strcmp(kCheats[i].key, "ap") != 0) continue;
+        const std::size_t choice = overview.builtin[i].choice;
+        return choice >= 1u && choice <= std::size(kApAmounts) ? kApAmounts[choice - 1u] : 0u;
+    }
+    return 0u;
+}
 
 } // namespace d012
