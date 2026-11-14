@@ -706,8 +706,9 @@ versus is active; at other times a second gamepad stays a spare for player 1, as
   hide the old row's, `main:0x0887B924` / `0x0887B944`, bit `0x400` of the text's `+0x10`).
 
 - The menu's texts array (`state+0x8B8`) has 0x59 entries. 0x4D to 0x4F are made apart from the table (the
-  player's name, the play time); entries from 0x52 up are made and replaced as the menu goes. 0x50 and 0x51 stayed
-  free in every run.
+  player's name, the play time); entries from 0x52 up are made and replaced as the menu goes. 0x50 is the menu's
+  notice ("Received mail from moogles!", `0x089E6248`): released and made again when one arrives, so it is not free
+  (see "The rows' labels moved out of the menu's array" below). 0x51 stayed free in every run.
 - Two ends: leaving for a destination (mode 4, then 5: `0x089E133C` releases the layouts, `main:0x088D3A04`, which
   takes their parts, then every text) and `0x089E17F8` (parts by table, `main:0x088D3C24`, then layouts, then
   texts). Mode 6 (`0x089E1428`) then waits until the font has no text objects left (`main:0x0887E718`): a text the
@@ -835,10 +836,12 @@ Battle, Stage, Rules, Judgment, with Quick Battle's header and plates, and "GUES
 (`setup3/`). The battle is still a Quick Battle: the cursor, the settings, Enter Battle and the split battle after it
 work as before. **Not checked:** setting Judgment to anything but None, and what it does in a Quick Battle.
 
-**The row's lit label** (7.6's "drawn dark"): the label's two copies are now menu texts 0x50 (on the label part) and
-0x51 (on the bar at locator 1, as the game's rows have it). The help, which needs no slot of its own on a part, moved
-to the private text at `0x08800A80` (`kPrivateHelp`). Texts on a row's parts are drawn only from the menu's own
-array, so the private one could not carry the label. Checked lit and unlit (`rows_lit2/`).
+**The row's lit label** (7.6's "drawn dark"): the label's two copies were then menu texts 0x50 (on the label part)
+and 0x51 (on the bar at locator 1, as the game's rows have it); they have since moved (see "The rows' labels moved
+out of the menu's array" below). The help, which needs no slot of its own on a part, moved to the private text at
+`0x08800A80` (`kPrivateHelp`). Texts on a row's parts were then drawn only from the menu's own array, so the private
+one could not carry the label; placing them through `main:0x088D4584` (the Party row's labels) later made that work.
+Checked lit and unlit (`rows_lit2/`).
 
 **Four Battle Mode rows** (`D012_TEST_FOUR_ROWS=1` sets the save's flag `0x400000`): the fourth row is "Labyrinth".
 The versus row goes to slot 0, under it, and lights, chooses and helps as with three rows (`rows_four/`).
@@ -1479,3 +1482,12 @@ The owner wants this route for online play and matchmaking, much later. What was
   Windows Firewall prompt.
 - The 16-bit packet carries the left stick as 8 directions only, so online play would be digital unless both ends
   change the packet ([pad-module.md](../research/pad-module.md) section 6).
+
+**The rows' labels moved out of the menu's array** (2026-11-15). Menu text 0x50 is the start menu's notice: when
+mail arrives, `0x089E6248` releases the text in that slot (the 1-on-1 row's label) and makes "Received mail from
+moogles!" there, which then showed on the 1-on-1 row, and the menu's end released it a second time. The 1-on-1
+row's two label texts are now kept apart as the Party row's are (`0x08800A80`, words 4 and 5 after the help and
+the Party row's three): attached to their parts when the rows are made, placed with the rows' texts table
+(`main:0x088D44EC`, `place_row_labels`), shown and hidden with the first text of Battle Mode's own table
+(`row_labels_follow`), and released by the port after the layouts. The rows' texts table is now Battle Mode's own,
+copied.
