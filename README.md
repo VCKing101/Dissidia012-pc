@@ -205,6 +205,10 @@ the game's code is compiled again only when the new version needs it. The game t
 and attach the log, `data\logs\D012Native.log` in the install folder. Starting the game again renames it to
 `D012Native-previous.log`, so attach that one if you have. A crash writes where it happened at the end of the log.
 
+**If the game says it can't start its graphics,** Windows found no working Vulkan driver. Install the current driver
+for your graphics card from AMD, NVIDIA or Intel, even if you have it already. If that doesn't help, open an issue
+with the log: it lists what Windows has for Vulkan.
+
 You need Windows 10 or 11 (64-bit), a graphics driver with Vulkan (any GPU from about 2016 on) and about 2.5 GB of
 free disk space.
 

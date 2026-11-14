@@ -1,0 +1,429 @@
+From 319be0254324806ee877b4f13031ec8c45cf03df Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Sat, 14 Nov 2026 15:48:22 +1030
+Subject: [PATCH] Renderer: a Vulkan report when it cannot start, and a hook to
+ say so
+
+When the renderer could not start, the game ran on with no window. A
+player saw nothing happen: the program stayed in Task Manager, waiting
+unseen at the game's first dialog, and the log said only what SDL said.
+Issue 24 of the Dissidia 012 port was this: a GTX 1070 on a current
+driver, and "Installed Vulkan doesn't implement the VK_KHR_surface
+extension", which means the loader found no driver at all.
+
+The log now gets a report of what the machine has for Vulkan
+(gpu/vulkan_report.cpp, "[vulkan]" lines): the graphics adapters as DXGI
+lists them, with their drivers' versions; the loader's version and
+instance extensions; the loader's own account of its driver search,
+which manifests it found and which drivers it loaded or skipped and why;
+the devices of an instance made without a window; and those of the
+loader's environment variables that are set. VK_LOADER_DEBUG is read
+once, when the loader is loaded at start-up, so the account comes from a
+debug messenger chained into vkCreateInstance, which the loader gives
+the same messages; only its problems and its driver lines are kept.
+
+GameProfile::renderer_unavailable is called with the renderer's reason
+when the game starts without a renderer (not when <prefix>_NO_RENDER
+turns it off), after the report. A player's build can tell the player
+and end. Without the hook nothing changes: the game runs on without a
+window, as test runs on a machine without Vulkan want. The setup screens
+still fall back to the system's dialogs when they find no renderer; only
+the game's own start calls the hook.
+
+Tested on Windows 11 with Dissidia 012 (setup build, llvm-mingw), AMD
+and Intel graphics: VK_DRIVER_FILES pointing at no file gives the
+reporter's exact error, the report names the variable and "Found no
+drivers!", and the port's hook shows its message and ends; a normal
+start is unchanged. hle_media.cpp also compiles without the renderer.
+Not tested: Linux, macOS, a real broken driver install, another game.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ cmake/PortableKit.cmake    |   1 +
+ docs/DESKTOP_APP.md        |   2 +-
+ docs/PROFILE_GUIDE.md      |   2 +
+ host/gpu/vulkan_report.cpp | 243 +++++++++++++++++++++++++++++++++++++
+ host/gpu/vulkan_report.hpp |  18 +++
+ host/hle/hle_media.cpp     |  18 ++-
+ host/profile.hpp           |   7 ++
+ 7 files changed, 289 insertions(+), 2 deletions(-)
+ create mode 100644 host/gpu/vulkan_report.cpp
+ create mode 100644 host/gpu/vulkan_report.hpp
+
+diff --git a/cmake/PortableKit.cmake b/cmake/PortableKit.cmake
+index 9733b4c..3c02db9 100644
+--- a/cmake/PortableKit.cmake
++++ b/cmake/PortableKit.cmake
+@@ -109,6 +109,7 @@ set(PORTABLEKIT_RENDERER_SOURCES
+     host/gpu/present_queue.cpp
+     host/gpu/replacement_textures.cpp
+     host/gpu/vulkan_renderer.cpp
++    host/gpu/vulkan_report.cpp
+     host/ui/file_browser.cpp
+     host/ui/font_menu.cpp
+     host/input/motion.cpp
+diff --git a/docs/DESKTOP_APP.md b/docs/DESKTOP_APP.md
+index 68821d6..5092d9a 100644
+--- a/docs/DESKTOP_APP.md
++++ b/docs/DESKTOP_APP.md
+@@ -83,7 +83,7 @@ Today a port is a `GameProfile` written in C++ ([`host/profile.hpp`](../host/pro
+ | `save_game_name`, `save_folders` | the disc id. The game names its folders itself when it saves; the save screen's labels are generic ("Game data") | the main one; the others only by running |
+ | `adhoc_product_code` | the disc id | a guess that holds for most games |
+ | `app_name`, `project_name`, `env_prefix`, data names | the app's own (`portablekit`, `PORTABLEKIT_*`) | — |
+-| `register_extra_hle`, `patch_loaded_image`, `camera`, `view_aspect_frame`, `interpolation_thresholds`, `glyph_cache`, `trigger_profiles`, `other_releases`, `sharp_textures`, `edited_textures`, `second_player`, `cheats` | none: the framework's defaults | these are what hand profiles are for |
++| `register_extra_hle`, `patch_loaded_image`, `renderer_unavailable`, `camera`, `view_aspect_frame`, `interpolation_thresholds`, `glyph_cache`, `trigger_profiles`, `other_releases`, `sharp_textures`, `edited_textures`, `second_player`, `cheats` | none: the framework's defaults | these are what hand profiles are for |
+ 
+ The entry point, the code ranges, the imports and relocations are read from the ELF by the framework already; the recompiler finds the code by its own analysis (`psp_recomp --auto`). Modules the game loads from its disc that the framework implements as HLE (`libfont.prx`, `psmf.prx` and the like) are recognised by name at run time.
+ 
+diff --git a/docs/PROFILE_GUIDE.md b/docs/PROFILE_GUIDE.md
+index 5ef3e3b..f43998f 100644
+--- a/docs/PROFILE_GUIDE.md
++++ b/docs/PROFILE_GUIDE.md
+@@ -58,6 +58,8 @@ Read the values off the player's own disc rather than recalling them:
+ 
+ Two fields are hooks rather than values. `register_extra_hle` adds calls this game makes that the framework does not implement, or replaces one it gets wrong for this game. `patch_loaded_image` is for per-game fixes with no better home. Both may be null, and a profile that needs neither is the goal.
+ 
++A third hook is about the player's machine, not the game. `renderer_unavailable` is called once if the window and the renderer cannot be made as the game starts, with the renderer's reason, after the log has a report of what the machine has for Vulkan (`host/gpu/vulkan_report.hpp`: the graphics adapters, the loader's extensions and its account of its driver search, and the loader's variables that are set). Without it the game runs on with no window, which a test run on a machine without Vulkan wants and a player does not: the game waits unseen at its first dialog. A player's build can tell the player why and end.
++
+ Two more are for a port that goes further than the PSP did, and both are null until a game has earned them:
+ 
+ - `camera`, a `CameraDriver`: drives the game's own camera from what the player asks of it. The framework turns every device — the second stick, camera keys, the mouse — into one request (`host/camera/camera_input.hpp`); the driver takes it at each flip and says whether the game must stop acting on the second stick meanwhile, whether the game is aiming, and how fast the current camera turns (`host/camera/camera_driver.hpp` has the framework's side and its defaults). Where a game keeps its camera is the game's, so the driver is too. Without one, Analog camera and its rows are not offered and what the devices ask of the camera is dropped. Yakumo's `host/camera/game_camera.cpp` is the example.
+diff --git a/host/gpu/vulkan_report.cpp b/host/gpu/vulkan_report.cpp
+new file mode 100644
+index 0000000..a898b01
+--- /dev/null
++++ b/host/gpu/vulkan_report.cpp
+@@ -0,0 +1,243 @@
++#include "vulkan_report.hpp"
++
++#include <vulkan/vulkan.h>
++
++#include <cstddef>
++#include <cstdint>
++#include <cstdio>
++#include <cstdlib>
++#include <iostream>
++#include <string>
++#include <string_view>
++#include <vector>
++
++#if defined(_WIN32)
++#ifndef WIN32_LEAN_AND_MEAN
++#define WIN32_LEAN_AND_MEAN
++#endif
++#ifndef NOMINMAX
++#define NOMINMAX
++#endif
++#include <windows.h>
++#include <dxgi.h>
++#endif
++
++namespace portablekit::gpu {
++namespace {
++
++// More than a driver search takes on a machine with several drivers, fewer
++// than the loader's whole account of its layers.
++constexpr std::size_t kMaxLoaderLines = 40u;
++
++std::string describe(VkResult result) {
++    const char *name = "an error";
++    switch (result) {
++    case VK_SUCCESS: name = "VK_SUCCESS"; break;
++    case VK_ERROR_INCOMPATIBLE_DRIVER: name = "VK_ERROR_INCOMPATIBLE_DRIVER"; break;
++    case VK_ERROR_INITIALIZATION_FAILED: name = "VK_ERROR_INITIALIZATION_FAILED"; break;
++    case VK_ERROR_EXTENSION_NOT_PRESENT: name = "VK_ERROR_EXTENSION_NOT_PRESENT"; break;
++    case VK_ERROR_LAYER_NOT_PRESENT: name = "VK_ERROR_LAYER_NOT_PRESENT"; break;
++    case VK_ERROR_OUT_OF_HOST_MEMORY: name = "VK_ERROR_OUT_OF_HOST_MEMORY"; break;
++    case VK_ERROR_OUT_OF_DEVICE_MEMORY: name = "VK_ERROR_OUT_OF_DEVICE_MEMORY"; break;
++    default: break;
++    }
++    return std::string(name) + " (" + std::to_string(static_cast<int>(result)) + ")";
++}
++
++std::string version_text(std::uint32_t version) {
++    return std::to_string(VK_API_VERSION_MAJOR(version)) + "." + std::to_string(VK_API_VERSION_MINOR(version)) + "." +
++           std::to_string(VK_API_VERSION_PATCH(version));
++}
++
++const char *device_type_name(VkPhysicalDeviceType type) {
++    switch (type) {
++    case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU: return "integrated";
++    case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU: return "discrete";
++    case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU: return "virtual";
++    case VK_PHYSICAL_DEVICE_TYPE_CPU: return "software";
++    default: return "other";
++    }
++}
++
++#if defined(_WIN32)
++std::string utf8(const wchar_t *text) {
++    const int size = WideCharToMultiByte(CP_UTF8, 0, text, -1, nullptr, 0, nullptr, nullptr);
++    if (size <= 1) return {};
++    std::string out(static_cast<std::size_t>(size - 1), '\0');
++    WideCharToMultiByte(CP_UTF8, 0, text, -1, out.data(), size, nullptr, nullptr);
++    return out;
++}
++
++// The adapters as DXGI lists them, with their drivers' versions: whether
++// Windows has the graphics card's own driver, or only its basic display one.
++void log_adapters() {
++    HMODULE dxgi = LoadLibraryW(L"dxgi.dll");
++    if (dxgi == nullptr) {
++        std::cout << "[vulkan] no DXGI to list the graphics adapters\n";
++        return;
++    }
++    using CreateFactory = HRESULT(WINAPI *)(REFIID, void **);
++    const auto create =
++        reinterpret_cast<CreateFactory>(reinterpret_cast<void *>(GetProcAddress(dxgi, "CreateDXGIFactory1")));
++    IDXGIFactory1 *factory = nullptr;
++    if (create == nullptr || FAILED(create(__uuidof(IDXGIFactory1), reinterpret_cast<void **>(&factory)))) {
++        std::cout << "[vulkan] DXGI cannot list the graphics adapters\n";
++        FreeLibrary(dxgi);
++        return;
++    }
++    for (UINT i = 0; i < 16u; ++i) {
++        IDXGIAdapter1 *adapter = nullptr;
++        if (FAILED(factory->EnumAdapters1(i, &adapter)) || adapter == nullptr) break;
++        DXGI_ADAPTER_DESC1 desc{};
++        if (SUCCEEDED(adapter->GetDesc1(&desc))) {
++            char ids[16];
++            std::snprintf(ids, sizeof ids, "%04x:%04x", static_cast<unsigned>(desc.VendorId),
++                          static_cast<unsigned>(desc.DeviceId));
++            std::cout << "[vulkan] graphics adapter " << i << ": " << utf8(desc.Description) << " (" << ids << ")";
++            // The user-mode driver's version, as Device Manager shows it.
++            LARGE_INTEGER driver{};
++            if (SUCCEEDED(adapter->CheckInterfaceSupport(__uuidof(IDXGIDevice), &driver)))
++                std::cout << ", driver " << HIWORD(driver.HighPart) << "." << LOWORD(driver.HighPart) << "."
++                          << HIWORD(driver.LowPart) << "." << LOWORD(driver.LowPart);
++            if ((desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0u) std::cout << ", software";
++            std::cout << "\n";
++        }
++        adapter->Release();
++    }
++    factory->Release();
++    FreeLibrary(dxgi);
++}
++#endif
++
++// What the loader says while it makes an instance: its problems, and the
++// lines of its driver search (which manifests it found, which drivers it
++// loaded or skipped and why), not its search for layers.
++struct LoaderMessages {
++    std::vector<std::string> kept;
++    std::size_t left_out = 0u;
++};
++
++bool about_drivers(std::string_view text) {
++    if (text.find("DRIVERENUM") != std::string_view::npos) return false;
++    for (const char *word :
++         {"ICD", "driver manifest", "Driver Manifest", "Khronos\\Vulkan\\Drivers", "Found no drivers", "Driver \""})
++        if (text.find(word) != std::string_view::npos) return true;
++    return false;
++}
++
++VKAPI_ATTR VkBool32 VKAPI_CALL on_loader_message(VkDebugUtilsMessageSeverityFlagBitsEXT severity,
++                                                 VkDebugUtilsMessageTypeFlagsEXT,
++                                                 const VkDebugUtilsMessengerCallbackDataEXT *data, void *user) {
++    auto &messages = *static_cast<LoaderMessages *>(user);
++    const std::string_view text = data != nullptr && data->pMessage != nullptr ? data->pMessage : "";
++    const bool error = severity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
++    const bool warning = severity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT;
++    if (!warning && !about_drivers(text)) return VK_FALSE;
++    if (messages.kept.size() >= kMaxLoaderLines) {
++        ++messages.left_out;
++        return VK_FALSE;
++    }
++    try {
++        messages.kept.push_back(std::string(error ? "error: " : warning ? "warning: " : "") + std::string(text));
++    } catch (...) {
++    }
++    return VK_FALSE;
++}
++
++void log_devices(VkInstance instance) {
++    std::uint32_t count = 0u;
++    vkEnumeratePhysicalDevices(instance, &count, nullptr);
++    std::vector<VkPhysicalDevice> devices(count);
++    if (count != 0u) vkEnumeratePhysicalDevices(instance, &count, devices.data());
++    devices.resize(count);
++    if (devices.empty()) std::cout << "[vulkan] an instance without a window has no devices\n";
++    for (VkPhysicalDevice device : devices) {
++        VkPhysicalDeviceProperties properties{};
++        vkGetPhysicalDeviceProperties(device, &properties);
++        char ids[16];
++        std::snprintf(ids, sizeof ids, "%04x:%04x", properties.vendorID, properties.deviceID);
++        char driver[16];
++        std::snprintf(driver, sizeof driver, "0x%08x", properties.driverVersion);
++        std::cout << "[vulkan] device: " << properties.deviceName << " (" << ids << ", "
++                  << device_type_name(properties.deviceType) << "), Vulkan " << version_text(properties.apiVersion)
++                  << ", driver " << driver << "\n";
++    }
++}
++
++} // namespace
++
++void log_vulkan_report() {
++    std::cout << "[vulkan] what this machine has for Vulkan:\n";
++#if defined(_WIN32)
++    log_adapters();
++#endif
++    // vkEnumerateInstanceVersion is Vulkan 1.1's; a 1.0 loader has none.
++    std::uint32_t api = VK_API_VERSION_1_0;
++    if (const auto enumerate_version = reinterpret_cast<PFN_vkEnumerateInstanceVersion>(
++            vkGetInstanceProcAddr(VK_NULL_HANDLE, "vkEnumerateInstanceVersion")))
++        enumerate_version(&api);
++
++    std::uint32_t count = 0u;
++    VkResult result = vkEnumerateInstanceExtensionProperties(nullptr, &count, nullptr);
++    std::vector<VkExtensionProperties> extensions(count);
++    if (result == VK_SUCCESS && count != 0u) result = vkEnumerateInstanceExtensionProperties(nullptr, &count, extensions.data());
++    extensions.resize(result == VK_SUCCESS || result == VK_INCOMPLETE ? count : 0u);
++    bool debug_utils = false;
++    bool portability = false;
++    std::cout << "[vulkan] loader for Vulkan " << version_text(api) << ", instance extensions (" << extensions.size()
++              << "):";
++    for (const VkExtensionProperties &extension : extensions) {
++        const std::string_view name = extension.extensionName;
++        std::cout << " " << name;
++        if (name == VK_EXT_DEBUG_UTILS_EXTENSION_NAME) debug_utils = true;
++        if (name == VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME) portability = true;
++    }
++    std::cout << "\n";
++    if (result != VK_SUCCESS && result != VK_INCOMPLETE)
++        std::cout << "[vulkan] vkEnumerateInstanceExtensionProperties: " << describe(result) << "\n";
++
++    LoaderMessages messages;
++    VkDebugUtilsMessengerCreateInfoEXT messenger{VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT};
++    messenger.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT |
++                                VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT |
++                                VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
++                                VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
++    messenger.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
++                            VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
++    messenger.pfnUserCallback = &on_loader_message;
++    messenger.pUserData = &messages;
++    std::vector<const char *> enabled;
++    if (debug_utils) enabled.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
++    if (portability) enabled.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
++    VkApplicationInfo application{VK_STRUCTURE_TYPE_APPLICATION_INFO};
++    // A Vulkan 1.0 loader refuses any other version.
++    application.apiVersion = api >= VK_API_VERSION_1_1 ? VK_API_VERSION_1_1 : VK_API_VERSION_1_0;
++    VkInstanceCreateInfo info{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
++    info.pNext = debug_utils ? &messenger : nullptr;
++    info.pApplicationInfo = &application;
++    info.enabledExtensionCount = static_cast<std::uint32_t>(enabled.size());
++    info.ppEnabledExtensionNames = enabled.data();
++    if (portability) info.flags = VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
++    VkInstance instance = VK_NULL_HANDLE;
++    result = vkCreateInstance(&info, nullptr, &instance);
++    for (const std::string &line : messages.kept) std::cout << "[vulkan] loader: " << line << "\n";
++    if (messages.left_out != 0u) std::cout << "[vulkan] loader: " << messages.left_out << " more lines left out\n";
++    if (result != VK_SUCCESS) {
++        std::cout << "[vulkan] an instance without a window: " << describe(result) << "\n";
++    } else {
++        log_devices(instance);
++        vkDestroyInstance(instance, nullptr);
++    }
++
++    // The loader's variables change where it looks for drivers and layers, or
++    // turn drivers off; a program or a guide can leave one set for everyone.
++    for (const char *name : {"VK_ICD_FILENAMES", "VK_DRIVER_FILES", "VK_ADD_DRIVER_FILES", "VK_LOADER_DRIVERS_SELECT",
++                             "VK_LOADER_DRIVERS_DISABLE", "VK_INSTANCE_LAYERS", "VK_LOADER_LAYERS_ENABLE",
++                             "VK_LOADER_LAYERS_DISABLE", "VK_LAYER_PATH", "VK_ADD_LAYER_PATH", "VK_IMPLICIT_LAYER_PATH",
++                             "VK_ADD_IMPLICIT_LAYER_PATH", "VK_LOADER_DEBUG"})
++        if (const char *value = std::getenv(name); value != nullptr && *value != '\0')
++            std::cout << "[vulkan] " << name << "=" << value << "\n";
++    std::cout << std::flush;
++}
++
++} // namespace portablekit::gpu
+diff --git a/host/gpu/vulkan_report.hpp b/host/gpu/vulkan_report.hpp
+new file mode 100644
+index 0000000..e315b06
+--- /dev/null
++++ b/host/gpu/vulkan_report.hpp
+@@ -0,0 +1,18 @@
++#pragma once
++
++// What this machine offers for Vulkan, printed when the renderer cannot start
++// so that a player's log says why: the graphics adapters Windows has, the
++// loader's instance extensions, the loader's own account of its driver search,
++// the devices of an instance made without a window, and any of the loader's
++// environment variables that are set.
++//
++// The account of the driver search is what VK_LOADER_DEBUG would print. The
++// loader reads that variable once, when it is loaded at start-up, so it cannot
++// be turned on now; a debug messenger chained into vkCreateInstance is given
++// the same messages. Lines go to standard output, each starting "[vulkan]".
++
++namespace portablekit::gpu {
++
++void log_vulkan_report();
++
++} // namespace portablekit::gpu
+diff --git a/host/hle/hle_media.cpp b/host/hle/hle_media.cpp
+index 4f47df3..5868ee3 100644
+--- a/host/hle/hle_media.cpp
++++ b/host/hle/hle_media.cpp
+@@ -26,6 +26,7 @@
+ #include "perf/frame_stats.hpp"
+ #if defined(PORTABLEKIT_HAS_RENDERER)
+ #include "gpu/vulkan_renderer.hpp"
++#include "gpu/vulkan_report.hpp"
+ #include "ui/ui.hpp"
+ #endif
+ 
+@@ -1214,9 +1215,21 @@ bool first_pad_connected() {
+ #endif
+ }
+ 
++#if defined(PORTABLEKIT_HAS_RENDERER)
++// Why the renderer could not start; empty while it has not been tried, when
++// it started and when it was turned off.
++std::string &renderer_failure() {
++    static std::string why;
++    return why;
++}
++#endif
++
+ void initialize_renderer() {
+ #if defined(PORTABLEKIT_HAS_RENDERER)
+-    (void)ensure_renderer();
++    // The setup screens may have tried first, and fallen back to the system's
++    // dialogs; the game itself cannot.
++    if (ensure_renderer() == nullptr && !renderer_failure().empty() && game().renderer_unavailable != nullptr)
++        game().renderer_unavailable(renderer_failure());
+ #else
+     std::cout << "Renderer: not built\n";
+ #endif
+@@ -1329,6 +1342,9 @@ gpu::VulkanRenderer *ensure_renderer() {
+         config.title = title;
+     if (!renderer->initialize(config, error)) {
+         std::cerr << "Renderer: unavailable (" << error << "); running headless\n";
++        renderer.reset();
++        gpu::log_vulkan_report();
++        renderer_failure() = error.empty() ? "the renderer did not say why" : error;
+         return nullptr;
+     }
+     media().renderer = std::move(renderer);
+diff --git a/host/profile.hpp b/host/profile.hpp
+index ce6ef94..ab642f7 100644
+--- a/host/profile.hpp
++++ b/host/profile.hpp
+@@ -340,6 +340,13 @@ struct GameProfile {
+     // Called once the executable is in memory and before it runs, for the
+     // per-game patches that have no better home. Null means there are none.
+     void (*patch_loaded_image)(psprecomp::Runtime &, const psprecomp::Elf32Image &) = nullptr;
++    // Called once if the game's window and renderer cannot be made as the
++    // game starts (not when <prefix>_NO_RENDER turns them off), with why, after
++    // the log has the machine's Vulkan report (gpu/vulkan_report.hpp). A
++    // player's build can say so and end: with no window, the game runs on
++    // unseen, and waits forever at its first dialog. Null: it runs on without
++    // a window, as a test run on a machine without Vulkan wants.
++    void (*renderer_unavailable)(const std::string &why) = nullptr;
+ 
+     // --- The game's camera and view ----------------------------------------
+     // Drives the game's own camera from what the player asks of it
+-- 
+2.53.0.windows.1
+

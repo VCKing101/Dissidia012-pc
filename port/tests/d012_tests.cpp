@@ -10,6 +10,7 @@
 #include "d012_discord_rules.hpp"
 #include "d012_json.hpp"
 #include "d012_mod_manifest.hpp"
+#include "d012_no_window_rules.hpp"
 #include "d012_update_rules.hpp"
 #include "d012_versus_rules.hpp"
 #include "d012_voice_scenes.hpp"
@@ -851,6 +852,27 @@ void test_update_rules() {
     expect(!rules::parse_release("<html>", error), "an answer that is not JSON is refused");
 }
 
+// What the player is told when the game cannot open its window, and its off
+// switch (host/d012_no_window_rules.cpp, issue 24).
+void test_no_window_rules() {
+    namespace rules = d012::no_window_rules;
+    const std::string why = "SDL_CreateWindow failed: Installed Vulkan doesn't implement the VK_KHR_surface extension";
+    const std::string log = "C:\\Games\\Dissidia012\\data\\logs\\D012Native.log";
+    const std::string windows = rules::message(why, rules::System::Windows, log);
+    expect(windows.find("Reason: " + why + "\n") != std::string::npos, "the message gives the renderer's reason");
+    expect(windows.find("AMD, NVIDIA or Intel") != std::string::npos, "Windows is told where its driver comes from");
+    expect(windows.size() >= log.size() && windows.compare(windows.size() - log.size(), log.size(), log) == 0,
+           "the message ends with the log's path");
+    expect(rules::message(why, rules::System::Windows, "").find("log") == std::string::npos,
+           "no log line without a log file");
+    const std::string linux_text = rules::message(why, rules::System::Linux, "");
+    expect(linux_text.find("Mesa") != std::string::npos && linux_text.find("AMD, NVIDIA or Intel") == std::string::npos,
+           "Linux is told about its own drivers");
+    expect(!rules::keep_running(nullptr) && !rules::keep_running("") && !rules::keep_running("0"),
+           "unset, empty and 0 say what is wrong and end");
+    expect(rules::keep_running("1"), "D012_HEADLESS_FALLBACK=1 runs on without a window");
+}
+
 void test_discord_rules() {
     namespace rules = d012::discord_rules;
     using Scene = rules::Scene;
@@ -1251,6 +1273,7 @@ int main(int argc, char **argv) {
     test_undo();
     test_psp_iso();
     test_update_rules();
+    test_no_window_rules();
     test_discord_rules();
     test_versus_rules();
     test_voice_scenes();

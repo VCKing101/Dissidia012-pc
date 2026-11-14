@@ -16,6 +16,7 @@
 #include "d012_button_prompts.hpp"
 #include "d012_cheats.hpp"
 #include "d012_hle.hpp"
+#include "d012_no_window.hpp"
 #include "d012_version.hpp"
 
 #include <algorithm>
@@ -200,6 +201,9 @@ const GameProfile &game() {
 
         .register_extra_hle = &d012::register_extra_hle,
         .patch_loaded_image = &d012::patch_loaded_image,
+        // No window (no working Vulkan driver, issue 24): the setup's build
+        // says why and ends (d012_no_window.cpp).
+        .renderer_unavailable = &d012::renderer_unavailable,
 
         // Battles pace their 30 Hz logic on two vblanks (main:0x08883F9C,
         // frame timer interval 2).
