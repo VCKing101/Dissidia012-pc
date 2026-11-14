@@ -114,7 +114,13 @@ std::vector<Library> &libraries() {
     static bool loaded = false;
     if (loaded) return list;
     loaded = true;
+#if defined(PORTABLEKIT_ANDROID_APP)
+    // An APK's libraries sit in one flat directory, the overlays as libovl*.so
+    // (PortableKit's overlay_directory()).
+    std::filesystem::path directory = portablekit::executable_directory();
+#else
     std::filesystem::path directory = portablekit::bundled_overlay_directory();
+#endif
     if (const char *dir = portablekit::env("OVERLAY_DIR"); dir != nullptr && *dir != '\0') directory = dir;
     std::error_code ec;
     for (const auto &item : std::filesystem::directory_iterator(directory, ec)) {
@@ -129,6 +135,9 @@ std::vector<Library> &libraries() {
             reinterpret_cast<void *>(GetProcAddress(handle, "portablekit_register_overlay")));
 #else
         if (path.extension() != ".so" && path.extension() != ".dylib") continue;
+#if defined(PORTABLEKIT_ANDROID_APP)
+        if (!path.filename().string().starts_with("libovl")) continue;
+#endif
         void *handle = dlopen(path.string().c_str(), RTLD_NOW);
         if (handle == nullptr) continue;
         auto info_of = reinterpret_cast<decltype(&portablekit_overlay_info)>(dlsym(handle, "portablekit_overlay_info"));

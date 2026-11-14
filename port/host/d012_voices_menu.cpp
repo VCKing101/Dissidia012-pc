@@ -35,6 +35,15 @@
 #include "ui/ui.hpp"
 #include "ui/widgets.hpp"
 #endif
+#if defined(PORTABLEKIT_ANDROID_APP)
+#include "d012_android_import.hpp"
+#include "install/user_data.hpp"
+#include "platform/android_jni.hpp"
+
+#include <unistd.h>
+
+#include <thread>
+#endif
 
 #include <algorithm>
 #include <array>
@@ -43,6 +52,7 @@
 #include <filesystem>
 #include <iostream>
 #include <memory>
+#include <atomic>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -349,12 +359,118 @@ bool picker_frame() {
     return false;
 }
 
+#if defined(PORTABLEKIT_ANDROID_APP)
+// On Android the image is picked in Android's file picker, a content://
+// document: it is checked where it is, through its file descriptor, then
+// copied into the data folder as japanese.iso, which the port reads like any
+// image. The copy runs on a thread of its own under a panel showing it.
+struct Copy {
+    d012::android_import::Progress progress;
+    std::thread worker;
+    std::atomic<bool> running{false};
+    std::mutex lock;
+    std::string error;
+};
+Copy &copying() {
+    static Copy instance;
+    return instance;
+}
+
+std::string megabytes(std::uint64_t bytes) { return std::to_string((bytes + (1u << 19)) >> 20) + " MB"; }
+
+bool copy_frame() {
+    Copy &c = copying();
+    ui::Layer &layer = ui::Layer::get();
+    const ImGuiKey cancel = layer.confirm_south() ? ImGuiKey_GamepadFaceRight : ImGuiKey_GamepadFaceDown;
+    const bool back = layer.take_back() || ImGui::IsKeyPressed(cancel, false);
+    const bool running = c.running;
+    std::string error;
+    {
+        std::lock_guard guard(c.lock);
+        error = c.error;
+    }
+    if (!running && error.empty()) return false;  // copied and chosen
+    ui::begin_panel("##japanese-copy", "Japanese disc image", "Japanese voices", true);
+    ui::begin_content();
+    if (running) {
+        const std::uint64_t done = c.progress.done;
+        const std::uint64_t total = c.progress.total;
+        ui::paragraph("Copying the image into the game's storage. This takes a minute or two.");
+        ui::progress_bar(total != 0u ? static_cast<float>(done) / static_cast<float>(total) : 0.0f,
+                         total != 0u ? megabytes(done) + " of " + megabytes(total) : std::string("Checking…"));
+        if (back) c.progress.cancel = true;
+    } else {
+        ui::paragraph(error, ui::colors::kDanger);
+    }
+    ui::begin_footer();
+    ui::hints({{ui::Control::Back, running ? "Cancel" : "Close"}});
+    ui::end_panel();
+    return running || !back;
+}
+
+void open_picker() {
+    Copy &c = copying();
+    if (c.running) {
+        ui::open_panel_over_game(&copy_frame);
+        return;
+    }
+    // The picker blocks this thread until the player has chosen.
+    const std::optional<std::string> uri = portablekit::android::pick_document();
+    if (!uri) return;
+    std::cout << "[voices] the Japanese disc picked: " << *uri << std::endl;
+    if (c.worker.joinable()) c.worker.join();
+    c.progress.done = 0;
+    c.progress.total = 0;
+    c.progress.cancel = false;
+    {
+        std::lock_guard guard(c.lock);
+        c.error.clear();
+    }
+    c.running = true;
+    c.worker = std::thread([document = *uri] {
+        Copy &c = copying();
+        std::optional<std::string> error;
+        try {
+            const std::filesystem::path target = portablekit::install::user_data_directory() / "japanese.iso";
+            // Copied first, then checked: the picked document can be read
+            // only through its descriptor (opening /proc/self/fd/N again is
+            // refused, the app having no storage permission), and the disc
+            // reader opens a path. The copy replaces a disc already chosen
+            // only once it passes.
+            const std::filesystem::path incoming = target.parent_path() / "japanese-new.iso";
+            error = d012::android_import::copy_document(document, incoming, c.progress);
+            if (!error) error = check_disc(incoming);
+            std::error_code ec;
+            if (!error) {
+                std::filesystem::rename(incoming, target, ec);
+                if (ec) error = "The copy could not be put in place (" + ec.message() + ").";
+            }
+            if (error) std::filesystem::remove(incoming, ec);
+            if (!error) {
+                std::lock_guard guard(menu().lock);
+                menu().chosen = target;
+            }
+        } catch (const std::exception &e) {
+            error = e.what();
+        }
+        if (error) std::cout << "[voices] the Japanese disc not copied: " << *error << std::endl;
+        {
+            std::lock_guard guard(c.lock);
+            c.error = error ? (*error == "Cancelled" ? std::string("Cancelled. Nothing was copied.") : *error)
+                            : std::string();
+        }
+        c.running = false;
+    });
+    ui::open_panel_over_game(&copy_frame);
+}
+#else
 void open_picker() {
     Picker &p = picker();
     if (p.folder.empty()) p.folder = ui::FileBrowser::home();
     std::cout << "[voices] the Japanese disc browser opened from Options" << std::endl;
     ui::open_panel_over_game(&picker_frame);
 }
+#endif
 #endif
 
 // Confirm on the disc row opens the browser; the game, which does nothing

@@ -31,6 +31,10 @@
 // of a copy started from Steam or a menu is <data>/logs/D012Native.log
 // (host/d012_portable.cpp). D012_TEST_CRASH works as on Windows.
 //
+// On Android: nothing here. The system's own crash reporter (debuggerd)
+// already logs every thread's stack to logcat (`adb logcat -b crash`) and
+// keeps a tombstone; a handler of ours would take its place.
+//
 // MIT licence; see port/README.md.
 
 #if defined(_WIN32)
@@ -198,7 +202,7 @@ const bool g_installed = [] {
 
 } // namespace
 
-#elif defined(__linux__)
+#elif defined(__linux__) && !defined(__ANDROID__)
 
 #include <dlfcn.h>
 #include <execinfo.h>

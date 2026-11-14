@@ -1,6 +1,7 @@
 // Dissidia 012's own HLE additions and diagnostics, reached through the
 // profile's hooks. MIT licence; see port/README.md.
 
+#include "d012_android_import.hpp"
 #include "d012_bgm_playlist.hpp"
 #include "d012_bloom.hpp"
 #include "d012_camera.hpp"
@@ -138,6 +139,8 @@ void register_extra_hle(portablekit::HleRegistrar &hle) {
     test_switches::install(hle);
     // Checking for a newer version (d012_updates.cpp).
     updates::install(hle);
+    // Mods and DLC through Android's file picker (d012_android_import.cpp).
+    android_import::install(hle);
     // The Discord status (d012_discord.cpp).
     discord::install(hle);
     dialogs::install(hle);

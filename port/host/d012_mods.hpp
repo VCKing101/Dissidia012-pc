@@ -84,6 +84,10 @@ void prefetch(const Track &track);
 
 // Loads the mods and serves their tracks to the game. Called once, from the
 // profile's HLE hook.
+// Where mods are read from at start: D012_MODS_DIR, else <data dir>/mods;
+// empty when there is no data directory.
+[[nodiscard]] std::filesystem::path folder();
+
 void install(portablekit::HleRegistrar &hle);
 
 // FNV-1a, 32 bits, of `text`: how ids become numbers.
