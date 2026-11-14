@@ -5,7 +5,7 @@
 // developer pipeline's generate step (tools/port/setup/build.py and
 // tools/port/overlay_meta.py), so the installer needs no Python, CMake or Git.
 //
-//   D012Native --compile-game [--iso PATH] [--opt N] [--jobs N] [--force] [--keep-work]
+//   D012Native --compile-game [--iso PATH] [--opt N] [--jobs N] [--force] [--keep-work] [--launcher-progress]
 //
 // --keep-work leaves game-code.new/ (the C++ and the objects), for comparing
 // with the developer pipeline's output.
@@ -845,7 +845,8 @@ int main(int argc, char **argv) {
             options.launcher = true;
         } else {
             std::cerr << "--compile-game: unknown option " << arg
-                      << "\nusage: D012Native --compile-game [--iso PATH] [--opt N] [--jobs N] [--force] [--keep-work]\n";
+                      << "\nusage: D012Native --compile-game [--iso PATH] [--opt N] [--jobs N] [--force] [--keep-work] "
+                         "[--launcher-progress]\n";
             return 2;
         }
     }
@@ -858,16 +859,67 @@ int main(int argc, char **argv) {
 // compiled as d012_portablekit_main (portablekit_add_game(... HOST_MAIN_NAME)).
 int d012_portablekit_main(int argc, char **argv);
 
+namespace {
+
+// PortableKit's main restarts the program on Linux to raise the stack (host/main.cpp, ensure_main_stack), with the
+// arguments it was given. Called here with made-up arguments, that restart would become the whole run, so the marker
+// that says "already raised" is set around such a call and cleared before the game itself starts.
+void set_stack_marker(bool on) {
+#if defined(__linux__)
+    const std::string marker = portablekit::env_name("STACK_RAISED");
+    if (on) setenv(marker.c_str(), "1", 1);
+    else unsetenv(marker.c_str());
+#else
+    (void)on;
+#endif
+}
+
+// The same path, as the Windows setup compares them (AlreadyInstalledFrom in tools/port/installer/dissidia012.iss):
+// both made absolute and normal, and on Windows without regard to case.
+bool same_path(const std::filesystem::path &a, const std::filesystem::path &b) {
+    std::error_code ec;
+    const std::filesystem::path x = std::filesystem::absolute(a, ec).lexically_normal();
+    const std::filesystem::path y = std::filesystem::absolute(b, ec).lexically_normal();
+#if defined(_WIN32)
+    const std::wstring &l = x.native(), &r = y.native();
+    return CompareStringOrdinal(l.c_str(), static_cast<int>(l.size()), r.c_str(), static_cast<int>(r.size()), TRUE) ==
+           CSTR_EQUAL;
+#else
+    return x == y;
+#endif
+}
+
+// True when `--install` has already set up this disc image: data/EBOOT.ELF is there and settings.ini's disc_image
+// names this file. Then the install would only decrypt the same executable again.
+bool installed_from(const std::string &iso) {
+    try {
+        const auto installation =
+            portablekit::install::find_installation(portablekit::install::user_data_directory());
+        return installation && same_path(installation->disc_image, portablekit::install::path_from_utf8(iso));
+    } catch (const std::exception &) {
+        return false;
+    }
+}
+
+} // namespace
+
 // The installer's `--install <iso> --in-place`: decrypts the executable and remembers where the disc image is.
+// Skipped when that disc image is already the one set up.
 static int install_from(char *program, std::string &iso) {
+    if (installed_from(iso)) return 0;
     std::vector<char *> install{program, const_cast<char *>("--install"), iso.data(), const_cast<char *>("--in-place"),
                                 nullptr};
-    return d012_portablekit_main(static_cast<int>(install.size()) - 1, install.data());
+    set_stack_marker(true);
+    const int code = d012_portablekit_main(static_cast<int>(install.size()) - 1, install.data());
+    set_stack_marker(false);
+    return code;
 }
 
 // `D012Native --game <iso>` plays from that disc image wherever it is, for launchers, scripts and Steam shortcuts:
-// the setup's first step (quick when the image is the one already set up), then the game as usual. The game's
-// code must already be compiled (the setup, or --prepare, does that). Only this exact form is taken.
+// the setup's first step (skipped when the image is the one already set up), then the game as usual. The game's
+// code must already be compiled (the setup, or --prepare, does that). Only this exact form is taken. On Linux the
+// game's start may restart the program with the larger stack; it restarts as a plain start, which plays the copy
+// just set up.
 static int play_from(char *program, std::string iso) {
     const int install_code = install_from(program, iso);
     if (install_code != 0) return install_code;
@@ -875,9 +927,23 @@ static int play_from(char *program, std::string iso) {
     return d012_portablekit_main(1, start.data());
 }
 
+// Launcher installs are updated by the launcher, so the game's own check at start, which points to the release
+// page and its setup, is turned off the first time. A choice the player makes in the game's options stays.
+static void leave_updates_to_the_launcher() {
+    try {
+        const std::filesystem::path dir = portablekit::install::user_data_directory();
+        portablekit::install::SettingsEntries entries = portablekit::install::read_settings_file(dir);
+        if (entries.contains("updates.check_at_start")) return;
+        entries["updates.check_at_start"] = "0";
+        portablekit::install::write_settings_file(dir, entries);
+    } catch (const std::exception &e) {
+        std::cerr << "--prepare: settings.ini not written for updates.check_at_start: " << e.what() << "\n";
+    }
+}
+
 // `D012Native --prepare --game <iso>` is the setup RecompLauncher runs without a window (recomplauncher.json,
 // "prepare"): the two steps of the installer, `--install <iso> --in-place` and `--compile-game`, one after the other,
-// printing "progress <0 to 1> <text>" lines. Both are quick when nothing changed, so it runs again on every change
+// printing "progress <0 to 1> <text>" lines. The first is skipped and the second quick when nothing changed, so it runs again on every change
 // of the player's copy. Without --prepare nothing here is reached.
 static int prepare(int argc, char **argv) {
     std::string iso;
@@ -897,6 +963,7 @@ static int prepare(int argc, char **argv) {
     std::cout << "progress 0.000 Reading your disc and decrypting the game's program" << std::endl;
     const int install_code = install_from(argv[0], iso);
     if (install_code != 0) return install_code;
+    leave_updates_to_the_launcher();
     std::vector<char *> compile{argv[0], const_cast<char *>("--compile-game"),
                                 const_cast<char *>("--launcher-progress"), nullptr};
     return d012::compile_game::main(static_cast<int>(compile.size()) - 1, compile.data());

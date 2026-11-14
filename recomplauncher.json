@@ -93,7 +93,7 @@
   ],
   "actions": [
     { "id": "saves", "label": "Saves", "help": "Your save data.", "open": "saves" },
-    { "id": "mods", "label": "Mods", "help": "Battle music mods go here.", "open": "mods" },
+    { "id": "mods", "label": "Mods", "help": "Mods go here.", "open": "mods" },
     { "id": "logs", "label": "Logs", "help": "The log to attach to a crash report.", "open": "logs" }
   ]
 }
