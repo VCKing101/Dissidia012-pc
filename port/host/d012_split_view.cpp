@@ -609,10 +609,58 @@ void trace_freerun_markers(Guest *g) {
     std::fflush(stdout);
 }
 
+// Player 1's markers out of player 2's view, the game's own way
+// (D012_MARKERS_OWN_VIEW=1, issue 25). The effect update's cull (main
+// 0x088A6DA0) puts an effect out of view with three calls on its instance
+// (effect +0xCC): main 0x088A47E4 with 0 (the nodes' hide bit, main
+// 0x0894D964), 0x088A483C with 1 and 0x088A4894 with 0; and back in view with
+// 1, 0, 1. Player 1's markers in view get the out-of-view calls before player
+// 2's view and the in-view ones after it. Hiding them by the nodes' bit alone
+// (as markers_set does) had the library keep heap blocks it never gave back.
+std::vector<gaddr> markers_parked;  // instances put out of view for view 2
+
+gaddr marker_instance(Guest *g, gaddr effect) {
+    const gaddr instance = guest_ram(effect) ? g_ld32(g, effect + 0xCCu) : 0u;
+    return guest_ram(instance) && guest_ram(g_ld32(g, instance + 0x10u)) ? instance : 0u;
+}
+
+void marker_park(Guest *g, gaddr instance, bool park) {
+    g_call2(g, 0x088A47E4u, instance, park ? 0u : 1u);
+    g_call2(g, 0x088A483Cu, instance, park ? 1u : 0u);
+    g_call2(g, 0x088A4894u, instance, park ? 0u : 1u);
+}
+
+// One player's markers in view put out of view; how many.
+std::size_t markers_park(Guest *g, std::uint32_t slot) {
+    const gaddr field = g_ld32(g, kBattleManager);
+    const gaddr fighter = field != 0u ? g_ld32(g, field + 0x38u + 4u * slot) : 0u;
+    if (!guest_ram(fighter)) return 0u;
+    std::size_t parked = 0;
+    for (std::uint32_t at : kMarkerEffects) {
+        const gaddr instance = marker_instance(g, g_ld32(g, fighter + at));
+        if (instance == 0u) continue;
+        if (g_ld16s(g, g_ld32(g, instance + 0x10u) + 0x0Au) & 1) continue;  // out of view already
+        marker_park(g, instance, true);
+        markers_parked.push_back(instance);
+        ++parked;
+    }
+    return parked;
+}
+
+bool markers_own_view() {
+    static const bool on = [] {
+        const char *text = std::getenv("D012_MARKERS_OWN_VIEW");
+        return text != nullptr && *text != '\0' && std::strcmp(text, "0") != 0;
+    }();
+    return on;
+}
+
 void markers_back(Guest *g) {
     auto &hidden = state().markers_hidden;
     for (auto it = hidden.rbegin(); it != hidden.rend(); ++it) g_st16(g, it->first, it->second);
     hidden.clear();
+    for (gaddr instance : markers_parked) marker_park(g, instance, false);
+    markers_parked.clear();
 }
 
 // One player's markers hidden or shown for the view about to be drawn (`slot`
@@ -640,21 +688,24 @@ void markers_view1(Guest *g) {
 // same hide bit), so player 2's markers, next to player 2's fighter, were
 // mostly hidden from player 2's own view.
 //
-// Player 1's markers are no longer left out of this view (issue 25). Their
-// nodes, drawn in the first pass, hidden for the second and put back after,
-// made the effect library keep blocks of its heap it never gave back (main
-// 0x0894CF98's and 0x08945BEC's, from 0x08971134): in a minute or so of
-// fighting the 256 KiB heap at 0x09BD6AF0 was full, the library made no new
-// effect systems (main 0x08941914 below 0), and hits went on drawing nothing,
-// with no sound. Measured with D012_TRACE_EFFECT_POOL=1, Onion Knight against
-// Kain, the same fight: 94 KiB at 40 s and climbing with player 1's markers
-// left out, 24 KiB without, as with no markers for player 2 at all. Hiding
-// player 2's markers in the first view does not do it, nor does the library's
-// own hide (main 0x088A47E4), which does not take effect within the frame.
-// So player 1's markers show in player 2's view, as they did before 7.19.
+// Player 1's markers are not hidden from this view by their nodes' bit any
+// more (issue 25): drawn in the first pass, hidden for the second and put back
+// after, they had the effect library keep blocks of its heap it never gave
+// back (main 0x0894CF98's and 0x08945BEC's, from 0x08971134). In a minute or
+// so of fighting the 256 KiB heap at 0x09BD6AF0 was full, the library made no
+// new effect systems (main 0x08941914 below 0), and hits went on drawing
+// nothing. Measured with D012_TRACE_EFFECT_POOL=1, Onion Knight against Kain,
+// the same fight: 88 KiB at 40 s and climbing with the bit, 24 KiB with player
+// 1's markers shown here (the default for now, as before 7.19) or put out of
+// view the game's way (D012_MARKERS_OWN_VIEW=1, markers_park). Hiding player
+// 2's markers from the first view by the bit does not leak.
+// D012_TEST_MARKERS_BIT=1 hides player 1's by the bit again, to test.
 void markers_view2(Guest *g) {
     if (markers_off()) return;
-    markers_hidden_view[1] = 0u;
+    static const bool bit = std::getenv("D012_TEST_MARKERS_BIT") != nullptr;
+    markers_hidden_view[1] = bit                  ? markers_set(g, 0u, true)
+                             : markers_own_view() ? markers_park(g, 0u)
+                                                  : 0u;
     markers_set(g, 1u, false);
 }
 

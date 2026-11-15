@@ -1519,8 +1519,8 @@ the same day (the effect-heap traces below come from the second). V unless marke
   half by setting the hide bit on their nodes before that half and putting it back after (`markers_view1`,
   `markers_view2`, `markers_back`). Player 1's pointer and arrows are drawn in the first pass and hidden for the
   second; with that, the library kept a block of its heap each frame. Player 2's markers hidden for the first pass
-  and shown for the second do not do it. Hiding through the library's own call (main `0x088A47E4` with 1) does not
-  leak, but does not hide anything within the frame either.
+  and shown for the second do not do it. Fading them out instead (main `0x088A4760`, colour 0) does not take
+  effect within the frame: the library uses the colour it had.
 - **Measured** (Onion Knight against Kain, the bot, `D012_TRACE_EFFECT_POOL=1`, which now also follows the pools,
   the heap, its refusals and the blocks in use by who asked; every run the same fight, the fighters' places matching
   frame for frame): as released 94 KiB at 40 s, full at about 70 s, 50 refusals by 80 s and 365 by 100 s
@@ -1532,9 +1532,21 @@ the same day (the effect-heap traces below come from the second). V unless marke
   alone. A first reading blamed player 2's pointer: the runs without it had been fought on another stage (the
   route's stage pick had missed), so they were not the same fight. The library's heap is rebuilt when a battle
   starts (battle `0x08B34DA8`, main `0x088A5D78`), so each fight began clean (not traced).
-- **The fix** (`markers_view2`): player 1's markers are no longer hidden in player 2's view, as before 7.19. Player
-  2's are still left out of player 1's view and shown in player 2's. Checked: the fight above, hit sparks, criticals
-  and Bravery Breaks drawn to its end (`heap_final`).
+- **The fix for now** (`markers_view2`, the default): player 1's markers are no longer hidden in player 2's view, as
+  before 7.19. Player 2's are still left out of player 1's view and shown in player 2's. Checked: the fight above, hit
+  sparks, criticals and Bravery Breaks drawn to its end (`heap_final`).
+- **Each player's markers in their own view, without the leak** (`D012_MARKERS_OWN_VIEW=1`, `markers_park`, not the
+  default yet). The effect update's cull (main `0x088A6DA0`) takes an effect out of view with three calls on its
+  instance (effect `+0xCC`): main `0x088A47E4` with 0 (the nodes' hide bit, through `0x0894D964`, whose flag 1
+  clears it), `0x088A483C` with 1 and `0x088A4894` with 0; back in view with 1, 0, 1. Player 1's markers in view get
+  the out-of-view calls before player 2's view and the in-view ones after it. The bit alone was what leaked; the
+  other two calls go with it in the game's own culling. Checked, the same fight frame for frame (`c_default`,
+  `c_ownview`, `c_bit`): 24 KiB at 40 s by default and with this, 94 KiB with the bit (`D012_TEST_MARKERS_BIT=1`,
+  the v0.7.1 hide, kept to test). Standing on Old Chaos Shrine, player 1's arrows show in player 1's half and not in
+  player 2's (`vown`; by default they show in both, `vdef`). A 150 s fight with it: 19 KiB, none refused (`own_long`). Not checked: the pointer seen in a half (it shows only
+  with the opponent far or out of sight), real controllers.
+- **An earlier misreading:** the "wake" first tried for player 2's pointer (0, 1, 0 after the cull) is the
+  out-of-view state; it parked the pointer. It changed nothing.
 - **Open:** every effect is still culled against player 1's camera only, so player 2's half can be missing an effect
   player 1's camera cannot see. Player 1's arrows were not hidden in player 2's half before either: their effect has
   no node tree at `+0xCC`.
