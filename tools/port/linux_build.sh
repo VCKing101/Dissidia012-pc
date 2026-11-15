@@ -45,9 +45,16 @@ tar -C "$repo/port" -cf - . | tar -C "$root/src/port" -xpf -
 # recompiles only what changed.
 mkdir -p "$root/src/PortableKit"
 tar -C "$kit_tree" --exclude=./.git -cf - . | tar -C "$root/src/PortableKit" -xpf -
-# A Windows checkout of PortableKit may have Windows line ends, which bash
-# cannot run: its shell scripts (sources.sh, the release scripts) as LF.
-find "$root/src/PortableKit" -name '*.sh' -exec sed -i 's/\r$//' {} +
+# A Windows checkout of PortableKit may have Windows line ends: every text
+# file back to LF, as PortableKit commits them. Bash cannot run its scripts
+# with them, and sdk/ (copied from here) is in --compile-game's key, so the
+# same headers with other line ends would compile every player's game again.
+# Each keeps its time, so a later build compiles only what changed.
+while IFS= read -r -d '' file; do
+    stamp="$(stat -c %y "$file")"
+    sed -i 's/\r$//' "$file"
+    touch -d "$stamp" "$file"
+done < <(grep -rlIZ $'\r' "$root/src/PortableKit" || true)
 echo "PortableKit from $kit_tree"
 for part in generated overlays config; do
     if [[ "$installer" -eq 0 && ! -d "$root/work/$part" ]]; then

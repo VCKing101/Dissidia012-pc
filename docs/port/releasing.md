@@ -71,7 +71,9 @@ wsl -d Ubuntu-24.04 -- bash tools/port/linux_setup.sh
 The installer build runs in the Steam Runtime SDK container with GCC (`~/d012-linux/build-installer`; a build folder
 configured with the clang trial must not be reused), then the AppDir, the checks and appimagetool. The result goes
 to `build/port/installer-linux/dist`, the symbols to `build/port/installer-linux/symbols/<version>`. PortableKit comes
-from the main checkout's clone; its shell scripts are made LF on the way in.
+from the main checkout's clone; its text files are made LF on the way in, as PortableKit commits them. That matters
+beyond the scripts: `sdk/` is copied from it and is in the game code's key, and with Windows line ends a 0.7.2 build
+recompiled every Linux player's game for no change at all.
 
 Test: run the new AppImage over the previous release's install in WSL (`~/d012-linux/setup-test`): the version is
 the new one, the compile skipped or partial as on Windows, the game starts.
