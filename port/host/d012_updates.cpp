@@ -644,7 +644,8 @@ void system_rows() {
         ui::info_row("Status", "Version " + r.latest + " is available");
         ui::RowOptions open;
 #if defined(__ANDROID__)
-        open.description = "Opens the release's page in your browser.";
+        open.description = "Opens the release's page in your browser, with the Android app (the .apk). Install it "
+                           "over this one: your saves, settings and mods stay.";
 #else
         open.description = "Opens the release's page in your browser, with the setups for Windows and Linux. "
                            "Install it into the same folder: your saves, settings and mods stay.";

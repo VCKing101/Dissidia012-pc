@@ -28,6 +28,9 @@ online and test sessions. Bugs and crashes go in [GitHub issues](https://github.
   (SteamOS), with mods, DLC and the Japanese voices. Other x86-64 Linux systems with Vulkan should work but are
   untested. The Windows build through Proton also still works on the Deck
   ([docs/port/steam-deck.md](docs/port/steam-deck.md)).
+- **Android (new, experimental):** an app for 64-bit Android 10 and later. It sets the game up from your ISO on the
+  phone itself ([quick start](#quick-start-android)), with touch controls or a controller. Tested on one phone, a
+  Galaxy S25 Ultra.
 - **Matching decompilation:** a few hundred functions are matching C; most of the game is still machine code. See the
   [decompilation notes](docs/decomp/README.md) and the [progress report](docs/decomp/progress.md).
 
@@ -294,12 +297,42 @@ questions in a terminal window. SteamOS has all of these.
 - Install it in a folder of its own: the setup will not install over the Windows version's folder (a Proton install).
 - The Linux build and setup are made on a Windows PC with WSL; see [docs/port/platforms.md](docs/port/platforms.md).
 
+## Quick start (Android)
+
+**1. Download** `Dissidia012-<version>-Android-arm64.apk` from the
+[latest release](https://github.com/VCKing101/Dissidia012-pc/releases), on the phone or on a PC.
+
+**2. Copy your game to the phone:** your own USA (**ULUS10566**) or European (**ULES01505**) disc image as an `.iso`
+file, for example into **Download**. The Japanese and Asian releases do not work.
+
+**3. Install the app.** Open the APK in the phone's file manager. Android asks once to allow installs from that app;
+allow it, then **Install**.
+
+**4. Choose your ISO.** Open **Dissidia 012** and choose the ISO when it asks. The app copies it in, then makes the
+game's code from it on the phone. That takes a few minutes the first time (about 7 on a Galaxy S25 Ultra): keep the
+app open and the phone charging. Nothing is downloaded, and nothing made from your disc leaves the phone. Later starts
+go straight to the game. The ISO in Download can be deleted afterwards.
+
+**5. Play** with the touch controls or a controller. The menu button at the top of the touch controls, Back, or
+L3 + R3 on a controller opens the port's menu. **System, Add content** there imports mods and DLC.
+
+**To update:** download the new release's APK and install it over the app. Your saves, settings and mods stay, and
+the game's code is made again only for the parts the new version changes.
+
+You need a 64-bit phone or tablet with Android 10 or later and about 2 GB of free space for the app, the copy of
+your ISO and the game's code, plus room for the ISO itself while it is copied in.
+
+- The Battle BGM Maker is not in the app. Split-screen versus and online play are untested on Android.
+- If it crashes, please [open an issue](https://github.com/VCKing101/Dissidia012-pc/issues/new/choose) with the
+  phone's model and what you were doing.
+
 ## Updates
 
 When the game starts, it asks GitHub whether a newer version is out. If one is, a notice on the title screen says so
 until you press a button.
 
-- **Check for updates** on the System page of the port's menu (Esc, or L3 + R3) asks again. When a newer version is
+- **Check for updates** on the System page of the port's menu (Esc, or L3 + R3; on Android the menu button or Back)
+  asks again. When a newer version is
   out, **Open the download page** opens its release in your browser. Install it as above, into the same folder.
 - **Check when the game starts**, on the same page, turns the check at start off. The button still works.
 - The check sends GitHub only its request, which names the port's version. It never downloads or installs anything.

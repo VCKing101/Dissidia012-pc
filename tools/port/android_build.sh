@@ -2,7 +2,17 @@
 # Builds a developer's Android app of the port (arm64-v8a, Android 10 and up)
 # in WSL, with the Android NDK, for the developer's own test device:
 #
-#   wsl -d Ubuntu-24.04 -- bash tools/port/android_build.sh [--player] [--sync-only] [--jobs N] [--gen-jobs N]
+#   wsl -d Ubuntu-24.04 -- bash tools/port/android_build.sh [--player | --release] [--sync-only] [--jobs N] [--gen-jobs N]
+#
+# --release is --player for a release (docs/port/releasing.md): signed with
+# the release key instead of the developer's (D012_RELEASE_KEYSTORE, default
+# ~/d012-android/keys/release.keystore; its password in
+# D012_RELEASE_KEYSTORE_PASS, never written here; alias D012_RELEASE_KEY_ALIAS,
+# default dissidia012), not debuggable, its version code made from the
+# version (0.7.2 is 702, so a later release always installs over an earlier
+# one), written as dist/Dissidia012-<version>-Android-arm64.apk, with the
+# unstripped libmain.so kept beside it in dist/symbols-<version>/ for crash
+# reports (never shipped).
 #
 # This app carries the game's code (libmain.so and the overlay libraries,
 # compiled from the recompiled build's corpus), so it is for the developer's
@@ -51,9 +61,11 @@ gen_jobs=6
 gen_opt=1
 sync_only=0
 player=0
+release=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --player) player=1; shift ;;
+        --release) player=1; release=1; shift ;;
         --sync-only) sync_only=1; shift ;;
         --jobs) jobs="${2:?--jobs needs a value}"; shift 2 ;;
         --gen-jobs) gen_jobs="${2:?--gen-jobs needs a value}"; shift 2 ;;
@@ -68,6 +80,13 @@ fi
 
 step() { printf '\n=== %s\n' "$*"; }
 fail() { echo "error: $*" >&2; exit 1; }
+
+# A release's key and password, asked before an hour of building.
+if [[ "$release" -eq 1 ]]; then
+    [[ -f "${D012_RELEASE_KEYSTORE:-$root/keys/release.keystore}" ]] ||
+        fail "no release key at ${D012_RELEASE_KEYSTORE:-$root/keys/release.keystore} (docs/port/releasing.md: the release key)"
+    [[ -n "${D012_RELEASE_KEYSTORE_PASS:-}" ]] || fail "set D012_RELEASE_KEYSTORE_PASS to the release key's password"
+fi
 
 ndk="$root/ndk"
 sdk="$root/sdk"
@@ -96,6 +115,9 @@ if [[ "$(cat "$kit_stamp" 2>/dev/null)" != "$kit_tree" ]]; then
 fi
 tar -C "$repo/port" -cf - . | tar -C "$root/src/port" -xpf -
 tar -C "$kit_tree" --exclude=./.git -cf - . | tar -C "$root/src/PortableKit" -xpf -
+# A Windows checkout of PortableKit may have Windows line ends, which bash
+# cannot run: its shell scripts (build_apk.sh, sources.sh) as LF.
+find "$root/src/PortableKit" -name '*.sh' -exec sed -i 's/\r$//' {} +
 echo "$kit_tree" > "$kit_stamp"
 echo "PortableKit from $kit_tree"
 cp "$repo/tools/port/release-version.txt" "$root/src/tools/port/"
@@ -218,12 +240,46 @@ if [[ "$player" -eq 1 ]]; then
     tar --format=ustar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -C "$tree" -cf "$assets/toolchain.tar" .
     sha256sum "$assets/toolchain.tar" | cut -d' ' -f1 > "$assets/toolchain.sha256"
     echo "toolchain.tar $(du -h "$assets/toolchain.tar" | cut -f1), $(cat "$assets/toolchain.sha256")"
-    extra=(EXTRA_LIBS="$programs" EXTRA_ASSETS="$assets")
+    # The licences of what the APK carries besides PortableKit's own list
+    # (build_apk.sh): LLVM's (clang, lld, libc++, libunwind, compiler-rt) and
+    # bionic's, readable without unpacking toolchain.tar, and the port's
+    # notices for all of it.
+    mkdir -p "$assets/licenses"
+    cp "$rt/android-runtime/licenses/"* "$rt/android-runtime/SOURCES.txt" "$assets/licenses/"
+    cp "$root/src/port/fonts/GoudyBookletter1911-OFL.txt" "$assets/licenses/"
+    extra=(EXTRA_LIBS="$programs" EXTRA_ASSETS="$assets" NOTICES="$root/src/port/android/THIRD_PARTY_NOTICES.md")
 fi
-env "${extra[@]}" \
+signing=(KEYSTORE="$keystore" KEYSTORE_PASS=d012dev KEY_ALIAS=d012dev DEBUGGABLE=1)
+version_code="$(date +%s)"
+if [[ "$release" -eq 1 ]]; then
+    # The release key, never the developer's: every later release must be
+    # signed with it, or Android will not install it over this one. Keep it
+    # and its password out of the repository, with a backup.
+    keystore="${D012_RELEASE_KEYSTORE:-$root/keys/release.keystore}"
+    [[ -f "$keystore" ]] || fail "no release key at $keystore (docs/port/releasing.md: making the release key)"
+    [[ -n "${D012_RELEASE_KEYSTORE_PASS:-}" ]] || fail "set D012_RELEASE_KEYSTORE_PASS to the release key's password"
+    [[ "$version" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]] || fail "release-version.txt holds $version, not a release number like 0.7.2"
+    (( BASH_REMATCH[2] < 100 && BASH_REMATCH[3] < 100 )) || fail "the version code needs minor and patch below 100"
+    version_code=$(( BASH_REMATCH[1] * 10000 + BASH_REMATCH[2] * 100 + BASH_REMATCH[3] ))
+    signing=(KEYSTORE="$keystore" KEYSTORE_PASS="$D012_RELEASE_KEYSTORE_PASS"
+             KEY_ALIAS="${D012_RELEASE_KEY_ALIAS:-dissidia012}")
+    apk="$root/dist/Dissidia012-$version-Android-arm64.apk"
+fi
+env "${extra[@]}" "${signing[@]}" \
 APP_ID="$app_id" GAME_RES="$res" GAME_REPO="$repo" FONT_DIR="$sources" \
-KEYSTORE="$keystore" KEYSTORE_PASS=d012dev KEY_ALIAS=d012dev \
-VERSION_NAME="$version_name" VERSION_CODE="$(date +%s)" DEBUGGABLE=1 \
+VERSION_NAME="$version_name" VERSION_CODE="$version_code" \
     bash "$root/src/PortableKit/packaging/android/build_apk.sh" "$build" \
         "$root/deps-build/SDL3-$SDL3_VERSION" "$sdl_lib" "$apk"
+if [[ "$release" -eq 1 ]]; then
+    # Never shipped: a player's crash report names an offset in libmain.so,
+    # and llvm-symbolizer turns it into a function with this file.
+    symbols="$root/dist/symbols-$version"
+    mkdir -p "$symbols"
+    cp "$build/bin/libmain.so" "$symbols/"
+    # The APK must not be debuggable and must carry no game code.
+    "$sdk/build-tools/$(ls "$sdk/build-tools" | sort -V | tail -1)/aapt2" dump badging "$apk" |
+        grep -q "application-debuggable" && fail "$apk is debuggable"
+    unzip -l "$apk" | grep -E "lib/arm64-v8a/libovl|game-code|generated_unit" && fail "$apk carries game code"
+    echo "release APK: not debuggable, no game code, version $version ($version_code); symbols in $symbols"
+fi
 sha256sum "$apk"
