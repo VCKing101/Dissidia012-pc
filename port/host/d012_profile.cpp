@@ -17,6 +17,7 @@
 #include "d012_cheats.hpp"
 #include "d012_hle.hpp"
 #include "d012_no_window.hpp"
+#include "d012_online.hpp"
 #include "d012_source_hash.hpp"
 #include "d012_version.hpp"
 
@@ -217,6 +218,9 @@ const GameProfile &game() {
         .adhoc_product_code = "ULUS10566",
         .adhoc_group_name = adhoc_group_name,
         .adhoc_version = adhoc_version,
+        // Play online (d012_online.hpp, docs/port/online-matchmaking.md).
+        .public_server = d012::online::public_server,
+        .public_server_players = d012::online::players,
 
         // The keyboard: the mouse wheel on the D-pad, and a key each for the
         // battle moves made from two buttons together.

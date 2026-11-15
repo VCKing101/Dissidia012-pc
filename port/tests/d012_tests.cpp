@@ -12,6 +12,7 @@
 #include "d012_json.hpp"
 #include "d012_mod_manifest.hpp"
 #include "d012_no_window_rules.hpp"
+#include "d012_online_rules.hpp"
 #include "d012_update_rules.hpp"
 #include "d012_versus_rules.hpp"
 #include "d012_voice_scenes.hpp"
@@ -1283,6 +1284,28 @@ void test_relay_status() {
            "relay status: a short answer is not taken");
 }
 
+// Play online's address file (d012_online_rules.hpp, online/server.json).
+void test_online_rules() {
+    namespace rules = d012::online_rules;
+    std::string note;
+    expect(rules::address_in(R"({"address": "play.example.net"})", note) == "play.example.net" && note.empty(),
+           "online file: a host name");
+    expect(rules::address_in(R"({"address": "203.0.113.7:27312", "note": "spare"})", note) == "203.0.113.7:27312",
+           "online file: an address with a port, other members left alone");
+    expect(rules::address_in(R"({"address": "[2001:db8::1]:27312"})", note) == "[2001:db8::1]:27312",
+           "online file: a bracketed IPv6 address");
+    expect(rules::address_in(R"({"address": ""})", note).empty() && note == rules::kNoServerYet,
+           "online file: no server yet, said so");
+    for (const char *bad : {"", "not json", R"({"server": "x"})", R"({"address": 5})",
+                            R"({"address": "a b"})", R"({"address": "x;rm"})"})
+        expect(rules::address_in(bad, note).empty() && !note.empty() && note != rules::kNoServerYet,
+               std::string("online file: refused: ") + bad);
+    std::ifstream file(std::filesystem::path(D012_TESTS_DIR) / ".." / ".." / "online" / "server.json");
+    const std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    rules::address_in(text, note);
+    expect(!text.empty() && (note.empty() || note == rules::kNoServerYet), "online file: the repository's own reads");
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -1307,6 +1330,7 @@ int main(int argc, char **argv) {
     test_voice_scenes();
     test_movie_splice();
     test_relay_status();
+    test_online_rules();
     if (g_failures == 0) std::cout << "all passed\n";
     return g_failures == 0 ? 0 : 1;
 }

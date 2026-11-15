@@ -404,6 +404,15 @@ Answer read_file(const std::string &path) {
     return out;
 }
 
+} // namespace
+
+Fetched get(const std::string &url) {
+    const Answer answer = fetch(url);
+    return Fetched{answer.status, answer.body, answer.problem};
+}
+
+namespace {
+
 // --- The check -------------------------------------------------------------
 
 enum class Stage { Idle, Checking, Newest, Available, Failed };

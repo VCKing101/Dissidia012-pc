@@ -430,8 +430,61 @@ cmake --build build-server
 
 Steps 1 and 2 of section 9 are done: the version tag at log-in came with the server's changes.
 
-**Not tested yet:** a game copy against the server (it needs step 3's Play online, or Join a session with the
-server's address), the CMake build on Linux, a real machine, many players.
+**Two game copies through the server (15 November, this PC, V).** The server with `--loopback` on its usual ports;
+two copies of the clang build (`D012_ADHOC=1`, `D012_ADHOC_SERVER=127.0.0.1`, MACs `:01` and `:02`,
+`D012_ADHOC_LOOPBACK=1`, the game's code libraries copied from the 11 November party build, whose interface is the
+same), driven by live input scripts. Today's Join a session path, no client changes:
+- The server logged both in with the same tag, `ULUS10566/c62c0809acf02eac-std`.
+- Both entered lobby 9 (Midgar, `LOBBY8`); each listed the other's Friend Card as Online.
+- Copy 1 sent Battle Request [1-on-1] at level 20; copy 2 was asked and accepted; both joined the battle's group
+  (`75541845`), picked Lightning, and Enter Battle on both started it (stage Empyreal Paradox).
+- Both linked "through the relay" (the server's, at 127.0.0.1:27420) with 2 frames of input delay. With a minute of
+  random moves on both, the game's check values agreed every 640 frames to frame 3,210, with no wait over 0 ms; HP
+  and Brave changed on both.
+- STATUS from outside answered 2 players on that tag and 0 on another.
+
+**Not tested yet:** the battle to its end and a rematch, Group Battle and Communications through the server, the
+CMake build on Linux, a real machine, two machines, many players.
+
+## 11. Play online (step 3, built 15 November 2026)
+
+**PortableKit** (future patch 0108, branch `public-server`):
+- `GameProfile::public_server` (the address, or empty with a note for the player) and `public_server_players`
+  (the count, -1 while not known). With them the Network page starts with **Play online**: "Play online   N players
+  on"; chosen, "Playing online" and a red **Stop playing online**. Hosting keeps **Stop hosting**; a joined session
+  gets a red **Leave the session**. The three cancel rows leave nothing chosen, so the game asks again (the chooser,
+  step 4).
+- `network.online` (remembered) and `network.online_server` (the server Play online uses instead of the game's own;
+  the Ad hoc play section's **Online server** row replaces **Server** for such a game). Environment:
+  `D012_ONLINE`, `D012_ONLINE_SERVER`.
+- With a public server, a joined session lasts for the run (`adhoc_joined()`); `network.server` from settings.ini is
+  no longer used (a copy that joined someone before starts with nothing chosen), but `D012_ADHOC_SERVER` still
+  joins, for tests and launchers. Choosing one of Play online, Host and Join ends the others.
+- `adhoc_server_address()`: hosting, else joined this run, else an environment's server, else Play online's.
+- Without a public server, every row and rule is as before.
+
+**The port** (`host/d012_online.*`, `host/d012_online_rules.*`):
+- The address file is `online/server.json` on main (`{"address": "host[:port]"}`; `""` says there is no server
+  yet), fetched once a run when first asked for, through the update check's HTTPS (`updates::get`), and kept in the
+  data folder as `online-server.json`, used at once the next time. `D012_ONLINE_URL` reads another address or file.
+- The count is STATUS on the server's battle port every 5 s while the page shows it, for this copy's tag.
+- Player-facing notes: "Finding the server…", "There is no public server yet.", "The server's address could not be
+  fetched: …".
+
+**Tested (15 November, this PC, V):** `d012_tests` (new checks of the address file, including the repository's own);
+two copies, the server on loopback, `D012_ONLINE_URL` pointing at a file naming 127.0.0.1:
+- Copy 1, whose settings.ini still had `network.server=203.0.113.7` from an earlier join: the Network page showed
+  Play online first, "0 players on", and no joined session (the old address only under recent). Choosing it showed
+  "Playing online" and Stop playing online, and saved `network.online=1`.
+- Copy 2 with `D012_ONLINE=1`. Both went online with no address typed; the server logged both with one tag; both
+  saw each other in lobby 9; copy 1's page said "2 players on".
+- A challenge, accept and battle: "linked ... through the relay", in step at frame 650 on both.
+- Stop playing online: back to "Play online", `network.online=0` saved. Join by typing 127.0.0.1: "Joined 127.0.0.1"
+  and Leave the session; settings.ini's `network.server` unchanged and `network.online` still 0.
+
+**Not tested:** the file fetched from GitHub (it is not on main until this branch is merged and pushed: until then
+the fetch answers 404 and the page says the address could not be fetched), Linux and Android, the Deck, a copy with
+no data folder for the cache.
 
 ## Sources
 

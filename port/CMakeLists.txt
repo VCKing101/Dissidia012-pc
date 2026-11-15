@@ -96,6 +96,8 @@ portablekit_add_game(D012Native ${d012_corpus}
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_input.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_net.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_battle_relay.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_online.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_online_rules.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_rollback.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_comm_battle.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_brave_pool_guard.cpp"
@@ -291,6 +293,7 @@ endif()
 # portablekit_add_game() found above.
 add_library(d012_manifest STATIC "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_json.cpp"
                                  "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_update_rules.cpp"
+                                 "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_online_rules.cpp"
                                  "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_discord_rules.cpp"
                                  "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_versus_rules.cpp"
                                  "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_no_window_rules.cpp"
