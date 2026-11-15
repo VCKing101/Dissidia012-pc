@@ -1,0 +1,763 @@
+From 5147f70710a6aec99fc19137b97e01b4574ebe22 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Sun, 15 Nov 2026 08:36:11 +1030
+Subject: [PATCH 105/106] Android: touch controls over menus, L2/R2 and
+ two-button moves, a JNI-free data folder
+
+- The on-screen controls stay over the game's dialogs and the port's panels
+  (set_touch_for_interface); there they press ImGui's gamepad keys, and a
+  tap off a control reaches the screen as before.
+- L2 and R2 beside L and R, for a game that reads the extra buttons.
+- A button for each of the game's moves made from two buttons together
+  (GameProfile::combos), in two rows to the left of the face buttons.
+- user_data_directory() on Android without JNI, so it works from static
+  initialisers.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/gpu/vulkan_renderer.cpp   | 55 ++++++++++++++++++++++++++---
+ host/gpu/vulkan_renderer.hpp   |  8 +++++
+ host/input/touch_controls.cpp  | 63 ++++++++++++++++++++++++++++++++--
+ host/input/touch_controls.hpp  | 39 ++++++++++++++++++---
+ host/install/user_data.cpp     | 32 +++++++++++++++++
+ host/ui/layer.cpp              | 33 ++++++++++++++++++
+ host/ui/layer.hpp              |  2 ++
+ host/ui/menu.cpp               | 13 +++++++
+ host/ui/touch_overlay.cpp      | 57 ++++++++++++++++++++++++++++--
+ host/ui/touch_overlay.hpp      |  4 ++-
+ tests/touch_controls_tests.cpp | 27 ++++++++++++++-
+ 11 files changed, 318 insertions(+), 15 deletions(-)
+
+diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
+index 89870db..ff9be08 100644
+--- a/host/gpu/vulkan_renderer.cpp
++++ b/host/gpu/vulkan_renderer.cpp
+@@ -1254,6 +1254,8 @@ struct VulkanRenderer::Impl {
+     // Touch screen: the on-screen controls, in window coordinates.
+     input::touch::Controls touch;
+     bool touch_visible{};
++    bool touch_interface{};       // set_touch_for_interface()
++    bool touch_mouse_claimed{};   // the touch's mouse is on a control: not the interface's
+     bool real_mouse_seen{};
+     MouseMotion touch_motion{};
+     struct TouchLayoutKey {
+@@ -1296,8 +1298,16 @@ struct VulkanRenderer::Impl {
+         insets.top += margin;
+         insets.right += margin;
+         insets.bottom += margin;
+-        touch.set_layout(
+-            input::touch::make_layout(static_cast<float>(width), static_cast<float>(height), insets, size, dpad));
++        // A button for each of the game's moves made from two buttons
++        // together (GameProfile::combos).
++        std::array<std::uint16_t, input::touch::kMaxCombos> combos{};
++        std::size_t combo_count = 0;
++        for (const ComboControl &combo : portablekit::game().combos)
++            if (combo_count < combos.size()) combos[combo_count++] = static_cast<std::uint16_t>(combo.buttons);
++        touch.set_layout(input::touch::make_layout(
++            static_cast<float>(width), static_cast<float>(height), insets, size, dpad,
++            (portablekit::active_extra_buttons() & (input::kExtraL2 | input::kExtraR2)) != 0u,
++            std::span<const std::uint16_t>(combos.data(), combo_count)));
+     }
+     void handle_touch(const SDL_Event &event) {
+         const bool finger = event.type == SDL_EVENT_FINGER_DOWN || event.type == SDL_EVENT_FINGER_MOTION ||
+@@ -1314,7 +1324,7 @@ struct VulkanRenderer::Impl {
+             }
+             return;
+         }
+-        if (!settings::current().touch_controls || !game_input) {
++        if (!settings::current().touch_controls || (!game_input && !touch_interface)) {
+             touch.release_all();
+             return;
+         }
+@@ -1327,6 +1337,9 @@ struct VulkanRenderer::Impl {
+         const std::uint64_t id = event.tfinger.fingerID;
+         if (event.type == SDL_EVENT_FINGER_DOWN) {
+             touch_visible = true;
++            // Over an interface screen a tap that is not on a control is the
++            // screen's.
++            if (!game_input && !touch.claims(at)) return;
+             touch.finger_down(id, at);
+         } else if (event.type == SDL_EVENT_FINGER_MOTION) {
+             touch.finger_move(id, at);
+@@ -1334,6 +1347,7 @@ struct VulkanRenderer::Impl {
+             touch.finger_up(id);
+         }
+         const input::touch::Point drag = touch.take_camera_drag();
++        if (!game_input) return;
+         touch_motion.x += drag.x / static_cast<float>(height);
+         touch_motion.y += drag.y / static_cast<float>(height);
+     }
+@@ -7196,6 +7210,22 @@ bool VulkanRenderer::pump_events() {
+              event.button.which != SDL_TOUCH_MOUSEID))
+             impl_->real_mouse_seen = true;
+         impl_->handle_touch(event);
++        // Over an interface screen, the mouse SDL makes of a touch on a
++        // control is the control's, not a click on what lies under it.
++        if (impl_->touch_interface && !impl_->game_input && settings::current().touch_controls) {
++            const bool touch_mouse =
++                ((event.type == SDL_EVENT_MOUSE_BUTTON_DOWN || event.type == SDL_EVENT_MOUSE_BUTTON_UP) &&
++                 event.button.which == SDL_TOUCH_MOUSEID) ||
++                (event.type == SDL_EVENT_MOUSE_MOTION && event.motion.which == SDL_TOUCH_MOUSEID);
++            if (touch_mouse && event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
++                impl_->update_touch_layout();
++                impl_->touch_mouse_claimed = impl_->touch.claims({event.button.x, event.button.y});
++            }
++            if (touch_mouse && impl_->touch_mouse_claimed) {
++                if (event.type == SDL_EVENT_MOUSE_BUTTON_UP) impl_->touch_mouse_claimed = false;
++                continue;
++            }
++        }
+         if (event.type == SDL_EVENT_MOUSE_MOTION && impl_->mouse_captured && event.motion.which != SDL_TOUCH_MOUSEID &&
+             (!impl_->scripted_input || event.motion.which == kScriptedMouse)) {
+             impl_->mouse_motion.x += event.motion.xrel;
+@@ -7313,6 +7343,7 @@ void VulkanRenderer::Impl::sample_pad(bool focused) {
+     // So do the on-screen controls.
+     if (impl_->touch_visible) {
+         pad.buttons |= impl_->touch.buttons();
++        pad.extra |= impl_->touch.extra();
+         // The on-screen stick moves in a circle too.
+         const input::touch::Point touched = impl_->touch.stick();
+         input::stick::Vector stick{touched.x, touched.y};
+@@ -7398,7 +7429,23 @@ bool VulkanRenderer::first_pad_connected() const noexcept { return impl_ && impl
+ PadState VulkanRenderer::second_pad() const noexcept { return impl_ ? impl_->pad2 : PadState{}; }
+ 
+ bool VulkanRenderer::touch_controls_visible() const noexcept {
+-    return impl_ && impl_->touch_visible && impl_->game_input && settings::current().touch_controls;
++    if (!impl_ || !settings::current().touch_controls) return false;
++    if (impl_->game_input) return impl_->touch_visible;
++    if (!impl_->touch_interface) return false;
++    if (impl_->touch_visible) return true;
++    // No touch yet: shown on a touch screen when no gamepad is there to answer.
++    int touch_devices = 0;
++    SDL_free(SDL_GetTouchDevices(&touch_devices));
++    return touch_devices > 0 && impl_->gamepad == nullptr;
++}
++
++bool VulkanRenderer::touch_for_interface() const noexcept { return impl_ && impl_->touch_interface; }
++
++void VulkanRenderer::set_touch_for_interface(bool on) {
++    if (!impl_ || impl_->touch_interface == on) return;
++    impl_->touch_interface = on;
++    impl_->touch_mouse_claimed = false;
++    impl_->touch.release_all();
+ }
+ 
+ const input::touch::Controls &VulkanRenderer::touch_controls() const {
+diff --git a/host/gpu/vulkan_renderer.hpp b/host/gpu/vulkan_renderer.hpp
+index c4beda1..7d9f828 100644
+--- a/host/gpu/vulkan_renderer.hpp
++++ b/host/gpu/vulkan_renderer.hpp
+@@ -139,6 +139,14 @@ public:
+     [[nodiscard]] MouseMotion take_touch_motion() noexcept;
+     // The on-screen menu button was tapped since the last take.
+     [[nodiscard]] bool take_touch_menu() noexcept;
++    // A screen of the interface over the game (a save list, a message, a
++    // panel of the port's) takes the on-screen controls while the game's
++    // input is off: their buttons and D-pad press the screen's gamepad keys
++    // (see touch_controls().buttons()), and a tap anywhere else reaches the
++    // screen as a touch. Shown there on a touch screen with no gamepad even
++    // before the first touch, so a player sees how to answer.
++    void set_touch_for_interface(bool on);
++    [[nodiscard]] bool touch_for_interface() const noexcept;
+     // The pointer is captured for the game: hidden, and its motion and
+     // buttons go to the game. That is while the mouse setting is on, the game
+     // has input, no interface screen is up and the window has focus.
+diff --git a/host/input/touch_controls.cpp b/host/input/touch_controls.cpp
+index 12d1a1c..1c226ed 100644
+--- a/host/input/touch_controls.cpp
++++ b/host/input/touch_controls.cpp
+@@ -19,6 +19,14 @@ std::uint16_t psp_button(Control control) {
+     }
+ }
+ 
++std::uint32_t extra_button(Control control) {
++    switch (control) {
++    case Control::L2: return 1u << 0u;  // input::kExtraL2
++    case Control::R2: return 1u << 1u;  // input::kExtraR2
++    default: return 0u;
++    }
++}
++
+ bool Circle::contains(Point p, float slack) const {
+     const float dx = p.x - centre.x;
+     const float dy = p.y - centre.y;
+@@ -26,7 +34,8 @@ bool Circle::contains(Point p, float slack) const {
+     return dx * dx + dy * dy <= r * r;
+ }
+ 
+-Layout make_layout(float width, float height, Insets insets, float size, bool dpad) {
++Layout make_layout(float width, float height, Insets insets, float size, bool dpad, bool triggers,
++                   std::span<const std::uint16_t> combos) {
+     Layout layout;
+     layout.width = width;
+     layout.height = height;
+@@ -48,6 +57,12 @@ Layout make_layout(float width, float height, Insets insets, float size, bool dp
+     const float shoulder = face * 1.05f;
+     c[static_cast<std::size_t>(Control::L)] = {{left + shoulder * 1.6f, top + shoulder * 1.4f}, shoulder};
+     c[static_cast<std::size_t>(Control::R)] = {{right - shoulder * 1.6f, top + shoulder * 1.4f}, shoulder};
++    if (triggers) {
++        const float trigger = shoulder * 0.8f;
++        const float apart = shoulder + trigger + face * 0.5f;
++        c[static_cast<std::size_t>(Control::L2)] = {{left + shoulder * 1.6f + apart, top + trigger * 1.2f}, trigger};
++        c[static_cast<std::size_t>(Control::R2)] = {{right - shoulder * 1.6f - apart, top + trigger * 1.2f}, trigger};
++    }
+     const float small = face * 0.55f;
+     const float middle = (left + right) * 0.5f;
+     c[static_cast<std::size_t>(Control::Select)] = {{middle - small * 3.0f, top + small * 1.6f}, small};
+@@ -60,6 +75,17 @@ Layout make_layout(float width, float height, Insets insets, float size, bool dp
+                     std::max(top + (bottom - top) * 0.47f, c[static_cast<std::size_t>(Control::L)].centre.y +
+                                                                shoulder + reach + face * 0.4f)},
+                    reach};
++    // Combo buttons: two rows to the left of the diamond, level with it,
++    // a column of two for each pair, the first pair nearest the thumb.
++    layout.combo_count = std::min(combos.size(), kMaxCombos);
++    const float combo = face * 0.62f;
++    const float step = combo * 2.3f;
++    const float first = diamond.x - spread - face - face * 0.45f - combo;
++    for (std::size_t i = 0; i < layout.combo_count; ++i) {
++        const float x = first - step * static_cast<float>(i / 2u);
++        const float y = diamond.y + (i % 2u == 0u ? -1.0f : 1.0f) * step * 0.5f;
++        layout.combos[i] = {{{x, y}, combo}, combos[i]};
++    }
+     layout.stick_radius = unit * 0.13f;
+     layout.stick_split = left + (right - left) * 0.45f;
+     return layout;
+@@ -93,7 +119,7 @@ std::optional<Control> Controls::control_at(Point at, bool face_only) const {
+     float best_distance = 0.0f;
+     for (std::size_t i = 0; i <= last; ++i) {
+         const Circle &circle = layout_.controls[i];
+-        if (!circle.contains(at, 1.2f)) continue;
++        if (!(circle.radius > 0.0f) || !circle.contains(at, 1.2f)) continue;
+         const float distance = std::hypot(at.x - circle.centre.x, at.y - circle.centre.y) / circle.radius;
+         if (!best || distance < best_distance) {
+             best = static_cast<Control>(i);
+@@ -103,6 +129,12 @@ std::optional<Control> Controls::control_at(Point at, bool face_only) const {
+     return best;
+ }
+ 
++std::optional<std::size_t> Controls::combo_at(Point at) const {
++    for (std::size_t i = 0; i < layout_.combo_count; ++i)
++        if (layout_.combos[i].circle.contains(at, 1.1f)) return i;
++    return std::nullopt;
++}
++
+ Controls::Finger *Controls::find(std::uint64_t id) {
+     for (Finger &finger : fingers_)
+         if (finger.used && finger.id == id) return &finger;
+@@ -118,12 +150,16 @@ void Controls::finger_down(std::uint64_t id, Point at) {
+             break;
+         }
+     if (slot == nullptr) return;
+-    *slot = Finger{id, true, Role::None, Control::Count, false, at};
++    *slot = Finger{id, true, Role::None, Control::Count, false, 0u, at};
+     if (const std::optional<Control> control = control_at(at, false)) {
+         slot->role = Role::Control;
+         slot->control = *control;
+         slot->over = true;
+         if (*control == Control::Menu) menu_tapped_ = true;
++    } else if (const std::optional<std::size_t> combo = combo_at(at)) {
++        slot->role = Role::Combo;
++        slot->combo = static_cast<std::uint8_t>(*combo);
++        slot->over = true;
+     } else if (layout_.dpad_shown && layout_.dpad.contains(at, 1.15f)) {
+         slot->role = Role::DPad;
+     } else if (at.x < layout_.stick_split && !stick_.active) {
+@@ -167,6 +203,9 @@ void Controls::finger_move(std::uint64_t id, Point at) {
+         }
+         break;
+     }
++    case Role::Combo:
++        finger->over = layout_.combos[finger->combo].circle.contains(at, 1.6f);
++        break;
+     case Role::Camera:
+         camera_drag_.x += at.x - finger->last.x;
+         camera_drag_.y += at.y - finger->last.y;
+@@ -191,12 +230,20 @@ void Controls::release_all() {
+     menu_tapped_ = false;
+ }
+ 
++std::uint32_t Controls::extra() const {
++    std::uint32_t extra = 0u;
++    for (const Finger &finger : fingers_)
++        if (finger.used && finger.role == Role::Control && finger.over) extra |= extra_button(finger.control);
++    return extra;
++}
++
+ std::uint16_t Controls::buttons() const {
+     std::uint16_t buttons = 0u;
+     for (const Finger &finger : fingers_) {
+         if (!finger.used) continue;
+         if (finger.role == Role::Control && finger.over) buttons |= psp_button(finger.control);
+         if (finger.role == Role::DPad) buttons |= dpad_held_by(finger);
++        if (finger.role == Role::Combo && finger.over) buttons |= layout_.combos[finger.combo].buttons;
+     }
+     return buttons;
+ }
+@@ -219,12 +266,22 @@ bool Controls::held(Control control) const {
+     return false;
+ }
+ 
++bool Controls::combo_held(std::size_t index) const {
++    for (const Finger &finger : fingers_)
++        if (finger.used && finger.role == Role::Combo && finger.over && finger.combo == index) return true;
++    return false;
++}
++
+ bool Controls::any_finger() const {
+     for (const Finger &finger : fingers_)
+         if (finger.used) return true;
+     return false;
+ }
+ 
++bool Controls::claims(Point at) const {
++    return control_at(at, false).has_value() || combo_at(at).has_value() || (layout_.dpad_shown && layout_.dpad.contains(at, 1.15f));
++}
++
+ Point Controls::stick() const {
+     if (!stick_.active) return {};
+     return stick_deflection({stick_.thumb.x - stick_.origin.x, stick_.thumb.y - stick_.origin.y},
+diff --git a/host/input/touch_controls.hpp b/host/input/touch_controls.hpp
+index 293be14..8df2f6a 100644
+--- a/host/input/touch_controls.hpp
++++ b/host/input/touch_controls.hpp
+@@ -4,6 +4,7 @@
+ #include <cstddef>
+ #include <cstdint>
+ #include <optional>
++#include <span>
+ 
+ // On-screen controls for a touch screen (#17, #103), drawn by the host over
+ // the game, never into its picture. This part is the pure logic: where the
+@@ -19,13 +20,19 @@
+ // centre. A drag anywhere else on the right half turns the camera, as the
+ // mouse does. Every finger is independent, so moving, turning and pressing
+ // work together.
++//
++// A game whose moves take two buttons at once (GameProfile::combos: R and
++// Cross to dodge) gets a small button for each, in two rows to the left of
++// the face buttons: a thumb cannot hold R in the corner and press Cross.
+ namespace portablekit::input::touch {
+ 
+-enum class Control : std::uint8_t { Triangle, Circle, Cross, Square, L, R, Start, Select, Menu, Count };
++enum class Control : std::uint8_t { Triangle, Circle, Cross, Square, L, R, L2, R2, Start, Select, Menu, Count };
+ inline constexpr std::size_t kControls = static_cast<std::size_t>(Control::Count);
+ 
+ // The PSP button (SceCtrlButtons) a control presses; 0 for the menu button.
+ [[nodiscard]] std::uint16_t psp_button(Control control);
++// The extra button (input::kExtraL2, kExtraR2) a control presses, or 0.
++[[nodiscard]] std::uint32_t extra_button(Control control);
+ 
+ struct Point {
+     float x{};
+@@ -44,19 +51,34 @@ struct Insets {
+     float bottom{};
+ };
+ 
++// The most combo buttons a layout holds.
++inline constexpr std::size_t kMaxCombos = 8u;
++struct ComboButton {
++    Circle circle;
++    std::uint16_t buttons{};  // the PSP buttons it presses together
++};
++
+ struct Layout {
++    // A control with radius 0 is not shown (L2 and R2 for a game that has
++    // no use for them).
+     std::array<Circle, kControls> controls{};
+     // The D-pad, when shown: its centre and the reach of its arms.
+     bool dpad_shown{};
+     Circle dpad{};
++    // The combo buttons, in the order the game lists them.
++    std::array<ComboButton, kMaxCombos> combos{};
++    std::size_t combo_count{};
+     float stick_radius{};    // the stick's reach from where the thumb landed
+     float stick_split{};     // x: fingers landing left of it are for the stick
+     float width{};
+     float height{};
+ };
+ // A layout for a width x height screen. `size` scales every control (1 is the
+-// default, sized for thumbs on a phone held sideways); `dpad` shows the D-pad.
+-[[nodiscard]] Layout make_layout(float width, float height, Insets insets, float size, bool dpad = true);
++// default, sized for thumbs on a phone held sideways); `dpad` shows the D-pad,
++// `triggers` L2 and R2 (beside L and R, towards the middle), `combos` a
++// button for each set of PSP buttons pressed together (kMaxCombos at most).
++[[nodiscard]] Layout make_layout(float width, float height, Insets insets, float size, bool dpad = true,
++                                 bool triggers = false, std::span<const std::uint16_t> combos = {});
+ 
+ // The PSP D-pad bits (up 0x10, right 0x20, down 0x40, left 0x80) for a finger
+ // at `offset` from the D-pad's centre: one direction within 22.5 degrees of
+@@ -87,6 +109,8 @@ public:
+ 
+     // PSP buttons held now.
+     [[nodiscard]] std::uint16_t buttons() const;
++    // Extra buttons (input::kExtraL2, kExtraR2) held now.
++    [[nodiscard]] std::uint32_t extra() const;
+     // The stick, each axis -1..1, right and down positive.
+     [[nodiscard]] Point stick() const;
+     [[nodiscard]] const Stick &stick_state() const { return stick_; }
+@@ -95,22 +119,29 @@ public:
+     // The menu button was tapped since the last take.
+     [[nodiscard]] bool take_menu();
+     [[nodiscard]] bool held(Control control) const;
++    // Combo button `index` is held now.
++    [[nodiscard]] bool combo_held(std::size_t index) const;
+     // The D-pad directions held now (PSP bits), for drawing.
+     [[nodiscard]] std::uint16_t dpad_held() const;
+     [[nodiscard]] bool any_finger() const;
++    // A finger landing at `at` would press a button or the D-pad (not the
++    // stick or the camera, which cover half the screen each).
++    [[nodiscard]] bool claims(Point at) const;
+ 
+ private:
+-    enum class Role : std::uint8_t { None, Stick, Control, Camera, DPad };
++    enum class Role : std::uint8_t { None, Stick, Control, Camera, DPad, Combo };
+     struct Finger {
+         std::uint64_t id{};
+         bool used{};
+         Role role{};
+         Control control{};
+         bool over{};    // the finger is still over its control
++        std::uint8_t combo{};  // Role::Combo: which one
+         Point last;
+     };
+     static constexpr std::size_t kFingers = 10u;
+     [[nodiscard]] std::optional<Control> control_at(Point at, bool face_only) const;
++    [[nodiscard]] std::optional<std::size_t> combo_at(Point at) const;
+     Finger *find(std::uint64_t id);
+     [[nodiscard]] std::uint16_t dpad_held_by(const Finger &finger) const;
+ 
+diff --git a/host/install/user_data.cpp b/host/install/user_data.cpp
+index 536eeb8..f1fce6b 100644
+--- a/host/install/user_data.cpp
++++ b/host/install/user_data.cpp
+@@ -7,6 +7,12 @@
+ #include <fstream>
+ #include <system_error>
+ 
++#if defined(__ANDROID__)
++#include <unistd.h>
++
++#include <string>
++#endif
++
+ #if defined(PORTABLEKIT_HAS_SDL)
+ #include <SDL3/SDL_filesystem.h>
+ #include <SDL3/SDL_stdinc.h>
+@@ -25,6 +31,29 @@ std::string trim(const std::string &text) {
+     return text.substr(first, last - first + 1u);
+ }
+ 
++#if defined(__ANDROID__)
++// The app's internal files directory, the one SDL_GetPrefPath() returns
++// (Context.getFilesDir(), with a slash), worked out without Java: SDL can only
++// ask Java once SDLActivity has set it up, and a port's static constructors
++// that read settings run before that, while libmain.so is loaded. Internal
++// storage is /data/user/<user>/<package>, the user being the uid's hundred
++// thousands and the package the process name. Empty when that directory is
++// not there (an app moved to adoptable storage keeps it elsewhere): SDL is
++// asked then.
++std::filesystem::path android_files_directory() {
++    std::ifstream cmdline("/proc/self/cmdline", std::ios::binary);
++    std::string name;
++    std::getline(cmdline, name, '\0');
++    name = name.substr(0, name.find(':'));  // a service process: <package>:<name>
++    if (name.empty() || name.find('/') != std::string::npos) return {};
++    const std::filesystem::path package =
++        std::filesystem::path("/data/user") / std::to_string(getuid() / 100000u) / name;
++    std::error_code ec;
++    if (!std::filesystem::is_directory(package, ec)) return {};
++    return package / "files" / "";
++}
++#endif
++
+ #if !defined(PORTABLEKIT_HAS_SDL)
+ std::filesystem::path environment_path(const char *name) {
+     const char *value = std::getenv(name);
+@@ -45,6 +74,9 @@ std::filesystem::path path_from_utf8(const std::string &text) {
+ 
+ std::filesystem::path user_data_directory() {
+     if (const char *dir = portablekit::env("DATA_DIR"); dir != nullptr && *dir != '\0') return path_from_utf8(dir);
++#if defined(__ANDROID__)
++    if (std::filesystem::path files = android_files_directory(); !files.empty()) return files;
++#endif
+ #if defined(PORTABLEKIT_HAS_SDL)
+     char *pref = SDL_GetPrefPath(portablekit::game().data_organization, portablekit::game().data_application);
+     if (pref == nullptr) throw psprecomp::Error(std::string("Cannot determine the user data directory: ") + SDL_GetError());
+diff --git a/host/ui/layer.cpp b/host/ui/layer.cpp
+index 46d2f54..a4d6a45 100644
+--- a/host/ui/layer.cpp
++++ b/host/ui/layer.cpp
+@@ -366,6 +366,38 @@ void Layer::apply_theme() {
+     ImGui::GetStyle() = make_style(scale(), font_size_);
+ }
+ 
++// The on-screen controls over an interface screen press its gamepad keys
++// (VulkanRenderer::set_touch_for_interface), after the backend has set the
++// real pads' so a touch is not undone by an idle pad.
++void Layer::feed_touch_buttons() {
++    const bool live = interactive_ && renderer_->touch_for_interface() && renderer_->touch_controls_visible();
++    const std::uint16_t held = live ? renderer_->touch_controls().buttons() : 0u;
++    // The menu button has nothing to open over a screen.
++    if (live) (void)renderer_->take_touch_menu();
++    struct Key {
++        std::uint16_t psp;
++        ImGuiKey key;
++    };
++    static constexpr Key kKeys[] = {
++        {0x4000u, ImGuiKey_GamepadFaceDown}, {0x2000u, ImGuiKey_GamepadFaceRight},
++        {0x1000u, ImGuiKey_GamepadFaceUp},   {0x8000u, ImGuiKey_GamepadFaceLeft},
++        {0x0010u, ImGuiKey_GamepadDpadUp},   {0x0020u, ImGuiKey_GamepadDpadRight},
++        {0x0040u, ImGuiKey_GamepadDpadDown}, {0x0080u, ImGuiKey_GamepadDpadLeft},
++        {0x0100u, ImGuiKey_GamepadL1},       {0x0200u, ImGuiKey_GamepadR1},
++        {0x0008u, ImGuiKey_GamepadStart},    {0x0001u, ImGuiKey_GamepadBack},
++    };
++    ImGuiIO &io = ImGui::GetIO();
++    const std::uint16_t changed = held ^ touch_held_;
++    for (const Key &k : kKeys)
++        if ((changed & k.psp) != 0u) io.AddKeyEvent(k.key, (held & k.psp) != 0u);
++    touch_held_ = held;
++    if (held != 0u) {
++        io.BackendFlags |= ImGuiBackendFlags_HasGamepad;
++        io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
++        device_ = InputDevice::Gamepad;
++    }
++}
++
+ void Layer::begin_frame() {
+     renderer_->begin_ui_frame();
+     ImGui_ImplSDL3_NewFrame();
+@@ -374,6 +406,7 @@ void Layer::begin_frame() {
+     if (!gamepad_armed_) gamepad_armed_ = !face_button_held();
+     if (gamepad_armed_) io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
+     else io.ConfigFlags &= ~ImGuiConfigFlags_NavEnableGamepad;
++    feed_touch_buttons();
+     apply_theme();
+     if (fonts::generation() != g_game_text_generation) load_game_text_font();
+     ImGui::NewFrame();
+diff --git a/host/ui/layer.hpp b/host/ui/layer.hpp
+index 4ddac36..2fdcb5b 100644
+--- a/host/ui/layer.hpp
++++ b/host/ui/layer.hpp
+@@ -88,6 +88,7 @@ private:
+     bool handle_event(const SDL_Event &event);
+     void resolve_escape();
+     void apply_theme();
++    void feed_touch_buttons();
+ 
+     gpu::VulkanRenderer *renderer_{};
+     bool interactive_{};
+@@ -103,6 +104,7 @@ private:
+     // Gamepad navigation waits until no face button is held, so a button held
+     // while a screen opens does not activate its first row.
+     bool gamepad_armed_{};
++    std::uint16_t touch_held_{};  // PSP buttons the on-screen controls hold for a screen
+     bool menu_toggle_{};
+     bool back_{};
+     bool capturing_binding_{};
+diff --git a/host/ui/menu.cpp b/host/ui/menu.cpp
+index af3b82d..a643d03 100644
+--- a/host/ui/menu.cpp
++++ b/host/ui/menu.cpp
+@@ -2101,6 +2101,16 @@ void draw_over_game() {
+     if (!layer.attached()) return;
+     script::tick();
+     std::optional<Menu> &menu = menu_over_game_state();
++    // The game's dialogs and the port's panels answer the on-screen controls
++    // too, which stay drawn over them; the menu and the keyboard are touched
++    // directly.
++    const bool touch_screen = !menu && !text_input_open() &&
++                              (game_message_open() || game_save_list_open() || g_panel_over_game != nullptr);
++    layer.renderer().set_touch_for_interface(touch_screen);
++    const auto draw_touch = [&] {
++        if (touch_screen && layer.renderer().touch_controls_visible())
++            draw_touch_controls(layer.renderer().touch_controls(), settings::current().touch_opacity, true);
++    };
+     // The game's keyboard request: drawn over every game frame until done. A
+     // keyboard opened from the menu over the running game is the menu's.
+     if (text_input_open() && !menu) {
+@@ -2117,6 +2127,7 @@ void draw_over_game() {
+         if (game_message_open() && game_save_list_open()) game_save_list_frame();
+         if (game_message_open()) game_message_frame();
+         else game_save_list_frame();
++        draw_touch();
+         layer.end_frame();
+         return;
+     }
+@@ -2127,6 +2138,8 @@ void draw_over_game() {
+             g_panel_over_game = nullptr;
+             layer.set_interactive(false);
+             layer.renderer().set_game_input(true);
++        } else {
++            draw_touch();
+         }
+         layer.end_frame();
+         return;
+diff --git a/host/ui/touch_overlay.cpp b/host/ui/touch_overlay.cpp
+index 4c0ca74..da259b4 100644
+--- a/host/ui/touch_overlay.cpp
++++ b/host/ui/touch_overlay.cpp
+@@ -1,9 +1,12 @@
+ #include "ui/touch_overlay.hpp"
+ 
++#include "profile.hpp"
++
+ #include <imgui.h>
+ 
+ #include <algorithm>
+ #include <cmath>
++#include <string>
+ 
+ namespace portablekit::ui {
+ namespace {
+@@ -43,16 +46,53 @@ const char *label(Control control) {
+     switch (control) {
+     case Control::L: return "L";
+     case Control::R: return "R";
++    case Control::L2: return "L2";
++    case Control::R2: return "R2";
+     case Control::Start: return "START";
+     case Control::Select: return "SELECT";
+     default: return nullptr;
+     }
+ }
+ 
++// A combo's name as its button shows it: the menu's label before the
++// buttons it stands for ("Dodge (R + x)" -> "Dodge").
++std::string combo_name(std::size_t index) {
++    const auto combos = game().combos;
++    if (index >= combos.size() || combos[index].label == nullptr) return {};
++    std::string name = combos[index].label;
++    if (const std::size_t open = name.find(" ("); open != std::string::npos) name.resize(open);
++    return name;
++}
++
++// Text centred in a circle of radius r: on one line, or on two at the
++// space nearest the middle when one would be too small to read.
++void draw_fitted(ImDrawList *list, const std::string &text, ImVec2 c, float r, ImU32 ink) {
++    ImFont *font = ImGui::GetFont();
++    const float width = r * 1.6f;
++    const float largest = r * 0.5f;
++    const auto fit = [&](const std::string &line) {
++        const ImVec2 at_one = font->CalcTextSizeA(1.0f, 1e9f, 0.0f, line.c_str());
++        return at_one.x > 0.0f ? std::min(largest, width / at_one.x) : largest;
++    };
++    const float one_line = fit(text);
++    const std::size_t space = text.find(' ');
++    if (one_line >= largest * 0.75f || space == std::string::npos) {
++        const ImVec2 extent = font->CalcTextSizeA(one_line, 1e9f, 0.0f, text.c_str());
++        list->AddText(font, one_line, {c.x - extent.x * 0.5f, c.y - extent.y * 0.5f}, ink, text.c_str());
++        return;
++    }
++    const std::string top = text.substr(0, space), bottom = text.substr(space + 1);
++    const float size = std::min({fit(top), fit(bottom), largest * 0.85f});
++    const ImVec2 a = font->CalcTextSizeA(size, 1e9f, 0.0f, top.c_str());
++    const ImVec2 b = font->CalcTextSizeA(size, 1e9f, 0.0f, bottom.c_str());
++    list->AddText(font, size, {c.x - a.x * 0.5f, c.y - a.y}, ink, top.c_str());
++    list->AddText(font, size, {c.x - b.x * 0.5f, c.y}, ink, bottom.c_str());
++}
++
+ } // namespace
+ 
+-void draw_touch_controls(const input::touch::Controls &controls, float opacity) {
+-    ImDrawList *list = ImGui::GetBackgroundDrawList();
++void draw_touch_controls(const input::touch::Controls &controls, float opacity, bool on_top) {
++    ImDrawList *list = on_top ? ImGui::GetForegroundDrawList() : ImGui::GetBackgroundDrawList();
+     const input::touch::Layout &layout = controls.layout();
+     const float base = std::clamp(opacity, 0.1f, 1.0f);
+     // PSP colours for the symbols.
+@@ -61,6 +101,7 @@ void draw_touch_controls(const input::touch::Controls &controls, float opacity)
+     for (std::size_t i = 0; i < input::touch::kControls; ++i) {
+         const auto control = static_cast<Control>(i);
+         const Circle &circle = layout.controls[i];
++        if (!(circle.radius > 0.0f)) continue;
+         const ImVec2 c{circle.centre.x, circle.centre.y};
+         const bool held = controls.held(control);
+         const float thickness = std::max(1.5f, circle.radius * 0.08f);
+@@ -79,6 +120,18 @@ void draw_touch_controls(const input::touch::Controls &controls, float opacity)
+             draw_symbol(list, control, c, circle.radius, ink, thickness * 1.3f);
+         }
+     }
++    // The combo buttons, named after the moves.
++    for (std::size_t i = 0; i < layout.combo_count; ++i) {
++        const Circle &circle = layout.combos[i].circle;
++        const ImVec2 c{circle.centre.x, circle.centre.y};
++        const bool held = controls.combo_held(i);
++        const float thickness = std::max(1.5f, circle.radius * 0.08f);
++        list->AddCircleFilled(c, circle.radius, colour(0, 0, 0, base * (held ? 0.55f : 0.3f)));
++        list->AddCircle(c, circle.radius + thickness, colour(0, 0, 0, base * 0.6f), 0, thickness);
++        list->AddCircle(c, circle.radius, colour(255, 255, 255, base * (held ? 1.0f : 0.8f)), 0, thickness);
++        if (held) list->AddCircleFilled(c, circle.radius * 0.92f, colour(255, 255, 255, base * 0.35f));
++        draw_fitted(list, combo_name(i), c, circle.radius, colour(255, 255, 255, base));
++    }
+     // The D-pad: a cross of four arms, each lit while held.
+     if (layout.dpad_shown) {
+         const ImVec2 c{layout.dpad.centre.x, layout.dpad.centre.y};
+diff --git a/host/ui/touch_overlay.hpp b/host/ui/touch_overlay.hpp
+index e4f2a40..eb8ae6c 100644
+--- a/host/ui/touch_overlay.hpp
++++ b/host/ui/touch_overlay.hpp
+@@ -6,6 +6,8 @@ namespace portablekit::ui {
+ 
+ // Draws the on-screen touch controls over the game in the current ImGui frame,
+ // behind any window: outlines at `opacity`, filled while held.
+-void draw_touch_controls(const input::touch::Controls &controls, float opacity);
++// `on_top`: over the interface's own windows (a dialog over the game), not
++// only over the game's picture.
++void draw_touch_controls(const input::touch::Controls &controls, float opacity, bool on_top = false);
+ 
+ } // namespace portablekit::ui
+diff --git a/tests/touch_controls_tests.cpp b/tests/touch_controls_tests.cpp
+index 65eebd9..5a1b264 100644
+--- a/tests/touch_controls_tests.cpp
++++ b/tests/touch_controls_tests.cpp
+@@ -19,7 +19,8 @@ void check(bool condition, const char *message) {
+ const Circle &at(const Layout &layout, Control control) { return layout.controls[static_cast<std::size_t>(control)]; }
+ 
+ void test_layout_fits(float width, float height, Insets insets, float size, const char *what) {
+-    const Layout layout = make_layout(width, height, insets, size);
++    const std::uint16_t combos[6] = {0x4200u, 0x1200u, 0x8200u, 0x2200u, 0x2100u, 0x8100u};
++    const Layout layout = make_layout(width, height, insets, size, true, true, combos);
+     bool inside = true;
+     for (const Circle &c : layout.controls)
+         inside = inside && c.centre.x - c.radius >= insets.left - 0.5f &&
+@@ -34,6 +35,21 @@ void test_layout_fits(float width, float height, Insets insets, float size, cons
+             apart = apart && std::hypot(a.centre.x - b.centre.x, a.centre.y - b.centre.y) >= a.radius + b.radius;
+         }
+     check(apart, "no two controls overlap");
++    check(layout.combo_count == 6u, "a button for each combo");
++    bool combos_fit = true;
++    for (std::size_t i = 0; i < layout.combo_count; ++i) {
++        const Circle &a = layout.combos[i].circle;
++        combos_fit = combos_fit && a.centre.x - a.radius >= layout.stick_split && a.centre.y - a.radius >= insets.top &&
++                     a.centre.y + a.radius <= height - insets.bottom + 0.5f;
++        for (std::size_t j = i + 1; j < layout.combo_count; ++j) {
++            const Circle &b = layout.combos[j].circle;
++            combos_fit = combos_fit && std::hypot(a.centre.x - b.centre.x, a.centre.y - b.centre.y) >= a.radius + b.radius;
++        }
++        for (const Circle &b : layout.controls)
++            combos_fit = combos_fit && (!(b.radius > 0.0f) ||
++                                        std::hypot(a.centre.x - b.centre.x, a.centre.y - b.centre.y) >= a.radius + b.radius);
++    }
++    check(combos_fit, "the combo buttons sit on the right half, on screen, clear of each other and the controls");
+     const Circle &d = layout.dpad;
+     check(d.centre.x - d.radius >= insets.left - 0.5f && d.centre.y - d.radius >= insets.top - 0.5f &&
+               d.centre.y + d.radius <= height - insets.bottom + 0.5f && d.centre.x + d.radius < layout.stick_split,
+@@ -137,6 +153,15 @@ void test_fingers() {
+     controls.finger_down(4, at(layout, Control::Menu).centre);
+     check(controls.take_menu() && !controls.take_menu(), "the menu button is one tap");
+     check(controls.buttons() == 0u, "the menu button presses no PSP button");
++    // A combo button presses its buttons together.
++    const std::uint16_t combos[2] = {0x4200u, 0x1200u};
++    const Layout with_combos = make_layout(1280.0f, 576.0f, {}, 1.0f, true, false, combos);
++    controls.set_layout(with_combos);
++    controls.finger_down(5, with_combos.combos[0].circle.centre);
++    check(controls.buttons() == 0x4200u && controls.combo_held(0) && !controls.combo_held(1), "a combo presses R and Cross");
++    check(controls.claims(with_combos.combos[1].circle.centre), "a combo button is a control, not the camera");
++    controls.finger_up(5);
++    check(controls.buttons() == 0u, "and lets go of both");
+     controls.release_all();
+     check(!controls.any_finger() && controls.buttons() == 0u, "release_all lets go of everything");
+ }
+-- 
+2.53.0.windows.1
+

@@ -87,12 +87,24 @@ Work:
 
 Work:
 1. **Compiling the game.** I: Android 10+ apps (target API 29+) cannot execute or `dlopen` files they wrote into
-   their own data folder, so compiling on the phone would need workarounds. The simpler plan is a "Make Android
-   app" step in the PC setup: recompile for arm64, compile with an Android clang (the NDK; the player downloads it
-   under Google's licence, or a clang with an Android sysroot that we may ship; licence to check), pack and sign
-   the APK with a key made on the player's PC. PortableKit's `build_apk.sh` already packs and signs without Gradle.
-   D: Yakumo's APK is 0.8 GB and needs only the ISO, which suggests it ships its game code; that does not fit our
-   rule of distributing no game-derived code.
+   their own data folder, so compiling on the phone would need workarounds. D: Yakumo's APK is 0.8 GB and needs
+   only the ISO, which suggests it ships its game code; that does not fit our rule of distributing no
+   game-derived code.
+
+   Chosen (15 November 2026): **the phone compiles it.** The player copies the APK and their ISO, nothing else.
+   The app is the installer build (no game code) and carries clang and lld built for Android and the
+   recompiler as libraries (`lib*.so`: programs an app may run), plus the Android parts they compile with. After
+   the disc is set up it runs `--compile-game`'s steps on the phone (`port/host/d012_device_compile.cpp`) and loads
+   the result; later starts check the keys and go straight to the game, and an update compiles only the parts
+   whose C++ changed. None of the compiler comes from the NDK download, whose licence forbids redistributing it:
+   bionic's headers and link stubs, crtbegin/crtend, libc++, libunwind and compiler-rt's builtins are built from
+   AOSP's and LLVM's sources at pinned versions by `tools/port/android_runtime.sh`, and clang and lld by
+   `tools/port/android_compiler.sh`. D (15 November 2026): the stubs export exactly the NDK r30 API 29 stubs'
+   symbols (1337, 286, 12); two builds of the parts from the same sources were byte for byte the same; on a
+   Galaxy S25 Ultra the first start compiled all 324 parts in 6 min 51 s (7 jobs, battery about 31 °C) and played,
+   and the next start went straight to the game. Considered and dropped: compiling on the player's PC and copying
+   the result to the phone (a third file and a PC for every player), or building the whole APK there (updates tied
+   to a signing key on that PC).
 2. **Overlays.** D: PortableKit's Android work (merged 7 October 2026) was described as "for games without
    overlays"; Dissidia has three overlays plus `LIBSUPPREACC.PRX`. The manifest extracts native libraries so the
    overlay loader can list them; to check against our three overlay libraries, or link them in statically.

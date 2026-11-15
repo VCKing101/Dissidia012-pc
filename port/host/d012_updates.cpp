@@ -4,9 +4,10 @@
 // (update_rules::kLatestRelease) and compares its tag with d012::kVersion,
 // tools/port/release-version.txt's number compiled in. It runs on a thread of
 // its own, so the game never waits for it: through WinHTTP on Windows, which
-// is part of Windows, and through the system's libcurl elsewhere, opened when
-// the check runs (SteamOS and nearly every desktop Linux have it; without it
-// the menu says the check cannot run). Nothing is sent but the request: the
+// is part of Windows, through Java's HttpURLConnection on Android (no app can
+// load the system's libcurl there), and through the system's libcurl
+// elsewhere, opened when the check runs (SteamOS and nearly every desktop
+// Linux have it; without it the menu says the check cannot run). Nothing is sent but the request: the
 // address, and a User-Agent naming the port and its version, which GitHub's
 // API asks for.
 //
@@ -53,6 +54,9 @@
 #endif
 #include <windows.h>
 #include <winhttp.h>
+#elif defined(__ANDROID__)
+#include <SDL3/SDL_system.h>
+#include <jni.h>
 #else
 #include <dlfcn.h>
 #endif
@@ -174,6 +178,115 @@ Answer fetch(const std::string &url) {
     if (request != nullptr) WinHttpCloseHandle(request);
     if (connection != nullptr) WinHttpCloseHandle(connection);
     if (session != nullptr) WinHttpCloseHandle(session);
+    return out;
+}
+#elif defined(__ANDROID__)
+// java.net.HttpURLConnection, called through JNI on the check's own thread
+// (SDL_GetAndroidJNIEnv attaches it to the Java VM). It follows redirects
+// within https by itself.
+Answer fetch(const std::string &url) {
+    Answer out;
+    if (url.rfind("https://", 0) != 0) {
+        out.problem = "the address is not one the check can use";
+        return out;
+    }
+    auto *jni = static_cast<JNIEnv *>(SDL_GetAndroidJNIEnv());
+    if (jni == nullptr || jni->PushLocalFrame(32) != JNI_OK) {
+        std::cout << "[updates] no Java environment: " << SDL_GetError() << std::endl;
+        out.problem = "the check could not start";
+        return out;
+    }
+    // A Java exception ends the attempt; its text goes to the log.
+    const auto thrown = [&](const char *step) {
+        if (!jni->ExceptionCheck()) return false;
+        jthrowable error = jni->ExceptionOccurred();
+        jni->ExceptionClear();
+        std::string text = "?";
+        if (jclass object = jni->FindClass("java/lang/Object"); object != nullptr) {
+            const jmethodID to_string = jni->GetMethodID(object, "toString", "()Ljava/lang/String;");
+            if (auto *s = static_cast<jstring>(jni->CallObjectMethod(error, to_string)); s != nullptr) {
+                if (const char *chars = jni->GetStringUTFChars(s, nullptr); chars != nullptr) {
+                    text = chars;
+                    jni->ReleaseStringUTFChars(s, chars);
+                }
+            }
+        }
+        jni->ExceptionClear();
+        std::cout << "[updates] " << step << ": " << text << std::endl;
+        return true;
+    };
+    jobject connection = nullptr;
+    jclass http = nullptr;
+    [&] {
+        jclass url_class = jni->FindClass("java/net/URL");
+        http = jni->FindClass("java/net/HttpURLConnection");
+        jclass stream_class = jni->FindClass("java/io/InputStream");
+        if (thrown("classes") || url_class == nullptr || http == nullptr || stream_class == nullptr) {
+            out.problem = "the check could not start";
+            return;
+        }
+        jobject address = jni->NewObject(url_class, jni->GetMethodID(url_class, "<init>", "(Ljava/lang/String;)V"),
+                                         jni->NewStringUTF(url.c_str()));
+        if (thrown("URL")) {
+            out.problem = "the address is not one the check can use";
+            return;
+        }
+        connection = jni->CallObjectMethod(
+            address, jni->GetMethodID(url_class, "openConnection", "()Ljava/net/URLConnection;"));
+        if (thrown("openConnection") || connection == nullptr || !jni->IsInstanceOf(connection, http)) {
+            connection = nullptr;
+            out.problem = "GitHub could not be reached";
+            return;
+        }
+        const jmethodID property =
+            jni->GetMethodID(http, "setRequestProperty", "(Ljava/lang/String;Ljava/lang/String;)V");
+        const std::string agent = std::string("Dissidia012-pc/") + kVersion;
+        jni->CallVoidMethod(connection, property, jni->NewStringUTF("User-Agent"), jni->NewStringUTF(agent.c_str()));
+        jni->CallVoidMethod(connection, property, jni->NewStringUTF("Accept"),
+                            jni->NewStringUTF("application/vnd.github+json"));
+        jni->CallVoidMethod(connection, jni->GetMethodID(http, "setConnectTimeout", "(I)V"), 10000);
+        jni->CallVoidMethod(connection, jni->GetMethodID(http, "setReadTimeout", "(I)V"), 20000);
+        const jint status = jni->CallIntMethod(connection, jni->GetMethodID(http, "getResponseCode", "()I"));
+        if (thrown("getResponseCode")) {
+            out.problem = "GitHub could not be reached";
+            return;
+        }
+        out.status = status;
+        if (status != 200) return;  // only the status matters then
+        jobject stream =
+            jni->CallObjectMethod(connection, jni->GetMethodID(http, "getInputStream", "()Ljava/io/InputStream;"));
+        if (thrown("getInputStream") || stream == nullptr) {
+            out.status = 0;
+            out.problem = "GitHub could not be reached";
+            return;
+        }
+        const jmethodID read = jni->GetMethodID(stream_class, "read", "([B)I");
+        jbyteArray buffer = jni->NewByteArray(16384);
+        for (;;) {
+            const jint got = jni->CallIntMethod(stream, read, buffer);
+            if (thrown("read")) {
+                out.status = 0;
+                out.problem = "GitHub could not be reached";
+                break;
+            }
+            if (got < 0) break;
+            if (out.body.size() + static_cast<std::size_t>(got) > kMaxAnswer) {
+                out.status = 0;
+                out.problem = "GitHub's answer was too long";
+                break;
+            }
+            const std::size_t at = out.body.size();
+            out.body.resize(at + static_cast<std::size_t>(got));
+            jni->GetByteArrayRegion(buffer, 0, got, reinterpret_cast<jbyte *>(out.body.data() + at));
+        }
+        jni->CallVoidMethod(stream, jni->GetMethodID(stream_class, "close", "()V"));
+        (void)thrown("close");
+    }();
+    if (connection != nullptr) {
+        jni->CallVoidMethod(connection, jni->GetMethodID(http, "disconnect", "()V"));
+        (void)thrown("disconnect");
+    }
+    jni->PopLocalFrame(nullptr);
     return out;
 }
 #else
@@ -470,7 +583,11 @@ void notice_draw() {
     ImDrawList *draw = ImGui::GetForegroundDrawList();
     ImFont *font = portablekit::ui::game_text_font();
     const std::string title = "Version " + r.latest + " is available";
+#if defined(__ANDROID__)
+    const char *hint = "Menu (or Back): System, Updates";
+#else
     const char *hint = "Esc (or L3 + R3): System, Updates";
+#endif
     // A band at the top right, clear of the title screen's choices.
     const float left = 292.0f;
     const float right = 472.0f;
@@ -526,8 +643,12 @@ void system_rows() {
     case Stage::Available: {
         ui::info_row("Status", "Version " + r.latest + " is available");
         ui::RowOptions open;
+#if defined(__ANDROID__)
+        open.description = "Opens the release's page in your browser.";
+#else
         open.description = "Opens the release's page in your browser, with the setups for Windows and Linux. "
                            "Install it into the same folder: your saves, settings and mods stay.";
+#endif
         if (ui::button_row("Open the download page", open) && !SDL_OpenURL(r.page.c_str()))
             std::cout << "[updates] cannot open " << r.page << ": " << SDL_GetError() << std::endl;
         ui::info_row("Page", r.page);

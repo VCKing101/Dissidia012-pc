@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The app's name on the device. tools/port/android_build.sh renames a
+         developer's build so it is told apart from the player's app. -->
+    <string name="app_name">Dissidia 012</string>
+</resources>

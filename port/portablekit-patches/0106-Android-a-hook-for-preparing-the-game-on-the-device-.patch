@@ -1,0 +1,154 @@
+From 84f9a319b182ebb332cadb0f81d1dbe78a46d8b3 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Sun, 15 Nov 2026 13:03:45 +1030
+Subject: [PATCH 106/106] Android: a hook for preparing the game on the device,
+ and extra APK contents
+
+GameProfile::prepare_game runs once the game's files are found and before
+its code is registered: the installer calls it with its own screens before
+it shows that the game is ready, and every start calls it again with none.
+A port that carries no game code uses it to make the code on the device
+from the player's disc.
+
+build_apk.sh packs EXTRA_LIBS (more lib*.so files, such as programs the
+app runs: Android runs programs only from the native library folder) and
+lays EXTRA_ASSETS into the assets. The overlay loader accepts any .so in
+OVERLAY_DIR on Android, where a port's compiled overlays are not named
+libovl*.
+
+Tested with Dissidia 012 on a Galaxy S25 Ultra (Android): the app compiled
+the game's code on the phone through the hook and started the game; the
+next start went straight to it. The installer-screen path (prepare_game
+with ui) is built but not yet run on the phone.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/install/installer.cpp     |  6 ++++++
+ host/main.cpp                  |  3 +++
+ host/overlays.cpp              |  6 +++++-
+ host/profile.hpp               | 15 +++++++++++++++
+ packaging/android/build_apk.sh |  6 ++++++
+ 5 files changed, 35 insertions(+), 1 deletion(-)
+
+diff --git a/host/install/installer.cpp b/host/install/installer.cpp
+index 891cc76..0026d72 100644
+--- a/host/install/installer.cpp
++++ b/host/install/installer.cpp
+@@ -396,6 +396,12 @@ bool run_installer(InstallerUi &ui, const std::filesystem::path &data_dir) {
+                                 ui.progress(stage, done, total);
+                             });
+                 });
++                // What the game still needs from the disc before it is ready
++                // (GameProfile::prepare_game), on these screens.
++                if (portablekit::game().prepare_game != nullptr)
++                    if (const auto installed = find_installation(data_dir))
++                        if (!portablekit::game().prepare_game(&ui, installed->executable, installed->disc_image))
++                            return false;
+                 ui.finished(data_dir);
+                 return true;
+             } catch (const InstallCancelled &) {
+diff --git a/host/main.cpp b/host/main.cpp
+index 1dddf0e..a74110a 100644
+--- a/host/main.cpp
++++ b/host/main.cpp
+@@ -386,6 +386,9 @@ int main(int argc, char **argv) {
+         }
+         if (!std::filesystem::is_regular_file(executable))
+             throw psprecomp::Error("Missing " + executable.string() + " (run scripts/prepare_game.sh)");
++        if (portablekit::game().prepare_game != nullptr &&
++            !portablekit::game().prepare_game(nullptr, executable, files->disc_image))
++            return 1;
+         // Which region's disc this is (RegionRelease): the executable is the
+         // same, but the game names its saves and downloads by its disc id.
+         if (!paths.disc_image.empty())
+diff --git a/host/overlays.cpp b/host/overlays.cpp
+index abf2598..5ad59e9 100644
+--- a/host/overlays.cpp
++++ b/host/overlays.cpp
+@@ -171,7 +171,11 @@ bool is_overlay_library(const std::filesystem::path &path) {
+     const std::filesystem::path extension = path.extension();
+ #if defined(PORTABLEKIT_ANDROID_APP)
+     // The package manager extracts only lib*.so, so the overlays are named
+-    // libovl*.so there, among SDL's, FFmpeg's and the host's own.
++    // libovl*.so there, among SDL's, FFmpeg's and the host's own. A folder of
++    // their own (<prefix>_OVERLAY_DIR: the app's storage, where a player's
++    // compiled code is imported) holds overlays only.
++    const char *dir = portablekit::env("OVERLAY_DIR");
++    if (dir != nullptr && *dir != '\0') return extension == ".so";
+     return extension == ".so" && path.filename().string().starts_with("libovl");
+ #else
+     return extension == ".so" || extension == ".dylib" || extension == ".dll";
+diff --git a/host/profile.hpp b/host/profile.hpp
+index ab642f7..5996fe4 100644
+--- a/host/profile.hpp
++++ b/host/profile.hpp
+@@ -17,6 +17,7 @@
+ #include <array>
+ #include <cstddef>
+ #include <cstdint>
++#include <filesystem>
+ #include <span>
+ #include <string>
+ #include <string_view>
+@@ -30,6 +31,9 @@ class Runtime;
+ namespace portablekit {
+ 
+ class HleRegistrar;
++namespace install {
++class InstallerUi;
++}
+ namespace gpu::interpolation {
+ struct CutThresholds;
+ }
+@@ -347,6 +351,17 @@ struct GameProfile {
+     // unseen, and waits forever at its first dialog. Null: it runs on without
+     // a window, as a test run on a machine without Vulkan wants.
+     void (*renderer_unavailable)(const std::string &why) = nullptr;
++    // Called once the game's files are found (set up from the player's disc)
++    // and before its code is registered: for a port that makes the game's
++    // code on the device from that disc, e.g. a phone app that carries no
++    // game code. The installer calls it with its own screens before it shows
++    // that the game is ready, and every start calls it again with ui null:
++    // when there is work then, it shows it on screens of its own
++    // (install::make_installer_ui()). Either way through run_task and
++    // progress. False: the player quit or it failed, and the game does not
++    // start. Null: nothing to prepare.
++    bool (*prepare_game)(install::InstallerUi *ui, const std::filesystem::path &executable,
++                         const std::filesystem::path &disc_image) = nullptr;
+ 
+     // --- The game's camera and view ----------------------------------------
+     // Drives the game's own camera from what the player asks of it
+diff --git a/packaging/android/build_apk.sh b/packaging/android/build_apk.sh
+index 1cae59e..b44533f 100755
+--- a/packaging/android/build_apk.sh
++++ b/packaging/android/build_apk.sh
+@@ -34,6 +34,10 @@
+ # pthread_cond_clockwait from android-30 on). Newer Android features are
+ # looked up at run time. After packing, every function a packed library
+ # imports is checked against Android 10's system libraries.
++# EXTRA_LIBS may name a directory of more lib*.so files to pack, such as
++# programs the app runs: Android runs programs only from the app's native
++# library folder, never from files the app wrote. EXTRA_ASSETS may name a
++# directory laid into the APK's assets.
+ # The overlay limit packs only the first N overlay libraries, to keep a test
+ # APK small; without it every one is packed.
+ set -euo pipefail
+@@ -83,6 +87,7 @@ if [[ -n "${FONT_DIR:-}" ]]; then
+     cp "$FONT_DIR/NotoSansCJKjp-Regular.otf" "$work/assets/fonts/"
+     cp "$FONT_DIR/NotoSansCJK-LICENSE.txt" "$work/assets/licenses/NotoSansCJK-OFL.txt"
+ fi
++if [[ -n "${EXTRA_ASSETS:-}" ]]; then cp -r "$EXTRA_ASSETS"/. "$work/assets/"; fi
+ assets=(-A "$work/assets")
+ "$build_tools/aapt2" compile --dir "$here/res" -o "$work/res.zip"
+ "$build_tools/aapt2" compile --dir "$game_res" -o "$work/game-res.zip"
+@@ -107,6 +112,7 @@ shopt -s nullglob
+ overlays=("$build_dir"/bin/overlays/libovl*.so)
+ if [[ -n "$overlay_limit" ]]; then overlays=("${overlays[@]:0:$overlay_limit}"); fi
+ if [[ ${#overlays[@]} -gt 0 ]]; then cp "${overlays[@]}" "$lib/"; fi
++if [[ -n "${EXTRA_LIBS:-}" ]]; then cp "$EXTRA_LIBS"/lib*.so "$lib/"; fi
+ strip="$(ls -d "$ANDROID_NDK"/toolchains/llvm/prebuilt/*/bin/llvm-strip | head -1)"
+ "$strip" --strip-unneeded "$lib"/*.so
+ # Every function a packed library imports must be in Android $min_sdk's system
+-- 
+2.53.0.windows.1
+

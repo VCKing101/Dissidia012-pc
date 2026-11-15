@@ -100,6 +100,12 @@ void report() {
 
 } // namespace
 
+std::filesystem::path folder() {
+    const std::filesystem::path ms0 = memory_stick();
+    if (ms0.empty()) return {};
+    return ms0 / "PSP" / "GAME" / portablekit::active_disc_id();
+}
+
 void install(portablekit::HleRegistrar &) {
     static bool installed = false;
     if (installed) return;

@@ -422,6 +422,8 @@ std::shared_ptr<portablekit::hle_extension::FileFilter> serve_bgm(std::string_vi
 
 } // namespace
 
+std::filesystem::path folder() { return mods_directory(); }
+
 std::uint32_t id_number(std::string_view text) { return mod_manifest::id_number(text); }
 
 const Catalogue &catalogue() { return mutable_catalogue(); }

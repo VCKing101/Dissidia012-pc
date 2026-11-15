@@ -219,7 +219,11 @@ struct PortableLayout {
         const std::filesystem::path folder = portablekit::executable_directory();
         std::error_code ec;
         const bool game_folder = !folder.empty() && std::filesystem::is_regular_file(folder / "game" / "EBOOT.ELF", ec);
-#if defined(D012_INSTALLER_BUILD)
+#if defined(PORTABLEKIT_ANDROID_APP)
+        // An app keeps everything in its own storage (install/user_data.cpp);
+        // the folder is the APK's libraries.
+        const bool portable = false;
+#elif defined(D012_INSTALLER_BUILD)
         const bool portable = !folder.empty();
 #else
         const bool portable = game_folder;
@@ -230,6 +234,12 @@ struct PortableLayout {
         const bool no_interpreter = portable;
 #endif
         if (no_interpreter && !is_set(kNoInterpreter) && !is_set(kInterpreter)) set(kNoInterpreter, "1");
+#if defined(PORTABLEKIT_ANDROID_APP) && defined(D012_INSTALLER_BUILD)
+        // The player's app: the overlay libraries the phone compiled, with
+        // main.so in the app's game-code folder.
+        if (!is_set(kOverlayDir)) set(kOverlayDir, utf8(d012::game_code::directory() / "overlays"));
+        if (!is_set(kNoInterpreter) && !is_set(kInterpreter)) set(kNoInterpreter, "1");
+#endif
         if (!portable) return;
 
         if (game_folder && !is_set(kGameDir)) set(kGameDir, utf8(folder / "game"));
