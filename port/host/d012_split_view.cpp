@@ -528,8 +528,10 @@ void chase_lines_view2(Guest *g, const std::uint8_t *view1, gaddr manager) {
 // to the other's arrows and to other effects (D012_TRACE_EFFECT_POOL: 60 such
 // effects in five minutes of fighting; with player 2's arrows left out, one,
 // of player 1's arrows, as the game does alone), and the holder went on
-// moving and letting go an effect that was no longer its own. A likely way for hit sparks and their sounds to drop out at random
-// (issue 25). Player 2 keeps the pointer: it is made once and never shared.
+// moving and letting go an effect that was no longer its own. (Not what made
+// hits draw nothing in issue 25: that was player 1's markers hidden in player
+// 2's view, markers_view2.) Player 2 keeps the pointer: it is made once and
+// never shared.
 constexpr std::uint32_t kLocalUpdate = 0x08B2D3BCu;
 constexpr std::uint32_t kFreerunArrows = 0x08ACBF20u;  // (fighter + 0x6E0, fighter)
 constexpr std::uint32_t kMarkerEffects[] = {0x738u, 0x760u};  // the arrows', the pointer's
@@ -633,13 +635,26 @@ void markers_view1(Guest *g) {
     markers_hidden_view[0] = markers_set(g, 1u, true);
 }
 
-// Before player 2's view: player 1's markers left out, and player 2's shown.
-// The effect update culls every effect against the on-screen camera, player
-// 1's (main 0x088A6DA0, the same hide bit), so player 2's markers, next to
-// player 2's fighter, were mostly hidden from player 2's own view.
+// Before player 2's view: player 2's markers shown. The effect update culls
+// every effect against the on-screen camera, player 1's (main 0x088A6DA0, the
+// same hide bit), so player 2's markers, next to player 2's fighter, were
+// mostly hidden from player 2's own view.
+//
+// Player 1's markers are no longer left out of this view (issue 25). Their
+// nodes, drawn in the first pass, hidden for the second and put back after,
+// made the effect library keep blocks of its heap it never gave back (main
+// 0x0894CF98's and 0x08945BEC's, from 0x08971134): in a minute or so of
+// fighting the 256 KiB heap at 0x09BD6AF0 was full, the library made no new
+// effect systems (main 0x08941914 below 0), and hits went on drawing nothing,
+// with no sound. Measured with D012_TRACE_EFFECT_POOL=1, Onion Knight against
+// Kain, the same fight: 94 KiB at 40 s and climbing with player 1's markers
+// left out, 24 KiB without, as with no markers for player 2 at all. Hiding
+// player 2's markers in the first view does not do it, nor does the library's
+// own hide (main 0x088A47E4), which does not take effect within the frame.
+// So player 1's markers show in player 2's view, as they did before 7.19.
 void markers_view2(Guest *g) {
     if (markers_off()) return;
-    markers_hidden_view[1] = markers_set(g, 0u, true);
+    markers_hidden_view[1] = 0u;
     markers_set(g, 1u, false);
 }
 
@@ -675,6 +690,236 @@ void run_trace_effect_make(Guest *g, const decomp::CallState &in, GuestRegs &out
                     static_cast<unsigned long long>(made), static_cast<unsigned long long>(none),
                     static_cast<unsigned long long>(held));
     std::fflush(stdout);
+}
+
+// D012_TRACE_EFFECT_POOL=1 also watches the three pools behind every effect:
+// the handles (0x280 bytes, main 0x088A7DBC: a stack of 64 at *0x09B4D434,
+// count +0xA100, unless the heap *0x089D6D94 is set), the instances that draw
+// them (0x50 bytes, main 0x088A4F48: a stack of 64 at *0x089D6D58, count
+// +0x1500, unless the heap *0x089D6D60 is set), and the library's systems
+// (main 0x08941914, -1 when it has none). A handle without an instance is an
+// effect that runs and draws nothing (main 0x088A68FC, +0xD4 = 2).
+constexpr std::uint32_t kEffectHandleAlloc = 0x088A7DBCu;
+constexpr std::uint32_t kEffectInstanceAlloc = 0x088A4F48u;
+constexpr std::uint32_t kEffectSystemMake = 0x08941914u;
+
+struct EffectPoolTrace {
+    std::uint64_t handles = 0, handles_failed = 0, instances = 0, instances_failed = 0, systems = 0,
+                  systems_failed = 0;
+    std::int32_t handles_low = INT32_MAX, instances_low = INT32_MAX;
+};
+
+EffectPoolTrace &effect_pool_trace() {
+    static EffectPoolTrace t;
+    return t;
+}
+
+std::int32_t effect_handles_free(Guest *g) {
+    if (g_ld32(g, 0x089D6D94u) != 0u) return -1;
+    const gaddr base = g_ld32(g, 0x09B4D434u);
+    return guest_ram(base) ? g_ld32s(g, base + 0xA100u) : -2;
+}
+
+std::int32_t effect_instances_free(Guest *g) {
+    if (g_ld32(g, 0x089D6D60u) != 0u) return -1;
+    const gaddr base = g_ld32(g, 0x089D6D58u);
+    return guest_ram(base) ? g_ld32s(g, base + 0x1500u) : -2;
+}
+
+void run_trace_handle_alloc(Guest *g, const decomp::CallState &in, GuestRegs &out) {
+    GuestRegs regs{};
+    for (int i = 0; i < 8; ++i) regs.a[i] = in.gpr[4 + i];
+    decomp::call_original(g, kEffectHandleAlloc, regs);
+    out.v0 = regs.v0;
+    EffectPoolTrace &t = effect_pool_trace();
+    ++t.handles;
+    if (regs.v0 == 0u && ++t.handles_failed <= 40u)
+        std::printf("[effects] no handle left (frame %llu)\n", static_cast<unsigned long long>(state().frames));
+    t.handles_low = std::min(t.handles_low, effect_handles_free(g));
+}
+
+void run_trace_instance_alloc(Guest *g, const decomp::CallState &in, GuestRegs &out) {
+    GuestRegs regs{};
+    for (int i = 0; i < 8; ++i) regs.a[i] = in.gpr[4 + i];
+    decomp::call_original(g, kEffectInstanceAlloc, regs);
+    out.v0 = regs.v0;
+    EffectPoolTrace &t = effect_pool_trace();
+    ++t.instances;
+    if (regs.v0 == 0u && ++t.instances_failed <= 40u)
+        std::printf("[effects] no instance left (frame %llu)\n", static_cast<unsigned long long>(state().frames));
+    t.instances_low = std::min(t.instances_low, effect_instances_free(g));
+}
+
+// The effect library's heaps (main 0x08970F2C sets one up): +0x10 bytes in
+// use, +0x14 its size, +0x1C a table of +0x24 handles (0 = free), blocks of a
+// 0x10-byte header from +0x08 to +0x0C (+0 next, +8 1 when in use). Every
+// heap main 0x08971134 is asked of is kept, with its refusals.
+constexpr std::uint32_t kEffectHeapAlloc = 0x08971134u;
+
+struct EffectHeap {
+    gaddr heap;
+    std::uint64_t asked, refused;
+    std::uint32_t largest_refused;
+};
+
+std::vector<EffectHeap> &effect_heaps() {
+    static std::vector<EffectHeap> heaps;
+    return heaps;
+}
+
+// The blocks in use, by heap and handle (header +0x0A, which compaction
+// keeps): who asked for each (the caller of main 0x08971134 and its caller's
+// caller, from the stack) and how big. Main 0x08971010 (heap, data) frees one.
+constexpr std::uint32_t kEffectHeapFree = 0x08971010u;
+
+struct LiveBlock {
+    std::uint32_t site, size, frame;
+};
+
+std::vector<std::pair<std::pair<gaddr, std::int32_t>, LiveBlock>> &live_blocks() {
+    static std::vector<std::pair<std::pair<gaddr, std::int32_t>, LiveBlock>> live;
+    return live;
+}
+
+void run_trace_heap_free(Guest *g, const decomp::CallState &in, GuestRegs &) {
+    const gaddr heap = in.gpr[4], data = in.gpr[5];
+    if (guest_ram(data)) {
+        const std::int32_t index = g_ld16s(g, data - 0x10u + 0x0Au);
+        auto &live = live_blocks();
+        for (auto it = live.begin(); it != live.end(); ++it)
+            if (it->first.first == heap && it->first.second == index) {
+                *it = live.back();
+                live.pop_back();
+                break;
+            }
+    }
+    GuestRegs regs{};
+    for (int i = 0; i < 8; ++i) regs.a[i] = in.gpr[4 + i];
+    decomp::call_original(g, kEffectHeapFree, regs);
+}
+
+// The blocks still in use, grouped by who asked: the eight biggest groups.
+void trace_live_blocks(Guest *g) {
+    (void)g;
+    struct Group {
+        std::uint32_t site, count, bytes, oldest;
+    };
+    std::vector<Group> groups;
+    for (const auto &entry : live_blocks()) {
+        auto it = std::find_if(groups.begin(), groups.end(),
+                               [&](const Group &x) { return x.site == entry.second.site; });
+        if (it == groups.end()) {
+            groups.push_back({entry.second.site, 0, 0, entry.second.frame});
+            it = groups.end() - 1;
+        }
+        ++it->count;
+        it->bytes += entry.second.size;
+        it->oldest = std::min(it->oldest, entry.second.frame);
+    }
+    std::sort(groups.begin(), groups.end(), [](const Group &a, const Group &b) { return a.bytes > b.bytes; });
+    for (std::size_t i = 0; i < groups.size() && i < 8u; ++i)
+        std::printf("[effects]   in use from %08X: %u blocks, %u bytes, oldest from frame %u\n", groups[i].site,
+                    groups[i].count, groups[i].bytes, groups[i].oldest);
+}
+
+void run_trace_heap_alloc(Guest *g, const decomp::CallState &in, GuestRegs &out) {
+    GuestRegs regs{};
+    for (int i = 0; i < 8; ++i) regs.a[i] = in.gpr[4 + i];
+    decomp::call_original(g, kEffectHeapAlloc, regs);
+    out.v0 = regs.v0;
+    auto &heaps = effect_heaps();
+    auto it = std::find_if(heaps.begin(), heaps.end(), [&](const EffectHeap &h) { return h.heap == in.gpr[4]; });
+    if (it == heaps.end()) {
+        if (heaps.size() >= 16u) return;
+        heaps.push_back({in.gpr[4], 0, 0, 0});
+        it = heaps.end() - 1;
+        std::printf("[effects] heap %08X: %u bytes, %d handles (first asked from %08X)\n", in.gpr[4],
+                    g_ld32(g, in.gpr[4] + 0x14u), g_ld32s(g, in.gpr[4] + 0x24u), in.gpr[31]);
+    }
+    ++it->asked;
+    if (regs.v0 != 0u && guest_ram(regs.v0) && live_blocks().size() < 200000u) {
+        const std::int32_t index = g_ld16s(g, regs.v0 - 0x10u + 0x0Au);
+        auto &live = live_blocks();
+        const auto key = std::make_pair(in.gpr[4], index);
+        auto found = std::find_if(live.begin(), live.end(), [&](const auto &e) { return e.first == key; });
+        const LiveBlock block{in.gpr[31], in.gpr[5], static_cast<std::uint32_t>(state().frames)};
+        if (found != live.end())
+            found->second = block;
+        else
+            live.emplace_back(key, block);
+    }
+    if (regs.v0 == 0u) {
+        it->largest_refused = std::max(it->largest_refused, in.gpr[5]);
+        if (++it->refused <= 20u)
+            std::printf("[effects] heap %08X refused %u bytes (from %08X, frame %llu)\n", in.gpr[4], in.gpr[5],
+                        in.gpr[31], static_cast<unsigned long long>(state().frames));
+    }
+}
+
+// A heap's state: bytes in use, handles in use, free blocks and the largest.
+void trace_effect_heap(Guest *g, const EffectHeap &h) {
+    const gaddr heap = h.heap;
+    const std::int32_t handles = g_ld32s(g, heap + 0x24u);
+    const gaddr table = g_ld32(g, heap + 0x1Cu);
+    int handles_used = 0;
+    if (guest_ram(table) && handles > 0 && handles < 0x8000)
+        for (int i = 0; i < handles; ++i) handles_used += g_ld32(g, table + 4u * i) != 0u ? 1 : 0;
+    std::uint32_t free_blocks = 0, free_bytes = 0, largest = 0, blocks = 0;
+    const gaddr last = g_ld32(g, heap + 0x0Cu);
+    for (gaddr b = g_ld32(g, heap + 0x08u); guest_ram(b) && b != last && blocks < 100000u; b = g_ld32(g, b)) {
+        ++blocks;
+        const gaddr next = g_ld32(g, b);
+        if (!guest_ram(next) || next <= b) break;
+        if (g_ld8(g, b + 8u) == 0u) {
+            ++free_blocks;
+            free_bytes += next - b;
+            largest = std::max(largest, next - b);
+        }
+    }
+    std::printf("[effects] split %llu heap %08X: %u of %u bytes in use, handles %d of %d, %u blocks, %u free "
+                "(%u bytes, largest %u); asked %llu, refused %llu (largest refused %u)\n",
+                static_cast<unsigned long long>(state().frames), heap, g_ld32(g, heap + 0x10u),
+                g_ld32(g, heap + 0x14u), handles_used, handles, blocks, free_blocks, free_bytes, largest,
+                static_cast<unsigned long long>(h.asked), static_cast<unsigned long long>(h.refused),
+                h.largest_refused);
+}
+
+void run_trace_system_make(Guest *g, const decomp::CallState &in, GuestRegs &out) {
+    GuestRegs regs{};
+    for (int i = 0; i < 8; ++i) regs.a[i] = in.gpr[4 + i];
+    for (int i = 0; i < 4; ++i) regs.f[i] = in.fpr[12 + i];
+    decomp::call_original(g, kEffectSystemMake, regs);
+    out.v0 = regs.v0;
+    EffectPoolTrace &t = effect_pool_trace();
+    ++t.systems;
+    if (static_cast<std::int32_t>(regs.v0) < 0 && ++t.systems_failed <= 40u)
+        std::printf("[effects] the library made no system for effect %u (code %d, from %08X, frame %llu)\n",
+                    in.gpr[6], static_cast<std::int32_t>(regs.v0), in.gpr[31],
+                    static_cast<unsigned long long>(state().frames));
+}
+
+// Every 600 split tasks: the pools' free counts now and at their lowest since
+// the last line, and how many of each were asked for and refused; each heap's
+// state; every 1800, the heap's blocks in use by who asked.
+void trace_effect_pools(Guest *g) {
+    static const bool on = [] {
+        const char *text = std::getenv("D012_TRACE_EFFECT_POOL");
+        return text != nullptr && *text != '\0' && std::strcmp(text, "0") != 0;
+    }();
+    if (!on || state().frames % 600u != 0u) return;
+    EffectPoolTrace &t = effect_pool_trace();
+    std::printf("[effects] split %llu handles free %d (lowest %d), instances free %d (lowest %d); asked "
+                "handles %llu (%llu refused), instances %llu (%llu refused), systems %llu (%llu refused)\n",
+                static_cast<unsigned long long>(state().frames), effect_handles_free(g),
+                t.handles_low == INT32_MAX ? -3 : t.handles_low, effect_instances_free(g),
+                t.instances_low == INT32_MAX ? -3 : t.instances_low, static_cast<unsigned long long>(t.handles),
+                static_cast<unsigned long long>(t.handles_failed), static_cast<unsigned long long>(t.instances),
+                static_cast<unsigned long long>(t.instances_failed), static_cast<unsigned long long>(t.systems),
+                static_cast<unsigned long long>(t.systems_failed));
+    for (const EffectHeap &h : effect_heaps()) trace_effect_heap(g, h);
+    if (state().frames % 1800u == 0u) trace_live_blocks(g);
+    std::fflush(stdout);
+    t.handles_low = t.instances_low = INT32_MAX;
 }
 
 // battle 0x08ACBF20: the freerun arrows, run for player 2's fighter only while
@@ -1867,6 +2112,7 @@ void run_split_task(Guest *g, const decomp::CallState &in, GuestRegs &) {
     chase_lines_back(g);
     markers_back(g);
     if (versus::active()) trace_freerun_markers(g);
+    trace_effect_pools(g);
     if (versus::active()) ending_local(g);
     if (!versus::active() || manager == 0u || graphics == 0u) return;
     // When the frame stays one full view, with player 2's cursor hidden:
@@ -2420,6 +2666,16 @@ struct Install {
             static const decomp::Override traces[] = {
                 {kEffectMake, "versus_trace_effect_make", decomp::Module::Main, decomp::Returns::Integer,
                  &run_trace_effect_make},
+                {kEffectHandleAlloc, "versus_trace_handle_alloc", decomp::Module::Main, decomp::Returns::Integer,
+                 &run_trace_handle_alloc},
+                {kEffectInstanceAlloc, "versus_trace_instance_alloc", decomp::Module::Main,
+                 decomp::Returns::Integer, &run_trace_instance_alloc},
+                {kEffectSystemMake, "versus_trace_system_make", decomp::Module::Main, decomp::Returns::Integer,
+                 &run_trace_system_make},
+                {kEffectHeapAlloc, "versus_trace_heap_alloc", decomp::Module::Main, decomp::Returns::Integer,
+                 &run_trace_heap_alloc},
+                {kEffectHeapFree, "versus_trace_heap_free", decomp::Module::Main, decomp::Returns::Nothing,
+                 &run_trace_heap_free},
             };
             decomp::add_overrides(traces, sizeof traces / sizeof traces[0], true);
         }

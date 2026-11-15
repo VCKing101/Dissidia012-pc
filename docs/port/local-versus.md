@@ -1426,8 +1426,9 @@ The owner, testing the party build: "Wall running does not seem to work on Playe
   and the stock Quick Battle (Party) against the CPU (`reg_stock2`, player 1's arrows and pointer, no versus lines)
   as before. **Not checked:** `D012_NO_MARKERS_PLAYER2=1`; real controllers; a marker over a wall in player 2's
   half (the arrows seen were a rail's).
-- **Later (7.21, issue 25):** player 2's arrows are left out again. Two fighters' arrows handed one effect back and
-  forth and left a fighter holding an effect that was no longer its own; player 2 keeps the pointer.
+- **Later (7.21, issue 25):** player 2's arrows are left out again (two fighters' arrows handed one effect back and
+  forth); player 2 keeps the pointer. Player 1's markers are no longer hidden in player 2's half: hiding them for
+  the second pass filled the effect library's heap until hits drew nothing.
 
 ## 7.20 The owner's party session: the final blow, the menu after each fight (11 November 2026)
 
@@ -1469,10 +1470,11 @@ fight. V unless marked.
   the screen tints (`0x08AEEE0C`, tasks 69650 and 100100), the alpha screen (86000), effects following a fighter or
   the camera, frame-buffer snapshots. `D012_SPLIT_ONLY`/`D012_SPLIT_SKIP` bisected it to 85000.
 
-## 7.21 Issue 25: player 2's winning words, player 2's arrows (15 November 2026)
+## 7.21 Issue 25: player 2's winning words, the vanishing effects (15 November 2026)
 
 Issue 25 (v0.7.1, split screen): when player 2 won, player 1's win quote played (Garland with Lightning's voice);
-and Garland's hit effects, and their sounds, stopped after a while. Both came from v0.7.1. V unless marked.
+and Garland's hit effects, and their sounds, stopped after a while. Both came from v0.7.1. Two sessions worked on it
+the same day (the effect-heap traces below come from the second). V unless marked.
 
 - **The winning words.** Reproduced with Lightning (player 1) against Vaan (player 2), player 2 winning: v0.7.0
   played Vaan's `va_battle_110` ("Huh? That's all?"), v0.7.1 Lightning's `li_battle_109` and `li_battle_110` under
@@ -1501,13 +1503,41 @@ and Garland's hit effects, and their sounds, stopped after a while. Both came fr
   again: in a 12-minute fight both fighters held the same effect 26 times, even 16 units apart; with
   `D012_TRACE_EFFECT_POOL=1` (new), a 5-minute fight had 60 effects made while a marker still held them (the trace
   stops naming them at 60), 57 of them arrows going back and forth and 3 other effects (battle `0x08AC0750`),
-  against none with `D012_NO_MARKERS_PLAYER2=1`. The holder then moved and let go an effect that was no longer its own: a likely way
-  for hit sparks and their sounds to drop out (not seen in the scripted fights, so not proven).
+  against none with `D012_NO_MARKERS_PLAYER2=1`. The holder then moved and let go an effect that was no longer its
+  own. First taken for the vanishing effects; it is not what made them vanish (below), but it is wrong all the same.
 - **The fix** (`run_freerun_arrows`): the arrows helper is left out for player 2's fighter. Player 2 keeps the blue
   pointer toward the opponent (`+0x760`): made once per fight, never shared in any trace. Player 2's triangle still
   runs up walls (it never needed the arrows, 7.19). Checked: the same 5-minute fight, one effect handed out while a
   marker held it (player 1's arrows, the game's own as in single player), player 2's `+0x738` always empty and its
   pointer the same effect throughout (`poolfix`).
+- **The vanishing effects** (the owner's video: Onion Knight's Thunder hits land, the orbs never show). The effect
+  library keeps its own heap (256 KiB, 4,096 handles, at `0x09BD6AF0`; main `0x08971134` asks, `0x08971010` gives
+  back). Once full, the library makes no new effect systems (main `0x08941914` below 0): effects still run, with
+  their hits, and draw nothing. The handle and instance pools (64 each, main `0x088A7DBC`, `0x088A4F48`) never ran
+  out. What filled the heap were blocks from main `0x0894CF98` (400 bytes) and `0x08945BEC`, never given back.
+- **The cause: player 1's markers hidden in player 2's view.** 7.19 leaves each player's markers out of the other's
+  half by setting the hide bit on their nodes before that half and putting it back after (`markers_view1`,
+  `markers_view2`, `markers_back`). Player 1's pointer and arrows are drawn in the first pass and hidden for the
+  second; with that, the library kept a block of its heap each frame. Player 2's markers hidden for the first pass
+  and shown for the second do not do it. Hiding through the library's own call (main `0x088A47E4` with 1) does not
+  leak, but does not hide anything within the frame either.
+- **Measured** (Onion Knight against Kain, the bot, `D012_TRACE_EFFECT_POOL=1`, which now also follows the pools,
+  the heap, its refusals and the blocks in use by who asked; every run the same fight, the fighters' places matching
+  frame for frame): as released 94 KiB at 40 s, full at about 70 s, 50 refusals by 80 s and 365 by 100 s
+  (`heap_split`); without player 1's markers hidden in view 2, 24 KiB at 40 s and 19 KiB at 150 s, none refused
+  (`heap_final`); with no markers for player 2 at all (`D012_NO_MARKERS_PLAYER2=1`) 22 KiB (`heap_nolend`). Still
+  leaking: player 2's pointer woken after the cull against player 1's camera, player 2's markers shown in view 1
+  too, player 2's markers not shown in view 2, the pointer's calls (place, colour) left out, the pointer at player
+  1's shoulder, no pointer effect for player 2, the pointer let go and made again, the flag lent for the pointer
+  alone. A first reading blamed player 2's pointer: the runs without it had been fought on another stage (the
+  route's stage pick had missed), so they were not the same fight. The library's heap is rebuilt when a battle
+  starts (battle `0x08B34DA8`, main `0x088A5D78`), so each fight began clean (not traced).
+- **The fix** (`markers_view2`): player 1's markers are no longer hidden in player 2's view, as before 7.19. Player
+  2's are still left out of player 1's view and shown in player 2's. Checked: the fight above, hit sparks, criticals
+  and Bravery Breaks drawn to its end (`heap_final`).
+- **Open:** every effect is still culled against player 1's camera only, so player 2's half can be missing an effect
+  player 1's camera cannot see. Player 1's arrows were not hidden in player 2's half before either: their effect has
+  no node tree at `+0xCC`.
 - **Test tools** (in `build/port/versus/issue25/evidence`, not tracked): a live-input bot that steers both players
   at each other from the `D012_TRACE_VERSUS` positions (the lock-on camera looks at the opponent, so "forward" is eye
   to opponent) with Bravery attacks in range, jumps for a step and an unstick; `D012_TEST_UNLOCK_FIGHTERS=1` for
