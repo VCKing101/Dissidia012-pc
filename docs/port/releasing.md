@@ -138,9 +138,21 @@ release can update the app: every player would have to uninstall, which deletes 
 
 Copy the four files into `build/port/release/v<version>-files/` and write `SHA256SUMS` there for all four
 (`sha256sum Dissidia012-* > SHA256SUMS`; check with `sha256sum -c SHA256SUMS`). The notes go in
-`build/port/release/v<version>-notes.md`, from the previous release's: What's new, the downloads (one line each, with
-their sizes), known issues, and how to update on each system. Player-facing text: short plain statements of what it
-does, "online" as one word.
+`build/port/release/v<version>-notes.md`. They are a changelog, kept short:
+
+- **What's new** and **Fixes:** one bullet each, with the issue or pull request.
+- **Install:** one line per system naming its file and linking to the README's quick start
+  ([Windows](../../README.md#quick-start-windows), [Linux and Steam Deck](../../README.md#quick-start-linux-and-steam-deck),
+  [Android](../../README.md#quick-start-android)), which hold the installation steps; RecompLauncher's page is
+  <https://recomplauncher.com/game/dissidia012-pc>. Steps go in the notes only for something new (Android's in 0.7.2).
+  Say whether updating recompiles the game and whether online play needs everyone on the new version.
+- **Not tested yet:** what is new but not tried, as a call for players' reports, not as a problem.
+- **Known issues:** only real problems that are new or changed, then a link to the previous release for the rest.
+- The Android key's certificate SHA-256 (from `apksigner verify --print-certs`), so a player can tell our APK from
+  another.
+
+Install steps change in the README, not in the notes. Player-facing text: short plain statements of what it does,
+"online" as one word.
 
 ## Publishing
 
