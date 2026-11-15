@@ -1497,19 +1497,27 @@ the same day (the effect-heap traces below come from the second). V unless marke
   (`build/port/versus/issue25/fixjp`; the runs below are beside it). Player
   1's win: Lightning's `li_battle_109`, as before (`p1jp`).
 - **The arrows.** 7.19 lent player 2's fighter the local flag for the local-only update, so the game's freerun arrows
-  (battle `0x08ACBF20`) ran for both fighters. The game has them for one fighter only: each time a fighter's arrows
-  move on (another wall or rail, or a step of 1 along it) the helper lets its effect go (main `0x088A6CB8`, mode 8)
-  and makes another (main `0x088A9DE8`). With both fighters doing so, the effect one still held was handed out
-  again: in a 12-minute fight both fighters held the same effect 26 times, even 16 units apart; with
-  `D012_TRACE_EFFECT_POOL=1` (new), a 5-minute fight had 60 effects made while a marker still held them (the trace
-  stops naming them at 60), 57 of them arrows going back and forth and 3 other effects (battle `0x08AC0750`),
-  against none with `D012_NO_MARKERS_PLAYER2=1`. The holder then moved and let go an effect that was no longer its
-  own. First taken for the vanishing effects; it is not what made them vanish (below), but it is wrong all the same.
-- **The fix** (`run_freerun_arrows`): the arrows helper is left out for player 2's fighter. Player 2 keeps the blue
-  pointer toward the opponent (`+0x760`): made once per fight, never shared in any trace. Player 2's triangle still
-  runs up walls (it never needed the arrows, 7.19). Checked: the same 5-minute fight, one effect handed out while a
-  marker held it (player 1's arrows, the game's own as in single player), player 2's `+0x738` always empty and its
-  pointer the same effect throughout (`poolfix`).
+  (battle `0x08ACBF20`) ran for both fighters. Each time a fighter's arrows move on (another wall or rail, or a step
+  of 1 along it) the helper lets its effect go (main `0x088A6CB8`, mode 8: an 8-frame fade) and makes another (main
+  `0x088A9DE8`). In v0.7.1 the two fighters' arrows came to hold the same effect: in a 12-minute fight 26 times, even
+  16 units apart; with `D012_TRACE_EFFECT_POOL=1` (new), a 5-minute fight had 60 effects made while a marker still
+  held them (the trace stops naming them at 60), 57 of them arrows and 3 other effects (battle `0x08AC0750`). The
+  holder then moved and let go an effect that was no longer its own. Player 2's arrows were left out at first
+  (edffd27e); they are back (below).
+- **Why the arrows shared an effect** (16 November): only with the effect heap full (below). An effect made while
+  the library has no room gets no instance (main `0x088A68FC`, state 2), ends at its first update (main `0x088A754C`
+  sets bit 2 of `+0xDC`) and is freed by the group update (main `0x088A9C18`, then `0x088A68B8` and `0x088A7E48`, the
+  handles' stack), while the helper still holds it. The stack hands the last handle back first, so the other
+  fighter's next arrows got it. The game alone can do the same (once in five minutes in one leaking run, to another
+  effect). In the same fight with player 2's arrows on and nothing hidden by the bit: none shared in 150 s
+  (`b_unguard`); with the v0.7.1 hide forced on (`D012_TEST_MARKERS_BIT=1`), 47 (`c_bit_unguard`).
+- **The fix** (`run_freerun_arrows`, `drop_stale_arrows`): before each fighter's arrows helper, and before player 1's
+  view, an effect at `+0x738` that is no longer that fighter's (back on the handles' stack, ended, made again for
+  another effect, or made again more recently for the other fighter's arrows) is let go of, with `+0x740` at -1 so
+  the helper makes a new one, as it does after letting one go. In versus only. With the v0.7.1 hide forced on, none
+  shared and 60 let go, every one back on the stack (`c_bit_guard`; with the heap full, the helper then tries again
+  each frame, so the library refuses more); in the fights without it, none let go. Player 2's triangle never needed
+  the arrows (7.19); player 2 has them again. `D012_TEST_ARROWS_UNGUARDED=1` leaves them as the game has them.
 - **The vanishing effects** (the owner's video: Onion Knight's Thunder hits land, the orbs never show). The effect
   library keeps its own heap (256 KiB, 4,096 handles, at `0x09BD6AF0`; main `0x08971134` asks, `0x08971010` gives
   back). Once full, the library makes no new effect systems (main `0x08941914` below 0): effects still run, with
@@ -1533,7 +1541,7 @@ the same day (the effect-heap traces below come from the second). V unless marke
   route's stage pick had missed), so they were not the same fight. The library's heap is rebuilt when a battle
   starts (battle `0x08B34DA8`, main `0x088A5D78`), so each fight began clean (not traced).
 - **The fix for now** (`markers_view2`, the default): player 1's markers are no longer hidden in player 2's view, as
-  before 7.19. Player 2's are still left out of player 1's view and shown in player 2's. Checked: the fight above, hit
+  before 7.19. Player 2's are left out of player 1's view and shown in player 2's. Checked: the fight above, hit
   sparks, criticals and Bravery Breaks drawn to its end (`heap_final`).
 - **Each player's markers in their own view, without the leak** (`D012_MARKERS_OWN_VIEW=1`, `markers_park`, not the
   default yet). The effect update's cull (main `0x088A6DA0`) takes an effect out of view with three calls on its
@@ -1543,17 +1551,32 @@ the same day (the effect-heap traces below come from the second). V unless marke
   other two calls go with it in the game's own culling. Checked, the same fight frame for frame (`c_default`,
   `c_ownview`, `c_bit`): 24 KiB at 40 s by default and with this, 94 KiB with the bit (`D012_TEST_MARKERS_BIT=1`,
   the v0.7.1 hide, kept to test). Standing on Old Chaos Shrine, player 1's arrows show in player 1's half and not in
-  player 2's (`vown`; by default they show in both, `vdef`). A 150 s fight with it: 19 KiB, none refused (`own_long`). Not checked: the pointer seen in a half (it shows only
-  with the opponent far or out of sight), real controllers.
-- **An earlier misreading:** the "wake" first tried for player 2's pointer (0, 1, 0 after the cull) is the
-  out-of-view state; it parked the pointer. It changed nothing.
+  player 2's (`vown`; by default they show in both, `vdef`). A 150 s fight with it: 19 KiB, none refused
+  (`own_long`). Player 2's markers the same way: below.
+- **Player 2's markers the same way** (16 November). Player 2's markers were left out of player 1's view by the bit
+  and shown in player 2's by clearing it. With player 2's pointer alone that did not leak: the cull against player
+  1's camera mostly had it out of view already. With player 2's arrows on again it did: 164 KiB at 150 s and
+  climbing (`a_guard`). Now player 2's markers in view get the out-of-view calls before player 1's view
+  (`markers_view1`, `markers_park`), and those out of view (the cull is against player 1's camera) the in-view calls
+  before player 2's view (`markers_view2`, `markers_unpark`), each put back after. The cull makes its calls every
+  frame and keeps nothing of its own, so the root node's hide bit tells where an effect stands. Checked, the same
+  fight frame for frame as `own_long`: by default and with `D012_MARKERS_OWN_VIEW=1`, 19 KiB at 150 s, none
+  refused, the same curve as with player 2's arrows left out (`b_default2`, `b_own`). Standing on Old Chaos Shrine,
+  each player's arrows show in their own half; by default player 1's also show, far off, in player 2's, and with
+  `D012_MARKERS_OWN_VIEW=1` they do not (`vdef2`, `vown2`; `evidence/arrows-default-vs-ownview.png`). Not checked:
+  the pointer seen in a half (it shows only with the opponent far or out of sight), real controllers.
+- **Earlier misreadings:** the "wake" first tried for player 2's pointer (0, 1, 0 after the cull) is the
+  out-of-view state; it parked the pointer. It changed nothing. Player 1's arrows once seemed to have no node tree at
+  `+0xCC`; that was in leaking runs, where arrows made with the heap full have no instance, and they are left out of
+  player 2's half with `D012_MARKERS_OWN_VIEW=1` (`vown`, `vown2`).
 - **Open:** every effect is still culled against player 1's camera only, so player 2's half can be missing an effect
-  player 1's camera cannot see. Player 1's arrows were not hidden in player 2's half before either: their effect has
-  no node tree at `+0xCC`.
+  player 1's camera cannot see. Whether `D012_MARKERS_OWN_VIEW=1` becomes the default.
 - **Test tools** (in `build/port/versus/issue25/evidence`, not tracked): a live-input bot that steers both players
   at each other from the `D012_TRACE_VERSUS` positions (the lock-on camera looks at the opponent, so "forward" is eye
   to opponent) with Bravery attacks in range, jumps for a step and an unstick; `D012_TEST_UNLOCK_FIGHTERS=1` for
-  Garland. Live-input lines must end in LF alone: CRLF made every button "unknown".
+  Garland. Live-input lines must end in LF alone: CRLF made every button "unknown". `bisect.sh` (55 s) and
+  `bisect150.sh` (150 s) fight Onion Knight against Kain and print the heap's use; Old Chaos Shrine starts player 1 at
+  (-7, 0, 9.5), and the route's stage pick lands elsewhere about half the time, so they try again.
 
 ## 8. For later: two copies over the game's ad hoc versus
 

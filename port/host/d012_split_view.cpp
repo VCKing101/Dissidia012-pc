@@ -512,26 +512,31 @@ void chase_lines_view2(Guest *g, const std::uint8_t *view1, gaddr manager) {
 // The map action itself is found for every fighter (battle 0x08ACC874, from
 // the fighter update 0x08B37604), so player 2's triangle already ran up walls;
 // player 2 only had no arrows to show where. In versus, player 2's fighter now
-// counts as local for that update too (run_local_update), and each player's
-// two effects are left out of the other player's half: the hide bit (bit 0 of
-// +0x0A) on each node under the effect's library object (effect +0xCC, its
-// +0x10), the bit the game's own culling sets (main 0x088A47E4, 0x0894D964),
-// put back after that half. Player 2's are shown in player 2's half, as the
-// game's culling is against player 1's camera (markers_view2).
-// D012_NO_MARKERS_PLAYER2=1 leaves them as they were.
+// counts as local for that update too (run_local_update). Player 2's markers
+// are left out of player 1's half and shown in player 2's (the game culls
+// every effect against player 1's camera), put out of view and back the way
+// the game's cull does it (markers_park, markers_view1, markers_view2);
+// player 1's are left out of player 2's half the same way with
+// D012_MARKERS_OWN_VIEW=1. D012_NO_MARKERS_PLAYER2=1 leaves them as they were.
 //
-// Player 2's arrows are left out again (run_freerun_arrows, issue 25): the
-// game has them for one fighter only. Each time a fighter's arrows move on
-// (another wall or rail, or a step of 1 along it) the helper lets its effect
-// go (main 0x088A6CB8, with mode 8) and makes another (main 0x088A9DE8); with
-// two fighters each doing so, the effect one still held was handed out again,
-// to the other's arrows and to other effects (D012_TRACE_EFFECT_POOL: 60 such
-// effects in five minutes of fighting; with player 2's arrows left out, one,
-// of player 1's arrows, as the game does alone), and the holder went on
-// moving and letting go an effect that was no longer its own. (Not what made
-// hits draw nothing in issue 25: that was player 1's markers hidden in player
-// 2's view, markers_view2.) Player 2 keeps the pointer: it is made once and
-// never shared.
+// Each fighter's arrows hold only an effect of their own (run_freerun_arrows,
+// issue 25). Each time a fighter's arrows move on (another wall or rail, or a
+// step of 1 along it) the helper lets its effect go (main 0x088A6CB8, mode 8:
+// an 8-frame fade) and makes another (main 0x088A9DE8). An effect that ends
+// on its own (state 2, main 0x088A754C, then freed by the group update main
+// 0x088A9C18 through 0x088A68B8 and 0x088A7E48, the handles' stack) is given
+// back while the helper still holds it, and the stack hands it out again
+// first. The game does this alone too (once in five minutes, to another
+// effect); with two fighters' arrows the next one made is often the other
+// fighter's, and the two then held one effect, each moving it and letting it
+// go: D012_TRACE_EFFECT_POOL counted 60 effects handed out while a marker held
+// them in five minutes, 57 of them arrows. Before each fighter's helper, an
+// effect at +0x738 that is no longer that fighter's (back on the stack, ended,
+// made again for another effect or for the other fighter's arrows) is
+// dropped, with +0x740 at -1 so the helper makes a new one, as it does after
+// letting one go. In versus only. (Not what made hits draw nothing in issue
+// 25: that was player 1's markers hidden in player 2's view, markers_view2.)
+// D012_TEST_ARROWS_UNGUARDED=1 leaves the arrows as the game has them, to test.
 constexpr std::uint32_t kLocalUpdate = 0x08B2D3BCu;
 constexpr std::uint32_t kFreerunArrows = 0x08ACBF20u;  // (fighter + 0x6E0, fighter)
 constexpr std::uint32_t kMarkerEffects[] = {0x738u, 0x760u};  // the arrows', the pointer's
@@ -574,7 +579,7 @@ void set_nodes(Guest *g, gaddr node, bool hide, int depth, std::vector<std::pair
 
 // D012_TRACE_MARKERS_FREERUN=1: every 60 split tasks, each fighter's map
 // action, its two effects, their places (+0x00) and hide bits, and how many
-// nodes each view left out last.
+// markers each view left out last (nodes, with D012_TEST_MARKERS_BIT=1).
 std::size_t markers_hidden_view[2] = {};
 
 void trace_freerun_markers(Guest *g) {
@@ -604,20 +609,22 @@ void trace_freerun_markers(Guest *g) {
         }
         std::printf("\n");
     }
-    std::printf("[markers] split %llu nodes left out: view 1 %zu, view 2 %zu\n",
+    std::printf("[markers] split %llu left out: view 1 %zu, view 2 %zu\n",
                 static_cast<unsigned long long>(state().frames), markers_hidden_view[0], markers_hidden_view[1]);
     std::fflush(stdout);
 }
 
-// Player 1's markers out of player 2's view, the game's own way
-// (D012_MARKERS_OWN_VIEW=1, issue 25). The effect update's cull (main
-// 0x088A6DA0) puts an effect out of view with three calls on its instance
-// (effect +0xCC): main 0x088A47E4 with 0 (the nodes' hide bit, main
-// 0x0894D964), 0x088A483C with 1 and 0x088A4894 with 0; and back in view with
-// 1, 0, 1. Player 1's markers in view get the out-of-view calls before player
-// 2's view and the in-view ones after it. Hiding them by the nodes' bit alone
-// (as markers_set does) had the library keep heap blocks it never gave back.
-std::vector<gaddr> markers_parked;  // instances put out of view for view 2
+// A player's markers out of a view, or into it, the game's own way (issue
+// 25). The effect update's cull (main 0x088A6DA0) puts an effect out of view
+// with three calls on its instance (effect +0xCC): main 0x088A47E4 with 0 (the
+// nodes' hide bit, main 0x0894D964), 0x088A483C with 1 and 0x088A4894 with 0;
+// and back in view with 1, 0, 1, every frame. A marker in view gets the
+// out-of-view calls before a view it is left out of and the in-view ones after
+// it, and the other way round for a view it is shown in (markers_back).
+// Hiding markers by the nodes' bit alone (markers_set, as v0.7.1 and v0.7.2
+// did) had the library keep heap blocks it never gave back.
+std::vector<gaddr> markers_parked;    // instances put out of view for a view, back in view after it
+std::vector<gaddr> markers_unparked;  // instances put in view for a view, back out of view after it
 
 gaddr marker_instance(Guest *g, gaddr effect) {
     const gaddr instance = guest_ram(effect) ? g_ld32(g, effect + 0xCCu) : 0u;
@@ -630,21 +637,34 @@ void marker_park(Guest *g, gaddr instance, bool park) {
     g_call2(g, 0x088A4894u, instance, park ? 0u : 1u);
 }
 
-// One player's markers in view put out of view; how many.
-std::size_t markers_park(Guest *g, std::uint32_t slot) {
+// One player's markers in view put out of view (`park`), or out of view put
+// in view; how many. The cull makes its calls each frame and keeps nothing of
+// its own, so the root node's hide bit is where an effect stands.
+std::size_t markers_move(Guest *g, std::uint32_t slot, bool park) {
     const gaddr field = g_ld32(g, kBattleManager);
     const gaddr fighter = field != 0u ? g_ld32(g, field + 0x38u + 4u * slot) : 0u;
     if (!guest_ram(fighter)) return 0u;
-    std::size_t parked = 0;
+    std::size_t moved = 0;
     for (std::uint32_t at : kMarkerEffects) {
         const gaddr instance = marker_instance(g, g_ld32(g, fighter + at));
         if (instance == 0u) continue;
-        if (g_ld16s(g, g_ld32(g, instance + 0x10u) + 0x0Au) & 1) continue;  // out of view already
-        marker_park(g, instance, true);
-        markers_parked.push_back(instance);
-        ++parked;
+        const bool out = (g_ld16s(g, g_ld32(g, instance + 0x10u) + 0x0Au) & 1) != 0;
+        if (out == park) continue;  // there already
+        marker_park(g, instance, park);
+        (park ? markers_parked : markers_unparked).push_back(instance);
+        ++moved;
     }
-    return parked;
+    return moved;
+}
+
+std::size_t markers_park(Guest *g, std::uint32_t slot) { return markers_move(g, slot, true); }
+std::size_t markers_unpark(Guest *g, std::uint32_t slot) { return markers_move(g, slot, false); }
+
+// D012_TEST_MARKERS_BIT=1: each player's markers left out of the other's view
+// by their nodes' hide bit alone, as v0.7.1 to v0.7.2 did, to test.
+bool markers_bit() {
+    static const bool on = std::getenv("D012_TEST_MARKERS_BIT") != nullptr;
+    return on;
 }
 
 bool markers_own_view() {
@@ -661,6 +681,8 @@ void markers_back(Guest *g) {
     hidden.clear();
     for (gaddr instance : markers_parked) marker_park(g, instance, false);
     markers_parked.clear();
+    for (gaddr instance : markers_unparked) marker_park(g, instance, true);
+    markers_unparked.clear();
 }
 
 // One player's markers hidden or shown for the view about to be drawn (`slot`
@@ -677,36 +699,45 @@ std::size_t markers_set(Guest *g, std::uint32_t slot, bool hide) {
     return state().markers_hidden.size() - before;
 }
 
-// Before player 1's view: player 2's markers left out.
+void drop_stale_arrows(Guest *g);
+
+// Before player 1's view: player 2's markers left out, and an arrows' effect
+// no longer its fighter's let go of first (drop_stale_arrows), so as not to
+// hide another effect.
 void markers_view1(Guest *g) {
     if (markers_off()) return;
-    markers_hidden_view[0] = markers_set(g, 1u, true);
+    drop_stale_arrows(g);
+    markers_hidden_view[0] = markers_bit() ? markers_set(g, 1u, true) : markers_park(g, 1u);
 }
 
-// Before player 2's view: player 2's markers shown. The effect update culls
-// every effect against the on-screen camera, player 1's (main 0x088A6DA0, the
-// same hide bit), so player 2's markers, next to player 2's fighter, were
-// mostly hidden from player 2's own view.
+// Before player 2's view: player 2's markers put in view, as the effect
+// update culls every effect against the on-screen camera, player 1's (main
+// 0x088A6DA0), so player 2's markers, next to player 2's fighter, were mostly
+// out of player 2's own view; and with D012_MARKERS_OWN_VIEW=1, player 1's
+// markers put out of it. All put back after it (markers_back).
 //
-// Player 1's markers are not hidden from this view by their nodes' bit any
-// more (issue 25): drawn in the first pass, hidden for the second and put back
-// after, they had the effect library keep blocks of its heap it never gave
-// back (main 0x0894CF98's and 0x08945BEC's, from 0x08971134). In a minute or
-// so of fighting the 256 KiB heap at 0x09BD6AF0 was full, the library made no
-// new effect systems (main 0x08941914 below 0), and hits went on drawing
-// nothing. Measured with D012_TRACE_EFFECT_POOL=1, Onion Knight against Kain,
-// the same fight: 88 KiB at 40 s and climbing with the bit, 24 KiB with player
-// 1's markers shown here (the default for now, as before 7.19) or put out of
-// view the game's way (D012_MARKERS_OWN_VIEW=1, markers_park). Hiding player
-// 2's markers from the first view by the bit does not leak.
-// D012_TEST_MARKERS_BIT=1 hides player 1's by the bit again, to test.
+// Hiding markers by their nodes' bit alone (issue 25): a marker drawn in one
+// view, hidden for the other and put back after had the effect library keep
+// blocks of its heap it never gave back (main 0x0894CF98's and 0x08945BEC's,
+// from 0x08971134). In a minute or so of fighting the 256 KiB heap at
+// 0x09BD6AF0 was full, the library made no new effect systems (main 0x08941914
+// below 0), and hits went on drawing nothing. Measured with
+// D012_TRACE_EFFECT_POOL=1, Onion Knight against Kain, the same fight each
+// time: 88 KiB at 40 s and climbing with player 1's markers hidden here by the
+// bit; with player 2's arrows hidden from the first view by the bit, 164 KiB
+// at 150 s and climbing; 19 KiB at 150 s with each player's markers put out of
+// the other's view the game's way. D012_TEST_MARKERS_BIT=1 hides them by the
+// bit again, to test.
 void markers_view2(Guest *g) {
     if (markers_off()) return;
-    static const bool bit = std::getenv("D012_TEST_MARKERS_BIT") != nullptr;
+    const bool bit = markers_bit();
     markers_hidden_view[1] = bit                  ? markers_set(g, 0u, true)
                              : markers_own_view() ? markers_park(g, 0u)
                                                   : 0u;
-    markers_set(g, 1u, false);
+    if (bit)
+        markers_set(g, 1u, false);
+    else
+        markers_unpark(g, 1u);
 }
 
 // D012_TRACE_EFFECT_POOL=1: every effect made through main 0x088A9DE8 (the
@@ -973,18 +1004,104 @@ void trace_effect_pools(Guest *g) {
     t.handles_low = t.instances_low = INT32_MAX;
 }
 
-// battle 0x08ACBF20: the freerun arrows, run for player 2's fighter only while
-// run_local_update lends it the local flag; left out for player 2's fighter.
-void run_freerun_arrows(Guest *g, const decomp::CallState &in, GuestRegs &) {
-    if (versus::active()) {
-        const gaddr field = g_ld32(g, kBattleManager);
-        const gaddr p2 = field != 0u ? g_ld32(g, field + 0x3Cu) : 0u;
-        if (p2 != 0u && in.gpr[5] == p2) return;
+// The arrows' effect each fighter's helper last made (see kFreerunArrows).
+struct ArrowsHeld {
+    gaddr fighter = 0u;
+    gaddr effect = 0u;
+    gaddr resource = 0u;     // the effect's +0xC0, as made
+    std::uint64_t made = 0u;  // the count of arrows made by then
+};
+std::array<ArrowsHeld, 2> arrows_held;
+std::uint64_t arrows_made = 0u;
+
+bool arrows_unguarded() {
+    static const bool on = [] {
+        const char *text = std::getenv("D012_TEST_ARROWS_UNGUARDED");
+        return text != nullptr && *text != '\0' && std::strcmp(text, "0") != 0;
+    }();
+    return on;
+}
+
+// On the handles' stack (main 0x088A7E48 puts a handle back there).
+bool effect_given_back(Guest *g, gaddr effect) {
+    if (g_ld32(g, 0x089D6D94u) != 0u) return false;  // handles from a heap instead
+    const gaddr base = g_ld32(g, 0x09B4D434u);
+    if (!guest_ram(base)) return false;
+    const std::int32_t count = std::min<std::int32_t>(g_ld32s(g, base + 0xA100u), 64);
+    for (std::int32_t i = 0; i < count; ++i)
+        if (g_ld32(g, base + 0xA000u + 4u * static_cast<std::uint32_t>(i)) == effect) return true;
+    return false;
+}
+
+// Why the arrows' effect a fighter holds is no longer its own, or nullptr.
+const char *arrows_stale(Guest *g, std::uint32_t slot, gaddr effect) {
+    const ArrowsHeld &mine = arrows_held[slot];
+    const ArrowsHeld &other = arrows_held[slot ^ 1u];
+    if (mine.effect != effect) return nullptr;  // not one its helper made: left alone
+    if (effect_given_back(g, effect)) return "given back";
+    if (g_ld32(g, effect + 0xDCu) & 2u) return "ended";
+    if (g_ld32(g, effect + 0xC0u) != mine.resource) return "made again for another effect";
+    if (other.effect == effect && other.made > mine.made) return "made again for the other fighter's arrows";
+    return nullptr;
+}
+
+// Each fighter's arrows' effect dropped when it is no longer its own.
+void drop_stale_arrows(Guest *g) {
+    if (!versus::active() || arrows_unguarded()) return;
+    const gaddr field = g_ld32(g, kBattleManager);
+    if (field == 0u) return;
+    static const bool trace = [] {
+        const char *text = std::getenv("D012_TRACE_EFFECT_POOL");
+        return text != nullptr && *text != '\0' && std::strcmp(text, "0") != 0;
+    }();
+    static std::uint64_t dropped = 0u;
+    for (std::uint32_t slot = 0; slot < 2u; ++slot) {
+        const gaddr fighter = g_ld32(g, field + 0x38u + 4u * slot);
+        ArrowsHeld &mine = arrows_held[slot];
+        if (!guest_ram(fighter)) continue;
+        if (mine.fighter != fighter) mine = ArrowsHeld{fighter};
+        const gaddr effect = g_ld32(g, fighter + 0x738u);
+        if (effect == 0u) {
+            mine.effect = 0u;
+            continue;
+        }
+        const char *why = arrows_stale(g, slot, effect);
+        if (why == nullptr) continue;
+        g_st32(g, fighter + 0x738u, 0u);
+        g_st32(g, fighter + 0x740u, 0xFFFFFFFFu);
+        mine.effect = 0u;
+        if (trace && ++dropped <= 60u)
+            std::printf("[effects] player %u's arrows let go of %08X: %s (split %llu)\n", slot + 1u, effect, why,
+                        static_cast<unsigned long long>(state().frames));
     }
+}
+
+// battle 0x08ACBF20: the freerun arrows, run for player 2's fighter too while
+// run_local_update lends it the local flag. Each fighter's arrows hold only an
+// effect of their own (kFreerunArrows).
+void run_freerun_arrows(Guest *g, const decomp::CallState &in, GuestRegs &) {
+    const gaddr fighter = in.gpr[5];
+    drop_stale_arrows(g);
+    const gaddr before = guest_ram(fighter) ? g_ld32(g, fighter + 0x738u) : 0u;
     GuestRegs regs{};
     for (int i = 0; i < 8; ++i) regs.a[i] = in.gpr[4 + i];
     for (int i = 0; i < 4; ++i) regs.f[i] = in.fpr[12 + i];
     decomp::call_original(g, kFreerunArrows, regs);
+    if (!versus::active() || !guest_ram(fighter)) return;
+    const gaddr field = g_ld32(g, kBattleManager);
+    for (std::uint32_t slot = 0; slot < 2u && field != 0u; ++slot) {
+        if (g_ld32(g, field + 0x38u + 4u * slot) != fighter) continue;
+        ArrowsHeld &mine = arrows_held[slot];
+        if (mine.fighter != fighter) mine = ArrowsHeld{fighter};
+        const gaddr now = g_ld32(g, fighter + 0x738u);
+        if (now == 0u) {
+            mine.effect = 0u;
+        } else if (now != before) {
+            mine.effect = now;
+            mine.resource = g_ld32(g, now + 0xC0u);
+            mine.made = ++arrows_made;
+        }
+    }
 }
 
 void run_local_update(Guest *g, const decomp::CallState &in, GuestRegs &) {
