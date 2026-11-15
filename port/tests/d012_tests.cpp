@@ -7,6 +7,7 @@
 // port/README.md.
 
 #include "checks.hpp"
+#include "d012_battle_relay.hpp"
 #include "d012_discord_rules.hpp"
 #include "d012_json.hpp"
 #include "d012_mod_manifest.hpp"
@@ -1255,6 +1256,33 @@ void test_movie_splice() {
     expect(vs::MovieSplice::open(reader(ours), reader(Bytes(4096u, 0u))) == nullptr, "not a movie: no splice");
 }
 
+// The battle relay's STATUS query and answer (d012_battle_relay.hpp).
+void test_relay_status() {
+    namespace relay = d012::net::relay;
+    const std::string query = relay::status_query(0xA1B2C3D4u, "0123456789abcdef-std");
+    expect(query.size() >= relay::kStatusAnswer, "relay status: a query is at least as long as its answer");
+    expect(query.compare(0, 4, "D0NL") == 0 && static_cast<std::uint8_t>(query[4]) == relay::kStatus,
+           "relay status: a query is a STATUS packet");
+    expect(static_cast<std::uint8_t>(query[relay::kHead + 4u]) == 20u &&
+               query.compare(relay::kStatusQuery, 20u, "0123456789abcdef-std") == 0,
+           "relay status: the query carries the version tag");
+    expect(relay::status_query(1u, "").size() == relay::kStatusAnswer, "relay status: an empty tag is padded");
+
+    // An answer as the relay writes it: the query's number, then the counts.
+    std::string answer(query, 0u, relay::kHead);
+    for (const std::uint32_t value : {0xA1B2C3D4u, 3u, 7u})
+        for (int i = 0; i < 4; ++i) answer.push_back(static_cast<char>((value >> (8 * i)) & 0xFFu));
+    const auto *bytes = reinterpret_cast<const std::uint8_t *>(answer.data());
+    relay::Counts counts;
+    expect(relay::read_status_answer(bytes, answer.size(), 0xA1B2C3D4u, counts) && counts.version == 3u &&
+               counts.all == 7u,
+           "relay status: an answer reads back");
+    expect(!relay::read_status_answer(bytes, answer.size(), 0x01020304u, counts),
+           "relay status: an answer to another query is not taken");
+    expect(!relay::read_status_answer(bytes, answer.size() - 1u, 0xA1B2C3D4u, counts),
+           "relay status: a short answer is not taken");
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -1278,6 +1306,7 @@ int main(int argc, char **argv) {
     test_versus_rules();
     test_voice_scenes();
     test_movie_splice();
+    test_relay_status();
     if (g_failures == 0) std::cout << "all passed\n";
     return g_failures == 0 ? 0 : 1;
 }

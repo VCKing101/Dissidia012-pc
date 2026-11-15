@@ -136,6 +136,10 @@ disassembler and the new `tools/port/` scripts cover the analysis.
   wait shows a band the player can leave, and the Network page has the input delay.
 - [Playing online](play-online.md): the players' guide: host, join, and what to do when the
   router, a shared provider address or a firewall stops it, including Tailscale and ZeroTier.
+- [Online matchmaking](online-matchmaking.md) (10 November 2026): research for a public server, nothing built. The
+  lobby, its relay and the battle relay move from a hosting player's copy to an always-on server. Battles go through
+  the relay first, then direct with the relay as fallback if measuring shows the need. A US$5 machine in Chicago
+  fits; the server's address is fetched by the port so the server can move.
 
 ## Texture packs (1 November 2026)
 

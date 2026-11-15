@@ -17,6 +17,7 @@
 #include "d012_cheats.hpp"
 #include "d012_hle.hpp"
 #include "d012_no_window.hpp"
+#include "d012_source_hash.hpp"
 #include "d012_version.hpp"
 
 #include <algorithm>
@@ -48,6 +49,21 @@ constexpr const char *kLobbyNames[] = {
     "Cornelia", "Fynn",    "Palamecia", "Sasune", "Baron",      "Tycoon",    "Bal",    "Figaro",
     "Midgar",   "Balamb",  "Galbadia",  "Esthar", "Alexandria", "Lindblum",  "Besaid", "Zanarkand",
 };
+
+// The tag this copy gives the ad hoc server (GameProfile::adhoc_version): what
+// a battle's start needs both players to share (d012_comm_battle.cpp), the
+// port's source and the compiler's kind, so that a public server shows each
+// player only the players they can battle (docs/port/online-matchmaking.md,
+// section 8).
+std::string adhoc_version() {
+    std::string tag = std::string(d012::source_hash()).substr(0, 16u);
+#if defined(_MSC_VER)
+    tag += "-msvc" + std::to_string(_MSC_FULL_VER);
+#else
+    tag += "-std";
+#endif
+    return tag;
+}
 
 std::string adhoc_group_name(std::string_view group) {
     const auto digits = [](std::string_view text) {
@@ -200,6 +216,7 @@ const GameProfile &game() {
         // and a North American one can find each other.
         .adhoc_product_code = "ULUS10566",
         .adhoc_group_name = adhoc_group_name,
+        .adhoc_version = adhoc_version,
 
         // The keyboard: the mouse wheel on the D-pad, and a key each for the
         // battle moves made from two buttons together.

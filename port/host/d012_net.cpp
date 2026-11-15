@@ -62,6 +62,8 @@
 
 #include "d012_net.hpp"
 
+#include "d012_battle_relay.hpp"
+
 #include "adhoc/session.hpp"
 
 #include "install/user_data.hpp"
@@ -1475,156 +1477,6 @@ namespace battle {
 
 namespace {
 
-// The session host's relay for battles (docs/port/online-next.md, section 2):
-// a UDP socket on the battle port, open while this copy hosts the session,
-// that passes each link's datagrams between its two copies, told apart by the
-// link's tag. So the two fighters need not be the host, and only the host's
-// router needs the port open. The host's own fighter reaches it on loopback.
-// Copies watching a battle (WATCH) are kept apart from its two fighters: their
-// WATCH goes to both fighters, and the leading fighter's STREAM to them.
-class Relay {
-public:
-    static Relay &get() {
-        static Relay *r = new Relay;  // its thread runs until the process ends
-        return *r;
-    }
-    void start(std::uint16_t port) {
-        std::lock_guard lock(mutex_);
-        if (started_) return;
-        started_ = true;
-        port_ = port;
-        std::thread([this] { run(); }).detach();
-    }
-
-private:
-    struct End {
-        sockaddr_in address;
-        Clock::time_point heard;
-    };
-    static constexpr std::size_t kMostWatchers = 16u;  // the game has at most 8
-    void run() {
-        Socket socket = kNoSocket;
-        auto checked = Clock::time_point{};
-        std::map<std::uint32_t, std::vector<End>> ends;      // by tag, at most two
-        std::map<std::uint32_t, std::vector<End>> watchers;  // by tag, the copies watching that battle
-        const auto forget = [](std::map<std::uint32_t, std::vector<End>> &by_tag, Clock::time_point now,
-                               Clock::duration quiet) {
-            for (auto it = by_tag.begin(); it != by_tag.end();) {
-                auto &list = it->second;
-                list.erase(std::remove_if(list.begin(), list.end(),
-                                          [&](const End &e) { return now - e.heard > quiet; }),
-                           list.end());
-                it = list.empty() ? by_tag.erase(it) : std::next(it);
-            }
-        };
-        for (;;) {
-            const auto now = Clock::now();
-            if (now - checked >= std::chrono::milliseconds(500)) {
-                checked = now;
-                const bool hosting = portablekit::adhoc_hosting();
-                if (hosting && socket == kNoSocket) socket = open(port_);
-                if (!hosting && socket != kNoSocket) {
-                    close_socket(socket);
-                    socket = kNoSocket;
-                    ends.clear();
-                    watchers.clear();
-                    std::cout << "[battle-relay] closed" << std::endl;
-                }
-                forget(ends, now, std::chrono::seconds(60));
-                forget(watchers, now, std::chrono::seconds(10));
-            }
-            if (socket == kNoSocket) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(200));
-                continue;
-            }
-            fd_set set;
-            FD_ZERO(&set);
-            FD_SET(socket, &set);
-            timeval time{0, 50000};
-            if (select(static_cast<int>(socket + 1), &set, nullptr, nullptr, &time) <= 0) continue;
-            for (;;) {
-                std::uint8_t data[2048];
-                sockaddr_in from{};
-                AddressSize from_size = sizeof from;
-                const int got = static_cast<int>(recvfrom(socket, reinterpret_cast<char *>(data), sizeof data, 0,
-                                                          reinterpret_cast<sockaddr *>(&from), &from_size));
-                if (got < 0) break;
-                if (static_cast<std::size_t>(got) < kHead || std::memcmp(data, kMagic, 4u) != 0) continue;
-                const std::uint32_t tag = tag_of(data);
-                const auto pass = [&](const std::vector<End> &to) {
-                    for (const End &e : to)
-                        if (!same_address(e.address, from))
-                            sendto(socket, reinterpret_cast<const char *>(data), got, 0,
-                                   reinterpret_cast<const sockaddr *>(&e.address), sizeof e.address);
-                };
-                if (data[4] == kWatch) {
-                    // A watcher: kept apart from the two fighters, its WATCH
-                    // passed to both (the leading one streams from it).
-                    auto &list = watchers[tag];
-                    const auto me = std::find_if(list.begin(), list.end(),
-                                                 [&](const End &e) { return same_address(e.address, from); });
-                    if (me != list.end()) me->heard = Clock::now();
-                    else if (list.size() < kMostWatchers) list.push_back(End{from, Clock::now()});
-                    else continue;
-                    if (const auto found = ends.find(tag); found != ends.end()) pass(found->second);
-                    continue;
-                }
-                if (data[4] == kStream) {
-                    if (const auto found = watchers.find(tag); found != watchers.end()) pass(found->second);
-                    continue;
-                }
-                auto &list = ends[tag];
-                const auto me = std::find_if(list.begin(), list.end(),
-                                             [&](const End &e) { return same_address(e.address, from); });
-                if (me != list.end()) {
-                    me->heard = Clock::now();
-                } else if (list.size() < 2u) {
-                    list.push_back(End{from, Clock::now()});
-                } else {
-                    // A third address for a tag: one of the two has gone quiet
-                    // (a copy that came back on a new port) or it is not ours.
-                    const auto quiet = std::min_element(list.begin(), list.end(), [](const End &a, const End &b) {
-                        return a.heard < b.heard;
-                    });
-                    if (Clock::now() - quiet->heard < std::chrono::seconds(5)) continue;
-                    *quiet = End{from, Clock::now()};
-                }
-                pass(list);
-            }
-        }
-    }
-    static Socket open(std::uint16_t port) {
-        if (!sockets_ready()) return kNoSocket;
-        const Socket socket = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-        if (socket == kNoSocket) return kNoSocket;
-#if defined(_WIN32)
-        constexpr DWORD kUdpConnReset = 0x9800000Cu;  // SIO_UDP_CONNRESET: a copy gone must not fail the next read
-        BOOL report = FALSE;
-        DWORD bytes = 0;
-        WSAIoctl(socket, kUdpConnReset, &report, sizeof report, nullptr, 0, &bytes, nullptr, nullptr);
-        u_long on = 1u;
-        ioctlsocket(socket, FIONBIO, &on);
-#else
-        fcntl(socket, F_SETFL, fcntl(socket, F_GETFL, 0) | O_NONBLOCK);
-#endif
-        sockaddr_in bound{};
-        bound.sin_family = AF_INET;
-        bound.sin_port = htons(port);
-        bound.sin_addr.s_addr = htonl(INADDR_ANY);
-        if (bind(socket, reinterpret_cast<const sockaddr *>(&bound), sizeof bound) != 0) {
-            close_socket(socket);
-            std::cerr << "[battle-relay] cannot open UDP port " << port << "; battles through this session fail"
-                      << std::endl;
-            return kNoSocket;
-        }
-        std::cout << "[battle-relay] relaying battles on UDP port " << port << std::endl;
-        return socket;
-    }
-    std::mutex mutex_;
-    bool started_ = false;
-    std::uint16_t port_ = kBattlePort;
-};
-
 int local_player = 0;  // this copy's fighter in the game: 0 or 1
 std::string failure;   // why the last open() failed, for the player
 
@@ -1824,8 +1676,16 @@ std::uint16_t port() {
     return number > 0 && number <= 65535 ? static_cast<std::uint16_t>(number) : kBattlePort;
 }
 
+// The session host's relay for battles (d012_battle_relay.hpp), open while
+// this copy hosts the session. So the two fighters need not be the host, and
+// only the host's router needs the port open. The host's own fighter reaches
+// it on loopback.
 void serve() {
-    if (setting("D012_NET_BATTLE", "online.battle_link").empty()) Relay::get().start(port());
+    if (!setting("D012_NET_BATTLE", "online.battle_link").empty()) return;
+    relay::Options options;
+    options.port = port();
+    options.open = [] { return portablekit::adhoc_hosting(); };
+    relay::start(std::move(options));
 }
 
 void must_match(const std::string &what, const std::string &value) {
