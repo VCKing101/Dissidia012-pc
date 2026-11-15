@@ -1426,6 +1426,8 @@ The owner, testing the party build: "Wall running does not seem to work on Playe
   and the stock Quick Battle (Party) against the CPU (`reg_stock2`, player 1's arrows and pointer, no versus lines)
   as before. **Not checked:** `D012_NO_MARKERS_PLAYER2=1`; real controllers; a marker over a wall in player 2's
   half (the arrows seen were a rail's).
+- **Later (7.21, issue 25):** player 2's arrows are left out again. Two fighters' arrows handed one effect back and
+  forth and left a fighter holding an effect that was no longer its own; player 2 keeps the pointer.
 
 ## 7.20 The owner's party session: the final blow, the menu after each fight (11 November 2026)
 
@@ -1466,6 +1468,50 @@ fight. V unless marked.
   switch is not a fix: the water sphere needs the rule. Ruled out on the way: the banner element, every HUD layout,
   the screen tints (`0x08AEEE0C`, tasks 69650 and 100100), the alpha screen (86000), effects following a fighter or
   the camera, frame-buffer snapshots. `D012_SPLIT_ONLY`/`D012_SPLIT_SKIP` bisected it to 85000.
+
+## 7.21 Issue 25: player 2's winning words, player 2's arrows (15 November 2026)
+
+Issue 25 (v0.7.1, split screen): when player 2 won, player 1's win quote played (Garland with Lightning's voice);
+and Garland's hit effects, and their sounds, stopped after a while. Both came from v0.7.1. V unless marked.
+
+- **The winning words.** Reproduced with Lightning (player 1) against Vaan (player 2), player 2 winning: v0.7.0
+  played Vaan's `va_battle_110` ("Huh? That's all?"), v0.7.1 Lightning's `li_battle_109` and `li_battle_110` under
+  Vaan's victory pose, the line number right for the winner but the speaker player 1's. Clips named by Japanese voices
+  with `D012_TRACE_VOICES=1` (the hash of the name the game asks for, against the package's name list) and by
+  transcribing both characters' battle clips.
+- **Where the words come from.** The winner decision (battle `0x08B09D88`) asks for the ending's sound (battle
+  `0x08B097D0` on flow `+0xA4`: the jingle, won or lost). A step of that request (battle `0x08B0998C`, from its state
+  table) starts the jingle, then loads the words (battle `0x08B09B04`): the player's fighter (main `0x08889E44`),
+  its victory or defeat line against the other side's character (battle `0x08B009D4` / `0x08B00A04`), opened as
+  `voice/<language>/battle/<name>.at3` (format at `0x08B0CDD8`) and said in the final blow (phase 2, battle
+  `0x08B06370` on the fighter knocked out). That runs a few frames after the decision. Since 7.20 player 1's fighter
+  is local again by then, so the words were player 1's.
+- **The fix** (`d012_split_view.cpp`, `run_player_fighter`): main `0x08889E44` answers player 2's fighter to that one
+  call (the one that returns to `0x08B09B20`) when player 2 won. The HUD of 7.20 is untouched. Ruled out on the
+  way: player 2 local for the voice call in phase 2 (still player 1's clip), and an override of the step
+  `0x08B0998C` (its own unit reaches it too, so the override missed the call that loaded the words).
+- **Checked:** player 2's win, Japanese voices: `va_battle_111` read, "Just as expected!" under Vaan's pose, player
+  1's plate on the left and player 2's whole plate on the right through the final blow and replay
+  (`build/port/versus/issue25/fixjp`; the runs below are beside it). Player
+  1's win: Lightning's `li_battle_109`, as before (`p1jp`).
+- **The arrows.** 7.19 lent player 2's fighter the local flag for the local-only update, so the game's freerun arrows
+  (battle `0x08ACBF20`) ran for both fighters. The game has them for one fighter only: each time a fighter's arrows
+  move on (another wall or rail, or a step of 1 along it) the helper lets its effect go (main `0x088A6CB8`, mode 8)
+  and makes another (main `0x088A9DE8`). With both fighters doing so, the effect one still held was handed out
+  again: in a 12-minute fight both fighters held the same effect 26 times, even 16 units apart; with
+  `D012_TRACE_EFFECT_POOL=1` (new), a 5-minute fight had 60 effects made while a marker still held them (the trace
+  stops naming them at 60), 57 of them arrows going back and forth and 3 other effects (battle `0x08AC0750`),
+  against none with `D012_NO_MARKERS_PLAYER2=1`. The holder then moved and let go an effect that was no longer its own: a likely way
+  for hit sparks and their sounds to drop out (not seen in the scripted fights, so not proven).
+- **The fix** (`run_freerun_arrows`): the arrows helper is left out for player 2's fighter. Player 2 keeps the blue
+  pointer toward the opponent (`+0x760`): made once per fight, never shared in any trace. Player 2's triangle still
+  runs up walls (it never needed the arrows, 7.19). Checked: the same 5-minute fight, one effect handed out while a
+  marker held it (player 1's arrows, the game's own as in single player), player 2's `+0x738` always empty and its
+  pointer the same effect throughout (`poolfix`).
+- **Test tools** (in `build/port/versus/issue25/evidence`, not tracked): a live-input bot that steers both players
+  at each other from the `D012_TRACE_VERSUS` positions (the lock-on camera looks at the opponent, so "forward" is eye
+  to opponent) with Bravery attacks in range, jumps for a step and an unstick; `D012_TEST_UNLOCK_FIGHTERS=1` for
+  Garland. Live-input lines must end in LF alone: CRLF made every button "unknown".
 
 ## 8. For later: two copies over the game's ad hoc versus
 

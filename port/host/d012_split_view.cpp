@@ -519,7 +519,19 @@ void chase_lines_view2(Guest *g, const std::uint8_t *view1, gaddr manager) {
 // put back after that half. Player 2's are shown in player 2's half, as the
 // game's culling is against player 1's camera (markers_view2).
 // D012_NO_MARKERS_PLAYER2=1 leaves them as they were.
+//
+// Player 2's arrows are left out again (run_freerun_arrows, issue 25): the
+// game has them for one fighter only. Each time a fighter's arrows move on
+// (another wall or rail, or a step of 1 along it) the helper lets its effect
+// go (main 0x088A6CB8, with mode 8) and makes another (main 0x088A9DE8); with
+// two fighters each doing so, the effect one still held was handed out again,
+// to the other's arrows and to other effects (D012_TRACE_EFFECT_POOL: 60 such
+// effects in five minutes of fighting; with player 2's arrows left out, one,
+// of player 1's arrows, as the game does alone), and the holder went on
+// moving and letting go an effect that was no longer its own. A likely way for hit sparks and their sounds to drop out at random
+// (issue 25). Player 2 keeps the pointer: it is made once and never shared.
 constexpr std::uint32_t kLocalUpdate = 0x08B2D3BCu;
+constexpr std::uint32_t kFreerunArrows = 0x08ACBF20u;  // (fighter + 0x6E0, fighter)
 constexpr std::uint32_t kMarkerEffects[] = {0x738u, 0x760u};  // the arrows', the pointer's
 constexpr std::uint8_t kListNode = 'l';
 
@@ -629,6 +641,54 @@ void markers_view2(Guest *g) {
     if (markers_off()) return;
     markers_hidden_view[1] = markers_set(g, 0u, true);
     markers_set(g, 1u, false);
+}
+
+// D012_TRACE_EFFECT_POOL=1: every effect made through main 0x088A9DE8 (the
+// markers' maker, and most others'), counted: those it could not make, and
+// those it handed out while a fighter's marker (+0x738, +0x760) still held it.
+constexpr std::uint32_t kEffectMake = 0x088A9DE8u;
+
+void run_trace_effect_make(Guest *g, const decomp::CallState &in, GuestRegs &out) {
+    GuestRegs regs{};
+    for (int i = 0; i < 8; ++i) regs.a[i] = in.gpr[4 + i];
+    for (int i = 0; i < 4; ++i) regs.f[i] = in.fpr[12 + i];
+    decomp::call_original(g, kEffectMake, regs);
+    out.v0 = regs.v0;
+    static std::uint64_t made = 0, none = 0, held = 0;
+    ++made;
+    const gaddr effect = regs.v0;
+    if (effect == 0u) {
+        if (++none <= 40u) std::printf("[effects] none made (from %08X)\n", in.gpr[31]);
+    } else {
+        const gaddr field = g_ld32(g, kBattleManager);
+        for (std::uint32_t slot = 0; slot < 2u && field != 0u; ++slot) {
+            const gaddr fighter = g_ld32(g, field + 0x38u + 4u * slot);
+            if (!guest_ram(fighter)) continue;
+            for (std::uint32_t at : kMarkerEffects)
+                if (g_ld32(g, fighter + at) == effect && ++held <= 60u)
+                    std::printf("[effects] %08X made (from %08X) while player %u's %s still holds it\n", effect,
+                                in.gpr[31], slot + 1u, at == 0x738u ? "arrows" : "pointer");
+        }
+    }
+    if (made % 500u == 0u || (effect == 0u && none <= 40u))
+        std::printf("[effects] %llu made, %llu none, %llu handed out while a marker held them\n",
+                    static_cast<unsigned long long>(made), static_cast<unsigned long long>(none),
+                    static_cast<unsigned long long>(held));
+    std::fflush(stdout);
+}
+
+// battle 0x08ACBF20: the freerun arrows, run for player 2's fighter only while
+// run_local_update lends it the local flag; left out for player 2's fighter.
+void run_freerun_arrows(Guest *g, const decomp::CallState &in, GuestRegs &) {
+    if (versus::active()) {
+        const gaddr field = g_ld32(g, kBattleManager);
+        const gaddr p2 = field != 0u ? g_ld32(g, field + 0x3Cu) : 0u;
+        if (p2 != 0u && in.gpr[5] == p2) return;
+    }
+    GuestRegs regs{};
+    for (int i = 0; i < 8; ++i) regs.a[i] = in.gpr[4 + i];
+    for (int i = 0; i < 4; ++i) regs.f[i] = in.fpr[12 + i];
+    decomp::call_original(g, kFreerunArrows, regs);
 }
 
 void run_local_update(Guest *g, const decomp::CallState &in, GuestRegs &) {
@@ -805,7 +865,8 @@ std::uint32_t battle_phase(Guest *g) {
 // the player's fighter (main 0x08889E44) picks the victory pose or the
 // player's defeat (kept at flow +0x0C). In versus a win of player 2's is
 // player 2's victory: player 2's fighter is the local one (and player 1's not)
-// for this call, so the ending is the winner's own, as player 1's is.
+// for this call, so the ending is the winner's own, as player 1's is. (The
+// winner's words, asked for here, come a few frames later: run_player_fighter.)
 //
 // Then player 1's is local again until the white flash (phase 8; see
 // ending_local): from the final blow the HUD lays out the local fighter on the
@@ -862,6 +923,37 @@ void run_winner_decision(Guest *g, const decomp::CallState &in, GuestRegs &) {
             if (goes_on) g_st32(g, flow + 0x10u, 1u);
         }
     }
+}
+
+// The winner's words. The winner decision asks for the ending's sound (battle
+// 0x08B097D0 on flow +0xA4: the jingle, won or lost); a step of that request
+// (battle 0x08B0998C) starts the jingle, then loads the words (battle
+// 0x08B09B04): the player's fighter (main 0x08889E44, the call that returns to
+// 0x08B09B20), its victory or defeat line against the other side's character
+// (battle 0x08B009D4 or 0x08B00A04), opened as
+// "voice/<language>/battle/<name>.at3" and said in the final blow. That runs a
+// few frames after the decision, with player 1's fighter local again, so a win
+// of player 2's had player 1's words: Lightning's line under Garland's victory
+// pose (issue 25). When player 2 won, that one question is answered with
+// player 2's fighter. (The step itself is reached from its own unit as well,
+// so an override of it does not see every call; this question comes from
+// the battle overlay into main, and does.)
+constexpr std::uint32_t kPlayerFighter = 0x08889E44u;
+constexpr std::uint32_t kWordsAskPlayer = 0x08B09B20u;  // in battle 0x08B09B04
+
+void run_player_fighter(Guest *g, const decomp::CallState &in, GuestRegs &out) {
+    if (versus::active() && state().player2_won && in.gpr[31] == kWordsAskPlayer) {
+        const gaddr field = g_ld32(g, kBattleManager);
+        const gaddr p2 = field != 0u ? g_ld32(g, field + 0x3Cu) : 0u;
+        if (p2 != 0u) {
+            out.v0 = p2;
+            std::cout << "[versus] player 2 won: the winner's words are player 2's" << std::endl;
+            return;
+        }
+    }
+    GuestRegs regs{};
+    decomp::call_original(g, kPlayerFighter, regs);
+    out.v0 = regs.v0;
 }
 
 // Each split task: player 2's fighter local from the white flash on (phase 8,
@@ -2316,9 +2408,21 @@ struct Install {
             {kLocalFighter, "versus_chase_local", decomp::Module::Main, decomp::Returns::Integer, &run_chase_local},
             {kLocalUpdate, "versus_local_update", decomp::Module::BattleOverlay, decomp::Returns::Nothing,
              &run_local_update},
+            {kPlayerFighter, "versus_player_fighter", decomp::Module::Main, decomp::Returns::Integer,
+             &run_player_fighter},
+            {kFreerunArrows, "versus_freerun_arrows", decomp::Module::BattleOverlay, decomp::Returns::Nothing,
+             &run_freerun_arrows},
         };
         decomp::add_overrides(overrides, sizeof overrides / sizeof overrides[0], true);
         // Overrides that only trace, there only with their switch.
+        const char *pool = std::getenv("D012_TRACE_EFFECT_POOL");
+        if (pool != nullptr && *pool != '\0' && std::strcmp(pool, "0") != 0) {
+            static const decomp::Override traces[] = {
+                {kEffectMake, "versus_trace_effect_make", decomp::Module::Main, decomp::Returns::Integer,
+                 &run_trace_effect_make},
+            };
+            decomp::add_overrides(traces, sizeof traces / sizeof traces[0], true);
+        }
         const char *trace = std::getenv("D012_TRACE_GUIDE");
         if (trace != nullptr && *trace != '\0' && std::strcmp(trace, "0") != 0) {
             static const decomp::Override traces[] = {
