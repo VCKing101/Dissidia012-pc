@@ -7,6 +7,13 @@
 //
 //   D012Native --compile-game [--iso PATH] [--opt N] [--jobs N] [--force] [--keep-work]
 //
+// The Android app runs the same steps on the phone (run_in_app(), from
+// host/d012_device_compile.cpp): its paths are the app's own (find_paths),
+// and clang compiles for --target=aarch64-linux-android29 with the Android
+// parts in toolchain/android/sysroot (bionic's headers and link stubs,
+// libc++) and the compiler-rt builtins in clang's own lib/clang/<N>/lib/
+// folder, all built from source by tools/port/android_runtime.sh.
+//
 // --keep-work leaves game-code.new/ (the C++ and the objects), for comparing
 // with the developer pipeline's output.
 //
@@ -60,6 +67,12 @@
 // A key.txt of 0.7.0 or before has the first line only, so the first update
 // from one compiles in full.
 //
+// When the C++ does change, only the parts (units) that changed compile:
+// game-code-cache/ beside the program keeps every part's object under the
+// SHA-256 of what it is made from (the tools, the flags, its library's headers
+// and its own source), and the libraries are linked from it. A new compiler,
+// sdk/ or set of flags compiles every part again.
+//
 // Progress goes to stdout and to game-code-status.txt beside the program
 // (key=value lines: state running|done|failed, step, done, total, message),
 // which the installer's wizard reads; the tools' output goes to
@@ -86,6 +99,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <mutex>
 #include <optional>
@@ -147,15 +161,36 @@ constexpr DiscFile kDiscFiles[] = {
 
 struct Options {
     fs::path iso;
+    bool android = false;  // the Android app's code (run_in_app)
     int opt = 1;
     unsigned jobs = 0;
     bool force = false;
     bool keep_work = false;
+    // Stop once the input key is known: run() returns 0 when the game's code
+    // is up to date and kNeedsCompile when it is not (the Android app asks
+    // before it shows its progress screen).
+    bool check_only = false;
 };
+
+constexpr int kNeedsCompile = 3;
+
+// Told each step and percentage, besides stdout and the status file (the
+// Android app's progress screen).
+std::function<void(const std::string &message, unsigned percent)> g_listener;
 
 struct Paths {
     fs::path folder, game_dir, eboot, iso, recompiler, compiler, sdk, out, work, status, log;
+    fs::path android_sysroot, android_builtins;  // in the Android app
+    fs::path cache;  // each part's object, by what it is made from (compile step)
 };
+
+// clang's target for the Android app: arm64, Android 10 (API 29).
+constexpr const char *kAndroidTarget = "aarch64-linux-android29";
+constexpr const char *kAndroidBuiltinsDir = "aarch64-unknown-linux-android29";
+
+const char *library_extension(const Options &options) {
+    return options.android ? ".so" : kLibrary;
+}
 
 struct Error : std::runtime_error {
     using std::runtime_error::runtime_error;
@@ -215,6 +250,7 @@ public:
         const std::lock_guard<std::mutex> guard(lock_);
         if (state == "done") start_ = 100, done_ = total_ = 0;
         std::cout << "[compile-game] " << percent() << "% " << message << std::endl;
+        if (g_listener) g_listener(message, percent());
         write_locked(state, message);
     }
 
@@ -229,6 +265,7 @@ private:
         std::cout << "[compile-game] " << percent() << "% " << step_;
         if (total_ > 1) std::cout << " (" << done_ << "/" << total_ << ")";
         std::cout << std::endl;
+        if (g_listener) g_listener(step_, percent());
     }
     void write_locked(const std::string &state, const std::string &message) {
         std::ostringstream body;
@@ -410,7 +447,16 @@ unsigned default_jobs() {
 
 Paths find_paths(const Options &options) {
     Paths p;
+#if defined(PORTABLEKIT_ANDROID_APP)
+    // In the Android app: everything in the app's own storage; the programs
+    // (libclang.so, liblld.so, libpsp_recomp.so) in its native library folder,
+    // which is where executable_directory() is, the only place Android runs
+    // programs from (android_device_compile.cpp links clang++ and ld.lld to
+    // them in toolchain/bin).
+    p.folder = portablekit::install::user_data_directory();
+#else
     p.folder = portablekit::executable_directory();
+#endif
     // The executable and the disc image as the game finds them: a game/
     // folder when D012_GAME_DIR names one (game/disc.iso), otherwise what
     // `--install <iso>` set up in the data directory (host/d012_portable.cpp).
@@ -428,7 +474,11 @@ Paths find_paths(const Options &options) {
     }
     if (!options.iso.empty()) p.iso = options.iso;
     const char *recompiler = std::getenv("D012_RECOMPILER");
+#if defined(PORTABLEKIT_ANDROID_APP)
+    p.recompiler = portablekit::executable_directory() / "libpsp_recomp.so";
+#else
     p.recompiler = recompiler != nullptr && *recompiler != '\0' ? path_of(recompiler) : p.folder / kRecompiler;
+#endif
     const char *toolchain = std::getenv("D012_TOOLCHAIN_DIR");
     const fs::path toolchain_dir = toolchain != nullptr && *toolchain != '\0' ? path_of(toolchain) : p.folder / "toolchain";
 #if defined(_WIN32)
@@ -436,11 +486,29 @@ Paths find_paths(const Options &options) {
 #else
     p.compiler = toolchain_dir / "bin" / "clang++";
 #endif
+#if defined(PORTABLEKIT_ANDROID_APP)
+    p.sdk = toolchain_dir / "sdk";
+    // Where host/d012_game_code.cpp loads it from.
+    const std::string out = "game-code";
+#else
     p.sdk = p.folder / "sdk";
-    p.out = p.folder / "game-code";
-    p.work = p.folder / "game-code.new";
-    p.status = p.folder / "game-code-status.txt";
-    p.log = p.folder / "game-code-build.log";
+    const std::string out = "game-code";
+#endif
+    p.out = p.folder / out;
+    p.work = p.folder / (out + ".new");
+    p.status = p.folder / (out + "-status.txt");
+    p.cache = p.folder / (out + "-cache");
+    p.log = p.folder / (out + "-build.log");
+    if (options.android) {
+        p.android_sysroot = toolchain_dir / "android" / "sysroot";
+        // In clang's own folder, lib/clang/<major>/lib/<target>/, where
+        // the driver looks for it.
+        std::error_code ec;
+        for (const auto &entry : fs::directory_iterator(toolchain_dir / "lib" / "clang", ec)) {
+            const fs::path file = entry.path() / "lib" / kAndroidBuiltinsDir / "libclang_rt.builtins.a";
+            if (fs::is_regular_file(file, ec)) p.android_builtins = file;
+        }
+    }
     return p;
 }
 
@@ -457,6 +525,11 @@ void check_inputs(const Paths &p) {
         if (!fs::is_regular_file(tool, ec)) throw Error(text(tool) + " is missing; reinstall the port");
     for (const char *name : {"corpus_module.cpp.in", "overlay_module.cpp.in", "dispatch-calls.txt", "d012_math.cpp"})
         if (!fs::is_regular_file(p.sdk / name, ec)) throw Error(text(p.sdk / name) + " is missing; reinstall the port");
+    if (!p.android_sysroot.empty() &&
+        (!fs::is_regular_file(p.android_sysroot / "usr" / "include" / "c++" / "v1" / "vector", ec) ||
+         p.android_builtins.empty()))
+        throw Error("the Android parts of the compiler are missing (" + text(p.android_sysroot.parent_path()) +
+                    "); reinstall the port");
 }
 
 // What clang is given for each unit, and the linker for each library, besides
@@ -464,13 +537,33 @@ void check_inputs(const Paths &p) {
 std::vector<std::string> compile_flags(const Options &options) {
     std::vector<std::string> flags{"-std=c++20", "-O" + std::to_string(options.opt), "-g0", "-fvisibility=hidden",
                                    "-fvisibility-inlines-hidden", "-w", "-DNDEBUG"};
-#if !defined(_WIN32)
+#if defined(_WIN32)
+    if (options.android) flags.push_back("-fPIC");
+#else
     flags.push_back("-fPIC");
 #endif
     return flags;
 }
 
-std::vector<std::string> link_flags() {
+// The target and sysroot in the Android app, given to every clang run but kept
+// out of the keys: they name the folder, and the keys name what is in it
+// (add_tools).
+std::vector<std::string> target_args(const Paths &p) {
+    if (p.android_sysroot.empty()) return {};
+#if defined(PORTABLEKIT_ANDROID_APP)
+    // clang++ is a link to libclang.so: clang then takes its folder, its own
+    // headers (../lib/clang/<N>) and ld.lld from the link's path, not the
+    // program's.
+    return {"-no-canonical-prefixes", std::string("--target=") + kAndroidTarget, "--sysroot=" + text(p.android_sysroot)};
+#else
+    return {std::string("--target=") + kAndroidTarget, "--sysroot=" + text(p.android_sysroot)};
+#endif
+}
+
+std::vector<std::string> link_flags(const Options &options) {
+    // An Android library links as a Linux one does (below).
+    if (options.android)
+        return {"-shared", "-fuse-ld=lld", "-static-libgcc", "-static-libstdc++", "-Wl,--exclude-libs,ALL"};
 #if defined(_WIN32)
     return {"-shared", "-static", "-static-libgcc", "-static-libstdc++"};
 #else
@@ -506,6 +599,12 @@ void add_tools(std::ostringstream &key, const Paths &p) {
     if (const fs::path config = fs::path(p.compiler).concat(".cfg"); fs::is_regular_file(config, config_ec))
         key << "compiler-config=" << psprecomp::sha256_file(config) << "\n";
     for (const auto &[name, path] : files_under(p.sdk)) key << "sdk " << name << "=" << psprecomp::sha256_file(path) << "\n";
+    if (!p.android_sysroot.empty()) {
+        key << "target=" << kAndroidTarget << "\nandroid-builtins=" << psprecomp::sha256_file(p.android_builtins)
+            << "\n";
+        for (const auto &[name, path] : files_under(p.android_sysroot))
+            key << "android-sysroot " << name << "=" << psprecomp::sha256_file(path) << "\n";
+    }
 }
 
 // The input key: everything the game's code is made from, as one SHA-256.
@@ -535,7 +634,7 @@ std::string source_key(const Paths &p, const Options &options, const std::vector
         << "\ncompile";
     for (const std::string &flag : compile_flags(options)) key << " " << flag;
     key << "\nlink";
-    for (const std::string &flag : link_flags()) key << " " << flag;
+    for (const std::string &flag : link_flags(options)) key << " " << flag;
     key << "\n";
     add_tools(key, p);
     for (const Library &library : libraries) {
@@ -622,13 +721,17 @@ int run(const Options &options) {
 
         const std::string key = code_key(p, options, disc_hashes);
         StoredKeys stored;
-        if (!options.force && fs::is_regular_file(p.out / (std::string("main") + kLibrary), ec))
+        if (!options.force && fs::is_regular_file(p.out / (std::string("main") + library_extension(options)), ec))
             stored = read_keys(p.out / "key.txt");
         if (!stored.input.empty() && stored.input == key) {
             note(p, "the input key matches game-code/key.txt: nothing to do");
             fs::remove_all(p.work, ec);
             progress.finish("done", "The game's code is already compiled and up to date.");
             return 0;
+        }
+        if (options.check_only) {
+            fs::remove_all(p.work, ec);
+            return kNeedsCompile;
         }
 
         // 2. The C++ code, from psp_recomp.
@@ -638,7 +741,7 @@ int run(const Options &options) {
         std::vector<Library> libraries;
         progress.step("Recompiling the game's code to C++", 1 + std::size(kDiscFiles));
         {
-            Library main{std::string("main") + kLibrary, p.work / "generated", {}, {}};
+            Library main{std::string("main") + library_extension(options), p.work / "generated", {}, {}};
             std::vector<std::string> args{recompiler, text(p.eboot), "--auto", text(main.generated), hex32(kMainBase)};
             const auto rows = dispatch_calls(dispatch, "main");
             args.insert(args.end(), rows.begin(), rows.end());
@@ -661,7 +764,8 @@ int run(const Options &options) {
                           static_cast<unsigned long long>(hash));
             char hash_text[24];
             std::snprintf(hash_text, sizeof hash_text, "0x%016llX", static_cast<unsigned long long>(hash));
-            Library overlay{std::string("overlays/") + prefix + kLibrary, p.work / "overlays" / prefix, {}, {}};
+            Library overlay{std::string("overlays/") + prefix + library_extension(options), p.work / "overlays" / prefix,
+                            {}, {}};
             std::vector<std::string> args{recompiler, text(disc_paths[i]), "--auto", text(overlay.generated),
                                           hex32(image.base), "--prefix", prefix};
             const auto rows = dispatch_calls(dispatch, kDiscFiles[i].name);
@@ -701,47 +805,86 @@ int run(const Options &options) {
         note(p, stored.source.empty() ? "no source key in game-code/key.txt: compiling"
                                       : "the source key differs from game-code/key.txt: compiling");
 
-        // 4. Compile every unit, in parallel.
+        // 4. Compile every unit that changed, in parallel. Each unit's object
+        // is kept in the cache (game-code-cache/), named by the SHA-256 of
+        // everything it is made from: the tools and flags (add_tools,
+        // compile_flags), its library's headers and its own source. A unit
+        // whose key is there is not compiled again, so an update that changes
+        // a few of the C++ files psp_recomp writes compiles those few and
+        // links. The cache keeps exactly the objects of the last compile.
         struct Unit {
-            fs::path source, object;
+            fs::path source, object;  // object: in the cache, by its key
             const Library *library;
         };
         std::vector<Unit> units;
         fs::create_directories(p.work / "objects", ec);
+        fs::create_directories(p.cache, ec);
+        std::string unit_base;
+        {
+            std::ostringstream base;
+            base << "corpus-abi=" << psprecomp::kCorpusAbiVersion << "\ncompile";
+            for (const std::string &flag : compile_flags(options)) base << " " << flag;
+            base << "\n";
+            add_tools(base, p);
+            unit_base = base.str();
+        }
         for (Library &library : libraries) {
             std::vector<fs::path> sources;
-            for (const auto &entry : fs::directory_iterator(library.generated))
-                if (entry.path().extension() == ".cpp") sources.push_back(entry.path());
+            std::ostringstream headers;
+            for (const auto &[name, path] : files_under(library.generated)) {
+                if (path.extension() == ".cpp") sources.push_back(path);
+                else headers << "header " << name << "=" << psprecomp::sha256_file(path) << "\n";
+            }
             std::sort(sources.begin(), sources.end());
             sources.push_back(p.sdk / "d012_math.cpp");
+            const std::string library_base = unit_base + headers.str();
             for (const fs::path &source : sources) {
-                const fs::path object = p.work / "objects" / ("u" + std::to_string(units.size()) + ".o");
+                const std::string unit_key =
+                    sha256_text(library_base + "unit " + text(source.filename()) + "=" + psprecomp::sha256_file(source));
+                const fs::path object = p.cache / (unit_key + ".o");
                 library.objects.push_back(object);
                 units.push_back({source, object, &library});
             }
         }
+        std::vector<const Unit *> to_compile;
+        for (const Unit &unit : units)
+            if (!fs::is_regular_file(unit.object, ec)) to_compile.push_back(&unit);
+        note(p, std::to_string(units.size() - to_compile.size()) + " of " + std::to_string(units.size()) +
+                    " parts unchanged since the last compile (in " + text(p.cache) + ")");
         const unsigned jobs = options.jobs != 0 ? options.jobs : default_jobs();
-        progress.step("Compiling the game's code (" + std::to_string(units.size()) + " parts, " +
-                          std::to_string(jobs) + " at a time)",
-                      static_cast<unsigned>(units.size()));
+        progress.step(to_compile.size() == units.size()
+                          ? "Compiling the game's code (" + std::to_string(units.size()) + " parts, " +
+                                std::to_string(jobs) + " at a time)"
+                          : "Compiling the game's code (" + std::to_string(to_compile.size()) + " of " +
+                                std::to_string(units.size()) + " parts changed)",
+                      static_cast<unsigned>(to_compile.size()));
         const std::string compiler = text(p.compiler);
         const std::string sdk_include = text(p.sdk / "include");
-        const std::vector<std::string> flags = compile_flags(options);
+        std::vector<std::string> flags = target_args(p);
+        for (const std::string &flag : compile_flags(options)) flags.push_back(flag);
         std::atomic<std::size_t> next{0};
         std::atomic<bool> failed{false};
         std::string failure;
         std::mutex failure_lock;
         std::vector<std::thread> workers;
-        for (unsigned j = 0; j < std::min<std::size_t>(jobs, units.size()); ++j)
+        for (unsigned j = 0; j < std::min<std::size_t>(jobs, to_compile.size()); ++j)
             workers.emplace_back([&] {
-                for (std::size_t i = next++; i < units.size() && !failed; i = next++) {
-                    const Unit &unit = units[i];
+                for (std::size_t i = next++; i < to_compile.size() && !failed; i = next++) {
+                    const Unit &unit = *to_compile[i];
+                    // Into the cache under another name first: an object
+                    // under its key is always a whole one.
+                    const fs::path partial = fs::path(unit.object).concat(".partial");
                     std::vector<std::string> args{compiler};
                     args.insert(args.end(), flags.begin(), flags.end());
                     args.insert(args.end(), {"-I", sdk_include, "-I", text(unit.library->generated), "-c",
-                                             text(unit.source), "-o", text(unit.object)});
+                                             text(unit.source), "-o", text(partial)});
                     const fs::path unit_log = p.work / "objects" / ("u" + std::to_string(i) + ".log");
-                    const int code = run_program(args, unit_log);
+                    int code = run_program(args, unit_log);
+                    if (code == 0) {
+                        std::error_code rename_ec;
+                        fs::rename(partial, unit.object, rename_ec);
+                        if (rename_ec) code = -1;
+                    }
                     if (code != 0) {
                         const std::lock_guard<std::mutex> guard(failure_lock);
                         if (!failed.exchange(true)) {
@@ -761,7 +904,8 @@ int run(const Options &options) {
         // 5. Link: every library on its own, with its own C++ runtime.
         progress.step("Linking the game's code", static_cast<unsigned>(libraries.size()));
         fs::create_directories(p.work / "result" / "overlays", ec);
-        const std::vector<std::string> linking = link_flags();
+        std::vector<std::string> linking = target_args(p);
+        for (const std::string &flag : link_flags(options)) linking.push_back(flag);
         for (const Library &library : libraries) {
             const fs::path rsp = p.work / "objects" / (fs::path(library.name).stem().string() + ".rsp");
             {
@@ -781,7 +925,7 @@ int run(const Options &options) {
         write_all(p.work / "result" / "key.txt", keys_text(key, source));
 
         // 6. Replace game-code/ with the result.
-        const fs::path old = p.folder / "game-code.old";
+        const fs::path old = fs::path(p.out).concat(".old");
         fs::remove_all(old, ec);
         if (fs::exists(p.out, ec)) {
             fs::rename(p.out, old, ec);
@@ -791,10 +935,24 @@ int run(const Options &options) {
         if (ec) throw Error("cannot move the result to " + text(p.out) + ": " + ec.message());
         fs::remove_all(old, ec);
         if (!options.keep_work) fs::remove_all(p.work, ec);
+        // The cache keeps this compile's objects only.
+        {
+            std::vector<fs::path> used;
+            for (const Unit &unit : units) used.push_back(unit.object);
+            std::sort(used.begin(), used.end());
+            std::vector<fs::path> stale;
+            for (const auto &entry : fs::directory_iterator(p.cache, ec))
+                if (!std::binary_search(used.begin(), used.end(), entry.path())) stale.push_back(entry.path());
+            for (const fs::path &path : stale) fs::remove(path, ec);
+        }
         const auto seconds =
             std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - started).count();
-        progress.finish("done", "The game's code is compiled (" + std::to_string(units.size()) + " parts in " +
-                                    std::to_string(seconds / 60) + " min " + std::to_string(seconds % 60) + " s).");
+        const std::string parts = to_compile.size() == units.size()
+                                      ? std::to_string(units.size()) + " parts"
+                                      : std::to_string(to_compile.size()) + " of " + std::to_string(units.size()) +
+                                            " parts compiled";
+        progress.finish("done", "The game's code is compiled (" + parts + " in " + std::to_string(seconds / 60) +
+                                    " min " + std::to_string(seconds % 60) + " s).");
         return 0;
     } catch (const std::exception &e) {
         progress.finish("failed", e.what());
@@ -804,6 +962,23 @@ int run(const Options &options) {
 
 } // namespace
 
+#if defined(PORTABLEKIT_ANDROID_APP)
+// The Android app's compile (host/d012_device_compile.cpp): the same steps,
+// with the app's paths (find_paths). 0: up to date or compiled;
+// kNeedsCompile with check_only when it must compile; 1: failed, with the
+// reason given to the listener.
+int run_in_app(bool check_only, std::function<void(const std::string &, unsigned)> listener) {
+    Options options;
+    options.android = true;
+    options.check_only = check_only;
+    g_listener = std::move(listener);
+    const int code = run(options);
+    g_listener = nullptr;
+    return code;
+}
+
+int needs_compile_code() { return kNeedsCompile; }
+#else
 int main(int argc, char **argv) {
     Options options;
     for (int i = 2; i < argc; ++i) {
@@ -833,9 +1008,11 @@ int main(int argc, char **argv) {
     }
     return run(options);
 }
+#endif
 
 } // namespace d012::compile_game
 
+#if !defined(PORTABLEKIT_ANDROID_APP)
 // The program's entry point in the installer build: PortableKit's main() is
 // compiled as d012_portablekit_main (portablekit_add_game(... HOST_MAIN_NAME)).
 int d012_portablekit_main(int argc, char **argv);
@@ -844,3 +1021,4 @@ int main(int argc, char **argv) {
     if (argc >= 2 && std::string_view(argv[1]) == "--compile-game") return d012::compile_game::main(argc, argv);
     return d012_portablekit_main(argc, argv);
 }
+#endif

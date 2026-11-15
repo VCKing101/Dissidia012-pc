@@ -136,7 +136,8 @@ std::vector<Library> &libraries() {
 #else
         if (path.extension() != ".so" && path.extension() != ".dylib") continue;
 #if defined(PORTABLEKIT_ANDROID_APP)
-        if (!path.filename().string().starts_with("libovl")) continue;
+        // Among the APK's own libraries, the overlays are libovl*.so.
+        if (!portablekit::env("OVERLAY_DIR") && !path.filename().string().starts_with("libovl")) continue;
 #endif
         void *handle = dlopen(path.string().c_str(), RTLD_NOW);
         if (handle == nullptr) continue;

@@ -101,6 +101,7 @@ Filename: "{app}\{#AppExe}"; WorkingDir: "{app}"; Description: "Play now"; Flags
 Type: filesandordirs; Name: "{app}\game-code"
 Type: filesandordirs; Name: "{app}\game-code.new"
 Type: filesandordirs; Name: "{app}\game-code.old"
+Type: filesandordirs; Name: "{app}\game-code-cache"
 Type: files; Name: "{app}\game-code-status.txt"
 Type: files; Name: "{app}\game-code-build.log"
 Type: files; Name: "{app}\setup-install.log"

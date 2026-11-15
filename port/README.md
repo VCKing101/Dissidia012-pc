@@ -423,6 +423,22 @@ built from the same source in another folder has the same bytes, and the same in
 or before has the input key only, so the first update from one compiles in full. Progress goes to stdout and to
 `game-code-status.txt`; the tools' output to `game-code-build.log`.
 
+When the C++ does change, only the parts that changed compile: `game-code-cache/` keeps each of the 324 parts'
+objects under the SHA-256 of what it is made from (the compiler, `sdk/`, the flags, its library's headers and its
+own source), and the libraries are linked from it; the cache keeps the last compile's objects only. A second forced
+compile on 15 November 2026 compiled 0 of 324 parts (the recompiles and linking only).
+
+The Android app does the same on the phone (`host/d012_device_compile.cpp`, through PortableKit's
+`GameProfile::prepare_game`): its APK carries clang and lld built for Android (`tools/port/android_compiler.sh`)
+and the recompiler as `libclang.so`, `liblld.so` and `libpsp_recomp.so`, since Android runs programs only from an
+app's native library folder, and the Android parts they compile with (bionic's headers, libc/libm/libdl link stubs
+and crt objects, libc++, libunwind, compiler-rt's builtins) built from AOSP's and LLVM's sources at pinned versions
+by `tools/port/android_runtime.sh`, nothing from the NDK. Those, clang's headers and `sdk/` are one asset,
+`toolchain.tar`, unpacked into the app's storage once; `toolchain/bin/clang++` and `ld.lld` are links to the
+programs, remade at every start, and clang runs with `-no-canonical-prefixes` so it finds its headers and the
+linker from the links' folder. Measured on 15 November 2026 on a Galaxy S25 Ultra: 12 s to unpack, 6 min 51 s for
+the whole compile (7 jobs), then the game; the next start went straight to it.
+
 Measured on 28 October 2026 (i7-12700K, 8 jobs, -O1): 4 minutes from the ISO, of which about 1 for the five
 recompiles and 3 for the compile. The C++ it generates is byte for byte the developer pipeline's (main and all
 four overlays, with the same overlay names and entry files). The game's code runs about three times faster than

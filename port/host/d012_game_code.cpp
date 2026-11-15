@@ -10,6 +10,9 @@
 //
 // On Linux they are main.so and overlays/*.so.
 //
+// In the Android app the folder is game-code/ in the app's own storage,
+// where the phone compiles the game's code (host/d012_device_compile.cpp).
+//
 // D012_GAME_CODE_DIR names another folder. PortableKit calls
 // register_generated_functions() where a port's build would have linked the
 // corpus (portablekit_add_game(... NO_CORPUS)).
@@ -18,6 +21,7 @@
 
 #include "app_paths.hpp"
 #include "corpus_library.hpp"
+#include "install/user_data.hpp"
 #include "profile.hpp"
 
 #include "psprecomp/corpus_abi.hpp"
@@ -34,7 +38,11 @@ namespace d012::game_code {
 std::filesystem::path directory() {
     if (const char *dir = std::getenv("D012_GAME_CODE_DIR"); dir != nullptr && *dir != '\0')
         return std::filesystem::path(std::u8string(dir, dir + std::char_traits<char>::length(dir)));
+#if defined(PORTABLEKIT_ANDROID_APP)
+    return portablekit::install::user_data_directory() / "game-code";
+#else
     return portablekit::executable_directory() / "game-code";
+#endif
 }
 
 namespace {
@@ -58,6 +66,11 @@ void register_generated_functions(CorpusRuntime &runtime) {
 #endif
     std::error_code ec;
     if (!std::filesystem::is_regular_file(library, ec)) {
+#if defined(PORTABLEKIT_ANDROID_APP)
+        // The app makes it before this (host/d012_device_compile.cpp).
+        std::cerr << "[game-code] " << library.string() << " is missing" << std::endl;
+        return;
+#endif
         d012::game_code::say("The game's code is not compiled yet (" + library.string() +
                              " is missing).\nRun the setup again to compile it from your disc.");
         return;

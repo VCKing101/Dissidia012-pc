@@ -43,7 +43,18 @@ add_subdirectory("${D012_PORTABLEKIT_DIR}" portablekit)
 # framework does not name; the profile keeps its copy in port/config. The
 # installer build's profile directory holds only that file, so a developer's
 # corpus and overlays in D012_WORK_DIR are never built into it.
-if(D012_INSTALLER_BUILD)
+if(D012_INSTALLER_BUILD AND ANDROID)
+    # The player's Android app: it carries no game code; the phone compiles
+    # it from the player's disc (host/d012_device_compile.cpp, with
+    # --compile-game's steps, host/d012_compile_game.cpp) into the app's
+    # storage, where host/d012_game_code.cpp loads it. SDL's main stays
+    # PortableKit's.
+    set(d012_profile_dir "${CMAKE_BINARY_DIR}/installer-profile")
+    set(d012_corpus NO_CORPUS)
+    set(d012_game_code "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_game_code.cpp"
+                       "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_compile_game.cpp"
+                       "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_device_compile.cpp")
+elseif(D012_INSTALLER_BUILD)
     set(d012_profile_dir "${CMAKE_BINARY_DIR}/installer-profile")
     # PortableKit's main() becomes d012_portablekit_main, behind the port's
     # own, which adds --compile-game (host/d012_compile_game.cpp).
@@ -184,8 +195,39 @@ if(PORTABLEKIT_RELEASE)
         COMPILE_DEFINITIONS D012_RELEASE_BUILD=1)
 endif()
 if(D012_INSTALLER_BUILD)
-    set_property(SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_portable.cpp" APPEND PROPERTY
+    set_property(SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_portable.cpp"
+                        "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_profile.cpp"
+                        "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_device_compile.cpp" APPEND PROPERTY
         COMPILE_DEFINITIONS D012_INSTALLER_BUILD=1)
+endif()
+if(D012_INSTALLER_BUILD AND ANDROID)
+    # What the phone's compile needs besides clang and lld
+    # (tools/port/android_build.sh packs them): the recompiler, as a program in
+    # the native library folder, and sdk/ (as the PC setups have it), which
+    # goes into the APK's toolchain.tar.
+    set(d012_sdk "${CMAKE_BINARY_DIR}/bin/android-toolchain/sdk")
+    add_custom_target(D012Native_android_files ALL
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/bin/android-programs"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:psp_recomp>"
+                "${CMAKE_BINARY_DIR}/bin/android-programs/libpsp_recomp.so"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${d012_sdk}/include/psprecomp"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${D012_PORTABLEKIT_DIR}/include/psprecomp/corpus_abi.hpp"
+                "${D012_PORTABLEKIT_DIR}/include/psprecomp/allegrex_context.hpp" "${d012_sdk}/include/psprecomp"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${D012_PORTABLEKIT_DIR}/host/overlay_module.hpp" "${d012_sdk}/include"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${D012_PORTABLEKIT_DIR}/host/corpus_module.cpp.in" "${D012_PORTABLEKIT_DIR}/host/overlay_module.cpp.in"
+                "${CMAKE_CURRENT_SOURCE_DIR}/config/dispatch-calls.txt"
+                "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_math.cpp" "${d012_sdk}"
+        VERBATIM)
+    add_dependencies(D012Native_android_files psp_recomp D012Native)
+    # A program Android runs from the native library folder: position
+    # independent, and the same bytes from the same source (--compile-game's
+    # key names it), so no build id.
+    target_link_options(psp_recomp PRIVATE -Wl,--build-id=none)
+endif()
+if(D012_INSTALLER_BUILD AND NOT ANDROID)
     # A windowed program: started from a shortcut, no console opens behind the
     # game. What it prints goes to data/logs/ then (host/d012_portable.cpp).
     set_target_properties(D012Native PROPERTIES WIN32_EXECUTABLE TRUE)

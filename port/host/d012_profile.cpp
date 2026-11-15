@@ -23,6 +23,18 @@
 #include <string>
 #include <string_view>
 
+#if defined(PORTABLEKIT_ANDROID_APP) && defined(D012_INSTALLER_BUILD)
+#include <filesystem>
+namespace portablekit::install {
+class InstallerUi;
+}
+namespace d012::device_compile {
+// d012_device_compile.cpp
+bool prepare(portablekit::install::InstallerUi *ui, const std::filesystem::path &executable,
+             const std::filesystem::path &disc_image);
+}
+#endif
+
 namespace portablekit {
 namespace {
 
@@ -200,6 +212,11 @@ const GameProfile &game() {
 
         .register_extra_hle = &d012::register_extra_hle,
         .patch_loaded_image = &d012::patch_loaded_image,
+#if defined(PORTABLEKIT_ANDROID_APP) && defined(D012_INSTALLER_BUILD)
+        // The player's app makes the game's code on the phone from the disc
+        // (d012_device_compile.cpp).
+        .prepare_game = &d012::device_compile::prepare,
+#endif
 
         // Battles pace their 30 Hz logic on two vblanks (main:0x08883F9C,
         // frame timer interval 2).

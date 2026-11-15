@@ -2,11 +2,17 @@
 # Builds a developer's Android app of the port (arm64-v8a, Android 10 and up)
 # in WSL, with the Android NDK, for the developer's own test device:
 #
-#   wsl -d Ubuntu-24.04 -- bash tools/port/android_build.sh [--sync-only] [--jobs N] [--gen-jobs N]
+#   wsl -d Ubuntu-24.04 -- bash tools/port/android_build.sh [--player] [--sync-only] [--jobs N] [--gen-jobs N]
 #
 # This app carries the game's code (libmain.so and the overlay libraries,
 # compiled from the recompiled build's corpus), so it is for the developer's
-# own device only and never shared. The player's app carries none of it.
+# own device only and never shared. The player's app carries none of it:
+# --player builds that one (the installer build, D012_INSTALLER_BUILD, in
+# build-player/, app id io.github.vcking101.dissidia012), which compiles the
+# game's code on the phone from the player's disc with the clang it carries
+# (host/d012_device_compile.cpp; run tools/port/android_runtime.sh and
+# tools/port/android_compiler.sh first) and loads it from its own storage
+# (game-code/, host/d012_game_code.cpp).
 #
 # Run from the checkout (on G:, through /mnt/g). Like tools/port/linux_build.sh
 # it copies into WSL's own disk (~/d012-android by default, D012_ANDROID_WORK):
@@ -44,14 +50,21 @@ gen_jobs=6
 # The setups compile the game's code at -O1 (host/d012_compile_game.cpp).
 gen_opt=1
 sync_only=0
+player=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --player) player=1; shift ;;
         --sync-only) sync_only=1; shift ;;
         --jobs) jobs="${2:?--jobs needs a value}"; shift 2 ;;
         --gen-jobs) gen_jobs="${2:?--gen-jobs needs a value}"; shift 2 ;;
         *) echo "unknown option $1" >&2; exit 2 ;;
     esac
 done
+
+if [[ "$player" -eq 1 ]]; then
+    app_id="${D012_APP_ID_PLAYER:-io.github.vcking101.dissidia012}"
+    app_name="${D012_APP_NAME_PLAYER:-Dissidia 012}"
+fi
 
 step() { printf '\n=== %s\n' "$*"; }
 fail() { echo "error: $*" >&2; exit 1; }
@@ -88,6 +101,7 @@ echo "PortableKit from $kit_tree"
 cp "$repo/tools/port/release-version.txt" "$root/src/tools/port/"
 cp "$repo/LICENSE" "$root/src/"
 for part in generated overlays config; do
+    [[ "$player" -eq 1 ]] && break
     if [[ ! -d "$root/work/$part" ]]; then
         [[ -d "$corpus/$part" ]] || fail "no corpus in $corpus (the recompiled build's generated/ and overlays/)"
         cp -r "$corpus/$part" "$root/work/$part"
@@ -122,7 +136,12 @@ sdl_cmake="$(dirname "$(find "$deps" -name SDL3Config.cmake | head -1)")"
 
 step "Configuring the port"
 build="$root/build"
-cmake -S "$root/src/port" -B "$build" -G Ninja "${toolchain[@]}" \
+player_flags=()
+if [[ "$player" -eq 1 ]]; then
+    build="$root/build-player"
+    player_flags=(-DD012_INSTALLER_BUILD=ON)
+fi
+cmake -S "$root/src/port" -B "$build" -G Ninja "${toolchain[@]}" "${player_flags[@]}" \
     -DCMAKE_BUILD_TYPE=Release \
     -DPORTABLEKIT_ANDROID_APP=ON \
     -DPORTABLEKIT_RELEASE=ON \
@@ -136,7 +155,9 @@ cmake -S "$root/src/port" -B "$build" -G Ninja "${toolchain[@]}" \
 
 step "Building"
 set +e
-cmake --build "$build" -j "$jobs" --target D012Native -- -k 0 2>&1 | tee "$root/build.log"
+build_targets=(D012Native)
+[[ "$player" -eq 1 ]] && build_targets+=(D012Native_android_files)
+cmake --build "$build" -j "$jobs" --target "${build_targets[@]}" -- -k 0 2>&1 | tee "$root/build.log"
 status=${PIPESTATUS[0]}
 set -e
 if [[ "$status" -ne 0 ]]; then
@@ -166,9 +187,43 @@ if [[ ! -f "$keystore" ]]; then
 fi
 version="$(tr -d '[:space:]' < "$root/src/tools/port/release-version.txt")"
 apk="$root/dist/Dissidia012-dev.apk"
+version_name="$version-dev"
+extra=()
+if [[ "$player" -eq 1 ]]; then
+    apk="$root/dist/Dissidia012.apk"
+    version_name="$version"
+    # The phone's compiler (host/d012_device_compile.cpp): clang, lld and the
+    # recompiler as libraries, and the rest as one asset, toolchain.tar, in the
+    # layout the app unpacks: lib/clang/<N>/ (clang's headers and the
+    # builtins), android/sysroot/, sdk/, licenses/. Made by
+    # tools/port/android_runtime.sh and tools/port/android_compiler.sh.
+    rt="${D012_ANDROID_RT_WORK:-$root/rt}/out"
+    [[ -x "$rt/android-compiler/bin/clang" && -d "$rt/android-runtime/sysroot" ]] ||
+        fail "no compiler for the phone in $rt: run tools/port/android_runtime.sh, then tools/port/android_compiler.sh"
+    programs="$build/apk-programs"
+    tree="$build/apk-toolchain"
+    assets="$build/apk-assets"
+    rm -rf "$programs" "$tree" "$assets"
+    mkdir -p "$programs" "$tree/lib/clang" "$tree/android" "$tree/licenses" "$assets"
+    cp "$rt/android-compiler/bin/clang" "$programs/libclang.so"
+    cp "$rt/android-compiler/bin/lld" "$programs/liblld.so"
+    cp "$build/bin/android-programs/libpsp_recomp.so" "$programs/"
+    cp -r "$rt/android-compiler/lib/clang/." "$tree/lib/clang/"
+    major="$(ls "$tree/lib/clang")"
+    cp -r "$rt/android-runtime/clang/lib" "$tree/lib/clang/$major/"
+    cp -r "$rt/android-runtime/sysroot" "$tree/android/"
+    cp -r "$build/bin/android-toolchain/sdk" "$tree/"
+    cp "$rt/android-runtime/licenses/"* "$rt/android-runtime/SOURCES.txt" "$tree/licenses/"
+    # The same files give the same tar: names sorted, no times or owners.
+    tar --format=ustar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -C "$tree" -cf "$assets/toolchain.tar" .
+    sha256sum "$assets/toolchain.tar" | cut -d' ' -f1 > "$assets/toolchain.sha256"
+    echo "toolchain.tar $(du -h "$assets/toolchain.tar" | cut -f1), $(cat "$assets/toolchain.sha256")"
+    extra=(EXTRA_LIBS="$programs" EXTRA_ASSETS="$assets")
+fi
+env "${extra[@]}" \
 APP_ID="$app_id" GAME_RES="$res" GAME_REPO="$repo" FONT_DIR="$sources" \
 KEYSTORE="$keystore" KEYSTORE_PASS=d012dev KEY_ALIAS=d012dev \
-VERSION_NAME="$version-dev" VERSION_CODE="$(date +%s)" DEBUGGABLE=1 \
+VERSION_NAME="$version_name" VERSION_CODE="$(date +%s)" DEBUGGABLE=1 \
     bash "$root/src/PortableKit/packaging/android/build_apk.sh" "$build" \
         "$root/deps-build/SDL3-$SDL3_VERSION" "$sdl_lib" "$apk"
 sha256sum "$apk"
