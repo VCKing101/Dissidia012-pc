@@ -658,8 +658,10 @@ void network_log_lines(std::vector<std::string> &lines) {
         lines.push_back("must match: " + what + " = " + (value.empty() ? "-" : value));
     const std::string delay = net::setting("D012_NET_DELAY", kDelayKey);
     const std::string always = net::setting("D012_NET_ALWAYS_RELAY", kAlwaysRelayKey);
+    const std::string rollback = net::setting("D012_NET_ROLLBACK", "online.rollback");
     lines.push_back("battle: UDP " + std::to_string(net::battle::port()) + ", input delay " +
-                    (delay.empty() ? "auto" : delay) + ", always through the server " + (always.empty() ? "0" : always));
+                    (delay.empty() ? "auto" : delay) + ", rollback " + (rollback.empty() ? "auto" : rollback) +
+                    ", always through the server " + (always.empty() ? "0" : always));
     if (const std::string path = net::battle::last_path(); !path.empty()) lines.push_back("last battle: " + path);
     if (const std::string why = net::battle::why_not(); !why.empty())
         lines.push_back("last battle that could not start: " + why);

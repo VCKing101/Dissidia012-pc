@@ -585,7 +585,9 @@ at a room, a search and Netconf since the fix, Linux and the Deck.
    the relay; the other copy answers each PROBE on the path it came by. Anything from one of the other's addresses
    (by IP; its router may change the port) counts as the direct path, and its sender's address is the one used.
 4. The leading copy times up to 8 round trips on each path for up to 2 s, as before for the relay alone. **The battle
-   goes direct when the direct path answered at least 3 times**; that path's round trips set the input delay.
+   goes direct when the direct path answered at least 3 times and its median round trip is not more than 5 ms above
+   the relay's** (section 14: two copies on one home Wi-Fi were slower to each other than through a wired server);
+   that path's round trips set the input delay.
    WELCOME (link version 9) carries a byte saying which, and goes on both paths. Both setting a fixed delay no
    longer skips the probe while a direct path may come.
 5. **A move to the relay mid-battle:** a copy that has waited a second for the other's input with nothing on the
@@ -629,6 +631,56 @@ take on the direct path, as a router that stopped passing it would.
 fighters behind one router reaching each other by their own-network addresses), mobile data, a hosting copy's relay
 with two other fighters, Group Battle (its watchers on the relay while the fighters go direct), rollback with a
 direct battle, Linux and the Deck. Step 6 of section 9 covers them.
+
+## 14. Tests on the home network (step 6, 16 November 2026)
+
+**Set-up.** `dissidia012-server` on this PC (192.168.0.x, wired; Windows asked once to allow it), from the clang build
+of cbab3262. The same commit built for:
+- **The Deck** (native Linux, Wi-Fi): `tools/port/linux_build.sh` with `D012_PORTABLEKIT_DIR` at the `public-server`
+  PortableKit, the portable package (22 files) swapped into `~/Games/Dissidia012-testinstall` over ssh as before
+  (program files backed up in `Dissidia012-testinstall-before-matchmaking`; `data/` and `game/` untouched;
+  `network.online_server` set to the PC in its settings.ini, backup `settings.ini.before-matchmaking`).
+- **The phone** (Galaxy S25 Ultra, Wi-Fi): the developer's app, `D012_APP_NAME="Dissidia 012 Dev"`
+  `tools/port/android_build.sh`, installed over the earlier dev app (same id, data kept), the server set the same way
+  through `run-as` (backup kept).
+- **This PC**: a copy driven by live input (scratchpad `lan-test.ps1`).
+
+All three builds have source hash `ea0dc7ef…`, and the server kept them together as one version (`ea0dc7ef6a033ab6-std`).
+Each device reached the game-styled chooser, chose Play Online and remembered it (the address file is not on main yet:
+"could not be fetched (GitHub answered 404)", the setting's address used instead).
+
+**Battles** (V; the owner played the Deck and the phone, the PC's fighter stood still; each 1-on-1 at Lv 20 from
+lobby 9):
+
+| Fighters | Path | Delay | What the logs say | The player |
+| --- | --- | --- | --- | --- |
+| PC vs Deck, lockstep | direct (3 ms; relay 4 ms) | 2 | In step to frame 3,210 and on; mostly 2 to 4 ms round trips, but spikes to 273 ms on the Deck's Wi-Fi: one wait of 741 ms, runs of ~170 ms waits, on both copies at once. Stayed direct (no wait reached the 1 s move) | "Felt good. A few stutters", the Deck's Wi-Fi |
+| PC vs Deck, rollback 7 | direct (4 ms) | 1 | Full speed (each 900 frames in 30.03 s), no waits, 8 checks agreed; no rollback needed (every guess right); a save 3 ms on the PC, 4.5 to 5.1 ms on the Deck | "Much smoother, barely any stutters" |
+| PC vs phone, rollback 7 | direct (5 ms) | 1 | Full speed, 7 checks agreed, no rollback needed; a save 6.4 to 7.2 ms on the phone | "Felt good, especially for phone" |
+| Deck vs phone, rollback 7 | direct (52 ms; relay 34 ms) | 1 | Full speed (900 frames in 30.05 s), 6 checks agreed; the phone went back 33 to 81 times every 30 s, at most 6 frames at once; a phone save 5.2 to 5.5 ms, a restore 3.6 to 3.8 ms | Fine |
+
+**What changed from them** (built and checked on this PC, two copies through a second server on other ports):
+- **Rollback by default through the public server.** `online.rollback` (`D012_NET_ROLLBACK`) empty or `auto` is now 7
+  frames for a battle through Play online and off for a session hosted or joined; a number or `off` still decides.
+  It is fixed as each battle opens (Play online can be chosen mid-run), logged as "rollback: up to 7 frames ahead",
+  and written in the network log's head. Checked: both copies through Play online took 7 with no setting, 1 frame of
+  delay, in step; both through Join stayed in the lockstep with 2 frames.
+- **The faster path.** The Deck and the phone, both on Wi-Fi, were 52 ms apart directly and 34 ms through the wired
+  PC's relay; the battle went direct all the same. Now the direct path must be within 5 ms of the relay's median
+  (section 13, step 4).
+
+**A challenge that failed once.** The first PC-to-phone challenge ended with "The challenge was canceled." on the PC
+and "Connection timed out." on the phone; neither copy joined the battle's group, and the network trace was off. It
+did not happen again in three challenges with the trace on. In every traced challenge the copy that accepts calls
+`sceNetAdhocctlGetPeerInfo` for the challenger right after ESTABLISHED (game 0x08903960), finds it "not in the group"
+(the challenger, which hosts, has already left the lobby for the battle's group) and calls `CancelTarget` (0x08903DF8),
+harmlessly since the challenger has moved on. A PSP keeps a departed peer in its list for a while; PortableKit drops it
+the moment the server says it left. If the order ever flips, that cancel may be what the PC saw (I). Not fixed; the
+trace switch on the Network page (Log every call and packet) catches it if it comes back.
+
+**Not tested:** a rented machine on the internet (the next part of step 6, once the host is chosen), routers that
+refuse hole punching, mobile data, Group Battle and Communications on the server, the Deck and the phone on the
+rebuilt defaults (their builds have rollback 7 set by hand and predate the faster-path rule).
 
 ## Sources
 

@@ -130,9 +130,12 @@ struct Pads {
 // As exchange() above, for the battle's frame `frame`.
 Pads exchange(std::uint64_t frame, const input::Pad &mine);
 
-// Rollback (D012_NET_ROLLBACK or online.rollback): how many frames this copy
-// may run past the other's latest input, guessing it; 0, the default, keeps
-// the lockstep. The guessed frames come off the automatic input delay.
+// Rollback: how many frames this copy may run past the other's latest input in
+// the open battle, guessing it; 0 keeps the lockstep. The guessed frames come
+// off the automatic input delay. Fixed as each battle opens, by
+// D012_NET_ROLLBACK or online.rollback: a number (1 to 12), "off", or empty
+// or "auto", the default: 7 for a battle through the public server (Play
+// online), off for a session hosted or joined.
 [[nodiscard]] std::uint32_t rollback_frames();
 // Rollback's exchange: both pads for `frame` without waiting for the other's,
 // guessed (`guessed`) when it has not come. A frame run again (`rerun`) keeps

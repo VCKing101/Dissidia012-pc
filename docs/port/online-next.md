@@ -282,7 +282,9 @@ saves (piece 8) would take most of the 5 ms save away.
 ### 5.8 Rollback in online battles (8 November 2026)
 
 Pieces 2, 5 and 6 of 5.6, on by a setting: `online.rollback` in settings.ini, or `D012_NET_ROLLBACK`, the frames a
-copy may run past the other's input (1 to 12; empty or `off`, the default, keeps the lockstep).
+copy may run past the other's input (1 to 12; `off` keeps the lockstep). Since 16 November 2026 empty or `auto`, the
+default, is 7 for a battle through the public server (Play online) and off for a hosted or joined session
+([online-matchmaking.md](online-matchmaking.md), section 14).
 
 **How it works.**
 - **The link** (`net::battle::exchange_ahead`): this copy's input for a frame goes out as before; both inputs come

@@ -175,6 +175,7 @@ constexpr std::size_t kProbes = 8u;           // round trips timed for an automa
 constexpr auto kProbeEvery = std::chrono::milliseconds(40);
 constexpr auto kProbeFor = std::chrono::seconds(2);
 constexpr std::size_t kDirectLeast = 3u;      // the direct path's answers that make it the battle's
+constexpr std::uint32_t kDirectSlack = 5u;    // ms the direct path may be slower and still be chosen
 constexpr auto kDirectQuiet = std::chrono::seconds(1);  // waiting, nothing direct: move to the relay
 constexpr auto kKeepRelay = std::chrono::seconds(5);    // ASK again while direct
 constexpr std::uint16_t kBattlePort = 27420;  // the battle link's UDP port by default
@@ -1227,18 +1228,27 @@ sockaddr_in local_address(const Link &l) {
 }
 
 // The leading copy, its probing done: the direct path when it answered
-// (kDirectLeast times), else the relay. The chosen path's round trips set the
-// input delay.
+// (kDirectLeast times) and is not slower than the relay by more than
+// kDirectSlack (two copies on one home Wi-Fi can be slower to each other than
+// through a wired server), else the relay. The chosen path's round trips set
+// the input delay.
 void choose_path(Link &l) {
     if (!l.relay) return;
-    const auto median = [](std::vector<std::uint32_t> trips) {
-        if (trips.empty()) return std::string("?");
+    const auto median = [](std::vector<std::uint32_t> trips) -> std::optional<std::uint32_t> {
+        if (trips.empty()) return std::nullopt;
         std::sort(trips.begin(), trips.end());
-        return std::to_string(trips[trips.size() / 2u]);
+        return trips[trips.size() / 2u];
     };
+    const auto text = [](std::optional<std::uint32_t> ms) { return ms ? std::to_string(*ms) : std::string("?"); };
+    const std::optional<std::uint32_t> direct = median(l.direct_trips), relayed = median(l.probe_trips);
     if (l.direct && l.direct_trips.size() >= kDirectLeast) {
-        std::cout << "[" << l.name << "] the direct path answered (a round trip of " << median(l.direct_trips)
-                  << " ms; through the relay " << median(l.probe_trips) << " ms): the battle goes direct" << std::endl;
+        const std::string trips = "a round trip of " + text(direct) + " ms; through the relay " + text(relayed) + " ms";
+        if (relayed && *direct > *relayed + kDirectSlack) {
+            std::cout << "[" << l.name << "] the direct path answered but is slower (" << trips
+                      << "): the battle goes through the relay" << std::endl;
+            return;
+        }
+        std::cout << "[" << l.name << "] the direct path answered (" << trips << "): the battle goes direct" << std::endl;
         l.peer = *l.direct;
         l.on_direct = true;
         l.direct_heard = Clock::now();
@@ -1708,6 +1718,21 @@ namespace {
 int local_player = 0;  // this copy's fighter in the game: 0 or 1
 std::string failure;   // why the last open() failed, for the player
 std::string path;      // the way the last battle linked went
+// The battle's rollback window (rollback_frames()), fixed as it opens.
+std::uint32_t rollback = 0u;
+// Through the public server (Play online), rollback by default: its window,
+// the one the Deck's tests used (communication-mode.md, section 19.6;
+// online-matchmaking.md, section 14).
+constexpr std::uint32_t kServerRollback = 7u;
+
+// The window for a battle as it opens: the setting (read once), else
+// kServerRollback through the public server and none otherwise.
+std::uint32_t rollback_for(bool through_public_server) {
+    static const std::string text = setting("D012_NET_ROLLBACK", "online.rollback");
+    if (text.empty() || text == "auto") return through_public_server ? kServerRollback : 0u;
+    if (text == "off" || text == "0") return 0u;
+    return static_cast<std::uint32_t>(std::clamp<unsigned long>(std::strtoul(text.c_str(), nullptr, 10), 1u, 12u));
+}
 
 // Rollback's leading copy: the frames below `upto` whose inputs are both
 // certain (the other's in, below their_count) go into the watchers' stream,
@@ -1968,6 +1993,9 @@ bool open(int player, std::uint32_t tag) {
     l.name = "battle-net";
     l.unit = "frame";
     l.tag = tag & kTagMask;
+    // Before the link: the leading copy's automatic delay counts the window.
+    rollback = rollback_for(text.empty() && portablekit::adhoc_online() && !portablekit::adhoc_hosting());
+    if (rollback != 0u) std::cout << "[battle-net] rollback: up to " << rollback << " frames ahead" << std::endl;
     if (!connect(l, listen, address, where, 30u, text.empty())) {
         if (l.refused) {
             failure = "This battle cannot start: the other player's game differs in " + l.refusal +
@@ -2019,14 +2047,7 @@ Pads exchange(std::uint64_t frame, const input::Pad &mine) {
     return pads;
 }
 
-std::uint32_t rollback_frames() {
-    static const std::uint32_t frames = [] {
-        const std::string text = setting("D012_NET_ROLLBACK", "online.rollback");
-        if (text.empty() || text == "off" || text == "0") return 0u;
-        return static_cast<std::uint32_t>(std::clamp<unsigned long>(std::strtoul(text.c_str(), nullptr, 10), 1u, 12u));
-    }();
-    return frames;
-}
+std::uint32_t rollback_frames() { return rollback; }
 
 Pads exchange_ahead(std::uint64_t frame, const input::Pad &mine, bool rerun, bool &guessed) {
     Link &l = battle_link();
