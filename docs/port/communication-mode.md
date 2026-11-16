@@ -1050,3 +1050,26 @@ for the switch became 0097, as main had taken 0095 and 0096.
 
 **Not verified.** Sending an Original Quest and Import a Friend Card between machines; more than one watcher at once; a path beyond one home network; rollback on a real
 path's jitter (the PC copy's lag was simulated).
+
+## 20. DLC on one side only, and cheats online (17 November 2026)
+
+Two copies of the clang build on this PC through `dissidia012-server --loopback` (scratchpad `dlc-test.ps1`), lobby 9,
+Lv 20, both Lightning. Copy 1 had the official USA DLC (222 files in `PSP/GAME/ULUS10566`) and Bravery 9,999 and
+Infinite HP on (`D012_CHEATS`, `D012_TRACE_CHEATS=1`); copy 2 had no `PSP/GAME` folder at all.
+
+**DLC (V).** On Player Select copy 1 pressed Look once: LOOK became DLC 1 (Lightning's DLC costume). Five battles
+with it (runs `dlc2` to `dlc5`, one a rematch) all stayed in step: after copy 1's forfeit both copies left on the
+same frame (2,914, 2,945, 2,954 and 1,663), and the rematch was still in step at frame 1,290 when the run ended.
+Copy 1 drew its own fighter in the DLC costume (black top, jeans) and copy 2's in the normal one. Copy 2's view of
+copy 1's fighter, small at the other end of the stage, looked like the normal costume (I): it never came close enough
+to be sure. The first run (`dlc1`), without the costume, was in step to frame 5,130.
+
+**Cheats (V), patch 0111.** Copy 1 ran its two cheats about a thousand times from boot, then logged `[cheats] paused:
+the game is playing ad hoc` as it entered the Online Lobby, and ran none through the battles: both fighters started
+with the battle's own 368 Bravery and 3,306 HP. After the forfeit, YES to "Disconnect wireless and return to the
+lobby?" left it in the lobby, still paused; YES to "Disconnect wireless and return to the Start Menu?" logged
+`running again` and the cheats ran 236 times by the next look. Entering the Online Lobby again paused them again, and
+the Cheats page showed "Cheats are paused while you play online. They come back on when you leave."
+
+**Not verified.** Two machines, another character's DLC costume, fan costumes, Group Battle and Communications with
+cheats on, the Steam Deck and Android.

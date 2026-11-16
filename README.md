@@ -432,6 +432,7 @@ Open the menu (Esc, or L3 + R3 on a controller) and go to **Cheats**:
 - **Battle:** Infinite HP, Max HP 999,999, Bravery 9,999, Infinite EX, Infinite Assist and Level 100 for you;
   Bravery 0, Max HP 100, No EX and No Assist for the opponent, and Defeat with Select.
 - **Use cheats** at the top turns them all off at once.
+- **Online, cheats pause:** in Communication Mode none run. The ones you had on come back on when you leave.
 
 PP shows its new amount the next time you open the PP Catalog. **Level 100** really levels up the character you
 fight with: it stays at level 100 after you turn the cheat off.

@@ -133,7 +133,7 @@ constexpr BuiltinCheat kCheats[] = {
 std::span<const portablekit::BuiltinCheat> builtin_cheats() { return kCheats; }
 
 std::uint32_t ap_after_battle() {
-    if (!portablekit::settings::current().cheats) return 0u;
+    if (!portablekit::settings::current().cheats || portablekit::cheats::paused_online()) return 0u;
     const portablekit::cheats::Overview overview = portablekit::cheats::overview();
     if (!overview.available) return 0u;
     for (std::size_t i = 0; i < std::size(kCheats) && i < overview.builtin.size(); ++i) {
