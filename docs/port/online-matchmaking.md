@@ -682,6 +682,39 @@ trace switch on the Network page (Log every call and packet) catches it if it co
 refuse hole punching, mobile data, Group Battle and Communications on the server, the Deck and the phone on the
 rebuilt defaults (their builds have rollback 7 set by hand and predate the faster-path rule).
 
+## 15. The official server (16 November 2026)
+
+**The machine.** The owner chose Vultr, Mexico City (players in the US, Central and South America): Shared CPU, High
+Performance `vhp-1c-1gb` (1 vCPU, 1 GB, 25 GB NVMe, 2 TB a month), US$6 a month, Ubuntu 24.04 LTS x64, public IPv4
+only, no backups, no DDoS add-on, SSH by the key made for it (`dissidia_server`), root login by key only.
+`online/server.json` names it (the players' games read that file from main). Miami was the other candidate (most South American routes
+pass through it); Vultr's test hosts `mex-mx-ping.vultr.com` and `mia-us-ping.vultr.com` let players compare.
+
+**What runs on it.**
+- `/opt/dissidia012/dissidia012-server`, built with GCC 13 on Ubuntu 24.04 (WSL, `g++ -std=c++20 -O2`, the same
+  sources as `port/server/CMakeLists.txt`), copied over ssh; it needs only libstdc++ and the C library.
+- The service: `port/server/dissidia012-server.service` in `/etc/systemd/system`, enabled: the unprivileged user
+  `dissidia` (no home, no shell), restarted 5 s after it stops, the system read-only to it
+  (`ProtectSystem=strict` and the rest), `--ban-list /etc/dissidia012/bans.txt` (the owner edits it as root; read
+  again within 5 s).
+- The firewall (ufw, on in Vultr's image): SSH, TCP 27312 to 27313 and UDP 27420, nothing else.
+- The log is the journal (`journalctl -u dissidia012-server`), kept 7 days (`/etc/systemd/journald.conf.d/
+  dissidia-retention.conf`): it holds players' addresses.
+- System updates installed at set-up and a reboot; Ubuntu's unattended upgrades stay on.
+
+To update the program: build it again, copy it over the old one, `systemctl restart dissidia012-server`.
+
+**Checked from this PC (V):** after a reboot the service came up by itself, listening on its three ports. From the
+owner's PC (far from Mexico City) a TCP connect to the lobby takes about 290 ms, and STATUS answers in 288 ms with
+the right counts. Two copies of the clang build behind the owner's router through it, Play online: logged in on one
+version, lobby 9, a challenge and a battle; rollback 7 by default; introduced, the direct path (on the home network,
+0 ms) chosen over the relay (577 ms there and back twice), in step. The same with Always through the server on one:
+every input through Mexico City, a 584 ms round trip, 3 frames of delay; rollback went back 34 times in 900 frames,
+at most 8 frames, no waits, in step at frames 650 and 1,290. The server's log has the logins, groups and battles.
+
+**Not yet:** players finding it by themselves (it counts once this branch's `online/server.json` is on main, and
+needs a release with Play online), players near the server, the Deck and the phone through it.
+
 ## Sources
 
 - [Oracle, Always Free Resources][oci-free], read 10 November 2026: the allowances, the home region, the idle rule.
