@@ -516,7 +516,7 @@ stay, for a choice undone on the Network page while in a lobby: a room picked (`
 `Join`), a Communications search, a Group Battle connection (Netconf); backed out of there, the game says "An error
 has occurred. (0x80410B05)" as it did with nothing set up before (V for the room; not tried for the other two).
 
-**PortableKit** (patch 0109, branch `public-server`):
+**PortableKit** (patches 0109 and 0110, branch `public-server`):
 - `ui/choice_screen.*`: `choose_over_game`, `notice_over_game`, `type_over_game`, screens over the paused game with
   one pause for the screens opened from one another (no input to the game, its sound stopped, the skin's sounds
   muted so none plays late).
@@ -532,6 +532,8 @@ has occurred. (0x80410B05)" as it did with nothing set up before (V for the room
   the player was asked and backed out. `D012_NO_ADHOC_CHOOSER=1` turns it off.
 - The keyboard: B with nothing typed goes back, as Cancel does (a new press; held down to delete, it stops at the
   empty field), and the hint says Back then instead of Delete.
+- Patch 0110: the screens' pause, and `wait_over_game`, stop frame interpolation's presents between the game's
+  frames, as the menu does; without it the window alternated between the screen and the game beneath it.
 
 **The port**: `d012_dialogs.cpp`'s `choices`, laid out as the Load screen: the page and its title, the instruction
 band, the choices as plates with the hand, the selected one's detail in the panel, the hint bar; its keyboard's hint
