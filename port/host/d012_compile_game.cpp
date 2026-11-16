@@ -557,6 +557,11 @@ std::vector<std::string> compile_flags(const Options &options) {
 #else
     flags.push_back("-fPIC");
 #endif
+    // On 64-bit ARM clang fuses a * b + c into one instruction, rounded once,
+    // so the phone's battles drift from the x86-64 builds' and online battles
+    // part ("Network sync failed"). x86-64 has nothing to fuse into, as for
+    // the program (port/CMakeLists.txt).
+    if (options.android) flags.push_back("-ffp-contract=off");
     return flags;
 }
 
@@ -630,6 +635,14 @@ std::string code_key(const Paths &p, const Options &options, const std::vector<s
     for (const std::string &hash : disc_hashes) key << "disc=" << hash << "\n";
     key << "recompiler=" << psprecomp::sha256_file(p.recompiler) << "\n";
     add_tools(key, p);
+    // Android's flags as well: 0.7.2's lacked -ffp-contract=off, so a phone
+    // with code compiled before compiles it again. The PC and Linux keys stay
+    // as they were, and their updates still skip the compile.
+    if (options.android) {
+        key << "flags";
+        for (const std::string &flag : compile_flags(options)) key << " " << flag;
+        key << "\n";
+    }
     return sha256_text(key.str());
 }
 
