@@ -221,6 +221,9 @@ const GameProfile &game() {
         // Play online (d012_online.hpp, docs/port/online-matchmaking.md).
         .public_server = d012::online::public_server,
         .public_server_players = d012::online::players,
+        // Asked from the Communications Mode menu instead, where Back returns
+        // to the menu (d012_online_menu.cpp).
+        .adhoc_choice_at_init = false,
 
         // The keyboard: the mouse wheel on the D-pad, and a key each for the
         // battle moves made from two buttons together.

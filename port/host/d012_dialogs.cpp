@@ -1091,6 +1091,63 @@ void save_list(const ui::SaveListSkinView &view, ui::SkinPointer &pointer) {
         hint_bar(c, {{&confirm_symbol(view.confirm_south), verb}, {&back_symbol(view.confirm_south), "Back"}});
 }
 
+// --- A list of choices ---------------------------------------------------------
+
+// The port's own choices over the paused game (PortableKit's choose_over_game:
+// how to play online), laid out as the save list is: the choices as plates
+// down the left, a few lines about the selected one in the panel at the right.
+void choices(const ui::ChoiceSkinView &view, ui::SkinPointer &pointer) {
+    const Canvas c = canvas();
+    page(c, view.title);
+    instruction(c, view.prompt);
+
+    constexpr float kLeft = 40.0f, kWidth = 226.0f, kTop = 74.0f, kRow = 24.0f, kHeight = 18.0f;
+    constexpr std::size_t kVisible = 7u;
+    std::size_t first = 0u;
+    if (view.selected >= kVisible) first = view.selected + 1u - kVisible;
+    for (std::size_t n = 0; n < kVisible && first + n < view.items.size(); ++n) {
+        const std::size_t index = first + n;
+        const ui::ChoiceSkinItem &item = view.items[index];
+        const bool selected = index == view.selected;
+        const float y = kTop + static_cast<float>(n) * kRow;
+        plate(c, kLeft, y, kWidth, kHeight, selected);
+        face_text(c, plate_face(kLeft, y, kWidth, kHeight), item.label, selected, 9.0f, 0.0f, 0.9f,
+                  item.enabled ? std::nullopt : std::optional<ImU32>(rgba(140, 138, 170)));
+        if (selected) hand(c, kLeft, y);
+        pointer_over(c, kLeft, y, kLeft + kWidth, y + kHeight, static_cast<int>(index), pointer);
+    }
+    if (first > 0u) piece(c, kArrowUp, kLeft + kWidth * 0.5f - 6.0f, kTop - 8.0f, 6.0f);
+    if (first + kVisible < view.items.size())
+        piece(c, kArrowDown, kLeft + kWidth * 0.5f - 6.0f, kTop + kVisible * kRow - 1.0f, 6.0f);
+
+    constexpr float kPanelX = 290.0f, kPanelY = 72.0f, kPanelW = 180.0f, kPanelH = 166.0f;
+    c.draw->AddRectFilled(c.at(kPanelX, kPanelY), c.at(kPanelX + kPanelW, kPanelY + kPanelH), rgba(255, 255, 255, 150),
+                          3.0f * c.s);
+    c.draw->AddRect(c.at(kPanelX, kPanelY), c.at(kPanelX + kPanelW, kPanelY + kPanelH), rgba(150, 146, 200), 3.0f * c.s,
+                    0, std::max(1.0f, 0.6f * c.s));
+    if (view.selected < view.items.size()) {
+        const ui::ChoiceSkinItem &shown = view.items[view.selected];
+        TextStyle name;
+        name.size = 12.0f;
+        name.fill = kNavy;
+        name.rim = kWhite;
+        TextStyle detail = name;
+        detail.size = 10.0f;
+        detail.fill = rgba(50, 48, 100);
+        c.draw->PushClipRect(c.at(kPanelX, kPanelY), c.at(kPanelX + kPanelW - 4.0f, kPanelY + kPanelH), true);
+        text_at(c, kPanelX + 10.0f, kPanelY + 10.0f, shown.label, name);
+        const std::vector<std::string> lines = wrap(c, shown.detail, kPanelW - 20.0f, detail);
+        for (std::size_t n = 0; n < lines.size() && n < 10u; ++n)
+            text_at(c, kPanelX + 10.0f, kPanelY + 30.0f + 13.0f * static_cast<float>(n), lines[n], detail);
+        c.draw->PopClipRect();
+    }
+
+    if (keyboard_hints())
+        hint_bar(c, {{nullptr, "Enter: Choose"}, {nullptr, "Esc: Back"}});
+    else
+        hint_bar(c, {{&confirm_symbol(view.confirm_south), "Choose"}, {&back_symbol(view.confirm_south), "Back"}});
+}
+
 // --- The keyboard -----------------------------------------------------------
 
 void keyboard(const ui::KeyboardSkinView &view, ui::SkinPointer &pointer) {
@@ -1151,7 +1208,7 @@ void keyboard(const ui::KeyboardSkinView &view, ui::SkinPointer &pointer) {
     const bool south = view.confirm_south;
     if (view.gamepad) {
         hint_bar(c, {{&confirm_symbol(south), "Type"},
-                     {&back_symbol(south), "Delete"},
+                     {&back_symbol(south), view.text.empty() ? "Back" : "Delete"},
                      {&face_piece(kSquare), "Shift"},
                      {&face_piece(kTriangle), "Space"},
                      {&kStart, "OK"}});
@@ -1280,6 +1337,7 @@ void install(portablekit::HleRegistrar &hle) {
     skin.message = message;
     skin.save_list = save_list;
     skin.keyboard = keyboard;
+    skin.choices = choices;
     ui::set_dialog_skin(skin);
 }
 

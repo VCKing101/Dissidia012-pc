@@ -97,6 +97,7 @@ portablekit_add_game(D012Native ${d012_corpus}
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_net.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_battle_relay.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_online.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_online_menu.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_online_rules.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_rollback.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_comm_battle.cpp"

@@ -382,7 +382,7 @@ build with `-DD012_BUILD_SERVER=ON`. It links PK's ad hoc code (`host/adhoc/`, `
 battle relay, now in `port/host/d012_battle_relay.cpp` so the game (while hosting) and the server share it. No
 graphics, sound or disc.
 
-**PortableKit changes** (future patch 0107, branch `public-server`):
+**PortableKit changes** (patch 0107, branch `public-server`):
 - A login carries a version tag after the nickname's NUL (`protocol.hpp`, `kVersionMark`), so older servers read
   the nickname as before. `GameProfile::adhoc_version` gives it; the port's is the first 16 digits of the source hash
   and the compiler's kind (`d012_profile.cpp`), what a battle's start checks.
@@ -448,7 +448,7 @@ CMake build on Linux, a real machine, two machines, many players.
 
 ## 11. Play online (step 3, built 15 November 2026)
 
-**PortableKit** (future patch 0108, branch `public-server`):
+**PortableKit** (patch 0108, branch `public-server`):
 - `GameProfile::public_server` (the address, or empty with a note for the player) and `public_server_players`
   (the count, -1 while not known). With them the Network page starts with **Play online**: "Play online   N players
   on"; chosen, "Playing online" and a red **Stop playing online**. Hosting keeps **Stop hosting**; a joined session
@@ -485,6 +485,88 @@ two copies, the server on loopback, `D012_ONLINE_URL` pointing at a file naming 
 **Not tested:** the file fetched from GitHub (it is not on main until this branch is merged and pushed: until then
 the fetch answers 404 and the page says the address could not be fetched), Linux and Android, the Deck, a copy with
 no data folder for the cache.
+
+## 12. The chooser (step 4, built 15 November 2026)
+
+**When.** The game does not read the wireless switch on its way to the Online Lobby (a trace of the 15 November
+runs: no `sceWlanGetSwitchState` at all). Each of Communications Mode's five rows leaves the start menu for a
+destination (main `0x09B6D838`: 6 Online Lobby, 7 Group Battle, 8 Friend Cards, 9 Artifacts, 10 Communications), and
+all five start the network on the way (`sceNetAdhocctlInit`, from main `0x0890E61C`), Friend Cards and Artifacts too
+(V, a trace of each row on 16 November). The game does not read whether that start worked (`0x0890E61C` drops the
+result) and goes on to the row's screen (V), so a question asked from `sceNetAdhocctlInit`, as first built, could not
+return the player to the menu: Back there went on to the lobby list.
+
+So the port asks from the menu, over it, for destinations 6, 7 and 10 only (`port/host/d012_online_menu.cpp`). The
+submenu handler (menu `0x089E4A60`; submenu `state+0xA88` = 2 for Communications Mode, row `state+0xA5C`) plays the
+"chosen" sound, writes the destination and mode 4 (`state+0`), and ends with menu `0x089E1DD8`, which calls
+`0x089E30B8`, which calls main `0x088D4EC4` with the state + 0x888: the hook, in the same frame as the writes, before
+the menu starts leaving. Calls inside the overlay's own generated unit are inline and cannot be overridden; this one
+goes to main, and only the menu overlay calls `0x088D4EC4`. Backed out of, the mode and the destination go back to
+what they were at the call before, and the menu stays as it was, the hand on the row (V).
+
+Two ways that did not work: asking as the menu leaves (main `0x0888208C`, the last call before menu `0x089E0CEC`
+switches on the destination) and setting the destination to 0 opened the title screen, not the start menu: 0 is the
+title (menu `0x089DE910`/`0x089DE94C`, object `0x089E09C0`), and the start menu is a task the other screens start
+again themselves (menu `0x089E0BDC`, object `0x089E75C4`), while `0x089E0CEC` runs as that task's own exit callback
+(V, the 16 November run). Hooking the main calls right after the handler's writes in `0x089E1E0C` (`0x088D44EC`,
+`0x088D3F00`) would have shared them with the versus row's hooks.
+
+PortableKit's question at `sceNetAdhocctlInit` is off for this game (`GameProfile::adhoc_choice_at_init`). Its others
+stay, for a choice undone on the Network page while in a lobby: a room picked (`sceNetAdhocctlCreate`/`Connect`/
+`Join`), a Communications search, a Group Battle connection (Netconf); backed out of there, the game says "An error
+has occurred. (0x80410B05)" as it did with nothing set up before (V for the room; not tried for the other two).
+
+**PortableKit** (patch 0109, branch `public-server`):
+- `ui/choice_screen.*`: `choose_over_game`, `notice_over_game`, `type_over_game`, screens over the paused game with
+  one pause for the screens opened from one another (no input to the game, its sound stopped, the skin's sounds
+  muted so none plays late).
+- `DialogSkin::choices` (`ChoiceSkinView`: title, prompt, items with a detail each); a keyboard asking for the game's
+  look (`TextInputRequest::game_look`); PortableKit's own look when a port has no skin.
+- `ui/adhoc_chooser.cpp`, the flow: **Online** ("How do you want to play?"): Play Online (the count and a line, or the
+  note when the address is not known, then dimmed), Host a Session, Join a Session, Back. **Join a Session**:
+  sessions on this network, recent addresses, Enter an Address (the keyboard, **Host's Address**), Back. Host
+  starts hosting and shows a notice with the router's answer (the internet address, copied; or why players on
+  the internet cannot reach the host, suggesting Play online).
+- `adhoc_ask_for_choice()` (`set_adhoc_chooser`), from `sceNetAdhocctlInit` (unless
+  `GameProfile::adhoc_choice_at_init` is off) and the three places above, or from a port's menu; false only when
+  the player was asked and backed out. `D012_NO_ADHOC_CHOOSER=1` turns it off.
+- The keyboard: B with nothing typed goes back, as Cancel does (a new press; held down to delete, it stops at the
+  empty field), and the hint says Back then instead of Delete.
+
+**The port**: `d012_dialogs.cpp`'s `choices`, laid out as the Load screen: the page and its title, the instruction
+band, the choices as plates with the hand, the selected one's detail in the panel, the hint bar; its keyboard's hint
+for B follows the field (Back or Delete). `d012_online_menu.cpp` asks from Communications Mode, above.
+
+**Tested (15 November, this PC, V):** two copies with nothing chosen and the server on loopback: the chooser opened
+as each picked Online Lobby, drawn in the game's look; the D-pad moved the hand; Copy 1 chose Join a Session, Enter
+an Address, typed 127.0.0.1 on the game-styled keyboard (Space dimmed) and went on to the lobby list; Copy 2's Play
+Online said "1 player is on now", chose it (`network.online=1` saved); both met in lobby 9. A new run of Copy 1 with
+the server stopped: the chooser again (the joined session not kept), Back, the lobby list, a room picked: the
+chooser again; Host a Session: "Hosting, for copies of the game on this computer only." (the loopback test switch),
+OK, and the game entered lobby 9 on its own session.
+
+**Back, tested 16 November (this PC, V):** inside the chooser it goes back a screen: B on Join a Session returns to
+Online with the hand on Join a Session, and so does Join's Back row; the keyboard's Cancel key returns to Join a
+Session. Two gaps: on the keyboard B deletes a letter and never goes back, even with nothing typed (only Cancel or
+Esc do), and the hints show no way back. Online's Back does not return to the Communications menu the player came
+from: the game goes on to its lobby list, a room picked asks again, and Back there gives the game's "An error has
+occurred. (0x80410B05)", then OK the lobby list, then O the Communications menu. Some captures of that run came out
+blank (PrintWindow); where the hand stood on the next screen shows what each press did.
+
+**Both fixed, tested 16 November (this PC, clang build, one copy on loopback, nothing chosen, V):** Online Lobby asked
+over the Communications menu; Join a Session, Enter an Address: the hint for B read Back; a letter typed, the hint
+Delete; B deleted it and the keyboard stayed; B again went back to Join a Session, B again to Online, and Online's
+Back row left the Communications menu on screen with the hand on Online Lobby. Group Battle asked, and B there left
+the menu with the hand on Group Battle. Friend Cards and Artifacts opened without asking. Communications asked; Host
+a Session showed its notice over the menu, OK opened the Communications screen; back out of it, Online Lobby went to
+the lobby list without asking (hosting chosen). The log: "backed out of destination 6: the menu stays (mode 7)", and
+the same for 7. Port tests pass; PortableKit's framework tests pass but for `portablekit_settings_tests`, which does
+not link on this branch (the controller picker's `input::format_player_device`/`parse_player_device` are not in its
+target; no file of this change is involved); the ad hoc tests were left out (firewall).
+
+**Not tested:** the router's notices (only the loopback one), PortableKit's own look (`D012_NO_NATIVE_DIALOGS=1`),
+touch on Android, a mouse, Group Battle and Communications searches through a chosen session, the fallback questions
+at a room, a search and Netconf since the fix, Linux and the Deck.
 
 ## Sources
 
