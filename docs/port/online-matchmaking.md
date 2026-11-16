@@ -715,6 +715,18 @@ at most 8 frames, no waits, in step at frames 650 and 1,290. The server's log ha
 **Not yet:** players finding it by themselves (it counts once this branch's `online/server.json` is on main, and
 needs a release with Play online), players near the server, the Deck and the phone through it.
 
+## 16. The docs (step 7, 16 November 2026)
+
+- [Playing online](play-online.md), the players' guide, now starts from the three ways to go online and the game's
+  "How do you want to play?" screen, then Play Online, hosting and joining; during a battle, the path, Always through
+  the server, rollback and the input delay; what the server sees; and Play Online's own troubles. Two new pictures:
+  the chooser (`docs/images/online-chooser.png`) and the Network page playing online through the official server
+  (`online-play-online.png`, from a copy with clean settings).
+- [Running a server](run-a-server.md): building it (the CMake build checked on Linux, WSL Ubuntu 24.04, GCC 13,
+  against the patched PortableKit), the service, the ports, the options, the ban list, the log and its keeping,
+  updating, and how players reach the official server or another.
+- The README's online section leads with the in-game choice; its Android notes no longer call online play untested.
+
 ## Sources
 
 - [Oracle, Always Free Resources][oci-free], read 10 November 2026: the allowances, the home region, the idle rule.

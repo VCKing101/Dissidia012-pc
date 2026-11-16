@@ -134,12 +134,17 @@ disassembler and the new `tools/port/` scripts cover the analysis.
   joined the address the PC showed and played a whole battle (section 14). For players (section 15): both copies
   must run the same program and rules or the battle says what differs, each player keeps their camera settings, a
   wait shows a band the player can leave, and the Network page has the input delay.
-- [Playing online](play-online.md): the players' guide: host, join, and what to do when the
+- [Playing online](play-online.md): the players' guide: the in-game choice of Play Online, Host a Session or Join a
+  Session, the battle's path, rollback and Always through the server, what the server sees, and what to do when the
   router, a shared provider address or a firewall stops it, including Tailscale and ZeroTier.
-- [Online matchmaking](online-matchmaking.md) (10 November 2026): research for a public server, nothing built. The
-  lobby, its relay and the battle relay move from a hosting player's copy to an always-on server. Battles go through
-  the relay first, then direct with the relay as fallback if measuring shows the need. A US$5 machine in Chicago
-  fits; the server's address is fetched by the port so the server can move.
+- [Online matchmaking](online-matchmaking.md) (10 to 16 November 2026): the public server, from research to running.
+  The lobby, its relay and the battle relay move from a hosting player's copy to an always-on server
+  (`dissidia012-server`); copies of one release meet there through Play Online, chosen in a game-styled screen as the
+  game goes online. Battles go straight between the fighters after the server introduces them, through its relay
+  otherwise, with rollback by default. Tested between Windows, a Steam Deck and a phone; the official server runs in
+  Mexico City.
+- [Running a server](run-a-server.md): building `dissidia012-server`, installing it as a service, its options, the
+  ban list and the log, and pointing players at it.
 
 ## Texture packs (1 November 2026)
 
