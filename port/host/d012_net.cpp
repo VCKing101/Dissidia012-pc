@@ -5,7 +5,8 @@
 // over from an earlier battle is never taken for this one:
 // - HELLO (1), the joining copy to the listening one: u32 version, then ABOUT.
 // - WELCOME (2), the listening copy's answer: u32 version, u32 input delay,
-//   u64 the PSP clock's epoch, u8 length and the save answers, then ABOUT.
+//   u64 the PSP clock's epoch, u8 length and the save answers, u8 the path (1
+//   direct, 0 the one HELLO came on), then ABOUT.
 // - ABOUT: this copy's camera settings (f32 dead zone, f32 sensitivity, u8
 //   inverts: 1 X, 2 Y), u8 count, then each must-match item's what and value
 //   (u8 length and bytes each; battle::must_match()).
@@ -36,9 +37,24 @@
 //   camera settings (as in ABOUT, 9 bytes each), the check values (u32 frame,
 //   u32 value each), then 32 bytes a frame: player 0's pad and player 1's, as
 //   INPUT's 16 bytes with dialog and save 0.
+// - ASK (12) and INTRO (13), a fighter and the relay (d012_battle_relay.hpp):
+//   an introduction for a direct battle.
+// - PUNCH (14), the joining copy straight to the other's addresses from INTRO:
+//   nothing but the head. It opens this copy's router to the other's packets.
 // Each INPUT carries every frame the other copy has not confirmed (up to 64),
 // so a lost packet costs only the wait for the next one. The first `delay`
 // frames carry nobody's input on either copy.
+//
+// Direct battles (docs/port/online-matchmaking.md, section 13): a relayed
+// link asks the relay for an introduction (ASK) as it starts. Given the other
+// copy's addresses (INTRO), the joining copy sends PUNCH to them, and the
+// leading copy PROBE to them as well as through the relay; the other answers
+// each PROBE on the path it came by. The battle goes direct when the direct
+// path answered (WELCOME says so), else through the relay, before its first
+// frame. A copy that waits a second for input with nothing on the direct path
+// moves to the relay, and the other follows when INPUT comes that way.
+// online.always_relay (D012_NET_ALWAYS_RELAY), Always through the server,
+// asks for no introduction, so neither copy is given the other's address.
 //
 // The battle link's address and the input delay can also come from
 // settings.ini (online.battle_link, online.input_delay), so that a copy needs
@@ -53,6 +69,9 @@
 // the last OUTAGE_MS of every EVERY_S seconds. Two copies on one PC each with
 // that setting are a link with twice DELAY_MS of round trip.
 // D012_NET_SIM_STREAM=1 keeps that to the STREAM packets, the watchers' path.
+// D012_NET_DIRECT_CUT=SECONDS, another: that long into a battle, this copy
+// stops sending and taking anything on the direct path, as a router that
+// dropped it would.
 //
 // MIT licence; see port/README.md.
 
@@ -135,7 +154,8 @@ constexpr std::uint8_t kRefuse = 7u;
 constexpr std::uint8_t kHere = 8u;  // the leading copy, to the relay: "I am here"
 constexpr std::uint8_t kWatch = 9u;
 constexpr std::uint8_t kStream = 10u;
-constexpr std::uint32_t kVersion = 8u;
+constexpr std::uint8_t kPunch = 14u;  // 12 and 13 are the relay's ASK and INTRO
+constexpr std::uint32_t kVersion = 9u;
 constexpr std::size_t kHead = 8u;
 constexpr std::size_t kInputHead = kHead + 52u;
 constexpr std::size_t kLocalSize = 16u;
@@ -154,6 +174,9 @@ constexpr std::uint64_t kReportEvery = 900u;  // frames between reports of the w
 constexpr std::size_t kProbes = 8u;           // round trips timed for an automatic delay
 constexpr auto kProbeEvery = std::chrono::milliseconds(40);
 constexpr auto kProbeFor = std::chrono::seconds(2);
+constexpr std::size_t kDirectLeast = 3u;      // the direct path's answers that make it the battle's
+constexpr auto kDirectQuiet = std::chrono::seconds(1);  // waiting, nothing direct: move to the relay
+constexpr auto kKeepRelay = std::chrono::seconds(5);    // ASK again while direct
 constexpr std::uint16_t kBattlePort = 27420;  // the battle link's UDP port by default
 // Keeping the two copies' frames in step (Link::slacks): how many frames the
 // slack is averaged over, the least difference acted on, and the most a
@@ -298,6 +321,24 @@ struct Link {
     std::shared_ptr<Receiver> receiver;
     sockaddr_in peer{};
     std::optional<sockaddr_in> relay;  // the session host's relay, when the battle goes through it
+    // A direct battle (a relayed link only): whether this copy may go direct
+    // (not Always through the server), its address on its own network for
+    // ASK, the relay's INTRO and the other copy's addresses it gave, the other
+    // copy's address once something came straight from it, whether the
+    // battle's packets go that way and when the last came, the latest ASK, the
+    // leading copy's round trips on the direct path (probe_trips: the relay's),
+    // and D012_NET_DIRECT_CUT's moment.
+    bool direct_ok = false;
+    sockaddr_in local{};
+    bool introduced = false;
+    bool intro_direct = false;
+    std::vector<sockaddr_in> candidates;
+    std::optional<sockaddr_in> direct;
+    bool on_direct = false;
+    Clock::time_point direct_heard{};
+    Clock::time_point asked{};
+    std::vector<std::uint32_t> direct_trips;
+    Clock::time_point cut_at = Clock::time_point::max();
     std::map<std::uint64_t, Local> mine;    // by frame, from the oldest the other copy may still need
     std::map<std::uint64_t, Local> theirs;  // by frame, received and not yet used
     std::map<std::uint64_t, Clock::time_point> arrived;  // when each of `theirs` first came
@@ -586,21 +627,89 @@ private:
     std::multimap<Clock::time_point, Held> held_;
 };
 
-void send(const Link &l, const std::vector<std::uint8_t> &out) {
+bool same_address(const sockaddr_in &a, const sockaddr_in &b);
+
+bool via_relay(const Link &l, const sockaddr_in &at) { return l.relay && same_address(at, *l.relay); }
+
+// D012_NET_DIRECT_CUT: the direct path has stopped, for this copy.
+bool direct_cut(const Link &l) { return l.active && Clock::now() >= l.cut_at; }
+
+// From the other copy straight, not through the relay: an address INTRO gave,
+// or the one its packets came from (its router may have changed the port).
+bool from_direct(const Link &l, const sockaddr_in &from) {
+    if (!l.relay || via_relay(l, from)) return false;
+    if (l.direct && l.direct->sin_addr.s_addr == from.sin_addr.s_addr) return true;
+    return std::any_of(l.candidates.begin(), l.candidates.end(),
+                       [&](const sockaddr_in &c) { return c.sin_addr.s_addr == from.sin_addr.s_addr; });
+}
+
+void send_to(const Link &l, const sockaddr_in &to, const std::vector<std::uint8_t> &out) {
+    if (direct_cut(l) && !via_relay(l, to)) return;
     Simulated &sim = Simulated::get();
-    if (sim.on()) sim.send(l.socket, l.peer, out);
-    else send_now(l.socket, l.peer, out);
+    if (sim.on()) sim.send(l.socket, to, out);
+    else send_now(l.socket, to, out);
+}
+
+void send(const Link &l, const std::vector<std::uint8_t> &out) { send_to(l, l.peer, out); }
+
+// On both paths while the battle goes direct: the other copy may have moved
+// to the relay.
+void send_both(const Link &l, const std::vector<std::uint8_t> &out) {
+    send(l, out);
+    if (l.on_direct && l.relay) send_to(l, *l.relay, out);
+}
+
+// ASK the relay for an introduction (d012_battle_relay.hpp).
+void send_ask(Link &l) {
+    if (!l.relay) return;
+    const std::string text = relay::ask(l.tag, l.direct_ok, relay::Endpoint{l.local.sin_addr.s_addr, l.local.sin_port});
+    send_to(l, *l.relay, std::vector<std::uint8_t>(text.begin(), text.end()));
+    l.asked = Clock::now();
+}
+
+// The relay's INTRO: the other copy's addresses to try, or none.
+void take_intro(Link &l, const std::uint8_t *data, std::size_t size) {
+    relay::Introduction intro;
+    if (l.introduced || l.active || !relay::read_introduction(data, size, intro)) return;
+    l.introduced = true;
+    l.intro_direct = intro.direct && l.direct_ok;
+    if (!l.intro_direct) {
+        std::cout << "[" << l.name << "] the relay keeps this battle"
+                  << (l.direct_ok ? " (the other player chose Always through the server, or it is on the relay's computer)"
+                                  : " (Always through the server)")
+                  << std::endl;
+        return;
+    }
+    for (const relay::Endpoint e : {intro.seen, intro.local}) {
+        if (e.address == 0u || e.port == 0u) continue;
+        sockaddr_in a{};
+        a.sin_family = AF_INET;
+        a.sin_addr.s_addr = e.address;
+        a.sin_port = e.port;
+        if (std::none_of(l.candidates.begin(), l.candidates.end(), [&](const sockaddr_in &c) { return same_address(c, a); }))
+            l.candidates.push_back(a);
+    }
+    std::cout << "[" << l.name << "] introduced to the other copy: trying a direct path" << std::endl;
+}
+
+// The battle's packets go through the relay from now on.
+void move_to_relay(Link &l, const char *why) {
+    if (!l.on_direct || !l.relay) return;
+    l.on_direct = false;
+    l.peer = *l.relay;
+    std::cout << "[" << l.name << "] " << why << ": on through the relay" << std::endl;
 }
 
 void send_welcome(const Link &l) {
-    std::vector<std::uint8_t> out = packet(l, kWelcome, kHead + 17u + l.answers.size());
+    std::vector<std::uint8_t> out = packet(l, kWelcome, kHead + 18u + l.answers.size());
     put32(out, kHead, kVersion);
     put32(out, kHead + 4u, l.delay);
     put64(out, kHead + 8u, l.epoch);
     out[kHead + 16u] = static_cast<std::uint8_t>(l.answers.size());
     std::memcpy(out.data() + kHead + 17u, l.answers.data(), l.answers.size());
+    out[kHead + 17u + l.answers.size()] = l.on_direct ? 1u : 0u;
     put_about(out);
-    send(l, out);
+    send_both(l, out);
 }
 
 void send_hello(const Link &l) {
@@ -667,6 +776,9 @@ void send_input(Link &l) {
     }
     send(l, out);
     l.sent = Clock::now();
+    // A direct battle keeps its place at the relay, and the router's path to
+    // it, for a move there.
+    if (l.on_direct && l.sent - l.asked >= kKeepRelay) send_ask(l);
 }
 
 // A pad in INPUT's 16 bytes, dialog and save 0 (the watchers' stream).
@@ -781,7 +893,7 @@ void send_stream(Link &l, std::optional<std::uint64_t> end = std::nullopt) {
         put_pad(out, at + kLocalSize, one);
         at += 2u * kLocalSize;
     }
-    send(l, out);
+    send_to(l, *l.relay, out);  // the watchers' path, whichever way the battle goes
     l.streamed = now;
 }
 
@@ -878,6 +990,20 @@ bool same_address(const sockaddr_in &a, const sockaddr_in &b) {
 void handle(Link &l, const std::uint8_t *data, std::size_t size, const sockaddr_in &from, Clock::time_point at) {
     if (size < kHead || std::memcmp(data, kMagic, 4u) != 0 || tag_of(data) != l.tag) return;
     const std::uint8_t kind = data[4];
+    const bool relayed = via_relay(l, from);
+    if (kind == relay::kIntro) {
+        if (relayed) take_intro(l, data, size);
+        return;
+    }
+    const bool direct = from_direct(l, from);
+    if (direct) {
+        if (direct_cut(l)) return;
+        // Its address as the other copy's packets show it, until the battle
+        // has chosen its path.
+        if (!l.on_direct) l.direct = from;
+        l.direct_heard = at;
+        if (kind == kPunch) return;
+    }
     if (kind == kHello && l.player1 && size >= kHead + 4u) {
         // Another version of the link is another version of the port.
         const std::optional<About> about = get<std::uint32_t>(data + kHead) == kVersion && size >= kHead + 8u
@@ -898,7 +1024,9 @@ void handle(Link &l, const std::uint8_t *data, std::size_t size, const sockaddr_
             l.their_camera = about->camera;
             l.their_fixed = std::min<std::uint32_t>(get<std::uint32_t>(data + kHead + 4u), 30u);
         }
-        if (same_address(from, l.peer) && l.decided) send_welcome(l);
+        // A HELLO comes through the relay until its copy is welcomed, whichever
+        // path the battle takes.
+        if ((same_address(from, l.peer) || relayed) && l.decided) send_welcome(l);
         return;
     }
     if (kind == kWatch && l.player1 && l.relay && same_address(from, *l.relay) && size >= kHead + 12u) {
@@ -910,7 +1038,7 @@ void handle(Link &l, const std::uint8_t *data, std::size_t size, const sockaddr_
         w.heard = at;
         return;
     }
-    if (!l.peer_known || !same_address(from, l.peer)) return;
+    if (!(l.peer_known && same_address(from, l.peer)) && !relayed && !direct) return;
     l.heard = Clock::now();
     if (kind == kRefuse && !l.player1 && size >= kHead + 1u) {
         const std::size_t length = std::min<std::size_t>(data[kHead], size - kHead - 1u);
@@ -923,28 +1051,43 @@ void handle(Link &l, const std::uint8_t *data, std::size_t size, const sockaddr_
         return;
     }
     if (kind == kProbe && !l.player1 && size >= kHead + 4u) {
+        // Answered on the path it came by: the leading copy times each.
         std::vector<std::uint8_t> out = packet(l, kProbeEcho, kHead + 4u);
         std::memcpy(out.data() + kHead, data + kHead, 4u);
-        send(l, out);
+        send_to(l, from, out);
         return;
     }
     if (kind == kProbeEcho && l.player1 && size >= kHead + 4u) {
         const std::uint32_t trip = clock_ms(at) - get<std::uint32_t>(data + kHead);
-        if (trip < 10000u) l.probe_trips.push_back(trip);
+        if (trip < 10000u) (direct ? l.direct_trips : l.probe_trips).push_back(trip);
         return;
     }
-    if (kind == kWelcome && !l.player1 && !l.welcomed && size >= kHead + 17u) {
+    if (kind == kWelcome && !l.player1 && !l.welcomed && size >= kHead + 18u) {
         const std::size_t length = data[kHead + 16u];
-        if (get<std::uint32_t>(data + kHead) != kVersion || size < kHead + 17u + length) return;
+        if (get<std::uint32_t>(data + kHead) != kVersion || size < kHead + 18u + length) return;
         l.delay = get<std::uint32_t>(data + kHead + 4u);
         l.epoch = get<std::uint64_t>(data + kHead + 8u);
         l.answers.assign(reinterpret_cast<const char *>(data + kHead + 17u), length);
-        if (const std::optional<About> about = take_about(data + kHead + 17u + length, size - kHead - 17u - length))
+        const bool go_direct = data[kHead + 17u + length] == 1u;
+        if (const std::optional<About> about = take_about(data + kHead + 18u + length, size - kHead - 18u - length))
             l.their_camera = about->camera;
+        if (go_direct && l.direct) {
+            l.peer = *l.direct;
+            l.on_direct = true;
+            l.direct_heard = at;
+        } else if (go_direct) {
+            // The leading copy heard this one straight, but not the other way
+            // round: the relay, which the other copy follows to.
+            std::cout << "[" << l.name << "] the other copy chose the direct path, which brought nothing here"
+                      << std::endl;
+        }
         l.welcomed = true;
         return;
     }
-    if (kind == kInput) take_input(l, data, size, at);
+    if (kind == kInput) {
+        if (l.on_direct && relayed) move_to_relay(l, "the other copy's input came through the relay");
+        take_input(l, data, size, at);
+    }
     if (kind == kBye && !l.left) {
         l.left = true;
         l.left_at = Clock::now();
@@ -1063,6 +1206,50 @@ bool wait_for(const std::function<bool()> &turn, const char *text = "Waiting for
 #endif
 }
 
+// This copy's address on its own network and its link's port, for ASK: the
+// address its packets to the relay leave from.
+sockaddr_in local_address(const Link &l) {
+    sockaddr_in me{};
+    AddressSize size = sizeof me;
+    if (getsockname(l.socket, reinterpret_cast<sockaddr *>(&me), &size) != 0) return sockaddr_in{};
+    if (me.sin_addr.s_addr == htonl(INADDR_ANY) && l.relay) {
+        const Socket probe = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+        if (probe != kNoSocket) {
+            sockaddr_in via{};
+            AddressSize via_size = sizeof via;
+            if (::connect(probe, reinterpret_cast<const sockaddr *>(&*l.relay), sizeof *l.relay) == 0 &&
+                getsockname(probe, reinterpret_cast<sockaddr *>(&via), &via_size) == 0)
+                me.sin_addr = via.sin_addr;
+            close_socket(probe);
+        }
+    }
+    return me;
+}
+
+// The leading copy, its probing done: the direct path when it answered
+// (kDirectLeast times), else the relay. The chosen path's round trips set the
+// input delay.
+void choose_path(Link &l) {
+    if (!l.relay) return;
+    const auto median = [](std::vector<std::uint32_t> trips) {
+        if (trips.empty()) return std::string("?");
+        std::sort(trips.begin(), trips.end());
+        return std::to_string(trips[trips.size() / 2u]);
+    };
+    if (l.direct && l.direct_trips.size() >= kDirectLeast) {
+        std::cout << "[" << l.name << "] the direct path answered (a round trip of " << median(l.direct_trips)
+                  << " ms; through the relay " << median(l.probe_trips) << " ms): the battle goes direct" << std::endl;
+        l.peer = *l.direct;
+        l.on_direct = true;
+        l.direct_heard = Clock::now();
+        l.probe_trips = l.direct_trips;
+        return;
+    }
+    if (l.intro_direct)
+        std::cout << "[" << l.name << "] no direct path answered" << (l.direct_trips.empty() ? "" : " often enough")
+                  << ": the battle goes through the relay" << std::endl;
+}
+
 // The listening copy, with the delay on auto, once it has timed a few round
 // trips to the joining copy: the delay from their median.
 void settle_delay(Link &l) {
@@ -1141,6 +1328,11 @@ bool connect(Link &l, bool host, const sockaddr_in &address, const std::string &
         std::cerr << "[" << l.name << "] cannot open a UDP socket for " << where << std::endl;
         return false;
     }
+    if (relayed) {
+        const std::string always = setting("D012_NET_ALWAYS_RELAY", "online.always_relay");
+        l.direct_ok = !(always == "1" || always == "true" || always == "on" || always == "yes");
+        l.local = local_address(l);
+    }
     const auto wait = std::chrono::seconds(env_number("D012_NET_WAIT", wait_default, 3600u));
     const auto began = Clock::now();
     if (const std::string delay = setting("D012_NET_DELAY", "online.input_delay"); !delay.empty() && delay != "auto")
@@ -1152,17 +1344,38 @@ bool connect(Link &l, bool host, const sockaddr_in &address, const std::string &
     }
     auto hello = Clock::now() - kHelloEvery;
     auto probed = Clock::time_point{};
+    auto punched = Clock::time_point{};
     std::optional<Clock::time_point> probing;
+    // The other copy's addresses to send to straight: INTRO's, and the one its
+    // packets came from.
+    const auto straight = [&] {
+        std::vector<sockaddr_in> to;
+        if (!l.intro_direct) return to;
+        to = l.candidates;
+        if (l.direct && std::none_of(to.begin(), to.end(), [&](const sockaddr_in &c) { return same_address(c, *l.direct); }))
+            to.push_back(*l.direct);
+        return to;
+    };
+    // Whether a direct path may still come: this copy may go direct and the
+    // relay has not said no.
+    const auto direct_may = [&] { return l.relay && l.direct_ok && (!l.introduced || l.intro_direct); };
     // One turn of the wait: the joining copy says HELLO until it is welcomed;
     // the listening copy waits for one, then with the delay on auto times
-    // round trips (PROBE) for up to kProbeFor and welcomes it.
+    // round trips (PROBE) for up to kProbeFor and welcomes it. A relayed link
+    // asks for an introduction meanwhile, and tries the direct path it gives
+    // (the joining copy with PUNCH, the listening one with its PROBEs).
     const auto turn = [&]() -> bool {
         const auto now = Clock::now();
         if (l.refused || now - began >= wait) return false;
+        if (l.relay && !l.introduced && now - l.asked >= kHelloEvery) send_ask(l);
         if (!host) {
             if (now - hello >= kHelloEvery) {
                 send_hello(l);
                 hello = now;
+            }
+            if (now - punched >= kProbeEvery) {
+                for (const sockaddr_in &to : straight()) send_to(l, to, packet(l, kPunch, kHead));
+                punched = now;
             }
             receive(l, std::chrono::milliseconds(10));
             return !l.welcomed && !l.refused;
@@ -1176,8 +1389,8 @@ bool connect(Link &l, bool host, const sockaddr_in &address, const std::string &
             return !l.peer_known || !l.decided;
         }
         if (l.decided) return false;
-        if (l.fixed != 0u && l.their_fixed != 0u) {
-            // Both set a number: nothing to time.
+        if (l.fixed != 0u && l.their_fixed != 0u && !direct_may()) {
+            // Both set a number, and one path: nothing to time.
             settle_delay(l);
             l.decided = true;
             send_welcome(l);
@@ -1188,10 +1401,13 @@ bool connect(Link &l, bool host, const sockaddr_in &address, const std::string &
             std::vector<std::uint8_t> out = packet(l, kProbe, kHead + 4u);
             put32(out, kHead, clock_ms());
             send(l, out);
+            for (const sockaddr_in &to : straight()) send_to(l, to, out);
             probed = now;
         }
         receive(l, std::chrono::milliseconds(10));
-        if (l.probe_trips.size() < kProbes && Clock::now() - *probing < kProbeFor) return true;
+        const bool enough = l.probe_trips.size() >= kProbes && (!direct_may() || l.direct_trips.size() >= kProbes);
+        if (!enough && Clock::now() - *probing < kProbeFor) return true;
+        choose_path(l);
         settle_delay(l);
         l.decided = true;
         send_welcome(l);
@@ -1219,6 +1435,14 @@ bool connect(Link &l, bool host, const sockaddr_in &address, const std::string &
     l.confirmed = l.delay;
     l.heard = Clock::now();
     l.active = true;
+    if (l.on_direct) {
+        l.direct_heard = l.heard;
+        if (const std::uint32_t cut = env_number("D012_NET_DIRECT_CUT", 0u, 3600u); cut != 0u) {
+            l.cut_at = l.heard + std::chrono::seconds(cut);
+            std::cout << "[" << l.name << "] the direct path stops in " << cut << " s (D012_NET_DIRECT_CUT)"
+                      << std::endl;
+        }
+    }
     return true;
 }
 
@@ -1255,6 +1479,8 @@ std::pair<Local, Local> trade(Link &l, std::uint64_t frame, const Local &local) 
         const auto turn = [&]() -> bool {
             receive(l, std::chrono::milliseconds(2));
             const auto now = Clock::now();
+            if (l.on_direct && now - began >= kDirectQuiet && now - l.direct_heard >= kDirectQuiet)
+                move_to_relay(l, "nothing came on the direct path for a second");
             if (now - l.sent >= kResend) send_input(l);
             // After a BYE, its last frames may still be on their way (packets
             // can pass each other): a moment for them.
@@ -1270,7 +1496,7 @@ std::pair<Local, Local> trade(Link &l, std::uint64_t frame, const Local &local) 
             std::cout << "[" << l.name << "] this copy's player left while waiting at " << l.unit << " " << frame
                       << std::endl;
             const std::vector<std::uint8_t> out = packet(l, kBye, kHead);
-            for (int i = 0; i < 3; ++i) send(l, out);
+            for (int i = 0; i < 3; ++i) send_both(l, out);
         }
         const auto waited = Clock::now() - began;
         ++l.waits;
@@ -1347,6 +1573,8 @@ std::pair<Local, Local> trade_ahead(Link &l, std::uint64_t frame, const Local &l
         const auto turn = [&]() -> bool {
             receive(l, std::chrono::milliseconds(2));
             const auto now = Clock::now();
+            if (l.on_direct && now - began >= kDirectQuiet && now - l.direct_heard >= kDirectQuiet)
+                move_to_relay(l, "nothing came on the direct path for a second");
             if (now - l.sent >= kResend) send_input(l);
             if ((l.left && now - l.left_at >= kLastFrames) || now - l.heard >= kLost || now - began >= kGiveUp) {
                 l.lost = true;
@@ -1358,7 +1586,7 @@ std::pair<Local, Local> trade_ahead(Link &l, std::uint64_t frame, const Local &l
             l.lost = true;
             l.leaving = true;
             const std::vector<std::uint8_t> out = packet(l, kBye, kHead);
-            for (int i = 0; i < 3; ++i) send(l, out);
+            for (int i = 0; i < 3; ++i) send_both(l, out);
         }
         ++l.waits;
         l.waited += Clock::now() - began;
@@ -1479,6 +1707,7 @@ namespace {
 
 int local_player = 0;  // this copy's fighter in the game: 0 or 1
 std::string failure;   // why the last open() failed, for the player
+std::string path;      // the way the last battle linked went
 
 // Rollback's leading copy: the frames below `upto` whose inputs are both
 // certain (the other's in, below their_count) go into the watchers' stream,
@@ -1757,10 +1986,17 @@ bool open(int player, std::uint32_t tag) {
                       std::to_string(ntohs(address.sin_port)) + " (see Playing online in the README).";
         return false;
     }
+    path = text.empty() ? (l.on_direct ? "direct" : "through the relay") : "the battle link's address";
     std::cout << "[battle-net] linked as player " << player << " for battle " << l.tag << " ("
-              << (text.empty() ? "through the relay, " : "") << (listen ? "leading" : "joined") << "): " << l.delay
+              << (text.empty() ? path + ", " : std::string()) << (listen ? "leading" : "joined") << "): " << l.delay
               << " frames of input delay" << std::endl;
     return true;
+}
+
+std::string last_path() {
+    const Link &l = battle_link();
+    if (l.active && l.relay) return l.on_direct ? "direct" : "through the relay";
+    return path;
 }
 
 bool open_now() { return battle_link().active; }
@@ -1836,7 +2072,7 @@ void close(std::uint64_t reached) {
         // first. Each is said a few times, since a datagram may be lost.
         for (int i = 0; i < 3; ++i) send_input(l);
         const std::vector<std::uint8_t> out = packet(l, kBye, kHead);
-        for (int i = 0; i < 3; ++i) send(l, out);
+        for (int i = 0; i < 3; ++i) send_both(l, out);
     }
     if (l.active && l.player1 && l.relay && !l.watchers.empty()) {
         // The watchers: every frame of the battle, and where it ended, until

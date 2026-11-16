@@ -568,6 +568,68 @@ target; no file of this change is involved); the ad hoc tests were left out (fir
 touch on Android, a mouse, Group Battle and Communications searches through a chosen session, the fallback questions
 at a room, a search and Netconf since the fix, Linux and the Deck.
 
+## 13. Direct battles (step 5, built 16 November 2026)
+
+**How a battle finds its path** (`port/host/d012_battle_relay.*`, `port/host/d012_net.cpp`). Only relayed links (no
+`online.battle_link`): the public server's relay, or a hosting copy's.
+1. As its link opens, each fighter sends the relay **ASK** (kind 12) every 250 ms until answered: whether it may go
+   direct (not Always through the server) and its address on its own network (the one its packets to the relay
+   leave from) with its link's port. The relay registers it as one of the battle's two ends and passes no ASK on.
+2. Once both fighters of a tag have asked, the relay answers each ASK with **INTRO** (13): the other's address and
+   port as the relay saw them (its router's) and its address on its own network, or, when either fighter wants the
+   relay or only one of them is on the relay's own computer (127.x, an address that means nothing to the other), a
+   "no" with no address. The server logs "battle N: the fighters may try a direct path" or "through the relay only",
+   once a battle, with no address.
+3. The joining copy sends **PUNCH** (14, just the head) to the other's addresses every 40 ms until welcomed: it opens
+   its own router to the other's packets. The leading copy sends its round-trip **PROBE**s to them as well as through
+   the relay; the other copy answers each PROBE on the path it came by. Anything from one of the other's addresses
+   (by IP; its router may change the port) counts as the direct path, and its sender's address is the one used.
+4. The leading copy times up to 8 round trips on each path for up to 2 s, as before for the relay alone. **The battle
+   goes direct when the direct path answered at least 3 times**; that path's round trips set the input delay.
+   WELCOME (link version 9) carries a byte saying which, and goes on both paths. Both setting a fixed delay no
+   longer skips the probe while a direct path may come.
+5. **A move to the relay mid-battle:** a copy that has waited a second for the other's input with nothing on the
+   direct path for a second moves its packets to the relay; the other moves as soon as an INPUT comes through the
+   relay. The input delay stays as set. Only a wait counts, so a pause on both sides moves nothing. While direct,
+   each copy sends ASK again every 5 s: the relay keeps it as an end (it forgets ends quiet for 60 s) and its router
+   keeps the path to the relay open. BYE goes on both paths.
+6. **Watchers stay on the relay**: the leading fighter's STREAM goes to the relay whatever the battle's path.
+
+**Always through the server**: the Network page's Online battles section, below Input delay, a switch, off by default
+(`online.always_relay` in settings.ini, `D012_NET_ALWAYS_RELAY`): "Online battles go through the server even when the
+two games could reach each other directly. The other player's game then never learns your internet address, but the
+battle may need a frame more of input delay." With it on for either fighter the relay sends neither an address. The
+network log's head says the setting and the last battle's path (`battle::last_path()`).
+
+**What a fighter's address shows**: with a direct battle each fighter's game learns the other's internet address and
+its address on its own network (a private one, 192.168.x and the like), as a hosted session's players learn the
+host's. Someone who knows a battle's tag (the battle group's 8 digits, visible to everyone in its lobby) could
+register as one of its ends before a fighter does and so be given that fighter's address, if that fighter allows
+direct battles; the battle then fails to start. Always through the server closes that too.
+
+**Test switch**: `D012_NET_DIRECT_CUT=SECONDS`, that long into a battle this copy drops everything it would send or
+take on the direct path, as a router that stopped passing it would.
+
+**Tested (16 November, this PC, clang build, V):**
+- `d012_tests`: ASK and INTRO written and read back, "no" with no address, the loopback rule; a relay on
+  127.0.0.1 with two sockets as fighters: each given the other's addresses, no ASK passed on, neither given an
+  address when one asks for the relay, a battle packet still passed. All pass.
+- Two copies through `dissidia012-server --loopback`, lobby 9, a challenge and a battle with a minute of moves:
+  - Both allowing direct, `D012_NET_DIRECT_CUT=30` on copy 1: introduced, "the direct path answered ... the battle
+    goes direct", linked direct with 2 frames of delay. At frame 900 (30 s) copy 1 waited 1,028 ms, said "nothing
+    came on the direct path for a second: on through the relay"; copy 2 "the other copy's input came through the
+    relay". In step at frames 650 and 1,290 on both; the battle ran to frame 1,904, where the windows were closed.
+  - Copy 2 with `D012_NET_ALWAYS_RELAY=1`: both said "the relay keeps this battle", the server "through the relay
+    only", linked through the relay, in step at frames 10 and 650; the probe ended with the relay's 8 round trips.
+- The Network page: the row, its description, Enter on and off, `online.always_relay` 1 then 0 in settings.ini.
+- `dissidia012-server` builds with MSVC and with GCC 13 (WSL, no warnings in the new code), and the loopback smoke
+  test passes on both.
+
+**Not tested:** two machines, a real router (hole punching through NAT, a router that does not allow it, two
+fighters behind one router reaching each other by their own-network addresses), mobile data, a hosting copy's relay
+with two other fighters, Group Battle (its watchers on the relay while the fighters go direct), rollback with a
+direct battle, Linux and the Deck. Step 6 of section 9 covers them.
+
 ## Sources
 
 - [Oracle, Always Free Resources][oci-free], read 10 November 2026: the allowances, the home region, the idle rule.

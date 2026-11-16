@@ -80,12 +80,27 @@ std::uint32_t get32(const std::uint8_t *data) {
            (static_cast<std::uint32_t>(data[2]) << 16u) | (static_cast<std::uint32_t>(data[3]) << 24u);
 }
 
-std::string head(std::uint8_t kind) {
+std::string head(std::uint8_t kind, std::uint32_t tag = 0u) {
     std::string out(kMagic, 4u);
     out.push_back(static_cast<char>(kind));
-    out.append(3u, '\0');  // tag 0
+    for (int i = 0; i < 3; ++i) out.push_back(static_cast<char>((tag >> (8 * i)) & 0xFFu));
     return out;
 }
+
+// An endpoint's six bytes, as they are in a sockaddr_in (network order).
+void put_endpoint(std::string &out, Endpoint e) {
+    out.append(reinterpret_cast<const char *>(&e.address), 4u);
+    out.append(reinterpret_cast<const char *>(&e.port), 2u);
+}
+
+Endpoint get_endpoint(const std::uint8_t *data) {
+    Endpoint e;
+    std::memcpy(&e.address, data, 4u);
+    std::memcpy(&e.port, data + 4u, 2u);
+    return e;
+}
+
+Endpoint endpoint_of(const sockaddr_in &a) { return Endpoint{a.sin_addr.s_addr, a.sin_port}; }
 
 Socket open_socket(std::uint16_t port, bool loopback_only, const std::string &name) {
     if (!sockets_ready()) return kNoSocket;
@@ -116,9 +131,38 @@ Socket open_socket(std::uint16_t port, bool loopback_only, const std::string &na
 }
 
 struct End {
+    End(const sockaddr_in &at, Clock::time_point when) : address(at), heard(when) {}
     sockaddr_in address;
     Clock::time_point heard;
+    // Its ASK, once one came: whether it may go direct, and its address on its
+    // own network. `told`: it has had an INTRO.
+    bool asked = false;
+    bool direct = false;
+    Endpoint local;
+    bool told = false;
 };
+
+// The end at `from` among a battle's two: known, added, or put in the place of
+// one quiet for 5 s (a copy that came back on a new port). Null for a third
+// address while both are heard: it is not this battle's.
+End *place(std::vector<End> &list, const sockaddr_in &from) {
+    const auto now = Clock::now();
+    const auto me =
+        std::find_if(list.begin(), list.end(), [&](const End &e) { return same_address(e.address, from); });
+    if (me != list.end()) {
+        me->heard = now;
+        return &*me;
+    }
+    if (list.size() < 2u) {
+        list.push_back(End{from, now});
+        return &list.back();
+    }
+    const auto quiet =
+        std::min_element(list.begin(), list.end(), [](const End &a, const End &b) { return a.heard < b.heard; });
+    if (now - quiet->heard < std::chrono::seconds(5)) return nullptr;
+    *quiet = End{from, now};
+    return &*quiet;
+}
 
 void run(const Options &options) {
     Socket socket = kNoSocket;
@@ -209,19 +253,37 @@ void run(const Options &options) {
                 continue;
             }
             auto &list = ends[tag];
-            const auto me =
-                std::find_if(list.begin(), list.end(), [&](const End &e) { return same_address(e.address, from); });
-            if (me != list.end()) {
-                me->heard = Clock::now();
-            } else if (list.size() < 2u) {
-                list.push_back(End{from, Clock::now()});
-            } else {
-                // A third address for a tag: one of the two has gone quiet
-                // (a copy that came back on a new port) or it is not ours.
-                const auto quiet = std::min_element(list.begin(), list.end(),
-                                                    [](const End &a, const End &b) { return a.heard < b.heard; });
-                if (Clock::now() - quiet->heard < std::chrono::seconds(5)) continue;
-                *quiet = End{from, Clock::now()};
+            End *const me = place(list, from);
+            if (me == nullptr) continue;
+            if (data[4] == kAsk) {
+                // An introduction asked for: answered once both fighters have
+                // asked, and never passed on.
+                bool direct = false;
+                Endpoint local;
+                if (!read_ask(data, size, direct, local)) continue;
+                me->asked = true;
+                me->direct = direct;
+                me->local = local;
+                if (list.size() < 2u) continue;
+                End &other = &list[0] == me ? list[1] : list[0];
+                if (!other.asked) continue;
+                Introduction intro;
+                intro.direct = me->direct && other.direct &&
+                               may_introduce(endpoint_of(me->address), endpoint_of(other.address));
+                if (intro.direct) {
+                    intro.seen = endpoint_of(other.address);
+                    intro.local = other.local;
+                }
+                const std::string out = introduction(tag, intro);
+                sendto(socket, out.data(), static_cast<int>(out.size()), 0, reinterpret_cast<const sockaddr *>(&from),
+                       sizeof from);
+                if (!me->told && !other.told)
+                    std::cout << "[" << options.name << "] battle " << tag << ": "
+                              << (intro.direct ? "the fighters may try a direct path"
+                                               : "through the relay only (a fighter's choice, or this computer's)")
+                              << std::endl;
+                me->told = true;
+                continue;
             }
             pass(list);
         }
@@ -255,6 +317,42 @@ bool read_status_answer(const std::uint8_t *data, std::size_t size, std::uint32_
     counts.version = get32(data + kHead + 4u);
     counts.all = get32(data + kHead + 8u);
     return true;
+}
+
+std::string ask(std::uint32_t tag, bool direct, Endpoint local) {
+    std::string out = head(kAsk, tag);
+    out.push_back(direct ? '\1' : '\0');
+    put_endpoint(out, local);
+    return out;
+}
+
+bool read_ask(const std::uint8_t *data, std::size_t size, bool &direct, Endpoint &local) {
+    if (size < kAskSize || std::memcmp(data, kMagic, 4u) != 0 || data[4] != kAsk) return false;
+    direct = (data[kHead] & 1u) != 0u;
+    local = get_endpoint(data + kHead + 1u);
+    return true;
+}
+
+std::string introduction(std::uint32_t tag, const Introduction &intro) {
+    std::string out = head(kIntro, tag);
+    out.push_back(intro.direct ? '\1' : '\0');
+    put_endpoint(out, intro.direct ? intro.seen : Endpoint{});
+    put_endpoint(out, intro.direct ? intro.local : Endpoint{});
+    return out;
+}
+
+bool read_introduction(const std::uint8_t *data, std::size_t size, Introduction &intro) {
+    if (size < kIntroSize || std::memcmp(data, kMagic, 4u) != 0 || data[4] != kIntro) return false;
+    intro.direct = (data[kHead] & 1u) != 0u;
+    intro.seen = get_endpoint(data + kHead + 1u);
+    intro.local = get_endpoint(data + kHead + 7u);
+    if (intro.seen.address == 0u || intro.seen.port == 0u) intro.direct = false;
+    return true;
+}
+
+bool may_introduce(Endpoint a, Endpoint b) {
+    const auto loopback = [](Endpoint e) { return (ntohl(e.address) >> 24u) == 127u; };
+    return loopback(a) == loopback(b);
 }
 
 } // namespace d012::net::relay

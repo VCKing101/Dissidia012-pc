@@ -107,6 +107,14 @@ bool open(int player, std::uint32_t tag);
 // answered. Empty when it did not fail, or the player chose to leave.
 [[nodiscard]] std::string why_not();
 
+// The way this battle's packets go, or the last linked battle's: "direct",
+// "through the relay" (and so after a move there), or empty before any.
+// Through a relay, a battle goes direct when both players' copies may
+// (online.always_relay, D012_NET_ALWAYS_RELAY: Always through the server, off
+// by default) and the direct path answers before the first frame
+// (docs/port/online-matchmaking.md, section 13).
+[[nodiscard]] std::string last_path();
+
 // Shows `text` over the game with an OK, and waits for it. Nothing without an
 // interface.
 void notice(const std::string &text);

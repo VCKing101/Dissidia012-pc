@@ -23,8 +23,24 @@
 #include "suggest.hpp"
 #include "undo.hpp"
 
+#if defined(_WIN32)
+#if !defined(NOMINMAX)
+#define NOMINMAX
+#endif
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/select.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#endif
+
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <thread>
 #include <tuple>
 
 #include <filesystem>
@@ -1284,6 +1300,162 @@ void test_relay_status() {
            "relay status: a short answer is not taken");
 }
 
+#if defined(_WIN32)
+using TestSocket = SOCKET;
+constexpr TestSocket kNoTestSocket = INVALID_SOCKET;
+void close_test_socket(TestSocket s) { closesocket(s); }
+#else
+using TestSocket = int;
+constexpr TestSocket kNoTestSocket = -1;
+void close_test_socket(TestSocket s) { close(s); }
+#endif
+
+// A UDP socket on 127.0.0.1 and a port the system picks, and its address.
+TestSocket loopback_socket(sockaddr_in &at) {
+    const TestSocket s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (s == kNoTestSocket) return s;
+    at = sockaddr_in{};
+    at.sin_family = AF_INET;
+    at.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    if (bind(s, reinterpret_cast<const sockaddr *>(&at), sizeof at) != 0) {
+        close_test_socket(s);
+        return kNoTestSocket;
+    }
+#if defined(_WIN32)
+    int size = sizeof at;
+#else
+    socklen_t size = sizeof at;
+#endif
+    getsockname(s, reinterpret_cast<sockaddr *>(&at), &size);
+    return s;
+}
+
+// The datagrams waiting on `s`, after up to `ms` for the first.
+std::vector<std::string> take_datagrams(TestSocket s, int ms) {
+    std::vector<std::string> out;
+    for (;;) {
+        fd_set set;
+        FD_ZERO(&set);
+        FD_SET(s, &set);
+        timeval time{0, (out.empty() ? ms : 0) * 1000};
+        if (select(static_cast<int>(s + 1), &set, nullptr, nullptr, &time) <= 0) return out;
+        char data[2048];
+        const int got = static_cast<int>(recv(s, data, sizeof data, 0));
+        if (got <= 0) return out;
+        out.emplace_back(data, static_cast<std::size_t>(got));
+    }
+}
+
+// Direct battles' packets (d012_battle_relay.hpp), and a relay on 127.0.0.1
+// introducing two fighters, or not when one wants the relay.
+void test_relay_introductions() {
+    namespace relay = d012::net::relay;
+    const auto bytes = [](const std::string &s) { return reinterpret_cast<const std::uint8_t *>(s.data()); };
+    const relay::Endpoint home{htonl(0xC0A80102u), htons(27420)};    // 192.168.1.2
+    const relay::Endpoint seen{htonl(0xCB007107u), htons(40001)};    // 203.0.113.7
+    const relay::Endpoint loop{htonl(0x7F000001u), htons(50000)};    // 127.0.0.1
+
+    const std::string ask = relay::ask(0x123456u, true, home);
+    bool direct = false;
+    relay::Endpoint local;
+    expect(ask.size() == relay::kAskSize && static_cast<std::uint8_t>(ask[4]) == relay::kAsk &&
+               static_cast<std::uint8_t>(ask[5]) == 0x56u && static_cast<std::uint8_t>(ask[7]) == 0x12u,
+           "relay intro: an ASK carries its kind and the battle's tag");
+    expect(relay::read_ask(bytes(ask), ask.size(), direct, local) && direct && local == home,
+           "relay intro: an ASK reads back");
+    const std::string no = relay::ask(1u, false, home);
+    expect(relay::read_ask(bytes(no), no.size(), direct, local) && !direct, "relay intro: Always through the server");
+    expect(!relay::read_ask(bytes(ask), ask.size() - 1u, direct, local), "relay intro: a short ASK is not taken");
+
+    relay::Introduction intro{true, seen, home}, back;
+    const std::string text = relay::introduction(0x123456u, intro);
+    expect(text.size() == relay::kIntroSize && relay::read_introduction(bytes(text), text.size(), back) &&
+               back.direct && back.seen == seen && back.local == home,
+           "relay intro: an INTRO reads back");
+    const std::string none = relay::introduction(1u, relay::Introduction{false, seen, home});
+    expect(relay::read_introduction(bytes(none), none.size(), back) && !back.direct && back.seen == relay::Endpoint{} &&
+               back.local == relay::Endpoint{},
+           "relay intro: an INTRO without a direct path gives no address");
+    expect(relay::may_introduce(seen, home) && relay::may_introduce(loop, loop) && !relay::may_introduce(loop, seen),
+           "relay intro: an address on the relay's own computer is not given to another");
+
+#if defined(_WIN32)
+    WSADATA wsa{};
+    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
+        expect(false, "relay intro: sockets");
+        return;
+    }
+#endif
+    constexpr std::uint16_t kPort = 27497;
+    relay::Options options;
+    options.port = kPort;
+    options.loopback_only = true;
+    options.name = "test-relay";
+    relay::start(options);
+    sockaddr_in to{};
+    to.sin_family = AF_INET;
+    to.sin_port = htons(kPort);
+    to.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    sockaddr_in at_a{}, at_b{};
+    const TestSocket a = loopback_socket(at_a), b = loopback_socket(at_b);
+    expect(a != kNoTestSocket && b != kNoTestSocket, "relay intro: two loopback sockets");
+    if (a == kNoTestSocket || b == kNoTestSocket) return;
+    const auto say = [&](TestSocket s, const std::string &packet) {
+        sendto(s, packet.data(), static_cast<int>(packet.size()), 0, reinterpret_cast<const sockaddr *>(&to), sizeof to);
+    };
+    // Each fighter asks until its INTRO comes; everything else that comes is
+    // kept to check that no ASK was passed on.
+    const auto introduce = [&](std::uint32_t tag, bool a_direct, bool b_direct, relay::Introduction &for_a,
+                               relay::Introduction &for_b, bool &other) {
+        bool got_a = false, got_b = false;
+        other = false;
+        const relay::Endpoint local_a{htonl(0x0A000001u), at_a.sin_port}, local_b{htonl(0x0A000002u), at_b.sin_port};
+        for (int i = 0; i < 60 && !(got_a && got_b); ++i) {
+            if (!got_a) say(a, relay::ask(tag, a_direct, local_a));
+            if (!got_b) say(b, relay::ask(tag, b_direct, local_b));
+            for (const auto &[s, intro, got] : {std::tuple{a, &for_a, &got_a}, std::tuple{b, &for_b, &got_b}})
+                for (const std::string &d : take_datagrams(s, 50)) {
+                    relay::Introduction read;
+                    if (relay::read_introduction(bytes(d), d.size(), read) && d.compare(5, 3, relay::ask(tag, true, {}), 5, 3) == 0) {
+                        *intro = read;
+                        *got = true;
+                    } else {
+                        other = true;
+                    }
+                }
+        }
+        return got_a && got_b;
+    };
+    relay::Introduction for_a, for_b;
+    bool other = false;
+    expect(introduce(0x0A0B0Cu, true, true, for_a, for_b, other), "relay intro: both fighters introduced");
+    expect(for_a.direct && for_a.seen == relay::Endpoint{at_b.sin_addr.s_addr, at_b.sin_port} &&
+               for_a.local == relay::Endpoint{htonl(0x0A000002u), at_b.sin_port},
+           "relay intro: the first fighter is given the second's addresses");
+    expect(for_b.direct && for_b.seen == relay::Endpoint{at_a.sin_addr.s_addr, at_a.sin_port} &&
+               for_b.local == relay::Endpoint{htonl(0x0A000001u), at_a.sin_port},
+           "relay intro: the second fighter is given the first's");
+    expect(!other, "relay intro: no ASK is passed on to the other fighter");
+    expect(introduce(0x0A0B0Du, true, false, for_a, for_b, other) && !for_a.direct && !for_b.direct &&
+               for_a.seen == relay::Endpoint{} && for_b.seen == relay::Endpoint{},
+           "relay intro: with Always through the server on one side, neither is given an address");
+    // The battle's own packets still pass between the two (INTROs answering
+    // the last ASKs cleared first).
+    take_datagrams(a, 200);
+    take_datagrams(b, 200);
+    std::string input(relay::kHead + 4u, '\0');
+    std::copy_n(relay::kMagic, 4, input.begin());
+    input[4] = 3;
+    input[5] = 0x0C;
+    input[6] = 0x0B;
+    input[7] = 0x0A;
+    say(a, input);
+    const std::vector<std::string> passed = take_datagrams(b, 500);
+    expect(passed.size() == 1u && passed[0] == input, "relay intro: an INPUT still passes through the relay");
+    close_test_socket(a);
+    close_test_socket(b);
+}
+
 // Play online's address file (d012_online_rules.hpp, online/server.json).
 void test_online_rules() {
     namespace rules = d012::online_rules;
@@ -1330,6 +1502,7 @@ int main(int argc, char **argv) {
     test_voice_scenes();
     test_movie_splice();
     test_relay_status();
+    test_relay_introductions();
     test_online_rules();
     if (g_failures == 0) std::cout << "all passed\n";
     return g_failures == 0 ? 0 : 1;
