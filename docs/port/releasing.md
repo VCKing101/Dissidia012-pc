@@ -42,8 +42,11 @@ Pushing, tagging and publishing are the owner's calls: each step under [Publishi
 ## 2. Windows: the setup and the RecompLauncher zip
 
 ```powershell
-python tools/port/package_installer.py
+python tools/port/package_installer.py --portablekit <main checkout>	ools\local\port\PortableKit
 ```
+
+A release worktree has no PortableKit clone of its own: `--portablekit` names the main checkout's, on `dissidia`.
+A build folder left half-configured by a failed first run must be deleted before trying again.
 
 It builds the installer build (`tools/local/port/build-d012-installer`, llvm-mingw), stages the folder with the
 trimmed toolchain, checks it, compiles the setup with Inno Setup and zips the same folder as the portable zip
@@ -57,7 +60,9 @@ Tests:
   uninstall it at the end.
 - The setup again, over the previous release's install: "already compiled and up to date" when the game's C++ did not
   change, or only the changed parts compiled (`game-code-cache/`); saves, settings and mods kept.
-- The zip: unpacked, `D012Native.exe --prepare --game <iso>` prints `progress` lines and ends in a compiled game;
+- The zip: unpacked, `D012Native.exe --prepare --game <iso>` prints `progress` lines and ends in a compiled game
+  (it is a windowed program: from PowerShell, `Start-Process -Wait -RedirectStandardOutput`, since `&` does not
+  wait for it and its output is lost);
   `--game <iso>` starts it. The first time a release has the zip, tell the RecompLauncher maintainer (Xarishark, on
   PR 21) where it is; keep its name exactly `Dissidia012-PC-<version>-Windows-x64.zip`, the pattern their catalogue
   looks for.
