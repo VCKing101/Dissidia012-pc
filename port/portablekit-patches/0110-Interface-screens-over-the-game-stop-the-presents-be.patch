@@ -1,0 +1,60 @@
+From 08e87f3a92c7faac05ab3ec30405c7ad8ec4891a Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Tue, 17 Nov 2026 06:29:23 +1030
+Subject: [PATCH] Interface: screens over the game stop the presents between
+ its frames
+
+With frame interpolation on, the present thread went on making the
+presents between the game's frames while a screen over the paused game
+was open: they show the game without the screen, so the window
+alternated between the two. The menu stops them before it runs
+(hle_media.cpp); the screens over the game now do the same.
+
+- ui/choice_screen: the pause around choose_over_game, notice_over_game
+  and type_over_game calls pause_interpolation().
+- ui/message_dialog: wait_over_game does too.
+
+Tested with Dissidia 012's port on Windows (clang) at 90 fps: the
+chooser, twelve window captures while open and after a move, all show
+it; Back returns to the game with interpolation at 90 again. The wait
+band in a battle (the other copy frozen for three seconds), eight
+captures, all show it; the battle goes on after. Not tested: Linux, the
+Steam Deck, Android, another game.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/ui/choice_screen.cpp  | 3 +++
+ host/ui/message_dialog.cpp | 3 +++
+ 2 files changed, 6 insertions(+)
+
+diff --git a/host/ui/choice_screen.cpp b/host/ui/choice_screen.cpp
+index 9bc9f2c..4b61e6a 100644
+--- a/host/ui/choice_screen.cpp
++++ b/host/ui/choice_screen.cpp
+@@ -29,6 +29,9 @@ public:
+         if (g_depth++ > 0) return;
+         Layer &layer = Layer::get();
+         stall_watchdog::note_menu(true);
++        // As for the menu: the presents between the game's frames stop, or
++        // they would show the game without the screen between its frames.
++        layer.renderer().pause_interpolation();
+         audio::AudioSink::instance().set_paused(true);
+         layer.renderer().set_game_input(false);
+         layer.set_interactive(true);
+diff --git a/host/ui/message_dialog.cpp b/host/ui/message_dialog.cpp
+index 1429701..f6d6f3c 100644
+--- a/host/ui/message_dialog.cpp
++++ b/host/ui/message_dialog.cpp
+@@ -232,6 +232,9 @@ WaitEnd wait_over_game(const std::function<bool(WaitView &)> &step) {
+         return WaitEnd::Done;
+     }
+     stall_watchdog::note_menu(true);
++    // As for the menu: the presents between the game's frames stop, or they
++    // would show the game without the band between its frames.
++    layer.renderer().pause_interpolation();
+     audio::AudioSink::instance().set_paused(true);
+     layer.renderer().set_game_input(false);
+     layer.set_interactive(true);
+-- 
+2.53.0.windows.1
+
