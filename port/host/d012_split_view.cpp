@@ -516,8 +516,8 @@ void chase_lines_view2(Guest *g, const std::uint8_t *view1, gaddr manager) {
 // are left out of player 1's half and shown in player 2's (the game culls
 // every effect against player 1's camera), put out of view and back the way
 // the game's cull does it (markers_park, markers_view1, markers_view2);
-// player 1's are left out of player 2's half the same way with
-// D012_MARKERS_OWN_VIEW=1. D012_NO_MARKERS_PLAYER2=1 leaves them as they were.
+// player 1's are left out of player 2's half the same way (D012_MARKERS_OWN_VIEW=0
+// shows them in both). D012_NO_MARKERS_PLAYER2=1 leaves them as they were.
 //
 // Each fighter's arrows hold only an effect of their own (run_freerun_arrows,
 // issue 25). Each time a fighter's arrows move on (another wall or rail, or a
@@ -667,10 +667,13 @@ bool markers_bit() {
     return on;
 }
 
+// Player 1's markers left out of player 2's view, as player 2's are out of
+// player 1's: on unless D012_MARKERS_OWN_VIEW=0, which shows player 1's in
+// both views (the default from 48853a31 until each player's arrows worked).
 bool markers_own_view() {
     static const bool on = [] {
         const char *text = std::getenv("D012_MARKERS_OWN_VIEW");
-        return text != nullptr && *text != '\0' && std::strcmp(text, "0") != 0;
+        return text == nullptr || std::strcmp(text, "0") != 0;
     }();
     return on;
 }
@@ -713,8 +716,8 @@ void markers_view1(Guest *g) {
 // Before player 2's view: player 2's markers put in view, as the effect
 // update culls every effect against the on-screen camera, player 1's (main
 // 0x088A6DA0), so player 2's markers, next to player 2's fighter, were mostly
-// out of player 2's own view; and with D012_MARKERS_OWN_VIEW=1, player 1's
-// markers put out of it. All put back after it (markers_back).
+// out of player 2's own view; and player 1's markers put out of it (unless
+// D012_MARKERS_OWN_VIEW=0). All put back after it (markers_back).
 //
 // Hiding markers by their nodes' bit alone (issue 25): a marker drawn in one
 // view, hidden for the other and put back after had the effect library keep
