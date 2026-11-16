@@ -587,6 +587,20 @@ void wrap_clock(portablekit::HleRegistrar &hle, const ClockImport &clock) {
 
 #if defined(PORTABLEKIT_HAS_RENDERER)
 constexpr const char *kDelayKey = "online.input_delay";
+constexpr const char *kAlwaysRelayKey = "online.always_relay";
+
+// A key of settings.ini, kept as PortableKit keeps its own; it leaves the
+// port's keys alone.
+void write_setting(const char *key, const std::string &value) {
+    try {
+        const std::filesystem::path dir = portablekit::install::user_data_directory();
+        portablekit::install::SettingsEntries entries = portablekit::install::read_settings_file(dir);
+        entries[key] = value;
+        portablekit::install::write_settings_file(dir, entries);
+    } catch (const std::exception &e) {
+        std::cerr << "[comm-battle] settings.ini not written for " << key << ": " << e.what() << std::endl;
+    }
+}
 
 // The Network page: the input delay of the battles this copy hosts (the
 // listening copy's counts), kept in settings.ini as PortableKit keeps its
@@ -609,18 +623,30 @@ void network_rows() {
         options.note = "Set by D012_NET_DELAY";
     }
     const std::string shown = frames == 0 ? "Auto" : std::to_string(frames) + " frames";
-    const int step = ui::choice_row("Input delay", shown, options);
-    if (step == 0) return;
-    // Auto, then 2 to 10: ten choices.
-    const int index = ((frames == 0 ? 0 : frames - 1) + step + 10) % 10;
-    frames = index == 0 ? 0 : index + 1;
-    try {
-        const std::filesystem::path dir = portablekit::install::user_data_directory();
-        portablekit::install::SettingsEntries entries = portablekit::install::read_settings_file(dir);
-        entries[kDelayKey] = frames == 0 ? "auto" : std::to_string(frames);
-        portablekit::install::write_settings_file(dir, entries);
-    } catch (const std::exception &e) {
-        std::cerr << "[comm-battle] settings.ini not written for " << kDelayKey << ": " << e.what() << std::endl;
+    if (const int step = ui::choice_row("Input delay", shown, options); step != 0) {
+        // Auto, then 2 to 10: ten choices.
+        const int index = ((frames == 0 ? 0 : frames - 1) + step + 10) % 10;
+        frames = index == 0 ? 0 : index + 1;
+        write_setting(kDelayKey, frames == 0 ? "auto" : std::to_string(frames));
+    }
+
+    // Always through the server: no direct battles, so neither player's game
+    // learns the other's internet address (d012_net.hpp, battle::last_path).
+    static bool always = [] {
+        const std::string text = net::setting("D012_NET_ALWAYS_RELAY", kAlwaysRelayKey);
+        return text == "1" || text == "true" || text == "on" || text == "yes";
+    }();
+    ui::RowOptions relay_options;
+    relay_options.description = "Online battles go through the server even when the two games could reach each "
+                                "other directly. The other player's game then never learns your internet address, but "
+                                "the battle may need a frame more of input delay.";
+    if (const char *text = std::getenv("D012_NET_ALWAYS_RELAY"); text != nullptr && *text != '\0') {
+        relay_options.disabled = true;
+        relay_options.note = "Set by D012_NET_ALWAYS_RELAY";
+    }
+    if (ui::toggle_row("Always through the server", always, relay_options)) {
+        always = !always;
+        write_setting(kAlwaysRelayKey, always ? "1" : "0");
     }
 }
 
@@ -631,8 +657,12 @@ void network_log_lines(std::vector<std::string> &lines) {
     for (const auto &[what, value] : net::battle::must_match_items())
         lines.push_back("must match: " + what + " = " + (value.empty() ? "-" : value));
     const std::string delay = net::setting("D012_NET_DELAY", kDelayKey);
+    const std::string always = net::setting("D012_NET_ALWAYS_RELAY", kAlwaysRelayKey);
+    const std::string rollback = net::setting("D012_NET_ROLLBACK", "online.rollback");
     lines.push_back("battle: UDP " + std::to_string(net::battle::port()) + ", input delay " +
-                    (delay.empty() ? "auto" : delay));
+                    (delay.empty() ? "auto" : delay) + ", rollback " + (rollback.empty() ? "auto" : rollback) +
+                    ", always through the server " + (always.empty() ? "0" : always));
+    if (const std::string path = net::battle::last_path(); !path.empty()) lines.push_back("last battle: " + path);
     if (const std::string why = net::battle::why_not(); !why.empty())
         lines.push_back("last battle that could not start: " + why);
 }

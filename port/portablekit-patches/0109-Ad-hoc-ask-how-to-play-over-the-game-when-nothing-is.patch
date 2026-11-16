@@ -1,0 +1,865 @@
+From 280718ee97525fe46d469f0ff130451ebdff8678 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Mon, 16 Nov 2026 18:45:37 +1030
+Subject: [PATCH 109/109] Ad hoc: ask how to play over the game when nothing is
+ chosen
+
+With a public server (patch 0108), a player who goes online with
+nothing chosen is asked how to play, on screens over the paused game,
+instead of the game failing to find a server.
+
+- ui/choice_screen: choose_over_game, notice_over_game and
+  type_over_game, screens over the paused game (no input to the game,
+  its sound stopped, the skin's sounds muted so none plays late), one
+  pause for screens opened from one another; PortableKit's own look when
+  a port has no skin.
+- DialogSkin::choices (ChoiceSkinView: a title, a prompt, items with a
+  detail each) for a port to draw them in its game's look; a keyboard can
+  ask for that look too (TextInputRequest::game_look).
+- ui/adhoc_chooser: Online ("How do you want to play?"): Play Online with
+  the players on now (dimmed, with the reason, while the server's address
+  is not known), Host a Session, Join a Session, Back. Join lists the
+  sessions on this network, recent addresses and Enter an Address (the
+  keyboard), Back. Host starts hosting and says what the router answered
+  (the internet address, copied), or why players on the internet cannot
+  reach this PC.
+- adhoc_ask_for_choice(), set by the interface (set_adhoc_chooser): from
+  sceNetAdhocctlInit, and again when a room, a Discover search or a
+  Netconf connection still finds nothing chosen. False only when the
+  player was asked and backed out. <prefix>_NO_ADHOC_CHOOSER=1 turns it
+  off.
+- GameProfile::adhoc_choice_at_init: a port that asks from its game's
+  menu turns the sceNetAdhocctlInit question off. By then a game is
+  usually on its way to an online screen, and Back cannot return to the
+  menu the player came from.
+- The keyboard: back with nothing typed cancels, as Cancel does, on a new
+  press (held down to delete, it stops at the empty field); the hint says
+  Back then instead of Delete.
+
+Tested with Dissidia 012's port on Windows (clang), its own look, one and
+two copies with the server on loopback: the chooser asked from the
+port's menu; Join by typed address; Play Online with the count, chosen
+and remembered, both copies meeting in a lobby; Host and its notice; Back
+from every screen and the keyboard's back. The framework tests pass but
+for portablekit_settings_tests, which does not link on this branch: its
+target lacks the controller picker's player-device functions, and no
+file of this change is involved. The ad hoc tests were not run
+(firewall). Not tested: the
+router's notices, PortableKit's own look, touch, a mouse, Linux, Android,
+another game.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ cmake/PortableKit.cmake   |   2 +
+ host/adhoc/host.cpp       |  18 +++
+ host/adhoc/session.hpp    |  13 ++
+ host/hle/hle_adhoc.cpp    |   9 ++
+ host/profile.hpp          |   6 +
+ host/ui/adhoc_chooser.cpp | 178 +++++++++++++++++++++++++
+ host/ui/choice_screen.cpp | 272 ++++++++++++++++++++++++++++++++++++++
+ host/ui/choice_screen.hpp |  47 +++++++
+ host/ui/dialog_skin.cpp   |   6 +-
+ host/ui/dialog_skin.hpp   |  27 +++-
+ host/ui/menu.cpp          |   7 +-
+ host/ui/text_input.cpp    |  10 +-
+ host/ui/text_input.hpp    |   6 +-
+ 13 files changed, 594 insertions(+), 7 deletions(-)
+ create mode 100644 host/ui/adhoc_chooser.cpp
+ create mode 100644 host/ui/choice_screen.cpp
+ create mode 100644 host/ui/choice_screen.hpp
+
+diff --git a/cmake/PortableKit.cmake b/cmake/PortableKit.cmake
+index 3c02db9..f82bb2c 100644
+--- a/cmake/PortableKit.cmake
++++ b/cmake/PortableKit.cmake
+@@ -117,6 +117,8 @@ set(PORTABLEKIT_RENDERER_SOURCES
+     host/ui/input_script.cpp
+     host/ui/layer.cpp
+     host/ui/menu.cpp
++    host/ui/adhoc_chooser.cpp
++    host/ui/choice_screen.cpp
+     host/ui/dialog_skin.cpp
+     host/ui/message_dialog.cpp
+     host/ui/save_list_dialog.cpp
+diff --git a/host/adhoc/host.cpp b/host/adhoc/host.cpp
+index 56f582b..e197dec 100644
+--- a/host/adhoc/host.cpp
++++ b/host/adhoc/host.cpp
+@@ -135,6 +135,24 @@ void adhoc_play_online() {
+     adhoc_apply_settings(true);
+ }
+ 
++namespace {
++bool (*g_chooser)() = nullptr;
++}
++
++void set_adhoc_chooser(bool (*chooser)()) { g_chooser = chooser; }
++
++bool adhoc_ask_for_choice() {
++    if (g_chooser == nullptr || !adhoc_has_public_server()) return true;
++    if (const char *off = portablekit::env("NO_ADHOC_CHOOSER"); off != nullptr && *off != '\0' && *off != '0')
++        return true;
++    if (settings::current().adhoc && !adhoc_server_address().empty()) return true;
++    adhoc::Client::log("[adhoc] nothing chosen: asking how to play", true);
++    const bool chosen = g_chooser();
++    adhoc::Client::log(chosen ? "[adhoc] chosen: " + adhoc_server_address() : std::string("[adhoc] still nothing chosen"),
++                       true);
++    return chosen;
++}
++
+ void adhoc_choose_nothing() {
+     HostState &state = host();
+     {
+diff --git a/host/adhoc/session.hpp b/host/adhoc/session.hpp
+index d35ac69..b1796f5 100644
+--- a/host/adhoc/session.hpp
++++ b/host/adhoc/session.hpp
+@@ -48,6 +48,19 @@ void adhoc_choose_nothing();
+ // The session joined in this run with a public server; empty for none.
+ [[nodiscard]] std::string adhoc_joined();
+ 
++// The interface's way of asking how to play (ui/adhoc_chooser.cpp): it shows
++// its screens over the paused game and returns once the player chose (true)
++// or backed out (false). Set when the interface attaches.
++void set_adhoc_chooser(bool (*chooser)());
++// Called on the game's thread as the game goes online (sceNetAdhocctlInit,
++// unless GameProfile::adhoc_choice_at_init is off), or by a port from its own
++// menu: with a public server and nothing chosen (or ad hoc play off), asks the
++// player how to play and returns once they are done. False only when the
++// player was asked and backed out. Without an interface, or with
++// <prefix>_NO_ADHOC_CHOOSER=1, it asks nothing, and the game finds no server
++// as before.
++bool adhoc_ask_for_choice();
++
+ // Hosting (adhoc/host.cpp) ------------------------------------------------------
+ 
+ // <prefix>_ADHOC_LOOPBACK: hosting listens on 127.0.0.1 alone, asks no router
+diff --git a/host/hle/hle_adhoc.cpp b/host/hle/hle_adhoc.cpp
+index a86210f..f5bae52 100644
+--- a/host/hle/hle_adhoc.cpp
++++ b/host/hle/hle_adhoc.cpp
+@@ -410,6 +410,10 @@ void register_adhocctl(HleRegistrar &hle) {
+     hle.add("sceNetAdhocctl", "sceNetAdhocctlInit", [](Runtime &rt, AllegrexContext &ctx) {
+         State &s = state();
+         if (s.ctl_initialized) return done(ctx, "sceNetAdhocctlInit", 3, err::kCtlAlreadyInitialized);
++        // The game is going online: with a public server and nothing chosen,
++        // the player is asked how to play first (over the paused game), unless
++        // the port asks from its own menu.
++        if (portablekit::game().adhoc_choice_at_init) (void)adhoc_ask_for_choice();
+         // SceNetAdhocctlAdhocId: i32 type, char product[9].
+         if (arg(ctx, 2) != 0u) {
+             const std::string product = read_cstring(rt.memory(), arg(ctx, 2) + 4u, 9u);
+@@ -489,6 +493,9 @@ void register_adhocctl(HleRegistrar &hle) {
+             State &s = state();
+             if (!s.ctl_initialized) return done(ctx, name, 1, err::kCtlNotInitialized);
+             log_once(std::string("adhocctl-") + name, std::string("[adhoc] ") + name + " (UNVERIFIED: no game traced yet)");
++            // Still nothing chosen (the player backed out as the game went
++            // online): ask again now they pick a room.
++            if (!settings::current().adhoc || adhoc_server_address().empty()) adhoc_ask_for_choice();
+             if (!settings::current().adhoc || adhoc_server_address().empty()) {
+                 Client::log("[adhoc] no server is set up (menu: Network); joining fails", true);
+                 notify_handlers(kEventError, err::kCtlTimeout);
+@@ -1211,6 +1218,7 @@ void register_discover(HleRegistrar &hle) {
+         constexpr const char *kName = "sceNetAdhocDiscoverInitStart";
+         if (!state().ctl_initialized) return done(ctx, kName, 1, err::kCtlNotInitialized);
+         if (arg(ctx, 0) == 0u) return done(ctx, kName, 1, err::kCtlInvalidArg);
++        if (!settings::current().adhoc || adhoc_server_address().empty()) adhoc_ask_for_choice();
+         if (!settings::current().adhoc || adhoc_server_address().empty()) {
+             Client::log("[adhoc] no server is set up (menu: Network); the search fails", true);
+             return done(ctx, kName, 1, err::kCtlTimeout, "no server");
+@@ -1277,6 +1285,7 @@ void register_netconf(HleRegistrar &hle) {
+             const std::string group = read_cstring(memory, adhoc_param, 8u);
+             note += " group \"" + group + "\" timeout " + std::to_string(memory.load32(adhoc_param + 8u));
+             ensure_hooked();
++            if (!settings::current().adhoc || adhoc_server_address().empty()) adhoc_ask_for_choice();
+             if (!settings::current().adhoc || adhoc_server_address().empty()) {
+                 netconf.result = err::kCtlTimeout;
+                 Client::log("[adhoc] no session to join and no server is set up (menu: Network); the connection "
+diff --git a/host/profile.hpp b/host/profile.hpp
+index b775e82..b331b38 100644
+--- a/host/profile.hpp
++++ b/host/profile.hpp
+@@ -326,6 +326,12 @@ struct GameProfile {
+     // known. Asked about once a frame while the Network page shows it; it
+     // must answer at once. Null: no count is shown.
+     int (*public_server_players)() = nullptr;
++    // Whether the player is asked how to play (adhoc_ask_for_choice()) as the
++    // game starts its network, sceNetAdhocctlInit. By then a game is usually on
++    // its way to an online screen, and Back cannot return to the menu the
++    // player came from. A port that asks earlier itself, from its game's menu,
++    // turns it off.
++    bool adhoc_choice_at_init = true;
+ 
+     // --- Controls ----------------------------------------------------------
+     // What the triggers may press instead of L and R, for the way this game is
+diff --git a/host/ui/adhoc_chooser.cpp b/host/ui/adhoc_chooser.cpp
+new file mode 100644
+index 0000000..711d8c8
+--- /dev/null
++++ b/host/ui/adhoc_chooser.cpp
+@@ -0,0 +1,178 @@
++// How to play, asked over the paused game when it goes online with nothing
++// chosen and the port has a public server (GameProfile::public_server): Play
++// online, Host a session or Join a session (a session on this network, a
++// recent one, or an address typed in), each screen with Back. Registered with
++// adhoc::set_adhoc_chooser() when the interface attaches; the game's
++// sceNetAdhocctlInit asks it (adhoc_ask_for_choice()), or the port from its
++// game's menu (GameProfile::adhoc_choice_at_init).
++#include "ui/choice_screen.hpp"
++
++#include "adhoc/discovery.hpp"
++#include "adhoc/port_mapping.hpp"
++#include "adhoc/protocol.hpp"
++#include "adhoc/session.hpp"
++#include "profile.hpp"
++#include "settings/settings.hpp"
++
++#include <SDL3/SDL.h>
++
++#include <algorithm>
++#include <string>
++#include <vector>
++
++namespace portablekit::ui {
++namespace {
++
++std::string players_line() {
++    const auto players = portablekit::game().public_server_players;
++    const int count = players != nullptr ? players() : -1;
++    if (count < 0) return {};
++    return count == 1 ? "1 player is on now.\n" : std::to_string(count) + " players are on now.\n";
++}
++
++bool address_character(char32_t c) {
++    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' || c == ':' ||
++           c == '-' || c == '[' || c == ']';
++}
++
++// What hosting is doing, for the notice after Host a session. Copies the
++// internet address once the router gives it.
++std::string hosting_text(std::string &copied) {
++    if (adhoc_loopback_only()) return "Hosting, for copies of the game on this computer only.";
++    if (!settings::current().adhoc_router_ports)
++        return "Hosting. Players on this network find your session by themselves. Over the internet, they need your "
++               "router's ports opened by hand.";
++    const adhoc::RouterStatus router = adhoc_router_status();
++    const std::uint16_t port = adhoc_host_status().adhocctl_port;
++    switch (router.state) {
++    case adhoc::RouterState::Off:
++    case adhoc::RouterState::Working: return "Hosting. Asking your router to open its ports…";
++    case adhoc::RouterState::Failed:
++        return "Hosting, but your router did not open its ports (" + router.error +
++               "). Players on this network can join; players on the internet may not reach you. Play online needs "
++               "no ports.";
++    case adhoc::RouterState::Open: break;
++    }
++    if (router.shared)
++        return "Hosting, but your provider shares your internet address, so players on the internet cannot reach "
++               "you. Players on this network can join. Over the internet, choose Play online instead.";
++    const std::string address =
++        router.external_address + (port == adhoc::kAdhocctlPort ? std::string() : ":" + std::to_string(port));
++    if (copied != address) {
++        SDL_SetClipboardText(address.c_str());
++        copied = address;
++    }
++    return "Hosting. Your internet address is " + address +
++           ", copied for you to send to the others. Players on this network find your session by themselves.";
++}
++
++// Host a session: true once hosting, after the notice.
++bool host() {
++    if (!adhoc_host_start()) {
++        const std::string error = adhoc_host_error();
++        notice_over_game([&] { return "This PC could not host a session: " + error + "."; });
++        return false;
++    }
++    std::string copied;
++    notice_over_game([&] { return hosting_text(copied); });
++    return true;
++}
++
++// Join a session: true once joined.
++bool join() {
++    adhoc::Discovery &discovery = adhoc::Discovery::get();
++    std::size_t selected = 0;
++    for (;;) {
++        std::vector<std::string> addresses;  // the address each choice joins; empty for the last two
++        const int pick = choose_over_game(
++            [&](ChoiceView &view) {
++                const settings::Settings &s = settings::current();
++                if (!adhoc_loopback_only()) {
++                    discovery.start_listening();
++                    discovery.query(s.adhoc_recent);
++                }
++                view.title = "Join a Session";
++                view.prompt = "Choose a session to join.";
++                view.items.clear();
++                addresses.clear();
++                const std::vector<adhoc::FoundHost> hosts = adhoc_loopback_only() ? std::vector<adhoc::FoundHost>{}
++                                                                                  : discovery.hosts();
++                for (const adhoc::FoundHost &found : hosts) {
++                    const unsigned n = found.info.players;
++                    view.items.push_back({found.info.name.empty() ? found.join_address() : found.info.name,
++                                          "On this network: " + found.join_address() + ", " +
++                                              (n == 1u ? std::string("1 player") : std::to_string(n) + " players") +
++                                              ".",
++                                          true});
++                    addresses.push_back(found.join_address());
++                }
++                for (const std::string &address : s.adhoc_recent) {
++                    if (std::find(addresses.begin(), addresses.end(), address) != addresses.end()) continue;
++                    view.items.push_back({address, "A session you joined before.", true});
++                    addresses.push_back(address);
++                }
++                view.items.push_back({"Enter an Address", "Type the address the host sent you.", true});
++                view.items.push_back({"Back", "Back to choosing how to play.", true});
++            },
++            selected);
++        if (pick < 0 || static_cast<std::size_t>(pick) == addresses.size() + 1u) return false;
++        selected = static_cast<std::size_t>(pick);
++        if (static_cast<std::size_t>(pick) < addresses.size()) {
++            adhoc_join(addresses[static_cast<std::size_t>(pick)]);
++            return true;
++        }
++        TextInputRequest request;
++        request.title = "Host's Address";
++        request.prompt = "Enter the address the host sent you.";
++        request.max_length = 64u;
++        request.allowed = address_character;
++        if (const std::optional<std::string> typed = type_over_game(std::move(request)); typed && !typed->empty()) {
++            adhoc_join(*typed);
++            return true;
++        }
++    }
++}
++
++bool run_adhoc_chooser() {
++    std::size_t selected = 0;
++    for (;;) {
++        const int pick = choose_over_game(
++            [](ChoiceView &view) {
++                view.title = "Online";
++                view.prompt = "How do you want to play?";
++                const settings::Settings &s = settings::current();
++                std::string note;
++                const std::string address =
++                    s.adhoc_online_server.empty() ? portablekit::game().public_server(note) : s.adhoc_online_server;
++                view.items = {
++                    {"Play Online",
++                     address.empty() ? note
++                                     : players_line() +
++                                           "Play with everyone on the game's server. Nothing to set up and no address "
++                                           "to send.",
++                     !address.empty()},
++                    {"Host a Session",
++                     "Play with friends: this PC runs the session and they join it. You send them your address; the "
++                     "game asks your router to open its ports.",
++                     true},
++                    {"Join a Session", "Join a session a friend hosts, on this network or by the address they send you.",
++                     true},
++                    {"Back", "Stay offline. You can choose later, here or on the menu's Network page.", true},
++                };
++            },
++            selected);
++        if (pick < 0 || pick == 3) return false;
++        selected = static_cast<std::size_t>(pick);
++        if (pick == 0) {
++            adhoc_play_online();
++            return true;
++        }
++        if (pick == 1 ? host() : join()) return true;
++    }
++}
++
++} // namespace
++
++void install_adhoc_chooser() { set_adhoc_chooser(run_adhoc_chooser); }
++
++} // namespace portablekit::ui
+diff --git a/host/ui/choice_screen.cpp b/host/ui/choice_screen.cpp
+new file mode 100644
+index 0000000..9bc9f2c
+--- /dev/null
++++ b/host/ui/choice_screen.cpp
+@@ -0,0 +1,272 @@
++#include "ui/choice_screen.hpp"
++
++#include "ui/layer.hpp"
++#include "ui/widgets.hpp"
++
++#include "audio/audio_sink.hpp"
++#include "kernel/kernel.hpp"
++#include "kernel/stall_watchdog.hpp"
++#include "perf/frame_stats.hpp"
++
++#include "gpu/vulkan_renderer.hpp"
++
++#include "imgui.h"
++
++#include <algorithm>
++#include <cmath>
++#include <initializer_list>
++#include <utility>
++
++namespace portablekit::ui {
++namespace {
++
++// The pause around the screens: taken by the outermost, given back by it.
++int g_depth = 0;
++
++class Paused {
++public:
++    Paused() {
++        if (g_depth++ > 0) return;
++        Layer &layer = Layer::get();
++        stall_watchdog::note_menu(true);
++        audio::AudioSink::instance().set_paused(true);
++        layer.renderer().set_game_input(false);
++        layer.set_interactive(true);
++        mute_skin_sounds(true);
++    }
++    ~Paused() {
++        if (--g_depth > 0) return;
++        Layer &layer = Layer::get();
++        mute_skin_sounds(false);
++        layer.set_interactive(false);
++        layer.renderer().set_game_input(true);
++        audio::AudioSink::instance().set_paused(false);
++        stall_watchdog::note_menu(false);
++        // Go on at normal speed rather than racing to make up the pause.
++        kernel().resync_real_time();
++        perf::restart_measurement();
++    }
++    Paused(const Paused &) = delete;
++    Paused &operator=(const Paused &) = delete;
++};
++
++float font() { return Layer::get().font_size(); }
++
++bool pressed(std::initializer_list<ImGuiKey> keys, bool repeat) {
++    for (const ImGuiKey key : keys)
++        if (ImGui::IsKeyPressed(key, repeat)) return true;
++    return false;
++}
++
++// What the player pressed this frame.
++struct Keys {
++    bool up{}, down{}, confirm{}, back{};
++};
++
++Keys read_keys() {
++    Layer &layer = Layer::get();
++    (void)layer.take_menu_toggle();  // the menu does not open over these screens
++    Keys k;
++    k.back = layer.take_back();
++    k.up = pressed({ImGuiKey_UpArrow}, true);
++    k.down = pressed({ImGuiKey_DownArrow}, true);
++    k.confirm = pressed({ImGuiKey_Enter, ImGuiKey_KeypadEnter}, false);
++    // A button held when the screen opened, such as the one that led to it,
++    // does nothing until it is released.
++    if (layer.gamepad_armed()) {
++        const bool south = layer.confirm_south();
++        const ImGuiKey confirm = south ? ImGuiKey_GamepadFaceDown : ImGuiKey_GamepadFaceRight;
++        const ImGuiKey back = south ? ImGuiKey_GamepadFaceRight : ImGuiKey_GamepadFaceDown;
++        k.up = k.up || pressed({ImGuiKey_GamepadDpadUp, ImGuiKey_GamepadLStickUp}, true);
++        k.down = k.down || pressed({ImGuiKey_GamepadDpadDown, ImGuiKey_GamepadLStickDown}, true);
++        k.confirm = k.confirm || ImGui::IsKeyPressed(confirm, false);
++        k.back = k.back || ImGui::IsKeyPressed(back, false);
++    }
++    return k;
++}
++
++bool mouse_moved() {
++    const ImGuiIO &io = ImGui::GetIO();
++    return io.MouseDelta.x * io.MouseDelta.x + io.MouseDelta.y * io.MouseDelta.y > 0.0f;
++}
++
++void begin_overlay(const char *id) {
++    const ImGuiIO &io = ImGui::GetIO();
++    ImGui::GetBackgroundDrawList()->AddRectFilled({0, 0}, io.DisplaySize, band::kDim);
++    ImGui::SetNextWindowPos({0, 0}, ImGuiCond_Always);
++    ImGui::SetNextWindowSize(io.DisplaySize, ImGuiCond_Always);
++    ImGui::Begin(id, nullptr,
++                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
++                     ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoBackground);
++}
++
++// PortableKit's own look: a band with the title and prompt, the choices one
++// under another, and the selected one's detail.
++void draw_choices(const ChoiceSkinView &view, SkinPointer &pointer) {
++    const ImGuiIO &io = ImGui::GetIO();
++    begin_overlay("##choices");
++    ImDrawList *draw = ImGui::GetWindowDrawList();
++    const float width = std::min(io.DisplaySize.x * 0.8f, font() * 30.0f);
++    const ImVec2 size{width * 0.6f, std::round(font() * 1.7f)};
++    const float gap = std::round(font() * 0.5f);
++    const float line = ImGui::GetTextLineHeightWithSpacing();
++    const float block = line * 2.5f + static_cast<float>(view.items.size()) * (size.y + gap) + line * 3.0f;
++    const float top = std::round((io.DisplaySize.y - block) * 0.5f);
++    draw_band(ImGui::GetBackgroundDrawList(), top - font(), top + block + font());
++    const auto centred = [&](float y, const std::string &text, ImU32 colour) {
++        const ImVec2 t = ImGui::CalcTextSize(text.c_str());
++        draw->AddText({std::round((io.DisplaySize.x - t.x) * 0.5f), y}, colour, text.c_str());
++    };
++    centred(top, view.title, band::kText);
++    centred(top + line, view.prompt, band::kTextDim);
++    float y = top + line * 2.5f;
++    const float left = std::round((io.DisplaySize.x - size.x) * 0.5f);
++    for (std::size_t i = 0; i < view.items.size(); ++i) {
++        const bool selected = i == view.selected;
++        ImGui::SetCursorScreenPos({left, y});
++        ImGui::PushID(static_cast<int>(i));
++        if (ImGui::InvisibleButton("##choice", size)) pointer.clicked = static_cast<int>(i);
++        if (ImGui::IsItemHovered()) pointer.hovered = static_cast<int>(i);
++        ImGui::PopID();
++        draw_choice(draw, {left, y}, {left + size.x, y + size.y}, selected);
++        const ImVec2 t = ImGui::CalcTextSize(view.items[i].label.c_str());
++        draw->AddText({std::round(left + (size.x - t.x) * 0.5f), std::round(y + (size.y - t.y) * 0.5f)},
++                      view.items[i].enabled ? (selected ? band::kText : band::kTextDim) : IM_COL32(150, 150, 160, 160),
++                      view.items[i].label.c_str());
++        y += size.y + gap;
++    }
++    if (view.selected < view.items.size()) {
++        ImGui::SetCursorScreenPos({std::round((io.DisplaySize.x - width) * 0.5f), y + gap});
++        ImGui::PushTextWrapPos(std::round((io.DisplaySize.x + width) * 0.5f));
++        ImGui::PushStyleColor(ImGuiCol_Text, band::kTextDim);
++        ImGui::TextUnformatted(view.items[view.selected].detail.c_str());
++        ImGui::PopStyleColor();
++        ImGui::PopTextWrapPos();
++    }
++    ImGui::End();
++}
++
++void draw_notice(const std::string &text, bool &confirmed) {
++    const ImGuiIO &io = ImGui::GetIO();
++    begin_overlay("##notice");
++    ImDrawList *draw = ImGui::GetWindowDrawList();
++    const float width = std::min(io.DisplaySize.x * 0.8f, font() * 34.0f);
++    ImGui::PushTextWrapPos(0.0f);
++    const ImVec2 text_size = ImGui::CalcTextSize(text.c_str(), nullptr, false, width);
++    ImGui::PopTextWrapPos();
++    const ImVec2 ok{std::round(font() * 5.5f), std::round(font() * 1.7f)};
++    const float gap = std::round(font() * 1.1f);
++    const float block = text_size.y + gap + ok.y;
++    const float top = std::round((io.DisplaySize.y - block) * 0.5f);
++    draw_band(ImGui::GetBackgroundDrawList(), top - font(), top + block + font());
++    ImGui::SetCursorScreenPos({std::round((io.DisplaySize.x - width) * 0.5f), top});
++    ImGui::PushTextWrapPos(std::round((io.DisplaySize.x + width) * 0.5f));
++    ImGui::PushStyleColor(ImGuiCol_Text, band::kText);
++    ImGui::TextUnformatted(text.c_str());
++    ImGui::PopStyleColor();
++    ImGui::PopTextWrapPos();
++    const float left = std::round((io.DisplaySize.x - ok.x) * 0.5f);
++    const float y = top + text_size.y + gap;
++    ImGui::SetCursorScreenPos({left, y});
++    if (ImGui::InvisibleButton("##ok", ok)) confirmed = true;
++    draw_choice(draw, {left, y}, {left + ok.x, y + ok.y}, true);
++    const ImVec2 t = ImGui::CalcTextSize("OK");
++    draw->AddText({std::round(left + (ok.x - t.x) * 0.5f), std::round(y + (ok.y - t.y) * 0.5f)}, band::kText, "OK");
++    ImGui::End();
++}
++
++} // namespace
++
++int choose_over_game(const std::function<void(ChoiceView &)> &step, std::size_t selected) {
++    Layer &layer = Layer::get();
++    if (!layer.attached()) return -1;
++    Paused paused;
++    ChoiceView view;
++    int chosen = -1;
++    const bool open = layer.run(
++        [&] {
++            step(view);
++            if (view.items.empty()) return false;
++            selected = std::min(selected, view.items.size() - 1u);
++            const Keys keys = read_keys();
++            if (keys.back) {
++                skin_sound(DialogSound::Back);
++                chosen = -1;
++                return false;
++            }
++            const std::size_t was = selected;
++            if (keys.up) selected = selected == 0u ? view.items.size() - 1u : selected - 1u;
++            if (keys.down) selected = selected + 1u == view.items.size() ? 0u : selected + 1u;
++            ChoiceSkinView shown;
++            shown.title = view.title;
++            shown.prompt = view.prompt;
++            shown.items = view.items;
++            shown.selected = selected;
++            shown.confirm_south = layer.confirm_south();
++            SkinPointer pointer;
++            if (const auto draw_skin = skin_ready(dialog_skin().choices)) draw_skin(shown, pointer);
++            else draw_choices(shown, pointer);
++            if (pointer.hovered >= 0 && mouse_moved()) selected = static_cast<std::size_t>(pointer.hovered);
++            if (selected != was) skin_sound(DialogSound::Move);
++            std::optional<std::size_t> pick;
++            if (keys.confirm) pick = selected;
++            if (pointer.clicked >= 0) pick = static_cast<std::size_t>(pointer.clicked);
++            if (pick && *pick < view.items.size()) {
++                if (!view.items[*pick].enabled) {
++                    skin_sound(DialogSound::Refused);
++                    return true;
++                }
++                skin_sound(DialogSound::Confirm);
++                chosen = static_cast<int>(*pick);
++                return false;
++            }
++            return true;
++        },
++        true);
++    return open ? chosen : -1;
++}
++
++void notice_over_game(const std::function<std::string()> &text) {
++    Layer &layer = Layer::get();
++    if (!layer.attached()) return;
++    Paused paused;
++    layer.run(
++        [&] {
++            const std::string shown = text();
++            const Keys keys = read_keys();
++            bool confirmed = keys.confirm || keys.back;
++            if (const auto draw_skin = skin_ready(dialog_skin().message)) {
++                MessageSkinView view;
++                view.text = shown;
++                view.confirm_south = layer.confirm_south();
++                SkinPointer pointer;
++                draw_skin(view, pointer);
++                confirmed = confirmed || pointer.clicked == 0;
++            } else {
++                draw_notice(shown, confirmed);
++            }
++            if (confirmed) skin_sound(DialogSound::Confirm);
++            return !confirmed;
++        },
++        true);
++}
++
++std::optional<std::string> type_over_game(TextInputRequest request) {
++    Layer &layer = Layer::get();
++    if (!layer.attached()) return std::nullopt;
++    Paused paused;
++    std::optional<std::string> result;
++    request.game_look = true;
++    open_text_input(std::move(request), [&](std::optional<std::string> text) { result = std::move(text); });
++    const bool open = layer.run(
++        [&] {
++            (void)layer.take_menu_toggle();
++            text_input_frame();
++            return text_input_open();
++        },
++        true);
++    if (!open && text_input_open()) cancel_text_input();
++    return result;
++}
++
++} // namespace portablekit::ui
+diff --git a/host/ui/choice_screen.hpp b/host/ui/choice_screen.hpp
+new file mode 100644
+index 0000000..9c9aef2
+--- /dev/null
++++ b/host/ui/choice_screen.hpp
+@@ -0,0 +1,47 @@
++#pragma once
++
++// Screens of a port's own over the paused game: a list of choices, a notice
++// with OK, and the keyboard. Each runs on the game's thread and returns when
++// the player is done with it; the game stands still meanwhile, as behind
++// wait_over_game()'s band (no input reaches it, its sound stops). They are
++// drawn in the port's look for the game's dialogs (dialog_skin.hpp: choices,
++// message, keyboard) when it has one, and in PortableKit's otherwise.
++//
++// Controls: up and down (D-pad, left stick, arrow keys, the mouse) move over
++// the choices, confirm (Enter, the confirm button, a click) chooses, back
++// (Esc, the back button) leaves.
++//
++// Screens run inside one another's pause: a notice or the keyboard opened from
++// a choice keeps the game paused until the outermost screen returns.
++#include "ui/dialog_skin.hpp"
++#include "ui/text_input.hpp"
++
++#include <cstddef>
++#include <functional>
++#include <optional>
++#include <string>
++#include <vector>
++
++namespace portablekit::ui {
++
++struct ChoiceView {
++    std::string title;
++    std::string prompt;
++    std::vector<ChoiceSkinItem> items;
++};
++
++// `step` fills the view before every interface frame (a detail may change, a
++// count come in). Returns the index of the choice made, or -1 when the player
++// backed out, the window closed, or there is no interface.
++int choose_over_game(const std::function<void(ChoiceView &)> &step, std::size_t selected = 0);
++
++// A message with OK. `text` is asked before every frame, so it can change as
++// something finishes. Returns when the player confirms (or backs out).
++void notice_over_game(const std::function<std::string()> &text);
++
++// The keyboard over the paused game, in the game's look when the port has one
++// (TextInputRequest::game_look is set): the text after OK, nullopt after
++// Cancel or without an interface.
++std::optional<std::string> type_over_game(TextInputRequest request);
++
++} // namespace portablekit::ui
+diff --git a/host/ui/dialog_skin.cpp b/host/ui/dialog_skin.cpp
+index c921478..f149eeb 100644
+--- a/host/ui/dialog_skin.cpp
++++ b/host/ui/dialog_skin.cpp
+@@ -8,6 +8,8 @@ DialogSkin &skin() {
+     return value;
+ }
+ 
++bool g_muted = false;  // the interface's thread only
++
+ } // namespace
+ 
+ void set_dialog_skin(const DialogSkin &value) { skin() = value; }
+@@ -15,7 +17,9 @@ void set_dialog_skin(const DialogSkin &value) { skin() = value; }
+ const DialogSkin &dialog_skin() { return skin(); }
+ 
+ void skin_sound(DialogSound sound) {
+-    if (skin().sound != nullptr) skin().sound(sound);
++    if (!g_muted && skin().sound != nullptr) skin().sound(sound);
+ }
+ 
++void mute_skin_sounds(bool muted) { g_muted = muted; }
++
+ } // namespace portablekit::ui
+diff --git a/host/ui/dialog_skin.hpp b/host/ui/dialog_skin.hpp
+index 7f6d304..3cbde4f 100644
+--- a/host/ui/dialog_skin.hpp
++++ b/host/ui/dialog_skin.hpp
+@@ -67,6 +67,22 @@ struct KeyboardSkinView {
+     std::vector<std::vector<KeyboardSkinKey>> rows;
+ };
+ 
++// A list of choices over the paused game (choice_screen.hpp): a page title, a
++// line saying what to do, the choices, and a few lines about the selected one.
++struct ChoiceSkinItem {
++    std::string label;
++    std::string detail;  // UTF-8; '\n' breaks lines
++    bool enabled{true};  // dimmed and refused when false
++};
++
++struct ChoiceSkinView {
++    std::string title;   // the page's heading, e.g. "Online"
++    std::string prompt;  // the line under it, e.g. "How do you want to play?"
++    std::vector<ChoiceSkinItem> items;
++    std::size_t selected{};
++    bool confirm_south{};
++};
++
+ // What a skinned dialog did this frame, for a skin that plays the game's own
+ // sounds: the selection moved, something was chosen (an answer, a slot, a key
+ // typed), the player backed out, or a key could not be typed.
+@@ -81,9 +97,13 @@ struct DialogSkin {
+     void (*sound)(DialogSound sound) = nullptr;
+     void (*message)(const MessageSkinView &view, SkinPointer &pointer) = nullptr;
+     void (*save_list)(const SaveListSkinView &view, SkinPointer &pointer) = nullptr;
+-    // Only the game's keyboard requests (open_game_text_input), not keyboards
+-    // opened inside PortableKit's own screens.
++    // Only the game's keyboard requests (open_game_text_input) and keyboards
++    // asking for the game's look (TextInputRequest::game_look), not those of
++    // PortableKit's own screens.
+     void (*keyboard)(const KeyboardSkinView &view, SkinPointer &pointer) = nullptr;
++    // A list of choices over the paused game (choose_over_game). A message
++    // there (notice_over_game) is drawn by `message`.
++    void (*choices)(const ChoiceSkinView &view, SkinPointer &pointer) = nullptr;
+ };
+ 
+ // Sets the skin; a member left null keeps PortableKit's look for that dialog.
+@@ -98,5 +118,8 @@ template <typename Draw> [[nodiscard]] Draw skin_ready(Draw draw) {
+ }
+ // Tells the skin's sound function, when it has one.
+ void skin_sound(DialogSound sound);
++// While muted, skin_sound() tells nobody: for screens over the paused game,
++// whose sound is stopped, so that nothing plays late once it goes on.
++void mute_skin_sounds(bool muted);
+ 
+ } // namespace portablekit::ui
+diff --git a/host/ui/menu.cpp b/host/ui/menu.cpp
+index b50c115..4ee8695 100644
+--- a/host/ui/menu.cpp
++++ b/host/ui/menu.cpp
+@@ -2108,7 +2108,12 @@ void note_menu_closed(bool quit) {
+ 
+ } // namespace
+ 
+-bool attach(gpu::VulkanRenderer &renderer) { return Layer::get().attach(renderer); }
++void install_adhoc_chooser();  // adhoc_chooser.cpp
++
++bool attach(gpu::VulkanRenderer &renderer) {
++    install_adhoc_chooser();
++    return Layer::get().attach(renderer);
++}
+ 
+ namespace {
+ bool (*g_status_overlay_visible)() = nullptr;
+diff --git a/host/ui/text_input.cpp b/host/ui/text_input.cpp
+index 8f6ce2c..9122d1d 100644
+--- a/host/ui/text_input.cpp
++++ b/host/ui/text_input.cpp
+@@ -389,6 +389,12 @@ void handle_keys(const std::vector<Row> &rows) {
+     if (pressed({ImGuiKey_GamepadDpadDown, ImGuiKey_GamepadLStickDown})) move_selection(0, 1);
+     if (ImGui::IsKeyPressed(ImGuiKey_GamepadL1, true)) move_cursor(-1);
+     if (ImGui::IsKeyPressed(ImGuiKey_GamepadR1, true)) move_cursor(1);
++    // Back deletes; with nothing typed, a new press goes back as Cancel does.
++    // Held down to delete, it stops at the empty field.
++    if (ImGui::IsKeyPressed(back, false) && k.text.empty()) {
++        finish(false);
++        return;
++    }
+     if (ImGui::IsKeyPressed(back, true)) erase_before_cursor();
+     if (ImGui::IsKeyPressed(ImGuiKey_GamepadFaceLeft, false)) cycle_shift();
+     if (ImGui::IsKeyPressed(ImGuiKey_GamepadFaceUp, true)) type(U' ');
+@@ -580,7 +586,7 @@ void text_input_frame() {
+     (void)layer.take_menu_toggle();
+ 
+     const std::vector<Row> rows = grid();
+-    const auto draw_skin = k.over_game ? skin_ready(dialog_skin().keyboard) : nullptr;
++    const auto draw_skin = k.over_game || k.request.game_look ? skin_ready(dialog_skin().keyboard) : nullptr;
+     if (draw_skin) {
+         // The frame's sounds, from what it changed: the selection moved, a
+         // key was typed or toggled, one was refused, or the keyboard closed.
+@@ -638,7 +644,7 @@ void text_input_frame() {
+     ImGui::Dummy({0.0f, px(8.0f)});
+     if (layer.input_device() == InputDevice::Gamepad) {
+         hints({{Control::Confirm, "Type"},
+-               {Control::Delete, "Delete"},
++               {Control::Delete, k.text.empty() ? "Back" : "Delete"},
+                {Control::Shift, "Shift"},
+                {Control::Space, "Space"}});
+         ImGui::Dummy({0.0f, px(4.0f)});
+diff --git a/host/ui/text_input.hpp b/host/ui/text_input.hpp
+index e17a9c0..012a53b 100644
+--- a/host/ui/text_input.hpp
++++ b/host/ui/text_input.hpp
+@@ -10,7 +10,8 @@
+ // same time, and the mouse can click its keys.
+ //
+ // Gamepad: the D-pad or left stick moves over the keys, confirm types the key,
+-// back deletes, the left face button is Shift (once, then Caps, then off), the
++// back deletes (with nothing typed, a new press of it cancels), the left face
++// button is Shift (once, then Caps, then off), the
+ // top face button types a space, Select/View switches to the symbols page,
+ // L1/R1 move the text cursor and Start is OK. Confirm is the face button the
+ // menu's "Confirm button" setting names.
+@@ -34,6 +35,9 @@ struct TextInputRequest {
+     // The characters that may be entered; the others are shown dimmed and
+     // cannot be typed. Null: printable ASCII.
+     std::function<bool(char32_t)> allowed;
++    // Drawn in the port's look for the game's keyboard (dialog_skin.hpp) when
++    // it has one, as for the game's own requests: for a screen over the game.
++    bool game_look{};
+ };
+ 
+ // Called once when the keyboard closes: the text (UTF-8) after OK, or nullopt
+-- 
+2.53.0.windows.1
+

@@ -56,7 +56,8 @@ online and test sessions. Bugs and crashes go in [GitHub issues](https://github.
 - **HD texture packs** in PPSSPP's format, and a menu option that dumps the game's textures to start one
   ([below](#hd-texture-packs)).
 - **Online play (experimental)**: 1-on-1 battles, Group Battle's party battles with watching, and Friend Card trading
-  over the internet through the game's own Communication Mode, with full analog and each player's right-stick camera
+  over the internet through the game's own Communication Mode: through the game's server with one choice, or in a
+  session a friend hosts, with rollback, full analog and each player's right-stick camera
   ([guide](docs/port/play-online.md)).
 - **Japanese voices** from your own Japanese disc image, with English text: choose the disc in the game's Options,
   under Voice ([below](#japanese-voices)).
@@ -142,25 +143,26 @@ without the rows; set it back to `1` to bring them back. `D012_LOCAL_VERSUS=0` d
 
 ## Online play (experimental)
 
-Two players fight a 1-on-1 battle over the internet in the game's own **Communications Mode**, each on their own PC
-or Steam Deck. Windows and Linux copies play each other. The battle runs on the port's own netcode: full analog, each player's right-stick camera and an input
-delay set from the connection.
+Players fight over the internet in the game's own **Communications Mode**, each on their own PC, Steam Deck or
+phone. Windows, Linux and Android copies play each other. The battle runs on the port's own netcode: rollback, full
+analog, each player's right-stick camera and an input delay set from the connection.
 
-1. **Host:** open the menu (Esc, or L3 + R3), go to the **Network** page and choose **Host a session**. The game
-   asks your router to open its ports and shows your internet address; select it to copy it, and send it to the
-   other player.
-2. **Join:** on the **Network** page, type the host's address under **Join a session**.
-3. Both go to **Communications Mode**, into the same **Online Lobby**, and one challenges the other.
+1. Go to **Communications Mode**, then **Online Lobby**. The first time, the game asks how you want to play:
+   - **Play Online**: through the game's server. Nothing to set up; everyone on your release is in the game's lobbies.
+   - **Host a Session**: a private session. The game shows your internet address, copied for you to send.
+   - **Join a Session**: a friend's session, on your network or by the address they sent.
+2. Pick the same lobby as the other player, and one challenges the other.
 
-Step by step, with pictures of each screen: the [players' guide](docs/port/play-online.md). To find someone to play,
-ask on the [Discord server](https://discord.gg/9GrbdQwPbS).
+![The game's Online screen: How do you want to play? with Play Online, Host a Session, Join a Session and Back](docs/images/online-chooser.png)
 
-![The Network page while hosting: the local address, and the internet address the router opened its ports on](docs/images/online-network-page.png)
+Step by step, with pictures of each screen: the [players' guide](docs/port/play-online.md). The same choices are on
+the menu's **Network** page (Esc, or L3 + R3). To find someone to play, ask on the
+[Discord server](https://discord.gg/9GrbdQwPbS).
 
 Both players need the same release and the same mods that change the game; the game checks and says what differs.
-When the router cannot open its ports, or your provider shares one address among its customers (as on mobile data),
-the [players' guide](docs/port/play-online.md) has the fixes: forwarding three ports by hand, or a VPN such as
-Tailscale.
+A battle goes straight between the two games when it can, and through the server when it cannot; **Always through
+the server** on the Network page keeps your address from the other player. What the server sees, and how to run one:
+the [players' guide](docs/port/play-online.md#what-the-server-sees) and [running a server](docs/port/run-a-server.md).
 
 **Group Battle** works online too: one player creates a room, the others enter it, and players who are not fighting
 watch each fight. So does trading Friend Cards in **Communications**. More than one player watching at once and two
@@ -322,7 +324,7 @@ the game's code is made again only for the parts the new version changes.
 You need a 64-bit phone or tablet with Android 10 or later and about 2 GB of free space for the app, the copy of
 your ISO and the game's code, plus room for the ISO itself while it is copied in.
 
-- The Battle BGM Maker is not in the app. Split-screen versus and online play are untested on Android.
+- The Battle BGM Maker is not in the app. Split-screen versus is untested on Android.
 - If it crashes, please [open an issue](https://github.com/VCKing101/Dissidia012-pc/issues/new/choose) with the
   phone's model and what you were doing.
 

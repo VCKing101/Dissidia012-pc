@@ -1,0 +1,845 @@
+From e8c97aa288cf3f0ca05fb35f741ea5b5d92f652f Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Sun, 15 Nov 2026 21:08:51 +1030
+Subject: [PATCH 107/107] Ad hoc server: a public server, and copies kept apart
+ by version
+
+The ad hoc server was written for friends who trust each other. A port
+that runs one for strangers (a public lobby, always on) needs it to trust
+its players less, and to keep apart copies that cannot play together.
+
+Versions:
+- A login may carry a version tag, after the nickname's terminating NUL
+  in the nickname field ("v=", the tag, NUL; protocol.hpp). A server that
+  knows nothing of it reads the nickname as before, so a tagged copy logs
+  in anywhere.
+- GameProfile::adhoc_version gives the tag (1 to 48 letters, digits and
+  . _ - +); the client sends it (Identity::version).
+- The server keeps players of different tags apart: groups, scans,
+  broadcasts and chat. ServerPlayer::version reports it.
+
+ServerConfig::public_server:
+- Player ids are numbers, never the player's IPv4 address.
+- A MAC stays with the first connection that logged in with it: a login
+  with it from another address is refused while that connection has been
+  heard from in the last 10 s (kMacTakeoverQuietMs); from the same address
+  it replaces the older one, as a reconnect does.
+- A relay connection must name the MAC of a player logged in from its
+  address (it waits up to 2 s for a login it overtook).
+- max_logins_per_address and max_relays_per_address, and
+  bytes_per_second_per_address: an address over its rate is not read
+  until it has some back, so it waits as on a slow link.
+
+Whatever the kind: max_logins and max_relays replace the fixed limits;
+refuse_address and refuse_mac turn a player away at connection or login
+and drop one online within a second; ServerStatus::refused counts them.
+
+Tested: adhoc_tests --loopback (MSVC, Windows) with a new public_server
+check (21 checks: the tag in a login, versions apart, the relay tied to
+the login, the rate, the per-address limit, both refusals), and the
+existing loopback checks, all passing. A standalone server built on this
+by a port, on Windows (MSVC) and Linux (GCC 13), passed a scripted run
+on loopback. Not run: the all-interface ad hoc suite (it raises a
+firewall prompt), a server on a real network, many players.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/adhoc/client.cpp   |   8 +-
+ host/adhoc/client.hpp   |   1 +
+ host/adhoc/protocol.hpp |  51 +++++++++-
+ host/adhoc/server.cpp   | 216 ++++++++++++++++++++++++++++++++++------
+ host/adhoc/server.hpp   |  41 ++++++++
+ host/hle/hle_adhoc.cpp  |   1 +
+ host/profile.hpp        |   7 ++
+ tests/adhoc_tests.cpp   | 121 ++++++++++++++++++++++
+ 8 files changed, 412 insertions(+), 34 deletions(-)
+
+diff --git a/host/adhoc/client.cpp b/host/adhoc/client.cpp
+index bb01842..354ae5b 100644
+--- a/host/adhoc/client.cpp
++++ b/host/adhoc/client.cpp
+@@ -715,8 +715,9 @@ struct Client::Impl {
+             return;
+         }
+         if (ctl.open && !logged_in) {
+-            send_ctl(ctl::login(identity.mac, identity.nickname, identity.product),
+-                     "login " + format_mac(identity.mac) + " \"" + identity.nickname + "\" " + identity.product);
++            send_ctl(ctl::login(identity.mac, identity.nickname, identity.product, identity.version),
++                     "login " + format_mac(identity.mac) + " \"" + identity.nickname + "\" " + identity.product +
++                         (identity.version.empty() ? std::string() : " version " + identity.version));
+             on_logged_in();
+         }
+         if (logged_in && now - last_ping >= kPingInterval) {
+@@ -1301,7 +1302,8 @@ void Client::start(const Identity &identity) {
+     std::lock_guard lock(impl_->mutex);
+     Impl &s = *impl_;
+     const bool same = s.active && s.identity.server == identity.server && s.identity.mac == identity.mac &&
+-                      s.identity.nickname == identity.nickname && s.identity.product == identity.product;
++                      s.identity.nickname == identity.nickname && s.identity.product == identity.product &&
++                      s.identity.version == identity.version;
+     if (same) return;
+     s.stop_ctl = true;
+     s.logged_in = false;
+diff --git a/host/adhoc/client.hpp b/host/adhoc/client.hpp
+index 0f6ee67..0ad247a 100644
+--- a/host/adhoc/client.hpp
++++ b/host/adhoc/client.hpp
+@@ -26,6 +26,7 @@ struct Identity {
+     std::string nickname;
+     Mac mac{};
+     std::string product;   // the game's product code, e.g. "ULJM05800"
++    std::string version;   // GameProfile::adhoc_version's tag; empty for none
+ };
+ 
+ // What the game sees of the matchmaking service.
+diff --git a/host/adhoc/protocol.hpp b/host/adhoc/protocol.hpp
+index 314395d..5aa34bc 100644
+--- a/host/adhoc/protocol.hpp
++++ b/host/adhoc/protocol.hpp
+@@ -95,15 +95,60 @@ inline constexpr std::size_t kGroupNameLength = 8;
+ inline constexpr std::size_t kProductCodeLength = 9;
+ inline constexpr std::size_t kChatLength = 64;
+ 
+-// Client to server. Ping, Disconnect and Scan are the opcode alone.
+-inline std::string login(const Mac &mac, std::string_view nickname, std::string_view product) {
++// A copy's version tag (GameProfile::adhoc_version) rides in the login's
++// nickname field, after the nickname's terminating NUL: "v=", the tag, NUL.
++// A server that knows nothing of it reads the nickname up to its NUL and
++// never sees the tag, so a tagged copy logs in anywhere; a server that does
++// keeps copies with different tags apart (server.hpp).
++inline constexpr std::size_t kVersionTagLength = 48;
++inline constexpr std::string_view kVersionMark = "v=";
++
++// A version tag: 1 to kVersionTagLength letters, digits and . _ - +.
++[[nodiscard]] inline bool version_tag_ok(std::string_view tag) {
++    if (tag.empty() || tag.size() > kVersionTagLength) return false;
++    for (const char c : tag)
++        if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '.' || c == '_' ||
++              c == '-' || c == '+'))
++            return false;
++    return true;
++}
++
++// Client to server. Ping, Disconnect and Scan are the opcode alone. A
++// version tag that is not version_tag_ok() is left out.
++inline std::string login(const Mac &mac, std::string_view nickname, std::string_view product,
++                         std::string_view version = {}) {
+     std::string out;
+     wire::put8(out, kLogin);
+     wire::put_mac(out, mac);
+-    wire::put_fixed(out, nickname.substr(0, kNicknameLength - 1u), kNicknameLength);
++    std::string field;
++    if (version_tag_ok(version)) {
++        // The nickname keeps what room the tag leaves it.
++        const std::size_t room = kNicknameLength - 1u - kVersionMark.size() - version.size() - 1u;
++        field.append(nickname.substr(0, room));
++        field.push_back('\0');
++        field.append(kVersionMark);
++        field.append(version);
++    } else {
++        field.append(nickname.substr(0, kNicknameLength - 1u));
++    }
++    wire::put_fixed(out, field, kNicknameLength);
+     wire::put_fixed(out, product, kProductCodeLength);
+     return out;
+ }
++
++// The version tag in a login's nickname field (kNicknameLength bytes), empty
++// for none or one that is not version_tag_ok().
++[[nodiscard]] inline std::string login_version(const char *field) {
++    std::size_t at = 0;
++    while (at < kNicknameLength && field[at] != '\0') ++at;
++    ++at;
++    if (at + kVersionMark.size() > kNicknameLength ||
++        std::string_view(field + at, kVersionMark.size()) != kVersionMark)
++        return {};
++    at += kVersionMark.size();
++    std::string tag = wire::get_fixed(field + at, kNicknameLength - at);
++    return version_tag_ok(tag) ? tag : std::string{};
++}
+ inline std::string connect(std::string_view group) {
+     std::string out;
+     wire::put8(out, kConnect);
+diff --git a/host/adhoc/server.cpp b/host/adhoc/server.cpp
+index 2b67c76..98d9d1e 100644
+--- a/host/adhoc/server.cpp
++++ b/host/adhoc/server.cpp
+@@ -34,8 +34,11 @@ constexpr auto kStreamWait = milliseconds(5000);
+ // closed.
+ constexpr std::size_t kQueueLimit = 512u * 1024u;
+ constexpr std::size_t kReadChunk = 16u * 1024u;
+-constexpr std::size_t kMaxAdhocctlConnections = 256u;
+-constexpr std::size_t kMaxRelayConnections = 2048u;
++// How often the refusal callbacks are asked again about players online.
++constexpr auto kRecheckEvery = milliseconds(1000);
++// On a public server, how long a relay connection naming a MAC not yet logged
++// in from its address waits for that login.
++constexpr auto kRelayLoginWait = milliseconds(2000);
+ 
+ void log_event(const std::string &line, bool print) { Client::log("[adhoc-server] " + line, print); }
+ void log_detail(const std::string &line) { Client::log("[adhoc-server] " + line, false); }
+@@ -121,20 +124,23 @@ struct Connection {
+     bool closing{};  // close once `out` is written
+     bool dead{};     // close now
+ 
+-    // Reads what is waiting, up to `limit` buffered bytes.
+-    void read(std::size_t limit) {
++    // Reads what is waiting, up to `limit` buffered bytes; returns how much.
++    std::size_t read(std::size_t limit) {
+         char buffer[kReadChunk];
++        std::size_t total = 0;
+         for (int round = 0; round < 8 && in.size() < limit; ++round) {
+             const auto count = ::recv(socket, buffer, static_cast<int>(sizeof(buffer)), 0);
+             if (count > 0) {
+                 in.append(buffer, static_cast<std::size_t>(count));
++                total += static_cast<std::size_t>(count);
+                 last_seen = Clock::now();
+-                if (static_cast<std::size_t>(count) < sizeof(buffer)) return;
++                if (static_cast<std::size_t>(count) < sizeof(buffer)) return total;
+                 continue;
+             }
+             if (count == 0 || !would_block(socket_error())) eof = true;
+-            return;
++            return total;
+         }
++        return total;
+     }
+ 
+     void write() {
+@@ -158,6 +164,10 @@ struct Player {
+     Mac mac{};
+     std::string nickname;
+     std::string product;
++    std::string version;
++    // Who this player can see: the product code, and the version tag after a
++    // slash when there is one. Groups and everything in them are kept by it.
++    std::string game;
+     std::optional<std::string> group;
+     std::uint32_t id{};
+     Clock::time_point login_time{};
+@@ -186,7 +196,14 @@ struct RelaySession {
+     Clock::time_point announced_at{};
+ };
+ 
+-std::string group_key(const std::string &product, const std::string &group) { return product + '\n' + group; }
++std::string group_key(const std::string &game, const std::string &group) { return game + '\n' + group; }
++
++// What one address may still send now, refilled at the configured rate up to
++// a second's worth; a read can take it below zero, and the address then waits.
++struct Allowance {
++    double bytes{};
++    Clock::time_point refilled{};
++};
+ 
+ } // namespace
+ 
+@@ -211,16 +228,25 @@ struct Server::Impl {
+     std::uint64_t relayed_packets{};
+     std::uint64_t relayed_bytes{};
+     std::uint64_t dropped{};
++    std::uint64_t refused{};
+     std::map<Mac, DatagramCounts> datagram_counts;
++    std::map<std::string, Allowance> allowances;  // by address, with a rate set
+     Clock::time_point published{};
++    Clock::time_point rechecked{};
++
++    void refuse(const std::string &why) {
++        ++refused;
++        log_event(why, config.print_events);
++    }
+ 
+     // adhocctl ---------------------------------------------------------------
+ 
+     std::uint32_t make_player_id(const Address &address) {
+         // The PRO protocol names players by IPv4 address; clients that relay
+         // everything only need the numbers to be unique. So the address when
+-        // it is unique and useful, otherwise a small number.
+-        const std::uint32_t v4 = address.ipv4();
++        // it is unique and useful, otherwise a small number. A public server
++        // never gives one player another's address.
++        const std::uint32_t v4 = config.public_server ? 0u : address.ipv4();
+         const auto taken = [&](std::uint32_t id) {
+             for (const auto &[key, player] : players)
+                 if (player.logged_in && player.id == id) return true;
+@@ -234,11 +260,11 @@ struct Server::Impl {
+         }
+     }
+ 
+-    std::vector<Player *> group_members(const std::string &product, const std::string &group, const Player *except) {
++    std::vector<Player *> group_members(const std::string &game, const std::string &group, const Player *except) {
+         std::vector<Player *> members;
+         for (auto &[key, player] : players)
+             if (&player != except && player.logged_in && !player.link.dead && player.group == group &&
+-                player.product == product)
++                player.game == game)
+                 members.push_back(&player);
+         return members;
+     }
+@@ -256,9 +282,9 @@ struct Server::Impl {
+         if (!player.group) return;
+         const std::string group = *player.group;
+         player.group.reset();
+-        const auto members = group_members(player.product, group, &player);
++        const auto members = group_members(player.game, group, &player);
+         for (Player *member : members) send(*member, ctl::peer_left(player.id));
+-        if (members.empty()) group_hosts.erase(group_key(player.product, group));
++        if (members.empty()) group_hosts.erase(group_key(player.game, group));
+         log_event(player.nickname + " left group " + group, config.print_events);
+     }
+ 
+@@ -270,9 +296,9 @@ struct Server::Impl {
+ 
+     void join_group(Player &player, const std::string &group) {
+         leave_group(player);
+-        const std::string key = group_key(player.product, group);
++        const std::string key = group_key(player.game, group);
+         const auto host = group_hosts.try_emplace(key, player.mac).first->second;
+-        for (Player *member : group_members(player.product, group, &player)) {
++        for (Player *member : group_members(player.game, group, &player)) {
+             send(*member, ctl::peer_joined(player.nickname, player.mac, player.id));
+             send(player, ctl::peer_joined(member->nickname, member->mac, member->id));
+         }
+@@ -292,12 +318,30 @@ struct Server::Impl {
+             product.size() == ctl::kProductCodeLength && std::all_of(product.begin(), product.end(), [](char c) {
+                 return (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9');
+             });
++        const std::string from = player.link.peer.host();
+         if (!mac_ok || !product_ok) {
+-            log_event("refused a login from " + player.link.peer.host() + ": bad address or product code",
+-                      config.print_events);
++            refuse("refused a login from " + from + ": bad address or product code");
++            return false;
++        }
++        if (config.refuse_mac && config.refuse_mac(mac)) {
++            refuse("refused a login from " + from + ": " + format_mac(mac) + " is turned away");
+             return false;
+         }
+-        // The same MAC again is the same player reconnecting.
++        const std::string version = ctl::login_version(packet + 7);
++        // The same MAC again is the same player reconnecting. On a public
++        // server only from the same address, or once the older connection
++        // has gone quiet: otherwise anyone could knock a player off by
++        // copying the MAC everyone in their group sees.
++        const auto now = Clock::now();
++        for (auto &[key, other] : players) {
++            if (&other == &player || !other.logged_in || other.link.dead || other.mac != mac) continue;
++            if (config.public_server && other.link.peer.host() != from &&
++                now - other.link.last_seen < milliseconds(kMacTakeoverQuietMs)) {
++                refuse("refused a login from " + from + ": " + format_mac(mac) + " is in use by " + other.nickname +
++                       " from another address");
++                return false;
++            }
++        }
+         for (auto &[key, other] : players) {
+             if (&other == &player || !other.logged_in || other.link.dead || other.mac != mac) continue;
+             log_event(other.nickname + " logged in again; closing the older connection", config.print_events);
+@@ -307,17 +351,18 @@ struct Server::Impl {
+         player.mac = mac;
+         player.nickname = nickname.empty() ? format_mac(mac) : nickname;
+         player.product = product;
++        player.version = version;
++        player.game = version.empty() ? product : product + '/' + version;
+         player.id = make_player_id(player.link.peer);
+         player.login_time = Clock::now();
+         datagram_counts[mac] = DatagramCounts{};
+-        log_event(player.nickname + " (" + format_mac(mac) + ", " + product + ") logged in from " +
+-                      player.link.peer.host(),
++        log_event(player.nickname + " (" + format_mac(mac) + ", " + player.game + ") logged in from " + from,
+                   config.print_events);
+         return true;
+     }
+ 
+     void scan(Player &player) {
+-        const std::string prefix = player.product + '\n';
++        const std::string prefix = player.game + '\n';
+         for (const auto &[key, host] : group_hosts)
+             if (key.compare(0, prefix.size(), prefix) == 0) send(player, ctl::scan_result(key.substr(prefix.size()), host));
+         send(player, ctl::opcode_only(ctl::kScanComplete));
+@@ -326,7 +371,7 @@ struct Server::Impl {
+     void chat(Player &player, const char *packet) {
+         if (!player.group) return;
+         const std::string message = wire::get_fixed(packet + 1, ctl::kChatLength);
+-        for (Player *member : group_members(player.product, *player.group, &player))
++        for (Player *member : group_members(player.game, *player.group, &player))
+             send(*member, ctl::chat_message(message, player.nickname));
+     }
+ 
+@@ -387,7 +432,17 @@ struct Server::Impl {
+             if (player.mac == b) second = &player;
+         }
+         return first != nullptr && second != nullptr && first->group && first->group == second->group &&
+-               first->product == second->product;
++               first->game == second->game;
++    }
++
++    // On a public server: whether a relay connection from `address` may name
++    // `mac`, the MAC of a player logged in from that address.
++    bool may_relay_for(const Mac &mac, const Address &address) const {
++        const std::string host = address.host();
++        for (const auto &[key, player] : players)
++            if (player.logged_in && !player.link.dead && player.mac == mac && player.link.peer.host() == host)
++                return true;
++        return false;
+     }
+ 
+     void deliver_datagram(const RelaySession &from, RelaySession &to, const char *data, std::size_t size) {
+@@ -498,6 +553,15 @@ struct Server::Impl {
+     void handle_init(int key, RelaySession &session, Clock::time_point now) {
+         std::string &in = session.link.in;
+         if (in.size() < relay::kInitSize) return;
++        if (config.public_server && !may_relay_for(wire::get_mac(in.data() + 4), session.link.peer)) {
++            // A relay connection can overtake its player's login on the way
++            // here: it waits a moment for it.
++            if (now - session.link.created < kRelayLoginWait) return;
++            refuse("refused a relay connection from " + session.link.peer.host() + ": " +
++                   format_mac(wire::get_mac(in.data() + 4)) + " is not logged in from there");
++            session.link.dead = true;
++            return;
++        }
+         const std::uint32_t type = wire::get32(in.data());
+         session.mac = wire::get_mac(in.data() + 4);
+         session.port = wire::get16(in.data() + 12);
+@@ -559,6 +623,19 @@ struct Server::Impl {
+ 
+     // Upkeep ---------------------------------------------------------------------
+ 
++    // Open connections of one kind from `host`.
++    std::size_t connections_from(const std::string &host, bool relay) const {
++        std::size_t count = 0;
++        if (relay) {
++            for (const auto &[key, session] : sessions)
++                if (!session.link.dead && session.link.peer.host() == host) ++count;
++        } else {
++            for (const auto &[key, player] : players)
++                if (!player.link.dead && player.link.peer.host() == host) ++count;
++        }
++        return count;
++    }
++
+     void accept_connections(Socket listener, bool relay, Clock::time_point now) {
+         for (int round = 0; round < 32; ++round) {
+             Address address;
+@@ -566,8 +643,22 @@ struct Server::Impl {
+             const Socket s = ::accept(listener, reinterpret_cast<sockaddr *>(&address.storage), &address.length);
+             if (s == kNoSocket) return;
+             const std::size_t count = relay ? sessions.size() : players.size();
+-            if (count >= (relay ? kMaxRelayConnections : kMaxAdhocctlConnections) || !set_nonblocking(s)) {
++            if (count >= (relay ? config.max_relays : config.max_logins) || !set_nonblocking(s)) {
++                close_socket(s);
++                ++refused;
++                continue;
++            }
++            const std::string host = address.host();
++            if (config.refuse_address && config.refuse_address(host)) {
++                close_socket(s);
++                ++refused;  // not logged: a turned-away address may try often
++                continue;
++            }
++            const std::size_t most = relay ? config.max_relays_per_address : config.max_logins_per_address;
++            if (most != 0u && connections_from(host, relay) >= most) {
+                 close_socket(s);
++                refuse("refused a " + std::string(relay ? "relay" : "matchmaking") + " connection from " + host +
++                       ": it has " + std::to_string(most) + " already");
+                 continue;
+             }
+             tune(s);
+@@ -582,7 +673,60 @@ struct Server::Impl {
+         }
+     }
+ 
++    // Players and relay connections the refusal callbacks now turn away.
++    void recheck(Clock::time_point now) {
++        if ((!config.refuse_address && !config.refuse_mac) || now - rechecked < kRecheckEvery) return;
++        rechecked = now;
++        for (auto &[key, player] : players) {
++            if (player.link.dead) continue;
++            const std::string host = player.link.peer.host();
++            const bool by_address = config.refuse_address && config.refuse_address(host);
++            const bool by_mac = player.logged_in && config.refuse_mac && config.refuse_mac(player.mac);
++            if (!by_address && !by_mac) continue;
++            refuse("turned away " + (player.logged_in ? player.nickname + " (" + format_mac(player.mac) + ")" : host) +
++                   " from " + host);
++            drop_player(player);
++        }
++        for (auto &[key, session] : sessions) {
++            if (session.link.dead) continue;
++            if ((config.refuse_address && config.refuse_address(session.link.peer.host())) ||
++                (session.kind != RelayKind::Pending && config.refuse_mac && config.refuse_mac(session.mac)))
++                session.link.dead = true;
++        }
++    }
++
++    // Whether `host` may send more now (always, without a rate).
++    bool allowed(const std::string &host, Clock::time_point now) {
++        if (config.bytes_per_second_per_address == 0u) return true;
++        const double rate = static_cast<double>(config.bytes_per_second_per_address);
++        auto [it, fresh] = allowances.try_emplace(host);
++        Allowance &a = it->second;
++        if (fresh) {
++            a.bytes = rate;
++        } else {
++            const double seconds = std::chrono::duration<double>(now - a.refilled).count();
++            a.bytes = std::min(rate, a.bytes + rate * seconds);
++        }
++        a.refilled = now;
++        return a.bytes > 0.0;
++    }
++
++    // How much more `host` may send now: a read takes no more than this (and
++    // at most one chunk over it).
++    std::size_t budget(const std::string &host) const {
++        if (config.bytes_per_second_per_address == 0u) return kQueueLimit * 2u;
++        const auto found = allowances.find(host);
++        if (found == allowances.end()) return config.bytes_per_second_per_address;
++        return found->second.bytes > 0.0 ? static_cast<std::size_t>(found->second.bytes) : 0u;
++    }
++
++    void spend(const std::string &host, std::size_t bytes) {
++        if (config.bytes_per_second_per_address == 0u || bytes == 0u) return;
++        allowances[host].bytes -= static_cast<double>(bytes);
++    }
++
+     void expire(Clock::time_point now) {
++        recheck(now);
+         for (auto &[key, player] : players) {
+             if (player.link.dead) continue;
+             if (!player.logged_in && now - player.link.created > kLoginTimeout) {
+@@ -666,6 +810,7 @@ struct Server::Impl {
+             entry.mac = player.mac;
+             entry.address = player.link.peer.host();
+             entry.product = player.product;
++            entry.version = player.version;
+             entry.group = player.group;
+             entry.online_ms =
+                 static_cast<std::uint64_t>(std::chrono::duration_cast<milliseconds>(now - player.login_time).count());
+@@ -694,6 +839,13 @@ struct Server::Impl {
+         status.relayed_packets = relayed_packets;
+         status.relayed_bytes = relayed_bytes;
+         status.dropped = dropped;
++        status.refused = refused;
++        // Allowances of addresses with nothing open, and back to full.
++        for (auto it = allowances.begin(); it != allowances.end();) {
++            const bool open = connections_from(it->first, false) != 0u || connections_from(it->first, true) != 0u;
++            const bool full = it->second.bytes >= static_cast<double>(config.bytes_per_second_per_address);
++            it = !open && full ? allowances.erase(it) : std::next(it);
++        }
+         std::lock_guard lock(mutex);
+         status_snapshot = std::move(status);
+     }
+@@ -702,6 +854,7 @@ struct Server::Impl {
+         std::vector<PollEntry> entries;
+         std::vector<Connection *> links;
+         while (!quit) {
++            const auto before = Clock::now();
+             entries.clear();
+             links.clear();
+             for (const Socket listener : {ctl_listener, relay_listener}) {
+@@ -712,6 +865,8 @@ struct Server::Impl {
+                 links.push_back(nullptr);
+             }
+             const auto add = [&](Connection &link, bool read) {
++                // An address over its rate is not read until it has some back.
++                if (read && !allowed(link.peer.host(), before)) read = false;
+                 PollEntry entry{};
+                 entry.fd = link.socket;
+                 entry.events = static_cast<short>((read ? POLLIN : 0) | (link.out.empty() ? 0 : POLLOUT));
+@@ -728,10 +883,13 @@ struct Server::Impl {
+                 if ((entries[1].revents & POLLIN) != 0) accept_connections(relay_listener, true, now);
+                 for (std::size_t i = 2; i < entries.size(); ++i) {
+                     Connection &link = *links[i];
+-                    if ((entries[i].revents & (POLLIN | POLLHUP | POLLERR)) != 0 && (entries[i].events & POLLIN) != 0)
+-                        link.read(kQueueLimit * 2u);
+-                    else if ((entries[i].revents & (POLLHUP | POLLERR)) != 0)
++                    if ((entries[i].revents & (POLLIN | POLLHUP | POLLERR)) != 0 && (entries[i].events & POLLIN) != 0) {
++                        const std::string host = link.peer.host();
++                        const std::size_t room = std::max<std::size_t>(budget(host), 1u);
++                        spend(host, link.read(std::min(kQueueLimit * 2u, link.in.size() + room)));
++                    } else if ((entries[i].revents & (POLLHUP | POLLERR)) != 0) {
+                         link.eof = true;
++                    }
+                 }
+             }
+             for (auto &[key, player] : players)
+@@ -793,7 +951,9 @@ bool Server::start(const ServerConfig &config) {
+     s.relay_listener = relay;
+     s.started = Clock::now();
+     s.published = Clock::time_point{};
+-    s.relayed_packets = s.relayed_bytes = s.dropped = 0u;
++    s.relayed_packets = s.relayed_bytes = s.dropped = s.refused = 0u;
++    s.allowances.clear();
++    s.rechecked = Clock::time_point{};
+     s.quit = false;
+     {
+         std::lock_guard lock(s.mutex);
+diff --git a/host/adhoc/server.hpp b/host/adhoc/server.hpp
+index d2eca71..fac600e 100644
+--- a/host/adhoc/server.hpp
++++ b/host/adhoc/server.hpp
+@@ -29,12 +29,35 @@
+ // can see who reaches the matchmaking port but not the relay's, and whose
+ // datagrams nobody receives.
+ //
++// Versions. A login may carry a version tag (protocol.hpp, kVersionMark).
++// Players see and reach only players of the same product code and the same
++// tag, none counting as a tag of its own: groups, scans, broadcasts and chat
++// are all kept apart.
++//
++// A public server (ServerConfig::public_server) is one strangers share, so it
++// trusts its players less:
++// - Player ids are numbers, never the player's IPv4 address, so nobody learns
++//   another player's address from the server.
++// - A MAC stays with the first connection that logged in with it. A login with
++//   it from another address is refused while that connection is alive (heard
++//   from in the last kMacTakeoverQuietMs); from the same address it replaces
++//   the older one, as a reconnect does.
++// - A relay connection must name the MAC of a player logged in from its
++//   address, so nobody can take another player's sockets or datagrams.
++// - At most max_logins_per_address matchmaking and max_relays_per_address
++//   relay connections from one address, and what one address sends is read
++//   at no more than bytes_per_second_per_address (beyond that it waits, as on
++//   a slow link).
++// Whatever the kind, refuse_address and refuse_mac (when set) turn a player
++// away at connection or login, and drop one already online within a second.
++//
+ // Threading. start() binds the listening sockets on the calling thread, which
+ // takes no time, and everything else runs on one network thread of the
+ // server's own. stop() closes every connection and joins that thread.
+ #include "adhoc/protocol.hpp"
+ 
+ #include <cstdint>
++#include <functional>
+ #include <memory>
+ #include <optional>
+ #include <string>
+@@ -51,17 +74,34 @@ struct ServerConfig {
+     // Written to the network log as it happens; to the console as well when
+     // set, as in the standalone server.
+     bool print_events{};
++    // A server strangers share (see the top of this file).
++    bool public_server{};
++    // Matchmaking and relay connections the server takes at most, all told.
++    std::size_t max_logins{256u};
++    std::size_t max_relays{2048u};
++    // For a public server, per address: 0 for no limit.
++    std::size_t max_logins_per_address{};
++    std::size_t max_relays_per_address{};
++    std::size_t bytes_per_second_per_address{};
++    // Asked on the server's thread, so they must be quick and thread-safe. An
++    // address is as ServerPlayer::address gives it.
++    std::function<bool(const std::string &address)> refuse_address;
++    std::function<bool(const Mac &mac)> refuse_mac;
+ };
+ 
+ // A player in a group this long with no relay connection is reported: to the
+ // network log once, and on the host's screen while it lasts.
+ inline constexpr std::uint64_t kRelayMissingMs = 10000u;
++// On a public server, a MAC's connection silent this long may be replaced by a
++// login from another address (a player whose address changed).
++inline constexpr std::uint64_t kMacTakeoverQuietMs = 10000u;
+ 
+ struct ServerPlayer {
+     std::string nickname;
+     Mac mac{};
+     std::string address;              // where the player connects from
+     std::string product;
++    std::string version;              // the login's version tag; empty for none
+     std::optional<std::string> group;
+     std::uint64_t online_ms{};
+     std::optional<std::uint64_t> in_group_ms;  // since it joined `group`
+@@ -88,6 +128,7 @@ struct ServerStatus {
+     std::uint64_t relayed_packets{};
+     std::uint64_t relayed_bytes{};
+     std::uint64_t dropped{};           // datagrams with no receiver or no room
++    std::uint64_t refused{};           // connections and logins turned away, since start()
+ };
+ 
+ class Server {
+diff --git a/host/hle/hle_adhoc.cpp b/host/hle/hle_adhoc.cpp
+index a4abc34..a86210f 100644
+--- a/host/hle/hle_adhoc.cpp
++++ b/host/hle/hle_adhoc.cpp
+@@ -259,6 +259,7 @@ void start_client() {
+     identity.nickname = nickname();
+     identity.mac = own_mac();
+     identity.product = state().product;
++    if (portablekit::game().adhoc_version != nullptr) identity.version = portablekit::game().adhoc_version();
+     Client::get().start(identity);
+ }
+ 
+diff --git a/host/profile.hpp b/host/profile.hpp
+index 5996fe4..2b61d8a 100644
+--- a/host/profile.hpp
++++ b/host/profile.hpp
+@@ -306,6 +306,13 @@ struct GameProfile {
+     // as the game's own screens do: a lobby group named "LOBBY0" is "Lobby 1"
+     // there. Empty, or null: the group's own name.
+     std::string (*adhoc_group_name)(std::string_view group) = nullptr;
++    // What this copy tells an ad hoc server about its build, so that a server
++    // keeps copies that cannot play together apart (a port whose online play
++    // needs both players on the same build, say): 1 to 48 letters, digits and
++    // . _ - + (adhoc::ctl::version_tag_ok). Copies with different tags never
++    // see each other's groups; a server that does not know of tags, or a copy
++    // without one, behaves as before. Null or empty: no tag.
++    std::string (*adhoc_version)() = nullptr;
+ 
+     // --- Controls ----------------------------------------------------------
+     // What the triggers may press instead of L and R, for the way this game is
+diff --git a/tests/adhoc_tests.cpp b/tests/adhoc_tests.cpp
+index af75f1b..06fe1c9 100644
+--- a/tests/adhoc_tests.cpp
++++ b/tests/adhoc_tests.cpp
+@@ -20,9 +20,11 @@
+ #include <functional>
+ #include <iostream>
+ #include <iterator>
++#include <memory>
+ #include <optional>
+ #include <string>
+ #include <thread>
++#include <vector>
+ 
+ namespace {
+ 
+@@ -621,6 +623,123 @@ void router_messages() {
+           "router: private, provider-shared and missing addresses are");
+ }
+ 
++// The version tag in a login, and a public server: versions kept apart, relay
++// connections tied to their player's login, refusals and per-address limits.
++// Loopback alone, so no firewall asks.
++void public_server() {
++    {
++        const std::string packet = ctl::login(kMacA, "HunterA", kProduct, "1.2.3-abc+clang");
++        check(packet.size() == ctl::client_packet_size(ctl::kLogin), "version tag: the login keeps its size");
++        check(wire::get_fixed(packet.data() + 7, ctl::kNicknameLength) == "HunterA" &&
++                  ctl::login_version(packet.data() + 7) == "1.2.3-abc+clang",
++              "version tag: the nickname and the tag both read back");
++        const std::string plain = ctl::login(kMacA, "HunterA", kProduct);
++        check(ctl::login_version(plain.data() + 7).empty(), "version tag: a login without one has none");
++        const std::string bad = ctl::login(kMacA, "HunterA", kProduct, "no spaces");
++        check(ctl::login_version(bad.data() + 7).empty() &&
++                  wire::get_fixed(bad.data() + 7, ctl::kNicknameLength) == "HunterA",
++              "version tag: a bad tag is left out");
++        const std::string long_name(200u, 'n');
++        const std::string full = ctl::login(kMacA, long_name, kProduct, std::string(ctl::kVersionTagLength, 'v'));
++        check(ctl::login_version(full.data() + 7) == std::string(ctl::kVersionTagLength, 'v') &&
++                  !wire::get_fixed(full.data() + 7, ctl::kNicknameLength).empty(),
++              "version tag: a long nickname makes room for the longest tag");
++    }
++
++    bool refuse_all_from_here = false;
++    Mac refused_mac{0x02, 0x11, 0x22, 0x33, 0x44, 0x0F};
++    Server server;
++    std::uint16_t port = 0;
++    for (std::uint16_t candidate = 39312; candidate < 39400 && port == 0u; candidate += 2) {
++        ServerConfig config;
++        config.adhocctl_port = candidate;
++        config.loopback_only = true;
++        config.public_server = true;
++        config.max_logins_per_address = 6u;
++        config.bytes_per_second_per_address = 30000u;
++        config.refuse_address = [&](const std::string &) { return refuse_all_from_here; };
++        config.refuse_mac = [&](const Mac &mac) { return mac == refused_mac; };
++        if (server.start(config)) port = candidate;
++    }
++    check(port != 0u, "public server: a loopback server starts");
++    if (port == 0u) return;
++    const std::uint16_t relay_port = relay_port_for(port);
++    const Mac kMacC{0x02, 0x11, 0x22, 0x33, 0x44, 0x0C};
++    const Mac kMacD{0x02, 0x11, 0x22, 0x33, 0x44, 0x0D};
++    const std::size_t joined_size = ctl::server_packet_size(ctl::kConnectBssid);
++    const std::size_t peer_size = ctl::server_packet_size(ctl::kConnect);
++
++    Raw a(port);
++    a.send(ctl::login(kMacA, "HunterA", kProduct, "one"));
++    a.send(ctl::connect("LOBBY0"));
++    check(a.read(joined_size).has_value(), "public server: A (version one) joins LOBBY0");
++    Raw b(port);
++    b.send(ctl::login(kMacB, "HunterB", kProduct, "two"));
++    b.send(ctl::connect("LOBBY0"));
++    check(b.read(joined_size).has_value(), "public server: B (version two) joins its own LOBBY0");
++    check(!a.read(1u, 500).has_value(), "public server: A is not told about B");
++    Raw c(port);
++    c.send(ctl::login(kMacC, "HunterC", kProduct, "one"));
++    c.send(ctl::connect("LOBBY0"));
++    const auto told = a.read(peer_size);
++    check(told && static_cast<std::uint8_t>((*told)[0]) == ctl::kConnect &&
++              wire::get_mac(told->data() + 1 + ctl::kNicknameLength) == kMacC,
++          "public server: A sees C, of its own version");
++    Raw d(port);
++    d.send(ctl::login(kMacD, "HunterD", kProduct, "three"));
++    d.send(ctl::opcode_only(ctl::kScan));
++    const auto scanned = d.read(1u);
++    check(scanned && static_cast<std::uint8_t>((*scanned)[0]) == ctl::kScanComplete,
++          "public server: a scan lists no group of another version");
++    bool versions_listed = false;
++    wait_until([&] {
++        int one = 0, two = 0;
++        for (const ServerPlayer &p : server.status().players) {
++            one += p.version == "one";
++            two += p.version == "two";
++        }
++        return versions_listed = one == 2 && two == 1;
++    });
++    check(versions_listed, "public server: the status gives each player's version");
++
++    // Relay connections: only for a MAC logged in from their address.
++    Raw stranger(relay_port);
++    stranger.send(relay::init(relay::kInitPdp, refused_mac, 100, Mac{}, 0));
++    check(stranger.closed(4000), "public server: a relay connection for a MAC nobody logged in with is closed");
++    Raw a_pdp(relay_port);
++    a_pdp.send(relay::init(relay::kInitPdp, kMacA, 100, Mac{}, 0));
++    Raw c_pdp(relay_port);
++    c_pdp.send(relay::init(relay::kInitPdp, kMacC, 100, Mac{}, 0));
++    check(!a_pdp.closed(500) && !c_pdp.closed(10), "public server: the players' own relay connections stay");
++
++    // What one address sends is read at the configured rate: 81 KB at 30 KB/s.
++    const std::string card(27000u, 'c');
++    const auto sent_at = Clock::now();
++    for (int i = 0; i < 3; ++i) a_pdp.send(relay::pdp_header(kMacC, 100, static_cast<std::uint32_t>(card.size())) + card);
++    bool all = true;
++    for (int i = 0; i < 3 && all; ++i) all = c_pdp.read(relay::kPdpHeaderSize + card.size(), 8000).has_value();
++    const double took = std::chrono::duration<double>(Clock::now() - sent_at).count();
++    check(all, "public server: datagrams over the rate still arrive");
++    check(took >= 1.0, "public server: but no faster than the rate (" + std::to_string(took) + " s)");
++
++    // The same MAC from the same address replaces the older connection.
++    Raw c_again(port);
++    c_again.send(ctl::login(kMacC, "HunterC", kProduct, "one"));
++    check(c.closed(), "public server: a reconnect from the same address replaces the older connection");
++
++    // Refusals.
++    Raw refused(port);
++    refused.send(ctl::login(refused_mac, "Refused", kProduct, "one"));
++    check(refused.closed(), "public server: a turned-away MAC cannot log in");
++    std::vector<std::unique_ptr<Raw>> extra;
++    for (int i = 0; i < 4; ++i) extra.push_back(std::make_unique<Raw>(port));
++    check(extra.back()->closed(), "public server: connections over the per-address limit are closed");
++    const auto refused_before = server.status().refused;
++    refuse_all_from_here = true;
++    check(a.closed(3000) && b.closed(10), "public server: players from a turned-away address are dropped");
++    check(wait_until([&] { return server.status().refused > refused_before; }), "public server: the status counts it");
++}
++
+ // A parent that accepts a child's request long after it came, as Dissidia
+ // 012's Group Battle host does when it starts the room. The engines are wired
+ // to each other in memory, on a clock of their own: no sockets.
+@@ -732,6 +851,7 @@ int main(int argc, char **argv) {
+     if (argc > 1 && std::string(argv[1]) == "--loopback") {
+         relay_report();
+         relay_out_of_reach();
++        public_server();
+         router_messages();
+         matching_request_waits();
+         std::cout << (failures == 0 ? "all loopback ad hoc tests passed" : std::to_string(failures) + " failed")
+@@ -747,6 +867,7 @@ int main(int argc, char **argv) {
+     server_and_client();
+     relay_report();
+     relay_out_of_reach();
++    public_server();
+     discovery(37500);
+     router_messages();
+     matching_request_waits();
+-- 
+2.53.0.windows.1
+

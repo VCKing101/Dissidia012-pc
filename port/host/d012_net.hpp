@@ -107,6 +107,14 @@ bool open(int player, std::uint32_t tag);
 // answered. Empty when it did not fail, or the player chose to leave.
 [[nodiscard]] std::string why_not();
 
+// The way this battle's packets go, or the last linked battle's: "direct",
+// "through the relay" (and so after a move there), or empty before any.
+// Through a relay, a battle goes direct when both players' copies may
+// (online.always_relay, D012_NET_ALWAYS_RELAY: Always through the server, off
+// by default) and the direct path answers before the first frame
+// (docs/port/online-matchmaking.md, section 13).
+[[nodiscard]] std::string last_path();
+
 // Shows `text` over the game with an OK, and waits for it. Nothing without an
 // interface.
 void notice(const std::string &text);
@@ -122,9 +130,12 @@ struct Pads {
 // As exchange() above, for the battle's frame `frame`.
 Pads exchange(std::uint64_t frame, const input::Pad &mine);
 
-// Rollback (D012_NET_ROLLBACK or online.rollback): how many frames this copy
-// may run past the other's latest input, guessing it; 0, the default, keeps
-// the lockstep. The guessed frames come off the automatic input delay.
+// Rollback: how many frames this copy may run past the other's latest input in
+// the open battle, guessing it; 0 keeps the lockstep. The guessed frames come
+// off the automatic input delay. Fixed as each battle opens, by
+// D012_NET_ROLLBACK or online.rollback: a number (1 to 12), "off", or empty
+// or "auto", the default: 7 for a battle through the public server (Play
+// online), off for a session hosted or joined.
 [[nodiscard]] std::uint32_t rollback_frames();
 // Rollback's exchange: both pads for `frame` without waiting for the other's,
 // guessed (`guessed`) when it has not come. A frame run again (`rerun`) keeps

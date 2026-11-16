@@ -1,0 +1,428 @@
+From d73be3e0654956cd4a704a8faef47f364bb18c8a Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Sun, 15 Nov 2026 22:35:08 +1030
+Subject: [PATCH 108/108] Ad hoc: Play online, a port's public server beside
+ hosting and joining
+
+A port that runs a public ad hoc server for its players (patch 0107's
+public_server mode) wants the game to go online through it with one
+press, and a joined or hosted session to be a choice for the moment
+rather than something the next run reconnects to.
+
+- GameProfile::public_server gives the server's address, or empty with
+  a note for the player while it is not known (a port fetches it in the
+  background); public_server_players the players on it this copy can play
+  with, -1 while not known. Both answer at once.
+- With them, the Network page starts with Play online ("Play online   N
+  players on"); chosen, it reads "Playing online" with Stop playing
+  online. A joined session gets Leave the session; hosting keeps Stop
+  hosting. Each leaves nothing chosen.
+- network.online (<prefix>_ONLINE) remembers Play online;
+  network.online_server (<prefix>_ONLINE_SERVER) names another server
+  for it, on an Online server row that takes the Server row's place.
+- Play online, hosting and joining are one choice at a time: choosing one
+  ends the others (adhoc_play_online, adhoc_choose_nothing).
+- A session joined with a public server lasts for the run
+  (adhoc_joined()); network.server from settings.ini is not used then, so
+  a copy that joined someone in an earlier run starts with nothing chosen.
+  A server given by the environment still joins, for tests and launchers.
+- adhoc_server_address(): this instance's own while hosting, else the
+  session joined this run, else the environment's server, else Play
+  online's (the Online server row, or the port's).
+- The network log gives Play online's state and the address in use.
+
+Without a public server nothing changes: the Server row, Join remembered.
+
+Tested with Dissidia 012's port on Windows (clang), two copies and a
+public server on loopback, the address from a file: Play online first on
+the page with the count (0, then 2 players on), chosen and remembered;
+both copies online with no address typed, seeing each other in a lobby,
+and a battle between them; Stop playing online back to nothing chosen
+(network.online=0); Join by typed address for the run (Leave the session,
+network.server untouched), and after a restart nothing chosen; the Online
+server row. Not tested: Linux, Android, another game.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/adhoc/host.cpp        | 87 ++++++++++++++++++++++++++++++++++---
+ host/adhoc/session.hpp     | 28 +++++++++++-
+ host/profile.hpp           | 13 ++++++
+ host/settings/settings.cpp | 11 +++++
+ host/settings/settings.hpp |  2 +
+ host/ui/menu.cpp           | 88 ++++++++++++++++++++++++++++++++++----
+ 6 files changed, 211 insertions(+), 18 deletions(-)
+
+diff --git a/host/adhoc/host.cpp b/host/adhoc/host.cpp
+index 561bc9a..56f582b 100644
+--- a/host/adhoc/host.cpp
++++ b/host/adhoc/host.cpp
+@@ -28,6 +28,7 @@ struct HostState {
+     std::string error;
+     std::uint16_t port{};
+     std::vector<adhoc::ForwardedPort> also;  // the game's own ports to forward
++    std::string joined;  // with a public server: the session joined in this run
+ };
+ 
+ // Never destroyed: the discovery thread asks the server for its player count
+@@ -81,13 +82,85 @@ std::string adhoc_server_address() {
+         const std::uint16_t port = host().port;
+         return port == adhoc::kAdhocctlPort ? std::string("127.0.0.1") : "127.0.0.1:" + std::to_string(port);
+     }
+-    return settings::current().adhoc_server;
++    const settings::Settings &s = settings::current();
++    if (!adhoc_has_public_server()) return s.adhoc_server;
++    if (std::string joined = adhoc_joined(); !joined.empty()) return joined;
++    if (!s.adhoc_server.empty() && !settings::overridden_by("network.server").empty()) return s.adhoc_server;
++    if (!s.adhoc_online) return {};
++    if (!s.adhoc_online_server.empty()) return s.adhoc_online_server;
++    std::string note;
++    return portablekit::game().public_server(note);
++}
++
++bool adhoc_has_public_server() { return portablekit::game().public_server != nullptr; }
++
++bool adhoc_online() { return adhoc_has_public_server() && settings::current().adhoc_online; }
++
++std::string adhoc_joined() {
++    HostState &state = host();
++    std::lock_guard lock(state.mutex);
++    return state.joined;
++}
++
++namespace {
++
++// Play online chosen or not, unless an environment variable decides it.
++void set_online(settings::Settings &s, bool online) {
++    if (settings::overridden_by("network.online").empty()) s.adhoc_online = online;
++}
++
++// Hosting ends: announcing, the server and the router's ports.
++void stop_hosting_locked(HostState &state) {
++    if (!state.server.running()) return;
++    adhoc::Discovery::get().stop_announcing();
++    state.server.stop();
++    state.port = 0u;
++    adhoc::PortMapper::get().stop();
++}
++
++} // namespace
++
++void adhoc_play_online() {
++    HostState &state = host();
++    {
++        std::lock_guard lock(state.mutex);
++        stop_hosting_locked(state);
++        state.joined.clear();
++    }
++    settings::Settings &s = settings::current();
++    set_online(s, true);
++    if (settings::overridden_by("network.adhoc").empty()) s.adhoc = true;
++    settings::save();
++    adhoc::Client::log("[adhoc] playing online", true);
++    adhoc_apply_settings(true);
++}
++
++void adhoc_choose_nothing() {
++    HostState &state = host();
++    {
++        std::lock_guard lock(state.mutex);
++        stop_hosting_locked(state);
++        state.joined.clear();
++    }
++    settings::Settings &s = settings::current();
++    set_online(s, false);
++    settings::save();
++    adhoc::Client::log("[adhoc] nothing chosen: not online", true);
++    adhoc_apply_settings(true);
+ }
+ 
+ bool adhoc_host_start() {
+     HostState &state = host();
+     std::vector<adhoc::ForwardedPort> also;
+     std::uint16_t port = 0;
++    if (adhoc_has_public_server()) {
++        // Hosting is a choice of its own: not Play online, nor a joined session.
++        {
++            std::lock_guard lock(state.mutex);
++            state.joined.clear();
++        }
++        set_online(settings::current(), false);
++    }
+     {
+         std::lock_guard lock(state.mutex);
+         if (state.server.running()) return true;
+@@ -170,16 +243,16 @@ void adhoc_remember(const std::string &address) {
+ 
+ void adhoc_join(const std::string &address) {
+     if (address.empty()) return;
+-    if (adhoc_hosting()) {
++    {
+         HostState &state = host();
+         std::lock_guard lock(state.mutex);
+-        adhoc::Discovery::get().stop_announcing();
+-        state.server.stop();
+-        state.port = 0u;
+-        adhoc::PortMapper::get().stop();
++        stop_hosting_locked(state);
++        // With a public server a joined session lasts for this run.
++        if (adhoc_has_public_server()) state.joined = address;
+     }
+     settings::Settings &s = settings::current();
+-    if (settings::overridden_by("network.server").empty()) s.adhoc_server = address;
++    if (adhoc_has_public_server()) set_online(s, false);
++    else if (settings::overridden_by("network.server").empty()) s.adhoc_server = address;
+     if (settings::overridden_by("network.adhoc").empty()) s.adhoc = true;
+     remember(address);
+     settings::save();
+diff --git a/host/adhoc/session.hpp b/host/adhoc/session.hpp
+index f3a976c..d35ac69 100644
+--- a/host/adhoc/session.hpp
++++ b/host/adhoc/session.hpp
+@@ -23,9 +23,31 @@ void adhoc_apply_settings(bool switch_now = false);
+ [[nodiscard]] std::string adhoc_player_name();
+ 
+ // The server the game goes online with: this instance's own while it hosts,
+-// otherwise the Server setting. Empty for none.
++// otherwise the Server setting. Empty for none. With a public server
++// (GameProfile::public_server): this instance's own while it hosts, else the
++// session joined in this run, else a Server setting given by an environment
++// variable (a test's or a launcher's), else, with Play online chosen, the
++// Online server setting or the public server; empty when nothing is chosen
++// or the public server's address is not known yet.
+ [[nodiscard]] std::string adhoc_server_address();
+ 
++// Play online (GameProfile::public_server) ---------------------------------------
++// Three choices, one at a time: Play online (remembered), hosting and joining
++// (for the run). Choosing one ends the others.
++
++[[nodiscard]] bool adhoc_has_public_server();
++// Play online chosen, whether or not the server's address is known yet.
++[[nodiscard]] bool adhoc_online();
++// Chooses Play online: stops hosting, leaves a joined session, turns ad hoc
++// play on and remembers the choice. The game goes online through it the next
++// time it goes online.
++void adhoc_play_online();
++// Chooses nothing: stops playing online, hosting and a joined session, so the
++// game sees the wireless switch off until a choice is made.
++void adhoc_choose_nothing();
++// The session joined in this run with a public server; empty for none.
++[[nodiscard]] std::string adhoc_joined();
++
+ // Hosting (adhoc/host.cpp) ------------------------------------------------------
+ 
+ // <prefix>_ADHOC_LOOPBACK: hosting listens on 127.0.0.1 alone, asks no router
+@@ -62,7 +84,9 @@ void adhoc_shutdown() noexcept;
+ 
+ // Joining: makes `address` ("host" or "host:port") the server, remembers it
+ // among the recent ones, turns ad hoc play on and uses it at once. Stops
+-// hosting first if this instance hosts.
++// hosting first if this instance hosts. With a public server the session is
++// joined for this run only (the Server setting is left alone) and Play online
++// is no longer chosen.
+ void adhoc_join(const std::string &address);
+ 
+ // Puts `address` first among the recent ones, as joining does, for a server
+diff --git a/host/profile.hpp b/host/profile.hpp
+index 2b61d8a..b775e82 100644
+--- a/host/profile.hpp
++++ b/host/profile.hpp
+@@ -313,6 +313,19 @@ struct GameProfile {
+     // see each other's groups; a server that does not know of tags, or a copy
+     // without one, behaves as before. Null or empty: no tag.
+     std::string (*adhoc_version)() = nullptr;
++    // A public ad hoc server the port runs for its players: "Play online" on
++    // the Network page, beside hosting and joining a session. Its address
++    // (host, or host:port off 27312), or empty while it is not known, with
++    // `note` saying why for the player. Asked on the interface's and the
++    // game's threads, so it must answer at once (a port fetches the address in
++    // the background). With one, only Play online is remembered across runs:
++    // a session joined or hosted lasts for the run. Null: no public server,
++    // and Join is remembered as before.
++    std::string (*public_server)(std::string &note) = nullptr;
++    // Players on the public server this copy can play with, or -1 while not
++    // known. Asked about once a frame while the Network page shows it; it
++    // must answer at once. Null: no count is shown.
++    int (*public_server_players)() = nullptr;
+ 
+     // --- Controls ----------------------------------------------------------
+     // What the triggers may press instead of L and R, for the way this game is
+diff --git a/host/settings/settings.cpp b/host/settings/settings.cpp
+index f4ebdf4..7d35904 100644
+--- a/host/settings/settings.cpp
++++ b/host/settings/settings.cpp
+@@ -404,6 +404,17 @@ const std::vector<Field> &fields() {
+              return true;
+          },
+          [](const Settings &s) { return s.adhoc_server; }, [](Settings &s, const char *t) { s.adhoc_server = t; }},
++        {"network.online", "ONLINE",
++         [](Settings &s, const std::string &t) { return parse_bool(t, s.adhoc_online); },
++         [](const Settings &s) { return std::string(s.adhoc_online ? "1" : "0"); },
++         [](Settings &s, const char *t) { s.adhoc_online = variable_flag(t); }},
++        {"network.online_server", "ONLINE_SERVER",
++         [](Settings &s, const std::string &t) {
++             s.adhoc_online_server = t;
++             return true;
++         },
++         [](const Settings &s) { return s.adhoc_online_server; },
++         [](Settings &s, const char *t) { s.adhoc_online_server = t; }},
+         {"network.nickname", "ADHOC_NICKNAME",
+          [](Settings &s, const std::string &t) {
+              s.adhoc_nickname = t;
+diff --git a/host/settings/settings.hpp b/host/settings/settings.hpp
+index 4ce5f66..eb19492 100644
+--- a/host/settings/settings.hpp
++++ b/host/settings/settings.hpp
+@@ -139,6 +139,8 @@ struct Settings {
+     // Network (ad hoc play through a PSP ad hoc server)
+     bool adhoc{};                      // wireless switch on: the game may go online
+     std::string adhoc_server;          // host or host:port of the server; empty: none
++    bool adhoc_online{};               // Play online chosen (GameProfile::public_server)
++    std::string adhoc_online_server;   // the server Play online uses; empty: the game's own
+     std::string adhoc_nickname;        // shown to other players; empty: the player name
+     std::string adhoc_mac;             // this player's virtual MAC, made up on first use
+     std::vector<std::string> adhoc_recent;  // sessions joined lately, the latest first
+diff --git a/host/ui/menu.cpp b/host/ui/menu.cpp
+index a643d03..b50c115 100644
+--- a/host/ui/menu.cpp
++++ b/host/ui/menu.cpp
+@@ -1377,6 +1377,14 @@ std::vector<std::string> network_log_about() {
+     const settings::Settings &s = settings::current();
+     lines.push_back(std::string("settings: ad hoc play ") + (s.adhoc ? "on" : "off") + ", server \"" + s.adhoc_server +
+                     "\", open router ports " + (s.adhoc_router_ports ? "on" : "off"));
++    if (adhoc_has_public_server()) {
++        std::string note;
++        const std::string address = game.public_server(note);
++        lines.push_back(std::string("play online: ") + (adhoc_online() ? "chosen" : "not chosen") +
++                        ", online server \"" + s.adhoc_online_server + "\", the game's server \"" + address + "\"" +
++                        (note.empty() ? std::string() : " (" + note + ")") + ", joined this run \"" + adhoc_joined() +
++                        "\", using \"" + adhoc_server_address() + "\"");
++    }
+     if (adhoc_hosting()) {
+         const adhoc::ServerStatus st = adhoc_host_status();
+         lines.push_back("hosting: TCP " + std::to_string(st.adhocctl_port) + " and " + std::to_string(st.relay_port) +
+@@ -1419,11 +1427,49 @@ std::vector<std::string> network_log_about() {
+     return lines;
+ }
+ 
++// "N players on", or nothing while the port does not know.
++std::string public_players_text() {
++    const auto players = portablekit::game().public_server_players;
++    const int count = players != nullptr ? players() : -1;
++    if (count < 0) return {};
++    return count == 1 ? "1 player on" : std::to_string(count) + " players on";
++}
++
++// Play online, with a port's public server (GameProfile::public_server).
++void play_online() {
++    const settings::Settings &s = settings::current();
++    section("Play online");
++    std::string note;
++    const std::string address =
++        s.adhoc_online_server.empty() ? portablekit::game().public_server(note) : s.adhoc_online_server;
++    const std::string players = public_players_text();
++    if (adhoc_online()) {
++        info_row("Playing online", (players.empty() ? std::string() : players + ". ") +
++                                       "Go online in the game: everyone on the server is in its lobbies.");
++        if (button_row("Stop playing online###choice",
++                       {false, {},
++                        "Leaves the server at once, as a lost connection does. Nothing is chosen then: the game asks "
++                        "again how to play the next time it goes online."},
++                       colors::kDanger))
++            adhoc_choose_nothing();
++    } else {
++        const std::string label = "Play online" + (players.empty() ? std::string() : "   " + players) + "###online";
++        if (button_row(label.c_str(),
++                       {false, {},
++                        "Plays through the game's own server: everyone online is in the game's lobbies, with no "
++                        "hosting and no addresses to send. Stops hosting or a joined session. Remembered."}))
++            adhoc_play_online();
++    }
++    if (address.empty() && !note.empty()) info_row("Server", note);
++    else if (!s.adhoc_online_server.empty()) info_row("Server", s.adhoc_online_server + "   from Online server, below");
++}
++
+ // Hosting and joining a session.
+ void play_together() {
+     settings::Settings &s = settings::current();
+     static std::string copied;
+     static std::string typed_address;
++    if (adhoc_has_public_server()) play_online();
+     section("Play together");
+     if (adhoc_hosting()) {
+         const adhoc::ServerStatus status = adhoc_host_status();
+@@ -1498,8 +1544,12 @@ void play_together() {
+     }
+     const std::vector<adhoc::FoundHost> hosts = discovery.hosts();
+     const bool hosting = adhoc_hosting();
++    const bool public_server = adhoc_has_public_server();
++    // With a public server, the session joined in this run; otherwise the
++    // Server setting.
++    const std::string joined_now = public_server ? adhoc_joined() : s.adhoc_server;
+     const auto joined = [&](const std::string &address) {
+-        return !hosting && s.adhoc && s.adhoc_server == address;
++        return !hosting && s.adhoc && !joined_now.empty() && joined_now == address;
+     };
+     for (std::size_t i = 0; i < hosts.size(); ++i) {
+         const adhoc::FoundHost &host = hosts[i];
+@@ -1515,8 +1565,16 @@ void play_together() {
+         info_row("On this network", "Not looked for: " + portablekit::env_name("ADHOC_LOOPBACK") + " is set");
+     else if (hosts.empty())
+         info_row("On this network", "Looking for hosted sessions…");
+-    if (!hosting && s.adhoc && !s.adhoc_server.empty())
+-        info_row("Joined", s.adhoc_server + "   connects when you go online");
++    if (!hosting && s.adhoc && !joined_now.empty()) {
++        info_row("Joined", joined_now + "   connects when you go online");
++        if (public_server &&
++            button_row("Leave the session###choice",
++                       {false, {},
++                        "Leaves the session at once, as a lost connection does. Nothing is chosen then: the game asks "
++                        "again how to play the next time it goes online."},
++                       colors::kDanger))
++            adhoc_choose_nothing();
++    }
+     if (text_row("join_address", "Address", typed_address, 100u, true, address_character,
+                  {false, {},
+                   "The host's address: their internet address, or their VPN address for a VPN without broadcast "
+@@ -1548,11 +1606,21 @@ void Menu::network() {
+         settings::save();
+         adhoc_apply_settings();
+     }
+-    if (text_row("server", "Server", s.adhoc_server, 100u, true, host_character,
+-                 options_for("network.server", "The session or PSP ad hoc server the game goes online with: host "
+-                                               "name or address, host:port if it is not on 27312. Joining fills "
+-                                               "it in; for a public server, type its name. Applies the next time "
+-                                               "the game goes online. Remembered under Join."))) {
++    if (adhoc_has_public_server()) {
++        if (text_row("online_server", "Online server", s.adhoc_online_server, 100u, true, host_character,
++                     options_for("network.online_server",
++                                 "The server Play online uses instead of the game's own: host name or address, "
++                                 "host:port if it is not on 27312. Empty: the game's own. Applies the next time the "
++                                 "game goes online."))) {
++            settings::save();
++            adhoc_apply_settings();
++        }
++    } else if (text_row("server", "Server", s.adhoc_server, 100u, true, host_character,
++                        options_for("network.server", "The session or PSP ad hoc server the game goes online with: "
++                                                      "host name or address, host:port if it is not on 27312. "
++                                                      "Joining fills it in; for a public server, type its name. "
++                                                      "Applies the next time the game goes online. Remembered under "
++                                                      "Join."))) {
+         adhoc_remember(s.adhoc_server);
+         settings::save();
+         adhoc_apply_settings();
+@@ -1678,9 +1746,11 @@ void Menu::network() {
+         };
+         restore("network.adhoc", s.adhoc, defaults.adhoc);
+         restore("network.server", s.adhoc_server, defaults.adhoc_server);
++        restore("network.online_server", s.adhoc_online_server, defaults.adhoc_online_server);
+         restore("network.nickname", s.adhoc_nickname, defaults.adhoc_nickname);
+         settings::save();
+-        adhoc_apply_settings();
++        if (adhoc_has_public_server()) adhoc_choose_nothing();  // saves and applies
++        else adhoc_apply_settings();
+     }
+ }
+ 
+-- 
+2.53.0.windows.1
+

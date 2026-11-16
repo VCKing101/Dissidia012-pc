@@ -95,6 +95,10 @@ portablekit_add_game(D012Native ${d012_corpus}
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_sync.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_input.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_net.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_battle_relay.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_online.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_online_menu.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_online_rules.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_rollback.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_comm_battle.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_brave_pool_guard.cpp"
@@ -290,6 +294,7 @@ endif()
 # portablekit_add_game() found above.
 add_library(d012_manifest STATIC "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_json.cpp"
                                  "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_update_rules.cpp"
+                                 "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_online_rules.cpp"
                                  "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_discord_rules.cpp"
                                  "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_versus_rules.cpp"
                                  "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_no_window_rules.cpp"
@@ -366,6 +371,14 @@ if(MINGW)
 endif()
 endif()  # NOT ANDROID
 
+# The public online server (server/CMakeLists.txt), which also builds on its
+# own: nothing of the game, so no player's build needs it.
+option(D012_BUILD_SERVER "Also build dissidia012-server, the public online server" OFF)
+if(D012_BUILD_SERVER AND NOT ANDROID)
+    add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/server" server)
+    set_target_properties(dissidia012-server PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+endif()
+
 # The port's own tests (tools/port/pk_ctest.cmd <build dir>): the manifest
 # rules (with tests/manifest_cases.json, which the Python tool's tests run
 # too), the JSON writer, and the BGM Maker's model, names, saving and loop
@@ -374,6 +387,11 @@ enable_testing()
 add_executable(d012_tests "${CMAKE_CURRENT_SOURCE_DIR}/tests/d012_tests.cpp"
                           "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/suggest.cpp")
 target_link_libraries(d012_tests PRIVATE d012_manifest Threads::Threads)
+# The battle relay's STATUS packets (it builds without PortableKit).
+target_sources(d012_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_battle_relay.cpp")
+if(WIN32)
+    target_link_libraries(d012_tests PRIVATE ws2_32)
+endif()
 target_compile_definitions(d012_tests PRIVATE D012_TESTS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests")
 set_target_properties(d012_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 add_test(NAME d012_tests COMMAND d012_tests)

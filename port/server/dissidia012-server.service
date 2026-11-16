@@ -1,0 +1,31 @@
+# dissidia012-server as a systemd service (docs/port/online-matchmaking.md,
+# section 15): /opt/dissidia012/dissidia012-server, run as the unprivileged
+# user dissidia, restarted if it stops, the ban list in /etc/dissidia012.
+
+[Unit]
+Description=Dissidia 012 online server (lobby, its relay and the battle relay)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=dissidia
+Group=dissidia
+ExecStart=/opt/dissidia012/dissidia012-server --ban-list /etc/dissidia012/bans.txt
+Restart=always
+RestartSec=5
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+LimitNOFILE=4096
+
+[Install]
+WantedBy=multi-user.target
