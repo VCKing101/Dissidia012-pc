@@ -42,7 +42,7 @@ Pushing, tagging and publishing are the owner's calls: each step under [Publishi
 ## 2. Windows: the setup and the RecompLauncher zip
 
 ```powershell
-python tools/port/package_installer.py --portablekit <main checkout>	ools\local\port\PortableKit
+python tools/port/package_installer.py --portablekit <main checkout>/tools/local/port/PortableKit
 ```
 
 A release worktree has no PortableKit clone of its own: `--portablekit` names the main checkout's, on `dissidia`.
