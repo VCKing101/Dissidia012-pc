@@ -1,0 +1,137 @@
+From 065d5cabec624645a6869f9efda68d6389f47eb1 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Tue, 17 Nov 2026 10:15:21 +1030
+Subject: [PATCH] Cheats: none run while the game has ad hoc play running
+
+A cheat changes one player's game only. In a network battle the two
+games then part (the port's battle cheats write "your" fighter, a
+different fighter on each player's game, so even the same cheats on both
+part them), and the other player fights against the cheat. So while the
+game has ad hoc play running (adhoc_networking_on(): from its
+sceNetAdhocctlInit or sceNetAdhocInit to the Term), no cheat runs, the
+port's own or the file's. Nothing in the settings changes: the cheats
+that were on run again once the game leaves ad hoc play.
+
+- cheats: paused_online(), asked before each pass; the log says when the
+  cheats pause and run again. <prefix>_CHEATS_ONLINE=1 runs them all the
+  same (the old behaviour).
+- ui/menu: the Cheats page says so while they are paused.
+- PROFILE_GUIDE: a port's own cheat run from a hook asks paused_online()
+  too.
+
+Tested on Windows (clang) with Dissidia 012, two copies through a
+loopback server: one copy with Bravery 9,999 and Infinite HP on ran them
+until it entered the Online Lobby, then not at all through a battle (the
+HUD kept the battle's own Bravery); back at the Start Menu they ran
+again, and paused again in the lobby, the Cheats page showing the line.
+Not tested: Linux, the Steam Deck, Android, another game, Group Battle.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ docs/PROFILE_GUIDE.md  |  2 +-
+ host/cheats/cheats.cpp | 12 ++++++++++++
+ host/cheats/cheats.hpp | 14 +++++++++++++-
+ host/ui/menu.cpp       |  3 +++
+ 4 files changed, 29 insertions(+), 2 deletions(-)
+
+diff --git a/docs/PROFILE_GUIDE.md b/docs/PROFILE_GUIDE.md
+index f43998f..aa18d24 100644
+--- a/docs/PROFILE_GUIDE.md
++++ b/docs/PROFILE_GUIDE.md
+@@ -89,7 +89,7 @@ For a picture of the port's own beside one of the game's screens, such as a hint
+ 
+ `edited_textures` lists textures the profile draws again as they load, with `edit_texture` doing the drawing: the game's button symbols in the style of the gamepad in use, for one. Each is an `EditedTexture`, named and found as a `SharpTexture` is. `edit_texture` gets the game's decoded picture (RGBA8) and a `TextureEditContext`, and returns its own picture, the same shape at any size (four times gives room for sharp detail), drawn with the same texture coordinates as a texture pack's image; false keeps the game's. The context holds what the picture may depend on: Button prompts with the gamepad in use and the Confirm button setting (`input::ButtonPrompts`: the style, which face button sends each of the PSP's, and whether L and R are on the triggers, which the Controls page's Swap shoulders and triggers does for every game), and whether Texture filter is Sharp. When it changes, the cached textures are dropped and the listed ones drawn again. Set `button_prompts` when they are the game's button symbols, and the Controls page offers Button prompts (Automatic, PSP, Xbox, PlayStation, Nintendo, Keyboard; Automatic follows player 1's pad, or the keyboard when that was played last or no pad is connected, and the PSP's on a phone without one). In the keyboard style `ButtonPrompts::keys` holds the first key or mouse button bound to each of the PSP's buttons (`input::PromptKey`), so the picture can show it; it is empty in the other styles. A texture pack's image for one is drawn instead. `<prefix>_NO_TEXTURE_EDITS=1` draws the game's own, for a comparison. Keep the game's pixels out of the profile: draw over the picture it is given.
+ 
+-`cheats` lists cheats the port offers on the menu's Cheats page, beside the player's own PPSSPP cheat file (`PSP/Cheats/<disc id>.ini` on the memory stick, `host/cheats/cheats.hpp`). Each is a `BuiltinCheat`: a key for settings.ini, the heading it goes under, a name, a sentence for the footer, and its choices, each a label and its CWCheat code lines (what a cheat file has after `_L`). One choice makes a switch; several make Off and each. They run through the same engine as the file, before it, every 77 ms of the game's time, so a code written as a player would write it gives the same result. A write into recompiled code is left out, as for the file; such a code needs the interpreter, which cheats do not reach yet. Test each against the game's own screens before listing it: a public list's codes can name an address the game no longer reads. Without any, the page has only the switch and the file.
++`cheats` lists cheats the port offers on the menu's Cheats page, beside the player's own PPSSPP cheat file (`PSP/Cheats/<disc id>.ini` on the memory stick, `host/cheats/cheats.hpp`). Each is a `BuiltinCheat`: a key for settings.ini, the heading it goes under, a name, a sentence for the footer, and its choices, each a label and its CWCheat code lines (what a cheat file has after `_L`). One choice makes a switch; several make Off and each. They run through the same engine as the file, before it, every 77 ms of the game's time, so a code written as a player would write it gives the same result. A write into recompiled code is left out, as for the file; such a code needs the interpreter, which cheats do not reach yet. Test each against the game's own screens before listing it: a public list's codes can name an address the game no longer reads. Without any, the page has only the switch and the file. No cheat runs while the game has ad hoc play running (`cheats::paused_online()`): it would change one player's game only, so a port's own cheat that runs from a hook rather than as codes asks the same.
+ 
+ `interpolation_thresholds` is for frame interpolation, which blends the game's frames and must not blend across a camera cut. The angles and fractions it uses to tell a cut from motion hold for any game; its distances are in the game's own world units, and the defaults were measured on Monster Hunter Portable 3rd. A game whose world is on a very different scale gives its own; one that does not, gets those defaults.
+ 
+diff --git a/host/cheats/cheats.cpp b/host/cheats/cheats.cpp
+index 9e4931f..351801a 100644
+--- a/host/cheats/cheats.cpp
++++ b/host/cheats/cheats.cpp
+@@ -37,6 +37,7 @@ struct State {
+     std::vector<bool> builtin_changes_code;
+     std::uint64_t interval_us{kDefaultIntervalUs};
+     std::uint64_t next_us{};
++    bool paused{};  // the last pass found ad hoc play running (for the log)
+ };
+ 
+ State &state() {
+@@ -167,6 +168,12 @@ void on_vblank() {
+     if (now < s.next_us) return;
+     s.next_us = now + s.interval_us;
+     if (!settings::current().cheats) return;
++    if (const bool paused = paused_online(); paused != s.paused) {
++        s.paused = paused;
++        std::cout << (paused ? "[cheats] paused: the game is playing ad hoc\n"
++                             : "[cheats] running again: the game has left ad hoc play\n");
++    }
++    if (s.paused) return;
+     const std::lock_guard<std::mutex> hold(s.lock);
+     if (!s.loaded) load(s);
+     if (s.runtime == nullptr) return;
+@@ -261,6 +268,11 @@ Overview overview() {
+     return o;
+ }
+ 
++bool paused_online() {
++    static const bool allowed = env("CHEATS_ONLINE") != nullptr;
++    return !allowed && adhoc_networking_on();
++}
++
+ void set_enabled(std::size_t index, bool enabled) {
+     State &s = state();
+     const std::lock_guard<std::mutex> hold(s.lock);
+diff --git a/host/cheats/cheats.hpp b/host/cheats/cheats.hpp
+index c7cdf37..c172bdc 100644
+--- a/host/cheats/cheats.hpp
++++ b/host/cheats/cheats.hpp
+@@ -11,9 +11,12 @@
+ // Recompiled code does not change when memory does, so a write into the
+ // game's code (its executable's code sections, or an overlay's header and
+ // code, overlays.hpp) is left out and the page says the cheat changes code.
++// While the game has ad hoc play running (paused_online()), no cheat runs.
++//
+ // <prefix>_CHEATS="key=choice,...": the port's own that are on, as
+ // settings.ini's cheats.builtin. <prefix>_NO_CHEATS=1: no cheats at all. <prefix>_CHEAT_INTERVAL_MS: another
+-// interval. <prefix>_TRACE_CHEATS=1: each pass's cheats, with what they did.
++// interval. <prefix>_TRACE_CHEATS=1: each pass's cheats, with what they did. <prefix>_CHEATS_ONLINE=1: cheats
++// run during ad hoc play too.
+ 
+ #include "psprecomp/elf32.hpp"
+ #include "psprecomp/runtime.hpp"
+@@ -57,6 +60,15 @@ struct Overview {
+ };
+ 
+ [[nodiscard]] Overview overview();
++// True while the game has ad hoc play running (adhoc_networking_on(): from
++// its sceNetAdhocctlInit or sceNetAdhocInit to the Term), unless
++// <prefix>_CHEATS_ONLINE is set. No cheat runs then, the port's or the file's:
++// a cheat changes one player's game only, so the players' games would part in
++// a battle, and the other player would play against it. Nothing in the
++// settings changes, so the cheats that were on run again once the game leaves
++// ad hoc play. A port's own cheat that is not a list of codes (one run from a
++// hook) asks this too.
++[[nodiscard]] bool paused_online();
+ // Turns a cheat on or off and saves the file.
+ void set_enabled(std::size_t index, bool enabled);
+ // Sets one of the port's own: 0 off, or a choice's number from 1. Saved in
+diff --git a/host/ui/menu.cpp b/host/ui/menu.cpp
+index 4ee8695..edfb87d 100644
+--- a/host/ui/menu.cpp
++++ b/host/ui/menu.cpp
+@@ -1768,6 +1768,9 @@ void Menu::cheat_page() {
+         s.cheats = !s.cheats;
+         settings::save();
+     }
++    if (s.cheats && cheats::paused_online())
++        paragraph("Cheats are paused while you play online. They come back on when you leave.",
++                  colors::kTextDisabled);
+     const std::string builtin_note = settings::overridden_by("cheats.builtin");
+     std::string heading;
+     for (std::size_t i = 0; i < o.builtin.size(); ++i) {
+-- 
+2.53.0.windows.1
+

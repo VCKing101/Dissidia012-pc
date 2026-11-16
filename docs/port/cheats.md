@@ -26,6 +26,15 @@ A recompiled game does not change when its code is written, so a write into the 
 or an overlay's) is left out. The page marks such a cheat **Changes code**; its other writes are made. Running those
 needs the interpreter (a later step).
 
+**Online, none run** (patch 0111). While the game has ad hoc play running, from its `sceNetAdhocctlInit` (or
+`sceNetAdhocInit`) to the `Term`, that is in Communication Mode's online screens, its battles and Communications,
+no cheat runs: not the port's own, not the file's, and not the AP row. A cheat changes one player's game only. The
+battle cheats write "your" fighter, which is a different fighter on each player's game, so even two players with the
+same cheats on would part ("Network sync failed"), and the other player would fight against them. Nothing in the
+settings changes: the cheats that were on run again once the game leaves Communication Mode. The page says so while
+they are paused, and the log says `[cheats] paused: the game is playing ad hoc`, then `running again`. Tested in
+[Communication Mode, section 20](communication-mode.md#20-dlc-on-one-side-only-and-cheats-online-17-november-2026).
+
 ## Compared with PPSSPP
 
 PPSSPP 1.20.4 was run beside the port with the same save (its own memory stick in `tools/local`, nothing of the
@@ -168,6 +177,7 @@ catalog, the game autosaved; opened again, it showed 20,000 with the preset boug
 | `D012_CHEATS=gil=2,kp=1,...` | The port's own that are on, for one run (the rows are then greyed) |
 | `D012_TRACE_CHEATS=1` | Each pass's cheats, with what they did |
 | `D012_CHEAT_INTERVAL_MS=<ms>` | Another interval than 77 ms |
+| `D012_CHEATS_ONLINE=1` | Cheats run during ad hoc play too, as before patch 0111 |
 
 ## Verified (6 November 2026, Windows, clang build, USA disc)
 
