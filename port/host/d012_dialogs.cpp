@@ -18,7 +18,8 @@
 // where each piece sits in its picture.
 //
 // Every place below is in the PSP's 480x272 screen, drawn over the game's
-// picture (ui::game_picture()).
+// picture (ui::game_picture()). The page around them reaches the edges of a
+// wider (or taller) window: see Canvas.
 #include "d012_dialogs.hpp"
 #include "d012_decomp_harness.hpp"
 
@@ -412,24 +413,58 @@ constexpr ImU32 kBlueRim = rgba(24, 20, 96);
 constexpr ImU32 kBandRim = rgba(30, 26, 80);
 constexpr ImU32 kWhite = rgba(255, 255, 255);
 
+// Where a dialog is drawn. Its page fills the window: past the black bars
+// beside a 16:9 picture on a wider screen (Aspect ratio Original), and at the
+// PSP's proportions over a stretched picture (Stretch), its pixels square
+// either way. The PSP's 480x272 screen sits in the middle of the page across
+// and at its top: the choices, panels and keys keep their places in it. The
+// page's ground, bands and rules run its full width, the title sits at its
+// left edge and the hints at its right edge and foot.
 struct Canvas {
     ImDrawList *draw{};
-    float left{};
+    float left{};  // where the PSP screen's (0, 0) is, in window coordinates
     float top{};
     float s{1.0f};  // window pixels per PSP pixel
+    // The page's edges in the PSP screen's pixels: from x0 (0 or less) to x1
+    // (480 or more) across, from 0 to `bottom` (272 or more) down.
+    float x0{0.0f};
+    float x1{480.0f};
+    float bottom{272.0f};
+    // The game picture's left and right edges, the same way: 0 and 480 under
+    // Original, the page's edges under Stretch.
+    float picture_x0{0.0f};
+    float picture_x1{480.0f};
 
     [[nodiscard]] ImVec2 at(float x, float y) const { return {left + x * s, top + y * s}; }
 };
 
 Canvas canvas() {
     const ui::GamePicture picture = ui::game_picture();
+    const ImVec2 display = ImGui::GetIO().DisplaySize;
+    // The page: the window as far as it reaches evenly on both sides of the
+    // picture's middle (an edge kept by the system, such as a phone's camera
+    // cutout, moves the picture off the window's middle), never less than the
+    // picture.
+    const float middle_x = picture.left + picture.width * 0.5f;
+    const float middle_y = picture.top + picture.height * 0.5f;
+    const float half_w = std::max(picture.width * 0.5f, std::min(middle_x, display.x - middle_x));
+    const float half_h = std::max(picture.height * 0.5f, std::min(middle_y, display.y - middle_y));
     Canvas c;
     c.draw = ImGui::GetForegroundDrawList();
-    c.left = picture.left;
-    c.top = picture.top;
-    c.s = picture.height / 272.0f;
+    c.s = std::min(2.0f * half_w / 480.0f, 2.0f * half_h / 272.0f);
+    c.x0 = (480.0f - 2.0f * half_w / c.s) * 0.5f;
+    c.x1 = 480.0f - c.x0;
+    c.bottom = 2.0f * half_h / c.s;
+    c.left = middle_x - half_w - c.x0 * c.s;
+    c.top = middle_y - half_h;
+    c.picture_x0 = std::max(c.x0, (picture.left - c.left) / c.s);
+    c.picture_x1 = std::min(c.x1, (picture.left + picture.width - c.left) / c.s);
     return c;
 }
+
+// The frame (ImGui's count) a page was last drawn in: a message drawn over
+// one runs the page's width, over the game the game picture's.
+int g_page_frame = -1;
 
 // What the game's own button symbols show now (Controls > Button prompts),
 // or none while they are the PSP's.
@@ -690,7 +725,7 @@ void title(const Canvas &c, std::string_view text) {
     ImFont *font = title_font();
     const float px = 22.0f * c.s;
     constexpr float kWiden = 1.12f;
-    const ImVec2 origin = c.at(8.0f, 1.0f);
+    const ImVec2 origin = c.at(c.x0 + 8.0f, 1.0f);
     ImDrawList *d = c.draw;
     // Each pass's vertices, widened about the title's left edge afterwards.
     const auto widen = [&](int from) {
@@ -747,18 +782,23 @@ void vertical(const Canvas &c, float x0, float y0, float x1, float y1, ImU32 top
 }
 
 void line(const Canvas &c, float y, ImU32 colour, float width) {
-    c.draw->AddLine(c.at(0.0f, y), c.at(480.0f, y), colour, std::max(1.0f, width * c.s));
+    c.draw->AddLine(c.at(c.x0, y), c.at(c.x1, y), colour, std::max(1.0f, width * c.s));
 }
 
 // The page behind the save list and the keyboard: the lavender ground, the
 // feather at the right, the title band and its rules, as at the top of Data
-// Config. The game shows through it only faintly.
+// Config. Opaque: past the game picture's edges the window is black, so a
+// ground the game showed through would show where the picture ends.
 void page(const Canvas &c, std::string_view heading) {
-    vertical(c, 0.0f, 0.0f, 480.0f, 272.0f, rgba(236, 236, 248, 248), rgba(196, 196, 228, 250));
+    g_page_frame = ImGui::GetFrameCount();
+    vertical(c, c.x0, 0.0f, c.x1, c.bottom, rgba(236, 236, 248), rgba(196, 196, 228));
+    // The feather runs past the page's right edge, cut there.
     const Texture &feather = sheet(kFeather);
-    image(c, feather, 0.0f, 0.0f, 256.0f, 256.0f, 480.0f - 260.0f + 40.0f, 10.0f, 260.0f, 260.0f, false,
+    c.draw->PushClipRect(c.at(c.x0, 0.0f), c.at(c.x1, c.bottom), true);
+    image(c, feather, 0.0f, 0.0f, 256.0f, 256.0f, c.x1 - 260.0f + 40.0f, 10.0f, 260.0f, 260.0f, false,
           rgba(255, 255, 255, 115));
-    vertical(c, 0.0f, 0.0f, 480.0f, 34.0f, rgba(255, 255, 255, 200), rgba(255, 255, 255, 0));
+    c.draw->PopClipRect();
+    vertical(c, c.x0, 0.0f, c.x1, 34.0f, rgba(255, 255, 255, 200), rgba(255, 255, 255, 0));
     line(c, 33.0f, rgba(120, 116, 170), 1.0f);
     line(c, 35.0f, rgba(255, 255, 255, 200), 0.5f);
     title(c, heading);
@@ -777,9 +817,10 @@ void instruction(const Canvas &c, std::string_view text) {
         const float t0 = static_cast<float>(i) / kSteps, t1 = static_cast<float>(i + 1) / kSteps;
         const ImU32 a = rgba(70, 66, 150, static_cast<int>(alpha(t0)));
         const ImU32 b = rgba(70, 66, 150, static_cast<int>(alpha(t1)));
-        c.draw->AddRectFilledMultiColor(c.at(480.0f * t0, y0), c.at(480.0f * t1, y1), a, b, b, a);
+        const float wide = c.x1 - c.x0;
+        c.draw->AddRectFilledMultiColor(c.at(c.x0 + wide * t0, y0), c.at(c.x0 + wide * t1, y1), a, b, b, a);
     }
-    c.draw->AddLine(c.at(0.0f, y0), c.at(480.0f, y0), rgba(200, 200, 240, 160), std::max(1.0f, 0.5f * c.s));
+    c.draw->AddLine(c.at(c.x0, y0), c.at(c.x1, y0), rgba(200, 200, 240, 160), std::max(1.0f, 0.5f * c.s));
     TextStyle style;
     style.bold = true;
     style.track = 0.9f;
@@ -849,12 +890,13 @@ void hints_at(const Canvas &c, const std::vector<Hint> &items, float right, floa
 
 // The bar at the foot of the page with the hints at its right.
 void hint_bar(const Canvas &c, const std::vector<Hint> &items) {
-    vertical(c, 0.0f, 248.0f, 480.0f, 268.0f, rgba(255, 255, 255, 215), rgba(255, 255, 255, 155));
-    c.draw->AddLine(c.at(0.0f, 248.0f), c.at(480.0f, 248.0f), rgba(140, 136, 190), std::max(1.0f, 0.5f * c.s));
+    const float y = c.bottom - 24.0f;  // 248 on the PSP's screen
+    vertical(c, c.x0, y, c.x1, y + 20.0f, rgba(255, 255, 255, 215), rgba(255, 255, 255, 155));
+    c.draw->AddLine(c.at(c.x0, y), c.at(c.x1, y), rgba(140, 136, 190), std::max(1.0f, 0.5f * c.s));
     TextStyle style;
     style.fill = kNavy;
     style.rim = kWhite;
-    hints_at(c, items, 474.0f, 258.0f, style);
+    hints_at(c, items, c.x1 - 6.0f, y + 10.0f, style);
 }
 
 bool hovering(const Canvas &c, float x0, float y0, float x1, float y1) {
@@ -924,12 +966,16 @@ void message(const ui::MessageSkinView &view, ui::SkinPointer &pointer) {
     const std::vector<std::string> lines = wrap(c, view.text, 440.0f, style);
     constexpr float kLine = 14.0f;
     const float band = 22.0f + kLine * static_cast<float>(lines.size()) + 46.0f;
-    const float top = std::round((272.0f - band) * 0.5f);
-    // The band, strongest in its middle.
-    vertical(c, 0.0f, top, 480.0f, top + band * 0.5f, rgba(66, 62, 146, 198), rgba(66, 62, 146, 238));
-    vertical(c, 0.0f, top + band * 0.5f, 480.0f, top + band, rgba(66, 62, 146, 238), rgba(66, 62, 146, 198));
-    c.draw->AddLine(c.at(0.0f, top), c.at(480.0f, top), rgba(210, 210, 250, 200), std::max(1.0f, 0.5f * c.s));
-    c.draw->AddLine(c.at(0.0f, top + band), c.at(480.0f, top + band), rgba(210, 210, 250, 200),
+    const float top = std::round((c.bottom - band) * 0.5f);
+    // The band, strongest in its middle: across the page behind it, or across
+    // the game picture (the game shows through the band, and past the
+    // picture's edges there is only black).
+    const bool over_page = g_page_frame == ImGui::GetFrameCount();
+    const float x0 = over_page ? c.x0 : c.picture_x0, x1 = over_page ? c.x1 : c.picture_x1;
+    vertical(c, x0, top, x1, top + band * 0.5f, rgba(66, 62, 146, 198), rgba(66, 62, 146, 238));
+    vertical(c, x0, top + band * 0.5f, x1, top + band, rgba(66, 62, 146, 238), rgba(66, 62, 146, 198));
+    c.draw->AddLine(c.at(x0, top), c.at(x1, top), rgba(210, 210, 250, 200), std::max(1.0f, 0.5f * c.s));
+    c.draw->AddLine(c.at(x0, top + band), c.at(x1, top + band), rgba(210, 210, 250, 200),
                     std::max(1.0f, 0.5f * c.s));
     for (std::size_t n = 0; n < lines.size(); ++n)
         text_centred(c, 240.0f, top + 12.0f + kLine * static_cast<float>(n) + 5.0f, lines[n], style);
@@ -962,7 +1008,7 @@ void message(const ui::MessageSkinView &view, ui::SkinPointer &pointer) {
     TextStyle hint;
     hint.size = 9.0f;
     hint.rim = kBandRim;
-    hints_at(c, items, 470.0f, top + band - 8.0f, hint);
+    hints_at(c, items, x1 - 10.0f, top + band - 8.0f, hint);
 }
 
 // --- The save list -----------------------------------------------------------

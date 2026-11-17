@@ -13,7 +13,11 @@ interface's look. Since 6 November 2026 the port draws them like the game's own 
 - the hand's poke: as on the game's pages, every half second it pokes 2, 3, 4, 3, 2 PSP pixels toward its choice
   over five frames (measured frame by frame on Data Config);
 - the game's own menu sounds: the cursor sound when the selection moves, the choice sound for an answer, a slot or a
-  key typed, the back sound for backing out, and the "not allowed" sound for a key that cannot be typed.
+  key typed, the back sound for backing out, and the "not allowed" sound for a key that cannot be typed;
+- the page filling the window on a screen wider (or taller) than 16:9, at the PSP's proportions whatever the
+  **Aspect ratio** setting (issue 26): the ground, bands and rules run the full width, the title sits at the left
+  edge and the hints at the right, and the choices, panels and keys stay in the middle. A message's band runs the
+  page's width over a page, and the game picture's over the game.
 
 The code is `port/host/d012_dialogs.cpp`. PortableKit keeps everything the dialogs do: the saves, the answers the
 game gets, the typing, and the gamepad and keyboard controls. Only the drawing is the port's, through PortableKit's
