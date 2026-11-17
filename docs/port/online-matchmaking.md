@@ -729,6 +729,26 @@ needs a release with Play online), players near the server, the Deck and the pho
   updating, and how players reach the official server or another.
 - The README's online section leads with the in-game choice; its Android notes no longer call online play untested.
 
+## 17. Each battle in the server's log (18 November 2026)
+
+On release day players lagged, "good to begin with, worse over time". The server's log said who played whom and
+when, but not how a battle went: the machine was nearly idle (under 4% busy, no dropped packets), and the traffic
+showed most battles went direct, past it. So the relay now writes each battle into the log
+([Running a server](run-a-server.md#the-log)): its path and length at its end, and while it carries one, every 30 s
+per fighter the frames a second, the round trip to the server, the longest silence and the slack.
+
+Nothing changed in the copies: the relay reads the INPUT packets it already passes on. A fighter's round trip comes
+from the echo each INPUT carries (the other copy's clock plus how long it was held): the relay notes when it passed
+on each clock, so an echo coming back, less its hold, is relay to fighter and back. Only the server program turns it
+on (`Options::report_battles`); a game hosting a session logs nothing new.
+
+Tested with two copies through `dissidia012-server --loopback` (Windows build): forced through the relay, copy 2
+with `D012_NET_SIM=40`: the relay read copy 1 at 0 ms and copy 2 at 40 ms (39-42), the copies' own round trip 40
+ms; both copies at 25 ms ± 10: the relay 24 and 23 ms, the copies 50 ms; about 28 frames a second; a direct battle
+logged as "direct, the relay carried none of its input". `d012_tests` passes. The Linux build (WSL GCC 13, the same
+g++ line as before) went onto the official server on 17 November at 21:14 UTC, with nobody online; the old program
+is kept beside it as `dissidia012-server.before-battle-log`. Not yet seen: a real battle through it.
+
 ## Sources
 
 - [Oracle, Always Free Resources][oci-free], read 10 November 2026: the allowances, the home region, the idle rule.

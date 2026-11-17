@@ -84,6 +84,15 @@ struct Options {
     std::function<Counts(std::string_view version)> status;
     // How the log names it.
     std::string name = "battle-relay";
+    // A line about each battle on standard output: every 30 s while the relay
+    // carries its input (each fighter's frames a second, round trip to the
+    // relay, longest silence and slack, read from the INPUT packets it
+    // passes on), and one at its end (how long, direct or through the relay,
+    // how it ended). The server program's log; off in a game.
+    bool report_battles{};
+    // The player at an IPv4 address (network byte order) for those lines;
+    // empty when unknown or shared ("fighter 1", "fighter 2" then).
+    std::function<std::string(std::uint32_t address)> who;
 };
 
 // Starts the relay on a thread of its own that runs until the process ends.

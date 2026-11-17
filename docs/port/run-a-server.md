@@ -96,7 +96,24 @@ of a change, and drops whoever it names.
 
 `journalctl -u dissidia012-server` shows each login (nickname, MAC, release and address), every player turned away,
 and, once a minute when it changed, how many players are online on each release. It holds players' addresses: keep
-it briefly. The official server keeps a week, with this in
+it briefly.
+
+Each battle has `[battle-relay]` lines. When it starts: whether the fighters may try a direct path. At its end: how
+long it lasted, how it ended (a fighter left, or nothing came for 20 s) and its path: `direct, the relay carried none
+of its input`, or `through the relay` (with `from` and `until` when it moved partway). While the relay carries a
+battle, every 30 s and in the end line, for each fighter (by nickname, or `fighter 1` and `fighter 2` when two
+players share an address):
+
+- **frames (n/s):** how far its game got. A battle runs at about 30 frames a second; fewer means that copy's game
+  ran slow, or waited for the other.
+- **round trip:** the server to that fighter and back, in ms (average, least to most), worked out from the echo in
+  each copy's input. The two fighters' round trips added are the battle's.
+- **quiet … at most:** the longest time with nothing from that fighter.
+- **slack:** how many ms before it needed them the other fighter's inputs reached that copy (average, and the
+  least). Negative: that copy waited.
+
+A direct battle passes nothing through the server, so for those the copies' own logs (`data/logs/D012Native.log`,
+its `[battle-net]` lines) are the place to look. The official server keeps a week, with this in
 `/etc/systemd/journald.conf.d/dissidia-retention.conf` (then `systemctl restart systemd-journald`):
 
 ```
