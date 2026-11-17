@@ -46,6 +46,7 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace portablekit {
 
@@ -168,20 +169,32 @@ class Online {
 public:
     void update(const portablekit::adhoc::ServerStatus &status) {
         std::set<std::uint32_t> addresses;
+        std::map<std::uint32_t, std::vector<std::string>> names;
         std::map<std::string, std::uint32_t> versions;
         for (const auto &player : status.players) {
             in_addr v4{};
-            if (inet_pton(AF_INET, player.address.c_str(), &v4) == 1) addresses.insert(v4.s_addr);
+            if (inet_pton(AF_INET, player.address.c_str(), &v4) == 1) {
+                addresses.insert(v4.s_addr);
+                names[v4.s_addr].push_back(player.nickname);
+            }
             ++versions[player.version];
         }
         std::lock_guard lock(mutex_);
         addresses_ = std::move(addresses);
+        names_ = std::move(names);
         versions_ = std::move(versions);
         all_ = static_cast<std::uint32_t>(status.players.size());
     }
     bool admits(std::uint32_t address) const {
         std::lock_guard lock(mutex_);
         return addresses_.count(address) != 0u;
+    }
+    // The nickname of the one player at an address; empty for none or several
+    // (one home's copies share its address).
+    std::string name_at(std::uint32_t address) const {
+        std::lock_guard lock(mutex_);
+        const auto found = names_.find(address);
+        return found != names_.end() && found->second.size() == 1u ? found->second.front() : std::string();
     }
     d012::net::relay::Counts counts(std::string_view version) const {
         std::lock_guard lock(mutex_);
@@ -204,6 +217,7 @@ public:
 private:
     mutable std::mutex mutex_;
     std::set<std::uint32_t> addresses_;
+    std::map<std::uint32_t, std::vector<std::string>> names_;
     std::map<std::string, std::uint32_t> versions_;
     std::uint32_t all_{};
 };
@@ -290,6 +304,8 @@ int main(int argc, char **argv) {
     relay.admit = [&online](std::uint32_t address) { return online.admits(address); };
     relay.status = [&online](std::string_view version) { return online.counts(version); };
     relay.name = "battle-relay";
+    relay.report_battles = true;
+    relay.who = [&online](std::uint32_t address) { return online.name_at(address); };
     d012::net::relay::start(std::move(relay));
 
     std::signal(SIGINT, on_signal);

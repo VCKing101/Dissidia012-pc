@@ -22,10 +22,15 @@
 
 #include <algorithm>
 #include <chrono>
+#include <climits>
 #include <cstring>
+#include <deque>
+#include <iomanip>
 #include <iostream>
 #include <map>
 #include <mutex>
+#include <optional>
+#include <sstream>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -78,6 +83,14 @@ void put32(std::string &out, std::uint32_t value) {
 std::uint32_t get32(const std::uint8_t *data) {
     return static_cast<std::uint32_t>(data[0]) | (static_cast<std::uint32_t>(data[1]) << 8u) |
            (static_cast<std::uint32_t>(data[2]) << 16u) | (static_cast<std::uint32_t>(data[3]) << 24u);
+}
+
+std::uint16_t get16(const std::uint8_t *data) {
+    return static_cast<std::uint16_t>(data[0] | (data[1] << 8u));
+}
+
+std::uint64_t get64(const std::uint8_t *data) {
+    return static_cast<std::uint64_t>(get32(data)) | (static_cast<std::uint64_t>(get32(data + 4u)) << 32u);
 }
 
 std::string head(std::uint8_t kind, std::uint32_t tag = 0u) {
@@ -164,11 +177,241 @@ End *place(std::vector<End> &list, const sockaddr_in &from) {
     return &*quiet;
 }
 
+// --- The battles' log (Options::report_battles) -----------------------------
+//
+// Read from what the relay passes on, so it needs nothing of the copies. The
+// battle link's INPUT (d012_net.cpp) after the head: u64 the other's frames
+// held, u64 the first frame carried, u16 their count, ..., at +40 u32 the
+// sender's clock in ms, at +44 u32 the other's clock from its latest INPUT
+// plus how long the sender held it (~0 for none), at +48 s16 the sender's
+// slack: how many ms before it needed them the other's inputs came (negative:
+// it waited; INT16_MIN for none yet). BYE: a fighter left.
+//
+// A fighter's round trip to the relay comes from its echo: the relay noted
+// when it passed on the other's INPUT stamped with that clock, so the echo
+// coming back now, less the hold the echo adds, is relay -> fighter -> relay.
+// The two fighters' round trips added are the battle's.
+constexpr std::uint8_t kInput = 3u;
+constexpr std::uint8_t kBye = 4u;
+constexpr std::size_t kInputHead = kHead + 52u;
+constexpr std::uint32_t kNoTime = ~0u;
+constexpr std::int16_t kNoSlack = INT16_MIN;
+constexpr auto kReportEvery = std::chrono::seconds(30);
+constexpr auto kAfterBye = std::chrono::seconds(3);      // the other's BYE and last packets
+constexpr auto kBattleQuiet = std::chrono::seconds(20);  // nothing at all: over (a direct battle ASKs every 5 s)
+constexpr auto kRemembered = std::chrono::seconds(60);   // a reported battle's late packets start none
+constexpr std::size_t kStamps = 256u;                    // over 4 s of a fighter's inputs
+constexpr std::size_t kMostFighters = 4u;                // two, and a copy back on a new port
+
+long long ms_of(Clock::duration d) { return std::chrono::duration_cast<std::chrono::milliseconds>(d).count(); }
+
+std::string minutes(Clock::duration d) {
+    const long long s = std::chrono::duration_cast<std::chrono::seconds>(d).count();
+    std::ostringstream out;
+    out << s / 60 << ':' << std::setw(2) << std::setfill('0') << s % 60;
+    return out.str();
+}
+
+struct Tally {
+    std::uint64_t inputs = 0;
+    std::uint64_t frames_from = 0;  // the fighter's latest frame when it began
+    bool frames_known = false;
+    Clock::duration quiet{};        // the longest wait between two of its inputs
+    std::uint64_t trips = 0;
+    long long trip_total = 0;
+    long long trip_least = LLONG_MAX;
+    long long trip_most = 0;
+    long long slack_total = 0;
+    std::uint64_t slacks = 0;
+    int slack_least = INT_MAX;
+};
+
+struct Fighter {
+    sockaddr_in address{};
+    std::string name;
+    std::uint64_t inputs = 0;
+    Clock::time_point first_input{};
+    Clock::time_point last_input{};
+    std::uint64_t latest = 0;  // its latest frame carried
+    bool framed = false;
+    Tally window;              // since the last report
+    Tally all;                 // the whole battle
+    std::deque<std::pair<std::uint32_t, Clock::time_point>> stamps;  // its clocks, when passed on
+};
+
+struct Battle {
+    Clock::time_point began;
+    Clock::time_point heard;
+    Clock::time_point reported;
+    std::optional<Clock::time_point> bye;
+    bool relayed = false;  // the relay carried its input
+    Clock::time_point first_relayed{};
+    Clock::time_point last_relayed{};
+    std::vector<Fighter> fighters;
+};
+
+Fighter *fighter_at(Battle &battle, const sockaddr_in &from, const Options &options) {
+    for (Fighter &f : battle.fighters)
+        if (same_address(f.address, from)) return &f;
+    if (battle.fighters.size() >= kMostFighters) return nullptr;
+    Fighter f;
+    f.address = from;
+    if (options.who) f.name = options.who(from.sin_addr.s_addr);
+    battle.fighters.push_back(std::move(f));
+    return &battle.fighters.back();
+}
+
+void note_input(Battle &battle, Fighter &me, const std::uint8_t *data, std::size_t size, Clock::time_point now) {
+    if (size < kInputHead) return;
+    const std::uint64_t first = get64(data + kHead + 8u);
+    const std::uint32_t count = get16(data + kHead + 16u);
+    const std::uint32_t stamp = get32(data + kHead + 40u);
+    const std::uint32_t echo = get32(data + kHead + 44u);
+    const auto slack = static_cast<std::int16_t>(get16(data + kHead + 48u));
+    if (!battle.relayed) battle.first_relayed = now;
+    battle.relayed = true;
+    battle.last_relayed = now;
+    if (me.inputs++ == 0u) me.first_input = now;
+    else
+        for (Tally *t : {&me.window, &me.all}) t->quiet = std::max(t->quiet, now - me.last_input);
+    me.last_input = now;
+    for (Tally *t : {&me.window, &me.all}) ++t->inputs;
+    if (count != 0u) {
+        me.latest = std::max(me.latest, first + count - 1u);
+        for (Tally *t : {&me.window, &me.all}) {
+            if (t->frames_known) continue;
+            t->frames_known = true;
+            t->frames_from = me.latest;
+        }
+        me.framed = true;
+    }
+    if (slack != kNoSlack)
+        for (Tally *t : {&me.window, &me.all}) {
+            t->slack_total += slack;
+            ++t->slacks;
+            t->slack_least = std::min(t->slack_least, static_cast<int>(slack));
+        }
+    if (echo != kNoTime) {
+        for (const Fighter &other : battle.fighters) {
+            if (&other == &me || other.stamps.empty()) continue;
+            // The latest of the other's clocks at or below the echo: the one
+            // it echoes, or one passed on just after it, which changes the
+            // answer by only that packet's jitter.
+            for (auto it = other.stamps.rbegin(); it != other.stamps.rend(); ++it) {
+                const std::uint32_t held = echo - it->first;
+                if (held > 5000u) continue;
+                const long long trip = ms_of(now - it->second) - static_cast<long long>(held);
+                if (trip >= 0 && trip < 10000)
+                    for (Tally *t : {&me.window, &me.all}) {
+                        ++t->trips;
+                        t->trip_total += trip;
+                        t->trip_least = std::min(t->trip_least, trip);
+                        t->trip_most = std::max(t->trip_most, trip);
+                    }
+                break;
+            }
+            break;
+        }
+    }
+    me.stamps.emplace_back(stamp, now);
+    if (me.stamps.size() > kStamps) me.stamps.pop_front();
+}
+
+// "fighter 2" for a fighter with no name, "Player 2" for a name two share.
+std::string name_of(const Battle &battle, std::size_t i) {
+    const std::string &name = battle.fighters[i].name;
+    const auto same = std::count_if(battle.fighters.begin(), battle.fighters.end(),
+                                    [&](const Fighter &f) { return f.name == name; });
+    if (!name.empty() && same == 1) return name;
+    return (name.empty() ? std::string("fighter") : name) + " " + std::to_string(i + 1u);
+}
+
+// One fighter's part of a line: frames over `span`, round trip, silence, slack.
+std::string tally_text(const Fighter &f, const Tally &t, Clock::duration span) {
+    std::ostringstream out;
+    if (t.inputs == 0u) return "nothing through the relay";
+    const std::uint64_t frames = t.frames_known && f.latest >= t.frames_from ? f.latest - t.frames_from : 0u;
+    const double seconds = std::chrono::duration<double>(span).count();
+    out << frames << " frames";
+    if (seconds >= 1.0) out << " (" << std::fixed << std::setprecision(1) << frames / seconds << "/s)";
+    if (t.trips != 0u)
+        out << ", round trip " << t.trip_total / static_cast<long long>(t.trips) << " ms (" << t.trip_least << "-"
+            << t.trip_most << ")";
+    out << ", quiet " << ms_of(t.quiet) << " ms at most";
+    if (t.slacks != 0u)
+        out << ", slack " << t.slack_total / static_cast<long long>(t.slacks) << " ms (least " << t.slack_least << ")";
+    return out.str();
+}
+
+// Every 30 s while the relay carries the battle's input, up to `upto` (now, or
+// the battle's end for its last part).
+void report_window(const Options &options, std::uint32_t tag, Battle &battle, Clock::time_point upto) {
+    const bool carried = std::any_of(battle.fighters.begin(), battle.fighters.end(),
+                                     [](const Fighter &f) { return f.window.inputs != 0u; });
+    if (carried && upto > battle.reported) {
+        std::ostringstream out;
+        out << "[" << options.name << "] battle " << tag << " at " << minutes(upto - battle.began) << ": ";
+        for (std::size_t i = 0; i < battle.fighters.size(); ++i)
+            out << (i == 0u ? "" : "; ") << name_of(battle, i) << " "
+                << tally_text(battle.fighters[i], battle.fighters[i].window, upto - battle.reported);
+        std::cout << out.str() << std::endl;
+    }
+    battle.reported = upto;
+    for (Fighter &f : battle.fighters) {
+        f.window = Tally{};
+        if (!f.framed) continue;
+        f.window.frames_known = true;
+        f.window.frames_from = f.latest;
+    }
+}
+
+// At its end: how long, which path, how it ended, and the whole battle's tally.
+void report_end(const Options &options, std::uint32_t tag, Battle &battle, const char *how) {
+    const Clock::time_point end = battle.bye ? *battle.bye : battle.heard;
+    report_window(options, tag, battle, end);
+    std::ostringstream out;
+    out << "[" << options.name << "] battle " << tag << " ended after " << minutes(end - battle.began) << " (" << how
+        << "): ";
+    if (!battle.relayed) {
+        out << "direct, the relay carried none of its input";
+    } else {
+        out << "through the relay";
+        if (battle.first_relayed - battle.began > std::chrono::seconds(3))
+            out << " from " << minutes(battle.first_relayed - battle.began);
+        if (end - battle.last_relayed > std::chrono::seconds(3)) out << " until " << minutes(battle.last_relayed - battle.began);
+        for (std::size_t i = 0; i < battle.fighters.size(); ++i) {
+            const Fighter &f = battle.fighters[i];
+            out << "; " << name_of(battle, i) << " " << tally_text(f, f.all, f.last_input - f.first_input);
+        }
+    }
+    std::cout << out.str() << std::endl;
+}
+
 void run(const Options &options) {
     Socket socket = kNoSocket;
     auto checked = Clock::time_point{};
     std::map<std::uint32_t, std::vector<End>> ends;      // by tag, at most two
     std::map<std::uint32_t, std::vector<End>> watchers;  // by tag, the copies watching that battle
+    std::map<std::uint32_t, Battle> battles;             // by tag, for the log
+    std::map<std::uint32_t, Clock::time_point> finished; // by tag, battles already reported
+    const auto report = [&](Clock::time_point now) {
+        for (auto it = battles.begin(); it != battles.end();) {
+            Battle &battle = it->second;
+            const char *how = battle.bye && now - *battle.bye >= kAfterBye ? "a fighter left"
+                              : now - battle.heard >= kBattleQuiet       ? "nothing came for 20 s"
+                                                                         : nullptr;
+            if (how == nullptr) {
+                if (now - battle.reported >= kReportEvery) report_window(options, it->first, battle, now);
+                ++it;
+                continue;
+            }
+            report_end(options, it->first, battle, how);
+            finished[it->first] = now;
+            it = battles.erase(it);
+        }
+        for (auto it = finished.begin(); it != finished.end();)
+            it = now - it->second > kRemembered ? finished.erase(it) : std::next(it);
+    };
     const auto forget = [](std::map<std::uint32_t, std::vector<End>> &by_tag, Clock::time_point now,
                            Clock::duration quiet) {
         for (auto it = by_tag.begin(); it != by_tag.end();) {
@@ -189,10 +432,13 @@ void run(const Options &options) {
                 socket = kNoSocket;
                 ends.clear();
                 watchers.clear();
+                for (auto &[tag, battle] : battles) report_end(options, tag, battle, "the relay closed");
+                battles.clear();
                 std::cout << "[" << options.name << "] closed" << std::endl;
             }
             forget(ends, now, std::chrono::seconds(60));
             forget(watchers, now, std::chrono::seconds(10));
+            if (options.report_battles) report(now);
         }
         if (socket == kNoSocket) {
             std::this_thread::sleep_for(std::chrono::milliseconds(200));
@@ -255,6 +501,17 @@ void run(const Options &options) {
             auto &list = ends[tag];
             End *const me = place(list, from);
             if (me == nullptr) continue;
+            if (options.report_battles && finished.count(tag) == 0u) {
+                const auto now = Clock::now();
+                const auto [found, added] = battles.try_emplace(tag);
+                Battle &battle = found->second;
+                if (added) battle.began = battle.reported = now;
+                battle.heard = now;
+                if (Fighter *const fighter = fighter_at(battle, from, options); fighter != nullptr) {
+                    if (data[4] == kInput) note_input(battle, *fighter, data, size, now);
+                    if (data[4] == kBye && !battle.bye) battle.bye = now;
+                }
+            }
             if (data[4] == kAsk) {
                 // An introduction asked for: answered once both fighters have
                 // asked, and never passed on.
