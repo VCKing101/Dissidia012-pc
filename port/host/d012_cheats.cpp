@@ -17,6 +17,8 @@
 
 #include "d012_cheats.hpp"
 
+#include "d012_summon_slot_rules.hpp"
+
 #include "cheats/cheats.hpp"
 #include "settings/settings.hpp"
 
@@ -67,9 +69,9 @@ static_assert(std::size(kAp) == std::size(kApAmounts));
 
 // --- Items -------------------------------------------------------------------
 // Each writes a count into every fourth byte: equipment from 0x08BBE41A,
-// accessories from 0x08BBEEC6, summons from 0x08BBF8BD. The list's longer
-// accessory code (672 entries) also reaches the summons, so the shorter one
-// (589) is used.
+// accessories from 0x08BBEEC6. The list's longer accessory code (672 entries)
+// also reaches the summons, so the shorter one (589) is used. The list's
+// summons code starts eight slots too late (d012_summon_slot_rules.hpp).
 constexpr CheatChoice kEquipment[] = {{nullptr, "0x803BE41A 0x02A50004\n0x00000063 0x00000000"}};
 constexpr CheatChoice kAccessories[] = {{nullptr, "0x803BEEC6 0x024D0004\n0x00000063 0x00000000"}};
 constexpr CheatChoice kMalaBestia[] = {{nullptr, "0x003BF762 0x00000063\n0x003BF7AA 0x00000063\n"
@@ -77,8 +79,7 @@ constexpr CheatChoice kMalaBestia[] = {{nullptr, "0x003BF762 0x00000063\n0x003BF
                                                  "0x003BF11A 0x00000063\n0x003BF116 0x00000063\n"
                                                  "0x003BF112 0x00000063\n0x003BF196 0x00000063\n"
                                                  "0x003BF0DE 0x00000063"}};
-constexpr CheatChoice kSummons[] = {{nullptr, "0x803BF8BF 0x003D0004\n0x00000003 0x00000000\n"
-                                              "0x803BF8BD 0x003D0004\n0x0000000A 0x00000000"}};
+constexpr CheatChoice kSummons[] = {{nullptr, summon_slots::kAllSummonsCode}};
 
 // --- Battle ------------------------------------------------------------------
 // Each writes 32 bits at the word at 0x08B633B0 minus an offset (pointer code

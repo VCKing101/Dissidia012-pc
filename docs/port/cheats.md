@@ -65,14 +65,14 @@ used or shipped.
 | All equipment ×99 | on | a count of 99 every 4 bytes from `0x08BBE41A`, 677 of them | the Equip list, every item ×99 |
 | All accessories ×99 | on | the same from `0x08BBEEC6`, 589 | the accessory list, every item ×99 |
 | Mala Bestia accessories ×99 | on | 9 of those counts | Growth Egg, Valor Resin, Chocobo Down, Wing and Feather, Supershine, Mog's Amulet, Qu'Bia Tail ×99 |
-| All summons | on | 61 summonstones from `0x08BBF8BD`: 10 uses and a 3 | every summonstone, 10 uses left |
+| All summons | on | the 61 summonstones' slots from `0x08BBF89C`: 10 uses and flags 3 | all 61 owned with 10 uses, the empty slots left alone ([All summons](#all-summons-and-the-empty-slots)) |
 | Infinite HP, Max HP 999,999, Bravery 9,999, Infinite EX, Infinite Assist, Level 100 | on | 32 bits at the word at `0x08B633B0` minus `0xE58`, `0xE54`, `0xE4C`, `0xE48`, `0xE44`, `0xE60` | HP stayed at 1242 through a 755-damage HP attack (0 without the cheat); HP 999999; Bravery 9999; Enter EX Mode offered; the Assist gauge full with Use Assist offered; Lv100 |
 | Opponent: Bravery 0, Max HP 100, No EX, No Assist | on | the same minus `0x2C`, `0x34`, `0x28`, `0x24` | Bravery 0 and a Break; max HP 100; against a Very High CPU, its EX and Assist gauges stayed empty (without the cheats it filled both and entered EX Mode) |
 | Opponent: Defeat with Select | on | `0x38` = 999,999 while Select is held (a joker line) | the opponent falls at once |
 
 **Level 100 is a real level-up.** It sets the level of the fighter in battle, and the game makes that the character's level: after the cheat is turned off, Customization still shows Lv100 with 1,969,359 EXP and HP 6,999, and the game keeps it when it saves.
 
-The list's codes were changed in five places:
+The list's codes were changed in six places:
 
 - Its **1,000,000 Gil** writes `0x08FF93F4` and `0x08FFB2D0`; the gil shown stayed at 788, so the port writes its
   Max Gil address, `0x08BBFA00`, for both choices.
@@ -81,6 +81,8 @@ The list's codes were changed in five places:
 - Its **PP** codes write `0x096B2DC0`, the PP Catalog's copy, at all times. The port's write the save's PP,
   `0x08BCCB38` (next section).
 - Its longer **accessories** code (672 counts) reaches the summonstones' bytes, so the port uses the shorter one (589).
+- Its **All summons** code starts eight slots too late and runs past the last summon, so the port's starts at the
+  first slot ([All summons](#all-summons-and-the-empty-slots)).
 - Each **battle** code is followed in the list by a write of 0 to `0x0880052C`, below the game, which the port leaves
   out.
 
@@ -169,11 +171,66 @@ Buying with it (13 November 2026): with 20,000 chosen, Preset - Lv 50 (900 PP) l
 catalog, the game autosaved; opened again, it showed 20,000 with the preset bought. That save, loaded with no cheats
 (`D012_NO_CHEATS=1`), opened the catalog at 20,000 PP with the preset bought.
 
+## All summons and the empty slots
+
+> 19 November 2026. `port/host/d012_summon_slot_guard.cpp`, `port/host/d012_summon_slot_rules.hpp`. Windows, clang
+> build, USA disc.
+
+The save's inventory (section 1 `+0xE788`, main `0x08BBE418`) keeps 64 summonstone slots of four bytes at `+0x1484`
+(main `0x08BBF89C`):
+
+| Byte | What |
+| --- | --- |
+| `+0` | the summon's id, -1 for an empty slot |
+| `+1` | uses left |
+| `+2` | battles left until it recharges |
+| `+3` | flags: bit 1 is owned; a new game sets 1 |
+
+A new game fills slots 0 to 60 with the 61 summons (their number is at inventory `+0x15FC`). Slots 61 to 63 stay empty.
+
+**The list's code.** It wrote 61 slots from `0x08BBF8BD`, slot 8's uses, so slots 8 to 68. The first eight summons were
+left out, and the empty slots 61 to 63 became owned with 10 uses. "Slots" 64 to 68 are the first ten entries of the next
+table (inventory `+0x1584`, 14 entries of two bytes, data tag `setc`), whose flags got 10 and 3 in turn.
+
+**The crash.** At the end of a battle, battle `0x08B13098` goes through all 64 slots. For each owned slot it looks the
+summon up (main `0x088C6CA4`) and, for the summon used in the battle, takes a use. With no summon used it is passed -1,
+which is also an empty slot's id, so each such battle took a use from the empty slots. At the last use it reads the
+summon's recharge through the lookup's empty result and the game stops:
+`Guest memory access outside PSP RAM/EDRAM at 0x00000009`, `guest_pc=0x08B1312C`, `s1=0x3D`. That comes before the
+autosave, so the save then stops at the end of every battle. The cheat puts the uses back to 10 while it is on, so the
+stop came 10 battles after turning it off. Which game mode the battle is in does not matter: `0x08B13098` has one
+caller, battle `0x08B08C14`.
+
+**What the port does.** Its code writes the 61 summons' slots and nothing else. For saves that already have the marked
+slots, an override of `0x08B13098` empties any slot with id -1 that is marked as owned before the game's own run, and the
+autosave keeps that. The log says `[summons] 3 empty summonstone slot(s) were marked as owned: emptied`. This also covers
+the public list's code in a PPSSPP cheat file. The flags left in the `setc` table are not put back, as their old values
+are gone. The summons the list's code gave stay owned, and the first eight are given only by the port's code.
+
+**Checked** (Quick Battle, won with Defeat with Select):
+
+| Save | Run | Result |
+| --- | --- | --- |
+| Clean, All summons never on (before the fix) | 15 battles | no stop |
+| Clean, one battle with the list's code, then off (before the fix) | battles until it stops | stopped at the end of the 10th |
+| That save, stopped | `D012_SUMMON_SLOT_GUARD=0` | stops at the end of the first battle |
+| That save, stopped | the fix, AP 999 | 14 battles; the three slots emptied once |
+| The save that run wrote | `D012_SUMMON_SLOT_GUARD=0` | 14 battles, no stop: the save itself is repaired |
+| Clean, the port's code on | slots read at a battle's end | slots 0 to 60 owned with 10 uses; slots 61 to 63 and the `setc` table unchanged |
+| The save that run wrote, the cheat off | `D012_SUMMON_SLOT_GUARD=0` | 15 battles, no stop |
+| One battle with the list's code, not stopped yet | the fix, the cheat off | 16 battles finished; the three slots emptied once |
+| The save that run wrote | `D012_SUMMON_SLOT_GUARD=0` | 15 battles finished, no stop |
+| Stopped, the port's code on | the fix | 11 battles finished; the three slots emptied once |
+| Clean, All summons never on | the fix | 15 battles finished; nothing emptied |
+
+Not checked: a battle in Arcade or Story Mode with the fix, the European disc, Linux, the Steam Deck and Android.
+
 ## Switches
 
 | Variable | Effect |
 | --- | --- |
 | `D012_NO_CHEATS=1` | No cheats at all; the page says so |
+| `D012_SUMMON_SLOT_GUARD=0` | Empty summonstone slots marked as owned are left as they are ([All summons](#all-summons-and-the-empty-slots)) |
 | `D012_CHEATS=gil=2,kp=1,...` | The port's own that are on, for one run (the rows are then greyed) |
 | `D012_TRACE_CHEATS=1` | Each pass's cheats, with what they did |
 | `D012_CHEAT_INTERVAL_MS=<ms>` | Another interval than 77 ms |

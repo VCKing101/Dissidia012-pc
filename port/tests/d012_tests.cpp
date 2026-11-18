@@ -15,6 +15,7 @@
 #include "d012_mod_manifest.hpp"
 #include "d012_no_window_rules.hpp"
 #include "d012_online_rules.hpp"
+#include "d012_summon_slot_rules.hpp"
 #include "d012_update_rules.hpp"
 #include "d012_versus_rules.hpp"
 #include "d012_voice_scenes.hpp"
@@ -45,6 +46,7 @@
 #include <thread>
 #include <tuple>
 
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -52,6 +54,7 @@
 #include <iostream>
 #include <iterator>
 #include <map>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -1836,6 +1839,38 @@ void test_dlc_packs() {
     }
 }
 
+// The All summons cheat writes the game's 61 summons and nothing after them;
+// an empty slot marked as owned is emptied, and no other slot is touched.
+void test_summon_slots() {
+    namespace slots = d012::summon_slots;
+    const std::uint32_t end = slots::kFirstSlot + slots::kSummonCount * 4u;
+    std::istringstream code(slots::kAllSummonsCode);
+    std::string line;
+    int writes = 0;
+    while (std::getline(code, line)) {
+        std::uint32_t address = 0, shape = 0;
+        expect(std::sscanf(line.c_str(), "%x %x", &address, &shape) == 2, "summons code: " + line);
+        std::getline(code, line);  // the value
+        const std::uint32_t first = 0x08800000u + (address & 0x0FFFFFFFu);
+        const std::uint32_t count = shape >> 16u, step = shape & 0xFFFFu;
+        expect(first >= slots::kFirstSlot && first < slots::kFirstSlot + 4u, "summons code starts in the first slot");
+        expect(count == slots::kSummonCount, "summons code writes each summon");
+        expect(step == 4u, "summons code writes one byte of each slot");
+        expect(first + (count - 1u) * step < end, "summons code stops at the last summon");
+        ++writes;
+    }
+    expect(writes == 2, "summons code writes uses and flags");
+
+    const slots::Slot marked{slots::kEmptyId, 1u, 2u, 3u};
+    expect(slots::marked_but_empty(marked), "an empty slot marked as owned is found");
+    const slots::Slot empty = slots::emptied(marked);
+    expect(empty.id == slots::kEmptyId && empty.uses == 0u && empty.recharge == 0u && empty.flags == 1u,
+           "it is left as a new game leaves an empty slot");
+    expect(!slots::marked_but_empty(empty), "an emptied slot is sound");
+    expect(!slots::marked_but_empty(slots::Slot{slots::kEmptyId, 0u, 0u, 1u}), "a new game's empty slot is left alone");
+    expect(!slots::marked_but_empty(slots::Slot{60u, 10u, 0u, 3u}), "an owned summon is left alone");
+}
+
 int main(int argc, char **argv) {
     if (argc == 2 && std::string(argv[1]) == "--print-cases") {
         test_shared_cases(true);
@@ -1862,6 +1897,7 @@ int main(int argc, char **argv) {
     test_online_rules();
     test_dlc_packs();
     test_frame_balance();
+    test_summon_slots();
     if (g_failures == 0) std::cout << "all passed\n";
     return g_failures == 0 ? 0 : 1;
 }
