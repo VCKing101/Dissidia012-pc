@@ -82,6 +82,7 @@
 #include "d012_net.hpp"
 
 #include "d012_battle_relay.hpp"
+#include "d012_frame_balance.hpp"
 
 #include "adhoc/session.hpp"
 
@@ -179,13 +180,6 @@ constexpr std::uint32_t kDirectSlack = 5u;    // ms the direct path may be slowe
 constexpr auto kDirectQuiet = std::chrono::seconds(1);  // waiting, nothing direct: move to the relay
 constexpr auto kKeepRelay = std::chrono::seconds(5);    // ASK again while direct
 constexpr std::uint16_t kBattlePort = 27420;  // the battle link's UDP port by default
-// Keeping the two copies' frames in step (Link::slacks): how many frames the
-// slack is averaged over, the least difference acted on, and the most a
-// frame is held back.
-constexpr std::size_t kSlackFrames = 16u;
-constexpr double kSlackMargin = 2.0;  // ms
-constexpr auto kMostHold = std::chrono::microseconds(1000);
-constexpr std::int16_t kNoSlack = INT16_MIN;
 // The watchers' stream: the most frames a STREAM carries (it stays under a
 // path's usual 1,500-byte limit), the check values it carries, how often it
 // goes when there is nothing new, and how long the leading copy keeps
@@ -205,7 +199,7 @@ constexpr auto kWatchFirst = std::chrono::seconds(40);
 // with each other: more than kWatchDrift frames short all through the last
 // kWatchDriftLook frames or more (not a gap in the path, which the buffer is
 // for), each frame is held back kWatchHold, as little as the fighters' own
-// hold (kMostHold). The
+// hold (FrameBalance::kMostHold). The
 // game's sound is timed by its frames, and a larger change would break it up.
 // A frame that has not come waits until the whole buffer is in again. Such a
 // wait the path caused (not the fighters' own) makes the buffer as many
@@ -238,7 +232,7 @@ constexpr auto kWatchFrameTime = std::chrono::microseconds(33367);  // the battl
 
 // Takes the link's datagrams as they come, on a thread of its own, with the
 // moment each came: the game's thread reads the socket only once a frame, and
-// the frames' balance (Link::slacks) needs when an input really arrived.
+// the frames' balance (Link::frames) needs when an input really arrived.
 class Receiver {
 public:
     struct Datagram {
@@ -349,16 +343,14 @@ struct Link {
     std::map<std::uint64_t, Local> history;
     std::map<std::uint64_t, Local> guessed;
     std::optional<std::uint64_t> wrong_from;
-    // The frames' balance. A copy's slack on a frame is how long before it
-    // needed the other copy's input for that frame the input came (less than
-    // 0: it waited). The copy with less is ahead of the other, and holds its
-    // frames back a little until both have the same: then neither waits until
-    // a delay spike eats all of it (docs/port/online-next.md).
+    // The frames' balance (d012_frame_balance.hpp): the copy that is ahead
+    // holds its frames back a little until both have the same slack, so that
+    // neither waits until a delay spike eats all of it and, with rollback,
+    // neither has all the guessing (docs/port/online-next.md). `ran`: with
+    // rollback, when each frame still waiting for the other's input ran.
     bool balance = true;
-    std::vector<double> slacks;  // ms, the latest kSlackFrames frames'
-    double slack = 0.0;          // their average, once there are kSlackFrames
-    bool slack_known = false;
-    std::int16_t their_slack = kNoSlack;
+    FrameBalance frames;
+    std::map<std::uint64_t, Clock::time_point> ran;
     Clock::duration held{};  // held back since the last report
     std::uint64_t their_count = 0;          // the other copy's frames held: all below this one
     std::uint64_t confirmed = 0;            // this copy's frames the other copy holds
@@ -757,9 +749,7 @@ void send_input(Link &l) {
                                   std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - l.their_time_at)
                                       .count());
     put32(out, kHead + 44u, echo);
-    put16(out, kHead + 48u,
-          static_cast<std::uint16_t>(l.slack_known ? static_cast<std::int16_t>(std::clamp(l.slack, -30000.0, 30000.0))
-                                                   : kNoSlack));
+    put16(out, kHead + 48u, static_cast<std::uint16_t>(l.frames.sent_slack()));
     for (std::uint64_t i = 0; i < count; ++i) {
         const Local &m = l.mine.at(first + i);
         const std::size_t at = kInputHead + i * kLocalSize;
@@ -936,7 +926,7 @@ void take_input(Link &l, const std::uint8_t *data, std::size_t size, Clock::time
     l.confirmed = std::max(l.confirmed, holds);
     l.their_time = get<std::uint32_t>(data + kHead + 40u);
     l.their_time_at = at;
-    l.their_slack = static_cast<std::int16_t>(get<std::uint16_t>(data + kHead + 48u));
+    l.frames.hear(static_cast<std::int16_t>(get<std::uint16_t>(data + kHead + 48u)));
     if (const std::uint32_t echo = get<std::uint32_t>(data + kHead + 44u); echo != kNoTime) {
         const std::uint32_t trip = clock_ms(at) - echo;
         if (trip < 10000u) {
@@ -1438,7 +1428,7 @@ bool connect(Link &l, bool host, const sockaddr_in &address, const std::string &
     }
     // The joining copy starts its frames when the WELCOME reaches it, half a
     // round trip from now: the listening copy starts with it, so the frames
-    // begin in balance (Link::slacks) and need not settle into it.
+    // begin in balance (Link::frames) and need not settle into it.
     if (host && l.balance && l.probe_median != 0u)
         std::this_thread::sleep_for(std::chrono::milliseconds(std::min<std::uint32_t>(l.probe_median / 2u, 500u)));
     l.their_count = l.delay;
@@ -1456,25 +1446,44 @@ bool connect(Link &l, bool host, const sockaddr_in &address, const std::string &
     return true;
 }
 
-// How long before this copy needed the other's input for a frame it came
-// (`slack`, less than 0 when it waited). Once both copies know their average,
-// the one with less holds its frames back by a share of the difference each
-// frame, so the two meet in the middle over a second or two.
-void note_slack(Link &l, Clock::duration slack) {
-    l.slacks.push_back(std::chrono::duration<double, std::milli>(slack).count());
-    if (l.slacks.size() > kSlackFrames) l.slacks.erase(l.slacks.begin());
-    if (l.slacks.size() < kSlackFrames) return;
-    double total = 0.0;
-    for (const double s : l.slacks) total += s;
-    l.slack = total / static_cast<double>(l.slacks.size());
-    l.slack_known = true;
-    if (!l.balance || l.their_slack == kNoSlack) return;
-    const double behind = static_cast<double>(l.their_slack) - l.slack;  // ms this copy is ahead by, twice over
-    if (behind <= kSlackMargin) return;
-    const auto hold = std::min(kMostHold, std::chrono::microseconds(static_cast<long long>(behind * 1000.0 / 2.0 /
-                                                                                            (2.0 * kSlackFrames))));
+// This frame's share of what puts the two copies' frames level: once a frame.
+void hold_frames(Link &l) {
+    if (!l.balance) return;
+    const std::chrono::microseconds hold = l.frames.hold();
+    if (hold.count() <= 0) return;
     portablekit::hle_extension::hold_back(hold);
     l.held += hold;
+}
+
+// The link's report, every kReportEvery frames.
+void report_frames(Link &l, std::uint64_t frame) {
+    if (l.report_from == 0u && frame == 0u) l.report_began = Clock::now();
+    if (frame + 1u - l.report_from < kReportEvery) return;
+    const auto ms = [](Clock::duration d) {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(d).count();
+    };
+    const auto now = Clock::now();
+    std::cout << "[" << l.name << "] " << l.unit << "s " << l.report_from << "-" << frame << " in "
+              << ms(now - l.report_began) << " ms: waited on " << l.waits << ", " << ms(l.waited)
+              << " ms in all, the longest " << ms(l.longest) << " ms";
+    if (l.frames.known())
+        std::cout << "; slack " << static_cast<int>(l.frames.slack()) << " ms here, "
+                  << (l.frames.their_slack() == kNoSlack ? std::string("?") : std::to_string(l.frames.their_slack()))
+                  << " there; held back " << ms(l.held) << " ms";
+    if (l.trips != 0u)
+        std::cout << "; round trip " << l.trip_total / l.trips << " ms on average, " << l.trip_least << " to "
+                  << l.trip_most;
+    std::cout << std::endl;
+    l.trips = 0u;
+    l.trip_total = 0u;
+    l.trip_least = kNoTime;
+    l.trip_most = 0u;
+    l.report_began = now;
+    l.report_from = frame + 1u;
+    l.waits = 0u;
+    l.waited = {};
+    l.longest = {};
+    l.held = {};
 }
 
 // This copy's input for `frame` goes out for frame + delay; returns this
@@ -1519,7 +1528,10 @@ std::pair<Local, Local> trade(Link &l, std::uint64_t frame, const Local &local) 
     } else {
         receive(l, std::chrono::milliseconds(0));
     }
-    if (const auto came = l.arrived.find(frame); came != l.arrived.end() && !l.lost) note_slack(l, needed - came->second);
+    if (const auto came = l.arrived.find(frame); came != l.arrived.end() && !l.lost) {
+        l.frames.note(needed - came->second);
+        hold_frames(l);
+    }
     l.arrived.erase(l.arrived.begin(), l.arrived.upper_bound(frame));
     const Local me = frame < l.delay ? idle() : l.mine.at(frame);
     Local them = idle();
@@ -1532,34 +1544,7 @@ std::pair<Local, Local> trade(Link &l, std::uint64_t frame, const Local &local) 
         }
     }
     l.mine.erase(l.mine.begin(), l.mine.lower_bound(std::min(l.confirmed, frame + 1u)));
-    if (l.report_from == 0u && frame == 0u) l.report_began = Clock::now();
-    if (frame + 1u - l.report_from >= kReportEvery) {
-        const auto ms = [](Clock::duration d) {
-            return std::chrono::duration_cast<std::chrono::milliseconds>(d).count();
-        };
-        const auto now = Clock::now();
-        std::cout << "[" << l.name << "] " << l.unit << "s " << l.report_from << "-" << frame << " in "
-                  << ms(now - l.report_began) << " ms: waited on " << l.waits << ", " << ms(l.waited)
-                  << " ms in all, the longest " << ms(l.longest) << " ms";
-        if (l.slack_known)
-            std::cout << "; slack " << static_cast<int>(l.slack) << " ms here, "
-                      << (l.their_slack == kNoSlack ? std::string("?") : std::to_string(l.their_slack))
-                      << " there; held back " << ms(l.held) << " ms";
-        if (l.trips != 0u)
-            std::cout << "; round trip " << l.trip_total / l.trips << " ms on average, " << l.trip_least << " to "
-                      << l.trip_most;
-        std::cout << std::endl;
-        l.trips = 0u;
-        l.trip_total = 0u;
-        l.trip_least = kNoTime;
-        l.trip_most = 0u;
-        l.report_began = now;
-        l.report_from = frame + 1u;
-        l.waits = 0u;
-        l.waited = {};
-        l.longest = {};
-        l.held = {};
-    }
+    report_frames(l, frame);
     return {me, them};
 }
 
@@ -1603,9 +1588,15 @@ std::pair<Local, Local> trade_ahead(Link &l, std::uint64_t frame, const Local &l
         l.longest = std::max(l.longest, Clock::now() - began);
     }
     if (!rerun) {
-        if (const auto came = l.arrived.find(frame); came != l.arrived.end() && !l.lost)
-            note_slack(l, needed - came->second);
-        l.arrived.erase(l.arrived.begin(), l.arrived.upper_bound(frame));
+        // Most inputs come after their frame has run on the guess: each counts
+        // when it comes, or the copy ahead never learns that it is.
+        if (frame >= l.delay) l.ran[frame] = needed;
+        const std::vector<Clock::duration> slacks = take_slacks(l.ran, l.arrived, frame);
+        if (!l.lost && !slacks.empty()) {
+            for (const Clock::duration slack : slacks) l.frames.note(slack);
+            hold_frames(l);
+        }
+        report_frames(l, frame);
     }
     const Local me = frame < l.delay ? idle() : l.history.at(frame);
     Local them = idle();

@@ -622,6 +622,8 @@ waited on almost every frame. The auto delay paid for that with a frame (section
   round trip of about 100 ms, where it was 3 from 75 ms.
 - Every 900 frames the link reports both slacks and how long this copy was held back.
 - `D012_NO_NET_BALANCE=1` turns it off (and puts the frame back into the auto delay).
+- With rollback a frame does not wait for its input, so each input counts when it comes, below 0 when it came late
+  ([online matchmaking](online-matchmaking.md), section 18).
 
 **Results (V).** Two copies on this PC through the Online Lobby with the routes of section 12 (random busy input
 from both players), the battle link through `D012_NET_SIM`. Per 900 frames (30 s at full speed):

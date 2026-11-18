@@ -321,7 +321,8 @@ holding packets 50 ± 10 ms with 1% loss (`D012_NET_SIM`):
 
 **The Steam Deck (8 November).** The Deck against a PC copy on simulated lag (Communication Mode 19.6): input delay 1
 at a 59 ms round trip, in step to the end at full speed; a save took 5 to 6 ms a frame on the Deck, a restore 4 to
-5 ms; the Deck went back 108 times, the PC copy 1,769. The player saw nothing wrong.
+5 ms; the Deck went back 108 times, the PC copy 1,769. The player saw nothing wrong. So uneven a share was the frames'
+balance not working with rollback, fixed on 18 November ([online matchmaking](online-matchmaking.md), section 18).
 
 **Not verified.** A real path's jitter; how a correction looks and sounds to a player (a sound the corrected frames start joins part-way, and a
 mispredicted one already played); a rollback longer than the window (the copy waits, as the lockstep does); Group
