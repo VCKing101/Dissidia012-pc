@@ -74,7 +74,8 @@ online and test sessions. Bugs and crashes go in [GitHub issues](https://github.
 - **Choose each player's controller**: player 1 and player 2 each on a controller of your choice or on the keyboard
   and mouse (menu's Controls page, **Player 1** and **Player 2**).
 - **More for keyboard players**: one key each for dodge, dash, EX Mode, summon and both assists; the mouse wheel moves
-  through menus and tilts the battle camera; the game's prompts show your keys (menu's Controls page).
+  through menus and tilts the battle camera; the game's prompts show your keys; a keypad key can do one thing with
+  Num Lock on and another with it off (menu's Controls page).
 - **Close the game from the title screen**: press circle there, then choose Yes.
 - **Cheats** on the menu's Cheats page: gil, KP, PP, AP, items and battle cheats, and PPSSPP cheat files
   ([below](#cheats)).
@@ -380,6 +381,13 @@ folder inside it.
   stores it may not load; the log says how many files are.
 - DLC music takes room in the game's list of 256 tracks, so with all 43 of those tracks, mods can add 82 tracks
   rather than 125.
+
+### Fan-made DLC packs
+
+Costumes and music made with [DissDlcToolkit](https://github.com/adriangl/DissDlcToolkit) go in a folder of their own
+in the `dlc` folder: `data\dlc\<any name>\` in the install folder (`build\port\data\dlc\<any name>\` from source).
+Packs built for the same slots work side by side: a pack that wants a slot already in use is given a free one. See
+[DLC packs](docs/port/dlc-packs.md).
 
 ## HD texture packs
 

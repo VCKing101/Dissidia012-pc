@@ -512,14 +512,33 @@ void chase_lines_view2(Guest *g, const std::uint8_t *view1, gaddr manager) {
 // The map action itself is found for every fighter (battle 0x08ACC874, from
 // the fighter update 0x08B37604), so player 2's triangle already ran up walls;
 // player 2 only had no arrows to show where. In versus, player 2's fighter now
-// counts as local for that update too (run_local_update), and each player's
-// two effects are left out of the other player's half: the hide bit (bit 0 of
-// +0x0A) on each node under the effect's library object (effect +0xCC, its
-// +0x10), the bit the game's own culling sets (main 0x088A47E4, 0x0894D964),
-// put back after that half. Player 2's are shown in player 2's half, as the
-// game's culling is against player 1's camera (markers_view2).
-// D012_NO_MARKERS_PLAYER2=1 leaves them as they were.
+// counts as local for that update too (run_local_update). Player 2's markers
+// are left out of player 1's half and shown in player 2's (the game culls
+// every effect against player 1's camera), put out of view and back the way
+// the game's cull does it (markers_park, markers_view1, markers_view2);
+// player 1's are left out of player 2's half the same way (D012_MARKERS_OWN_VIEW=0
+// shows them in both). D012_NO_MARKERS_PLAYER2=1 leaves them as they were.
+//
+// Each fighter's arrows hold only an effect of their own (run_freerun_arrows,
+// issue 25). Each time a fighter's arrows move on (another wall or rail, or a
+// step of 1 along it) the helper lets its effect go (main 0x088A6CB8, mode 8:
+// an 8-frame fade) and makes another (main 0x088A9DE8). An effect that ends
+// on its own (state 2, main 0x088A754C, then freed by the group update main
+// 0x088A9C18 through 0x088A68B8 and 0x088A7E48, the handles' stack) is given
+// back while the helper still holds it, and the stack hands it out again
+// first. The game does this alone too (once in five minutes, to another
+// effect); with two fighters' arrows the next one made is often the other
+// fighter's, and the two then held one effect, each moving it and letting it
+// go: D012_TRACE_EFFECT_POOL counted 60 effects handed out while a marker held
+// them in five minutes, 57 of them arrows. Before each fighter's helper, an
+// effect at +0x738 that is no longer that fighter's (back on the stack, ended,
+// made again for another effect or for the other fighter's arrows) is
+// dropped, with +0x740 at -1 so the helper makes a new one, as it does after
+// letting one go. In versus only. (Not what made hits draw nothing in issue
+// 25: that was player 1's markers hidden in player 2's view, markers_view2.)
+// D012_TEST_ARROWS_UNGUARDED=1 leaves the arrows as the game has them, to test.
 constexpr std::uint32_t kLocalUpdate = 0x08B2D3BCu;
+constexpr std::uint32_t kFreerunArrows = 0x08ACBF20u;  // (fighter + 0x6E0, fighter)
 constexpr std::uint32_t kMarkerEffects[] = {0x738u, 0x760u};  // the arrows', the pointer's
 constexpr std::uint8_t kListNode = 'l';
 
@@ -560,7 +579,7 @@ void set_nodes(Guest *g, gaddr node, bool hide, int depth, std::vector<std::pair
 
 // D012_TRACE_MARKERS_FREERUN=1: every 60 split tasks, each fighter's map
 // action, its two effects, their places (+0x00) and hide bits, and how many
-// nodes each view left out last.
+// markers each view left out last (nodes, with D012_TEST_MARKERS_BIT=1).
 std::size_t markers_hidden_view[2] = {};
 
 void trace_freerun_markers(Guest *g) {
@@ -590,15 +609,83 @@ void trace_freerun_markers(Guest *g) {
         }
         std::printf("\n");
     }
-    std::printf("[markers] split %llu nodes left out: view 1 %zu, view 2 %zu\n",
+    std::printf("[markers] split %llu left out: view 1 %zu, view 2 %zu\n",
                 static_cast<unsigned long long>(state().frames), markers_hidden_view[0], markers_hidden_view[1]);
     std::fflush(stdout);
+}
+
+// A player's markers out of a view, or into it, the game's own way (issue
+// 25). The effect update's cull (main 0x088A6DA0) puts an effect out of view
+// with three calls on its instance (effect +0xCC): main 0x088A47E4 with 0 (the
+// nodes' hide bit, main 0x0894D964), 0x088A483C with 1 and 0x088A4894 with 0;
+// and back in view with 1, 0, 1, every frame. A marker in view gets the
+// out-of-view calls before a view it is left out of and the in-view ones after
+// it, and the other way round for a view it is shown in (markers_back).
+// Hiding markers by the nodes' bit alone (markers_set, as v0.7.1 and v0.7.2
+// did) had the library keep heap blocks it never gave back.
+std::vector<gaddr> markers_parked;    // instances put out of view for a view, back in view after it
+std::vector<gaddr> markers_unparked;  // instances put in view for a view, back out of view after it
+
+gaddr marker_instance(Guest *g, gaddr effect) {
+    const gaddr instance = guest_ram(effect) ? g_ld32(g, effect + 0xCCu) : 0u;
+    return guest_ram(instance) && guest_ram(g_ld32(g, instance + 0x10u)) ? instance : 0u;
+}
+
+void marker_park(Guest *g, gaddr instance, bool park) {
+    g_call2(g, 0x088A47E4u, instance, park ? 0u : 1u);
+    g_call2(g, 0x088A483Cu, instance, park ? 1u : 0u);
+    g_call2(g, 0x088A4894u, instance, park ? 0u : 1u);
+}
+
+// One player's markers in view put out of view (`park`), or out of view put
+// in view; how many. The cull makes its calls each frame and keeps nothing of
+// its own, so the root node's hide bit is where an effect stands.
+std::size_t markers_move(Guest *g, std::uint32_t slot, bool park) {
+    const gaddr field = g_ld32(g, kBattleManager);
+    const gaddr fighter = field != 0u ? g_ld32(g, field + 0x38u + 4u * slot) : 0u;
+    if (!guest_ram(fighter)) return 0u;
+    std::size_t moved = 0;
+    for (std::uint32_t at : kMarkerEffects) {
+        const gaddr instance = marker_instance(g, g_ld32(g, fighter + at));
+        if (instance == 0u) continue;
+        const bool out = (g_ld16s(g, g_ld32(g, instance + 0x10u) + 0x0Au) & 1) != 0;
+        if (out == park) continue;  // there already
+        marker_park(g, instance, park);
+        (park ? markers_parked : markers_unparked).push_back(instance);
+        ++moved;
+    }
+    return moved;
+}
+
+std::size_t markers_park(Guest *g, std::uint32_t slot) { return markers_move(g, slot, true); }
+std::size_t markers_unpark(Guest *g, std::uint32_t slot) { return markers_move(g, slot, false); }
+
+// D012_TEST_MARKERS_BIT=1: each player's markers left out of the other's view
+// by their nodes' hide bit alone, as v0.7.1 to v0.7.2 did, to test.
+bool markers_bit() {
+    static const bool on = std::getenv("D012_TEST_MARKERS_BIT") != nullptr;
+    return on;
+}
+
+// Player 1's markers left out of player 2's view, as player 2's are out of
+// player 1's: on unless D012_MARKERS_OWN_VIEW=0, which shows player 1's in
+// both views (the default from 48853a31 until each player's arrows worked).
+bool markers_own_view() {
+    static const bool on = [] {
+        const char *text = std::getenv("D012_MARKERS_OWN_VIEW");
+        return text == nullptr || std::strcmp(text, "0") != 0;
+    }();
+    return on;
 }
 
 void markers_back(Guest *g) {
     auto &hidden = state().markers_hidden;
     for (auto it = hidden.rbegin(); it != hidden.rend(); ++it) g_st16(g, it->first, it->second);
     hidden.clear();
+    for (gaddr instance : markers_parked) marker_park(g, instance, false);
+    markers_parked.clear();
+    for (gaddr instance : markers_unparked) marker_park(g, instance, true);
+    markers_unparked.clear();
 }
 
 // One player's markers hidden or shown for the view about to be drawn (`slot`
@@ -615,20 +702,409 @@ std::size_t markers_set(Guest *g, std::uint32_t slot, bool hide) {
     return state().markers_hidden.size() - before;
 }
 
-// Before player 1's view: player 2's markers left out.
+void drop_stale_arrows(Guest *g);
+
+// Before player 1's view: player 2's markers left out, and an arrows' effect
+// no longer its fighter's let go of first (drop_stale_arrows), so as not to
+// hide another effect.
 void markers_view1(Guest *g) {
     if (markers_off()) return;
-    markers_hidden_view[0] = markers_set(g, 1u, true);
+    drop_stale_arrows(g);
+    markers_hidden_view[0] = markers_bit() ? markers_set(g, 1u, true) : markers_park(g, 1u);
 }
 
-// Before player 2's view: player 1's markers left out, and player 2's shown.
-// The effect update culls every effect against the on-screen camera, player
-// 1's (main 0x088A6DA0, the same hide bit), so player 2's markers, next to
-// player 2's fighter, were mostly hidden from player 2's own view.
+// Before player 2's view: player 2's markers put in view, as the effect
+// update culls every effect against the on-screen camera, player 1's (main
+// 0x088A6DA0), so player 2's markers, next to player 2's fighter, were mostly
+// out of player 2's own view; and player 1's markers put out of it (unless
+// D012_MARKERS_OWN_VIEW=0). All put back after it (markers_back).
+//
+// Hiding markers by their nodes' bit alone (issue 25): a marker drawn in one
+// view, hidden for the other and put back after had the effect library keep
+// blocks of its heap it never gave back (main 0x0894CF98's and 0x08945BEC's,
+// from 0x08971134). In a minute or so of fighting the 256 KiB heap at
+// 0x09BD6AF0 was full, the library made no new effect systems (main 0x08941914
+// below 0), and hits went on drawing nothing. Measured with
+// D012_TRACE_EFFECT_POOL=1, Onion Knight against Kain, the same fight each
+// time: 88 KiB at 40 s and climbing with player 1's markers hidden here by the
+// bit; with player 2's arrows hidden from the first view by the bit, 164 KiB
+// at 150 s and climbing; 19 KiB at 150 s with each player's markers put out of
+// the other's view the game's way. D012_TEST_MARKERS_BIT=1 hides them by the
+// bit again, to test.
 void markers_view2(Guest *g) {
     if (markers_off()) return;
-    markers_hidden_view[1] = markers_set(g, 0u, true);
-    markers_set(g, 1u, false);
+    const bool bit = markers_bit();
+    markers_hidden_view[1] = bit                  ? markers_set(g, 0u, true)
+                             : markers_own_view() ? markers_park(g, 0u)
+                                                  : 0u;
+    if (bit)
+        markers_set(g, 1u, false);
+    else
+        markers_unpark(g, 1u);
+}
+
+// D012_TRACE_EFFECT_POOL=1: every effect made through main 0x088A9DE8 (the
+// markers' maker, and most others'), counted: those it could not make, and
+// those it handed out while a fighter's marker (+0x738, +0x760) still held it.
+constexpr std::uint32_t kEffectMake = 0x088A9DE8u;
+
+void run_trace_effect_make(Guest *g, const decomp::CallState &in, GuestRegs &out) {
+    GuestRegs regs{};
+    for (int i = 0; i < 8; ++i) regs.a[i] = in.gpr[4 + i];
+    for (int i = 0; i < 4; ++i) regs.f[i] = in.fpr[12 + i];
+    decomp::call_original(g, kEffectMake, regs);
+    out.v0 = regs.v0;
+    static std::uint64_t made = 0, none = 0, held = 0;
+    ++made;
+    const gaddr effect = regs.v0;
+    if (effect == 0u) {
+        if (++none <= 40u) std::printf("[effects] none made (from %08X)\n", in.gpr[31]);
+    } else {
+        const gaddr field = g_ld32(g, kBattleManager);
+        for (std::uint32_t slot = 0; slot < 2u && field != 0u; ++slot) {
+            const gaddr fighter = g_ld32(g, field + 0x38u + 4u * slot);
+            if (!guest_ram(fighter)) continue;
+            for (std::uint32_t at : kMarkerEffects)
+                if (g_ld32(g, fighter + at) == effect && ++held <= 60u)
+                    std::printf("[effects] %08X made (from %08X) while player %u's %s still holds it\n", effect,
+                                in.gpr[31], slot + 1u, at == 0x738u ? "arrows" : "pointer");
+        }
+    }
+    if (made % 500u == 0u || (effect == 0u && none <= 40u))
+        std::printf("[effects] %llu made, %llu none, %llu handed out while a marker held them\n",
+                    static_cast<unsigned long long>(made), static_cast<unsigned long long>(none),
+                    static_cast<unsigned long long>(held));
+    std::fflush(stdout);
+}
+
+// D012_TRACE_EFFECT_POOL=1 also watches the three pools behind every effect:
+// the handles (0x280 bytes, main 0x088A7DBC: a stack of 64 at *0x09B4D434,
+// count +0xA100, unless the heap *0x089D6D94 is set), the instances that draw
+// them (0x50 bytes, main 0x088A4F48: a stack of 64 at *0x089D6D58, count
+// +0x1500, unless the heap *0x089D6D60 is set), and the library's systems
+// (main 0x08941914, -1 when it has none). A handle without an instance is an
+// effect that runs and draws nothing (main 0x088A68FC, +0xD4 = 2).
+constexpr std::uint32_t kEffectHandleAlloc = 0x088A7DBCu;
+constexpr std::uint32_t kEffectInstanceAlloc = 0x088A4F48u;
+constexpr std::uint32_t kEffectSystemMake = 0x08941914u;
+
+struct EffectPoolTrace {
+    std::uint64_t handles = 0, handles_failed = 0, instances = 0, instances_failed = 0, systems = 0,
+                  systems_failed = 0;
+    std::int32_t handles_low = INT32_MAX, instances_low = INT32_MAX;
+};
+
+EffectPoolTrace &effect_pool_trace() {
+    static EffectPoolTrace t;
+    return t;
+}
+
+std::int32_t effect_handles_free(Guest *g) {
+    if (g_ld32(g, 0x089D6D94u) != 0u) return -1;
+    const gaddr base = g_ld32(g, 0x09B4D434u);
+    return guest_ram(base) ? g_ld32s(g, base + 0xA100u) : -2;
+}
+
+std::int32_t effect_instances_free(Guest *g) {
+    if (g_ld32(g, 0x089D6D60u) != 0u) return -1;
+    const gaddr base = g_ld32(g, 0x089D6D58u);
+    return guest_ram(base) ? g_ld32s(g, base + 0x1500u) : -2;
+}
+
+void run_trace_handle_alloc(Guest *g, const decomp::CallState &in, GuestRegs &out) {
+    GuestRegs regs{};
+    for (int i = 0; i < 8; ++i) regs.a[i] = in.gpr[4 + i];
+    decomp::call_original(g, kEffectHandleAlloc, regs);
+    out.v0 = regs.v0;
+    EffectPoolTrace &t = effect_pool_trace();
+    ++t.handles;
+    if (regs.v0 == 0u && ++t.handles_failed <= 40u)
+        std::printf("[effects] no handle left (frame %llu)\n", static_cast<unsigned long long>(state().frames));
+    t.handles_low = std::min(t.handles_low, effect_handles_free(g));
+}
+
+void run_trace_instance_alloc(Guest *g, const decomp::CallState &in, GuestRegs &out) {
+    GuestRegs regs{};
+    for (int i = 0; i < 8; ++i) regs.a[i] = in.gpr[4 + i];
+    decomp::call_original(g, kEffectInstanceAlloc, regs);
+    out.v0 = regs.v0;
+    EffectPoolTrace &t = effect_pool_trace();
+    ++t.instances;
+    if (regs.v0 == 0u && ++t.instances_failed <= 40u)
+        std::printf("[effects] no instance left (frame %llu)\n", static_cast<unsigned long long>(state().frames));
+    t.instances_low = std::min(t.instances_low, effect_instances_free(g));
+}
+
+// The effect library's heaps (main 0x08970F2C sets one up): +0x10 bytes in
+// use, +0x14 its size, +0x1C a table of +0x24 handles (0 = free), blocks of a
+// 0x10-byte header from +0x08 to +0x0C (+0 next, +8 1 when in use). Every
+// heap main 0x08971134 is asked of is kept, with its refusals.
+constexpr std::uint32_t kEffectHeapAlloc = 0x08971134u;
+
+struct EffectHeap {
+    gaddr heap;
+    std::uint64_t asked, refused;
+    std::uint32_t largest_refused;
+};
+
+std::vector<EffectHeap> &effect_heaps() {
+    static std::vector<EffectHeap> heaps;
+    return heaps;
+}
+
+// The blocks in use, by heap and handle (header +0x0A, which compaction
+// keeps): who asked for each (the caller of main 0x08971134 and its caller's
+// caller, from the stack) and how big. Main 0x08971010 (heap, data) frees one.
+constexpr std::uint32_t kEffectHeapFree = 0x08971010u;
+
+struct LiveBlock {
+    std::uint32_t site, size, frame;
+};
+
+std::vector<std::pair<std::pair<gaddr, std::int32_t>, LiveBlock>> &live_blocks() {
+    static std::vector<std::pair<std::pair<gaddr, std::int32_t>, LiveBlock>> live;
+    return live;
+}
+
+void run_trace_heap_free(Guest *g, const decomp::CallState &in, GuestRegs &) {
+    const gaddr heap = in.gpr[4], data = in.gpr[5];
+    if (guest_ram(data)) {
+        const std::int32_t index = g_ld16s(g, data - 0x10u + 0x0Au);
+        auto &live = live_blocks();
+        for (auto it = live.begin(); it != live.end(); ++it)
+            if (it->first.first == heap && it->first.second == index) {
+                *it = live.back();
+                live.pop_back();
+                break;
+            }
+    }
+    GuestRegs regs{};
+    for (int i = 0; i < 8; ++i) regs.a[i] = in.gpr[4 + i];
+    decomp::call_original(g, kEffectHeapFree, regs);
+}
+
+// The blocks still in use, grouped by who asked: the eight biggest groups.
+void trace_live_blocks(Guest *g) {
+    (void)g;
+    struct Group {
+        std::uint32_t site, count, bytes, oldest;
+    };
+    std::vector<Group> groups;
+    for (const auto &entry : live_blocks()) {
+        auto it = std::find_if(groups.begin(), groups.end(),
+                               [&](const Group &x) { return x.site == entry.second.site; });
+        if (it == groups.end()) {
+            groups.push_back({entry.second.site, 0, 0, entry.second.frame});
+            it = groups.end() - 1;
+        }
+        ++it->count;
+        it->bytes += entry.second.size;
+        it->oldest = std::min(it->oldest, entry.second.frame);
+    }
+    std::sort(groups.begin(), groups.end(), [](const Group &a, const Group &b) { return a.bytes > b.bytes; });
+    for (std::size_t i = 0; i < groups.size() && i < 8u; ++i)
+        std::printf("[effects]   in use from %08X: %u blocks, %u bytes, oldest from frame %u\n", groups[i].site,
+                    groups[i].count, groups[i].bytes, groups[i].oldest);
+}
+
+void run_trace_heap_alloc(Guest *g, const decomp::CallState &in, GuestRegs &out) {
+    GuestRegs regs{};
+    for (int i = 0; i < 8; ++i) regs.a[i] = in.gpr[4 + i];
+    decomp::call_original(g, kEffectHeapAlloc, regs);
+    out.v0 = regs.v0;
+    auto &heaps = effect_heaps();
+    auto it = std::find_if(heaps.begin(), heaps.end(), [&](const EffectHeap &h) { return h.heap == in.gpr[4]; });
+    if (it == heaps.end()) {
+        if (heaps.size() >= 16u) return;
+        heaps.push_back({in.gpr[4], 0, 0, 0});
+        it = heaps.end() - 1;
+        std::printf("[effects] heap %08X: %u bytes, %d handles (first asked from %08X)\n", in.gpr[4],
+                    g_ld32(g, in.gpr[4] + 0x14u), g_ld32s(g, in.gpr[4] + 0x24u), in.gpr[31]);
+    }
+    ++it->asked;
+    if (regs.v0 != 0u && guest_ram(regs.v0) && live_blocks().size() < 200000u) {
+        const std::int32_t index = g_ld16s(g, regs.v0 - 0x10u + 0x0Au);
+        auto &live = live_blocks();
+        const auto key = std::make_pair(in.gpr[4], index);
+        auto found = std::find_if(live.begin(), live.end(), [&](const auto &e) { return e.first == key; });
+        const LiveBlock block{in.gpr[31], in.gpr[5], static_cast<std::uint32_t>(state().frames)};
+        if (found != live.end())
+            found->second = block;
+        else
+            live.emplace_back(key, block);
+    }
+    if (regs.v0 == 0u) {
+        it->largest_refused = std::max(it->largest_refused, in.gpr[5]);
+        if (++it->refused <= 20u)
+            std::printf("[effects] heap %08X refused %u bytes (from %08X, frame %llu)\n", in.gpr[4], in.gpr[5],
+                        in.gpr[31], static_cast<unsigned long long>(state().frames));
+    }
+}
+
+// A heap's state: bytes in use, handles in use, free blocks and the largest.
+void trace_effect_heap(Guest *g, const EffectHeap &h) {
+    const gaddr heap = h.heap;
+    const std::int32_t handles = g_ld32s(g, heap + 0x24u);
+    const gaddr table = g_ld32(g, heap + 0x1Cu);
+    int handles_used = 0;
+    if (guest_ram(table) && handles > 0 && handles < 0x8000)
+        for (int i = 0; i < handles; ++i) handles_used += g_ld32(g, table + 4u * i) != 0u ? 1 : 0;
+    std::uint32_t free_blocks = 0, free_bytes = 0, largest = 0, blocks = 0;
+    const gaddr last = g_ld32(g, heap + 0x0Cu);
+    for (gaddr b = g_ld32(g, heap + 0x08u); guest_ram(b) && b != last && blocks < 100000u; b = g_ld32(g, b)) {
+        ++blocks;
+        const gaddr next = g_ld32(g, b);
+        if (!guest_ram(next) || next <= b) break;
+        if (g_ld8(g, b + 8u) == 0u) {
+            ++free_blocks;
+            free_bytes += next - b;
+            largest = std::max(largest, next - b);
+        }
+    }
+    std::printf("[effects] split %llu heap %08X: %u of %u bytes in use, handles %d of %d, %u blocks, %u free "
+                "(%u bytes, largest %u); asked %llu, refused %llu (largest refused %u)\n",
+                static_cast<unsigned long long>(state().frames), heap, g_ld32(g, heap + 0x10u),
+                g_ld32(g, heap + 0x14u), handles_used, handles, blocks, free_blocks, free_bytes, largest,
+                static_cast<unsigned long long>(h.asked), static_cast<unsigned long long>(h.refused),
+                h.largest_refused);
+}
+
+void run_trace_system_make(Guest *g, const decomp::CallState &in, GuestRegs &out) {
+    GuestRegs regs{};
+    for (int i = 0; i < 8; ++i) regs.a[i] = in.gpr[4 + i];
+    for (int i = 0; i < 4; ++i) regs.f[i] = in.fpr[12 + i];
+    decomp::call_original(g, kEffectSystemMake, regs);
+    out.v0 = regs.v0;
+    EffectPoolTrace &t = effect_pool_trace();
+    ++t.systems;
+    if (static_cast<std::int32_t>(regs.v0) < 0 && ++t.systems_failed <= 40u)
+        std::printf("[effects] the library made no system for effect %u (code %d, from %08X, frame %llu)\n",
+                    in.gpr[6], static_cast<std::int32_t>(regs.v0), in.gpr[31],
+                    static_cast<unsigned long long>(state().frames));
+}
+
+// Every 600 split tasks: the pools' free counts now and at their lowest since
+// the last line, and how many of each were asked for and refused; each heap's
+// state; every 1800, the heap's blocks in use by who asked.
+void trace_effect_pools(Guest *g) {
+    static const bool on = [] {
+        const char *text = std::getenv("D012_TRACE_EFFECT_POOL");
+        return text != nullptr && *text != '\0' && std::strcmp(text, "0") != 0;
+    }();
+    if (!on || state().frames % 600u != 0u) return;
+    EffectPoolTrace &t = effect_pool_trace();
+    std::printf("[effects] split %llu handles free %d (lowest %d), instances free %d (lowest %d); asked "
+                "handles %llu (%llu refused), instances %llu (%llu refused), systems %llu (%llu refused)\n",
+                static_cast<unsigned long long>(state().frames), effect_handles_free(g),
+                t.handles_low == INT32_MAX ? -3 : t.handles_low, effect_instances_free(g),
+                t.instances_low == INT32_MAX ? -3 : t.instances_low, static_cast<unsigned long long>(t.handles),
+                static_cast<unsigned long long>(t.handles_failed), static_cast<unsigned long long>(t.instances),
+                static_cast<unsigned long long>(t.instances_failed), static_cast<unsigned long long>(t.systems),
+                static_cast<unsigned long long>(t.systems_failed));
+    for (const EffectHeap &h : effect_heaps()) trace_effect_heap(g, h);
+    if (state().frames % 1800u == 0u) trace_live_blocks(g);
+    std::fflush(stdout);
+    t.handles_low = t.instances_low = INT32_MAX;
+}
+
+// The arrows' effect each fighter's helper last made (see kFreerunArrows).
+struct ArrowsHeld {
+    gaddr fighter = 0u;
+    gaddr effect = 0u;
+    gaddr resource = 0u;     // the effect's +0xC0, as made
+    std::uint64_t made = 0u;  // the count of arrows made by then
+};
+std::array<ArrowsHeld, 2> arrows_held;
+std::uint64_t arrows_made = 0u;
+
+bool arrows_unguarded() {
+    static const bool on = [] {
+        const char *text = std::getenv("D012_TEST_ARROWS_UNGUARDED");
+        return text != nullptr && *text != '\0' && std::strcmp(text, "0") != 0;
+    }();
+    return on;
+}
+
+// On the handles' stack (main 0x088A7E48 puts a handle back there).
+bool effect_given_back(Guest *g, gaddr effect) {
+    if (g_ld32(g, 0x089D6D94u) != 0u) return false;  // handles from a heap instead
+    const gaddr base = g_ld32(g, 0x09B4D434u);
+    if (!guest_ram(base)) return false;
+    const std::int32_t count = std::min<std::int32_t>(g_ld32s(g, base + 0xA100u), 64);
+    for (std::int32_t i = 0; i < count; ++i)
+        if (g_ld32(g, base + 0xA000u + 4u * static_cast<std::uint32_t>(i)) == effect) return true;
+    return false;
+}
+
+// Why the arrows' effect a fighter holds is no longer its own, or nullptr.
+const char *arrows_stale(Guest *g, std::uint32_t slot, gaddr effect) {
+    const ArrowsHeld &mine = arrows_held[slot];
+    const ArrowsHeld &other = arrows_held[slot ^ 1u];
+    if (mine.effect != effect) return nullptr;  // not one its helper made: left alone
+    if (effect_given_back(g, effect)) return "given back";
+    if (g_ld32(g, effect + 0xDCu) & 2u) return "ended";
+    if (g_ld32(g, effect + 0xC0u) != mine.resource) return "made again for another effect";
+    if (other.effect == effect && other.made > mine.made) return "made again for the other fighter's arrows";
+    return nullptr;
+}
+
+// Each fighter's arrows' effect dropped when it is no longer its own.
+void drop_stale_arrows(Guest *g) {
+    if (!versus::active() || arrows_unguarded()) return;
+    const gaddr field = g_ld32(g, kBattleManager);
+    if (field == 0u) return;
+    static const bool trace = [] {
+        const char *text = std::getenv("D012_TRACE_EFFECT_POOL");
+        return text != nullptr && *text != '\0' && std::strcmp(text, "0") != 0;
+    }();
+    static std::uint64_t dropped = 0u;
+    for (std::uint32_t slot = 0; slot < 2u; ++slot) {
+        const gaddr fighter = g_ld32(g, field + 0x38u + 4u * slot);
+        ArrowsHeld &mine = arrows_held[slot];
+        if (!guest_ram(fighter)) continue;
+        if (mine.fighter != fighter) mine = ArrowsHeld{fighter};
+        const gaddr effect = g_ld32(g, fighter + 0x738u);
+        if (effect == 0u) {
+            mine.effect = 0u;
+            continue;
+        }
+        const char *why = arrows_stale(g, slot, effect);
+        if (why == nullptr) continue;
+        g_st32(g, fighter + 0x738u, 0u);
+        g_st32(g, fighter + 0x740u, 0xFFFFFFFFu);
+        mine.effect = 0u;
+        if (trace && ++dropped <= 60u)
+            std::printf("[effects] player %u's arrows let go of %08X: %s (split %llu)\n", slot + 1u, effect, why,
+                        static_cast<unsigned long long>(state().frames));
+    }
+}
+
+// battle 0x08ACBF20: the freerun arrows, run for player 2's fighter too while
+// run_local_update lends it the local flag. Each fighter's arrows hold only an
+// effect of their own (kFreerunArrows).
+void run_freerun_arrows(Guest *g, const decomp::CallState &in, GuestRegs &) {
+    const gaddr fighter = in.gpr[5];
+    drop_stale_arrows(g);
+    const gaddr before = guest_ram(fighter) ? g_ld32(g, fighter + 0x738u) : 0u;
+    GuestRegs regs{};
+    for (int i = 0; i < 8; ++i) regs.a[i] = in.gpr[4 + i];
+    for (int i = 0; i < 4; ++i) regs.f[i] = in.fpr[12 + i];
+    decomp::call_original(g, kFreerunArrows, regs);
+    if (!versus::active() || !guest_ram(fighter)) return;
+    const gaddr field = g_ld32(g, kBattleManager);
+    for (std::uint32_t slot = 0; slot < 2u && field != 0u; ++slot) {
+        if (g_ld32(g, field + 0x38u + 4u * slot) != fighter) continue;
+        ArrowsHeld &mine = arrows_held[slot];
+        if (mine.fighter != fighter) mine = ArrowsHeld{fighter};
+        const gaddr now = g_ld32(g, fighter + 0x738u);
+        if (now == 0u) {
+            mine.effect = 0u;
+        } else if (now != before) {
+            mine.effect = now;
+            mine.resource = g_ld32(g, now + 0xC0u);
+            mine.made = ++arrows_made;
+        }
+    }
 }
 
 void run_local_update(Guest *g, const decomp::CallState &in, GuestRegs &) {
@@ -805,7 +1281,8 @@ std::uint32_t battle_phase(Guest *g) {
 // the player's fighter (main 0x08889E44) picks the victory pose or the
 // player's defeat (kept at flow +0x0C). In versus a win of player 2's is
 // player 2's victory: player 2's fighter is the local one (and player 1's not)
-// for this call, so the ending is the winner's own, as player 1's is.
+// for this call, so the ending is the winner's own, as player 1's is. (The
+// winner's words, asked for here, come a few frames later: run_player_fighter.)
 //
 // Then player 1's is local again until the white flash (phase 8; see
 // ending_local): from the final blow the HUD lays out the local fighter on the
@@ -862,6 +1339,37 @@ void run_winner_decision(Guest *g, const decomp::CallState &in, GuestRegs &) {
             if (goes_on) g_st32(g, flow + 0x10u, 1u);
         }
     }
+}
+
+// The winner's words. The winner decision asks for the ending's sound (battle
+// 0x08B097D0 on flow +0xA4: the jingle, won or lost); a step of that request
+// (battle 0x08B0998C) starts the jingle, then loads the words (battle
+// 0x08B09B04): the player's fighter (main 0x08889E44, the call that returns to
+// 0x08B09B20), its victory or defeat line against the other side's character
+// (battle 0x08B009D4 or 0x08B00A04), opened as
+// "voice/<language>/battle/<name>.at3" and said in the final blow. That runs a
+// few frames after the decision, with player 1's fighter local again, so a win
+// of player 2's had player 1's words: Lightning's line under Garland's victory
+// pose (issue 25). When player 2 won, that one question is answered with
+// player 2's fighter. (The step itself is reached from its own unit as well,
+// so an override of it does not see every call; this question comes from
+// the battle overlay into main, and does.)
+constexpr std::uint32_t kPlayerFighter = 0x08889E44u;
+constexpr std::uint32_t kWordsAskPlayer = 0x08B09B20u;  // in battle 0x08B09B04
+
+void run_player_fighter(Guest *g, const decomp::CallState &in, GuestRegs &out) {
+    if (versus::active() && state().player2_won && in.gpr[31] == kWordsAskPlayer) {
+        const gaddr field = g_ld32(g, kBattleManager);
+        const gaddr p2 = field != 0u ? g_ld32(g, field + 0x3Cu) : 0u;
+        if (p2 != 0u) {
+            out.v0 = p2;
+            std::cout << "[versus] player 2 won: the winner's words are player 2's" << std::endl;
+            return;
+        }
+    }
+    GuestRegs regs{};
+    decomp::call_original(g, kPlayerFighter, regs);
+    out.v0 = regs.v0;
 }
 
 // Each split task: player 2's fighter local from the white flash on (phase 8,
@@ -1775,6 +2283,7 @@ void run_split_task(Guest *g, const decomp::CallState &in, GuestRegs &) {
     chase_lines_back(g);
     markers_back(g);
     if (versus::active()) trace_freerun_markers(g);
+    trace_effect_pools(g);
     if (versus::active()) ending_local(g);
     if (!versus::active() || manager == 0u || graphics == 0u) return;
     // When the frame stays one full view, with player 2's cursor hidden:
@@ -2316,9 +2825,31 @@ struct Install {
             {kLocalFighter, "versus_chase_local", decomp::Module::Main, decomp::Returns::Integer, &run_chase_local},
             {kLocalUpdate, "versus_local_update", decomp::Module::BattleOverlay, decomp::Returns::Nothing,
              &run_local_update},
+            {kPlayerFighter, "versus_player_fighter", decomp::Module::Main, decomp::Returns::Integer,
+             &run_player_fighter},
+            {kFreerunArrows, "versus_freerun_arrows", decomp::Module::BattleOverlay, decomp::Returns::Nothing,
+             &run_freerun_arrows},
         };
         decomp::add_overrides(overrides, sizeof overrides / sizeof overrides[0], true);
         // Overrides that only trace, there only with their switch.
+        const char *pool = std::getenv("D012_TRACE_EFFECT_POOL");
+        if (pool != nullptr && *pool != '\0' && std::strcmp(pool, "0") != 0) {
+            static const decomp::Override traces[] = {
+                {kEffectMake, "versus_trace_effect_make", decomp::Module::Main, decomp::Returns::Integer,
+                 &run_trace_effect_make},
+                {kEffectHandleAlloc, "versus_trace_handle_alloc", decomp::Module::Main, decomp::Returns::Integer,
+                 &run_trace_handle_alloc},
+                {kEffectInstanceAlloc, "versus_trace_instance_alloc", decomp::Module::Main,
+                 decomp::Returns::Integer, &run_trace_instance_alloc},
+                {kEffectSystemMake, "versus_trace_system_make", decomp::Module::Main, decomp::Returns::Integer,
+                 &run_trace_system_make},
+                {kEffectHeapAlloc, "versus_trace_heap_alloc", decomp::Module::Main, decomp::Returns::Integer,
+                 &run_trace_heap_alloc},
+                {kEffectHeapFree, "versus_trace_heap_free", decomp::Module::Main, decomp::Returns::Nothing,
+                 &run_trace_heap_free},
+            };
+            decomp::add_overrides(traces, sizeof traces / sizeof traces[0], true);
+        }
         const char *trace = std::getenv("D012_TRACE_GUIDE");
         if (trace != nullptr && *trace != '\0' && std::strcmp(trace, "0") != 0) {
             static const decomp::Override traces[] = {

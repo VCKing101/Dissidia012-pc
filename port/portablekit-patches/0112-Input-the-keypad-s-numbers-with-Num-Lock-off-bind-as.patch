@@ -1,0 +1,377 @@
+From 94c132b633628129cabb0cc5afdba33e3377496f Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Wed, 18 Nov 2026 14:34:13 +1030
+Subject: [PATCH] Input: the keypad's numbers with Num Lock off bind as keys of
+ their own
+
+Keys are bound by their place on the keyboard (SDL's scancodes), and
+SDL reports a keypad number key at the same place with Num Lock on or
+off, so Keypad 8 was Keypad 8 either way. A keyboard player moved with
+the keypad's 8 4 5 6 on a PSP emulator and pressed Num Lock to turn the
+same keys into the camera, which Windows' own keys allowed there: with
+Num Lock off the keypad sends the keys printed under its numbers.
+
+Now those are keys of their own, named after the keys printed under the
+numbers: Keypad Up (8), Keypad Clear (5), Keypad Home (7) and so on, at
+positions SDL leaves unused (501-511). A keypad key bound both ways
+presses its number's control with Num Lock on and the other with it
+off; bound only one way, it presses that control whatever Num Lock
+says, so keypads bound before, or bound with Num Lock off and played
+with it on, play as they did. They are not the arrow keys.
+
+- input/bindings: the names, num_lock_off_position(), keypad_number_of(),
+  typed_position() and key_held().
+- gpu/vulkan_renderer: the game's key read asks SDL's Num Lock through
+  key_held(); <prefix>_TRACE_PAD logs Num Lock as it changes.
+- ui/layer: the Controls page binds a keypad key pressed with Num Lock
+  off as its Num Lock off key.
+- <prefix>_NO_NUM_LOCK_KEYS=1 reads and binds the numbers whatever Num
+  Lock says (the old behaviour).
+- ui/input_script: `numlock on|off` sets SDL's Num Lock, and the key
+  events it sends carry SDL's modifiers.
+- tests: the Num Lock cases; the settings tests' target gets
+  host/input/players.cpp, without which it did not link.
+- PROFILE_GUIDE: the keypad's keys with Num Lock off.
+
+Tested on Windows (the game built with llvm-mingw clang, the framework
+tests with MSVC) with Dissidia 012 and the keyboard only, scripted: with Move on Keypad 8 4 5
+6 and the D-pad also on Keypad Up, Clear, Left and Right, Num Lock on
+moved the stick and Num Lock off pressed the D-pad, the arrow keys
+pressed the D-pad either way and unbound keypad keys nothing; with
+nothing scripted the game read Num Lock on as Windows had it; the
+Controls page with Num Lock off bound Keypad 8 as Keypad Up and Keypad
+5 as Keypad Clear and saved them. The framework tests pass but the ad
+hoc ones, not run. Not tested: the real Num Lock key pressed while the
+game runs, a battle, Linux, the Steam Deck, Android, another game.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ CMakeLists.txt               |  3 +-
+ docs/PROFILE_GUIDE.md        |  2 +-
+ host/gpu/vulkan_renderer.cpp | 21 +++++++++++--
+ host/input/bindings.cpp      | 22 ++++++++++++++
+ host/input/bindings.hpp      | 39 ++++++++++++++++++++++++
+ host/ui/input_script.cpp     |  6 ++++
+ host/ui/input_script.hpp     |  3 ++
+ host/ui/layer.cpp            | 15 ++++++++--
+ tests/input_tests.cpp        | 58 ++++++++++++++++++++++++++++++++++++
+ 9 files changed, 163 insertions(+), 6 deletions(-)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index c5250d9..d809952 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -332,7 +332,8 @@ if(PSPRECOMP_BUILD_TESTS)
+         "${PORTABLEKIT_ROOT}/host/profile.cpp"
+         "${PORTABLEKIT_ROOT}/host/settings/settings.cpp"
+         "${PORTABLEKIT_ROOT}/host/install/user_data.cpp"
+-        "${PORTABLEKIT_ROOT}/host/input/bindings.cpp")
++        "${PORTABLEKIT_ROOT}/host/input/bindings.cpp"
++        "${PORTABLEKIT_ROOT}/host/input/players.cpp")
+     target_include_directories(portablekit_settings_tests PRIVATE "${PORTABLEKIT_ROOT}/host")
+     target_link_libraries(portablekit_settings_tests PRIVATE psprecomp_core)
+     set_target_properties(portablekit_settings_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+diff --git a/docs/PROFILE_GUIDE.md b/docs/PROFILE_GUIDE.md
+index aa18d24..fa15ed4 100644
+--- a/docs/PROFILE_GUIDE.md
++++ b/docs/PROFILE_GUIDE.md
+@@ -71,7 +71,7 @@ Two more are for a port that goes further than the PSP did, and both are null un
+ 
+ `combos` are moves the game makes from two of the PSP's buttons together, each a `ComboControl`: the key settings.ini keeps it under (`input.bind.<key>`), the label the menu shows, the SceCtrlButtons it presses, and the key or mouse button bound to it until the player says otherwise. Keyboard and mouse lists one row each after the PSP's own controls, and the key presses all of its buttons in the same read, which a game that tests "R held and × pressed" takes as the move. At most `input::kCombos`. Dissidia 012 lists its dodge (R + ×), dash, EX Mode, summon and two assists.
+ 
+-`keyboard_defaults` changes the framework's keyboard and mouse for a game played otherwise. Only bindings settings.ini does not hold are taken from it, with one exception: the mouse wheel. Wheel Up and Wheel Down are bindings like a key (each notch presses its control for two of the game's pad reads and lets go for two, `<prefix>_WHEEL_HOLD` and `<prefix>_WHEEL_GAP` change that), and a settings.ini from before they existed held every binding; so a file without `input.bindings_version=2` gets the defaults' wheel bindings added where their control has room and the wheel is bound nowhere else, once. Binding the wheel to D-pad up and down there makes it move through the game's lists.
++`keyboard_defaults` changes the framework's keyboard and mouse for a game played otherwise. Only bindings settings.ini does not hold are taken from it, with one exception: the mouse wheel. Wheel Up and Wheel Down are bindings like a key (each notch presses its control for two of the game's pad reads and lets go for two, `<prefix>_WHEEL_HOLD` and `<prefix>_WHEEL_GAP` change that), and a settings.ini from before they existed held every binding; so a file without `input.bindings_version=2` gets the defaults' wheel bindings added where their control has room and the wheel is bound nowhere else, once. Binding the wheel to D-pad up and down there makes it move through the game's lists. With Num Lock off, the keypad's number keys are keys of their own, named after the keys printed under the numbers (Keypad Up for 8, Keypad Clear for 5, Keypad Home for 7 and so on), so one keypad key can press one control with Num Lock on and another with it off; a keypad key bound only one way presses it whatever Num Lock says (`input::key_held`). `<prefix>_NO_NUM_LOCK_KEYS=1` reads the numbers whatever Num Lock says.
+ 
+ For a picture of the port's own beside one of the game's screens, such as a hint by a menu the port extends, `ui::add_game_overlay` (`host/ui/ui.hpp`) draws with Dear ImGui over every game frame it asks for, `ui::game_picture()` says where the game's 480x272 picture is in the window, and `ui::game_text_font()` is the face the game's own text is drawn with.
+ 
+diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
+index ff9be08..a3d856a 100644
+--- a/host/gpu/vulkan_renderer.cpp
++++ b/host/gpu/vulkan_renderer.cpp
+@@ -737,6 +737,15 @@ PadTuning pad_tuning() {
+     return value;
+ }
+ 
++// Num Lock as the bindings read the keypad (input::key_held). On whatever
++// it says with <prefix>_NO_NUM_LOCK_KEYS, so the keypad's numbers are read
++// as they were before Num Lock counted. The Controls page's capture
++// (ui/layer.cpp) asks the same.
++bool num_lock_on(SDL_Keymod mod) {
++    static const bool ignored = portablekit::env_set("NO_NUM_LOCK_KEYS");
++    return ignored || (mod & SDL_KMOD_NUM) != 0;
++}
++
+ // Adds one gamepad's state to the pad bits and to the analog offsets the
+ // keyboard path also writes, so the two sources simply OR together.
+ // The mouse wheel's notches as presses. <prefix>_WHEEL_HOLD and
+@@ -7285,13 +7294,21 @@ void VulkanRenderer::Impl::sample_pad(bool focused) {
+     // bindings. Bits follow SceCtrlButtons; the stick is centred at 0x80.
+     const settings::Settings &player = settings::current();
+     const bool *keys = SDL_GetKeyboardState(nullptr);
++    const auto down = [&](int position) {
++        return (focused && position < SDL_SCANCODE_COUNT && keys[position]) ||
++               impl_->scripted_keys[static_cast<std::size_t>(position)];
++    };
++    const bool num_lock = num_lock_on(SDL_GetModState());
++    if (static int traced = -1; pad_tuning().trace && traced != static_cast<int>(num_lock)) {
++        traced = static_cast<int>(num_lock);
++        std::cout << "[pad] num lock " << (num_lock ? "on" : "off") << std::endl;
++    }
+     const input::PadInput typed = input::read(player.bindings, [&](input::Binding binding) {
+         if (const int button = input::mouse_button_of(binding))
+             return impl_->mouse_captured && (impl_->mouse_buttons & (1u << button)) != 0u;
+         if (const int wheel = input::wheel_of(binding)) return impl_->mouse_captured && impl_->wheel.held() == wheel;
+         const int position = input::key_position(binding);
+-        return position >= 0 && ((focused && position < SDL_SCANCODE_COUNT && keys[position]) ||
+-                                 impl_->scripted_keys[static_cast<std::size_t>(position)]);
++        return position >= 0 && input::key_held(player.bindings, position, num_lock, down);
+     });
+     // The keys and mouse buttons into a player's pad: player 1's, or player
+     // 2's when Controls > Player 2 is the keyboard.
+diff --git a/host/input/bindings.cpp b/host/input/bindings.cpp
+index 662e12e..e6618a6 100644
+--- a/host/input/bindings.cpp
++++ b/host/input/bindings.cpp
+@@ -43,6 +43,10 @@ constexpr KeyName kKeyNames[] = {
+     {98, "Keypad 0"}, {99, "Keypad Period"}, {100, "NonUSBackslash"}, {224, "Left Ctrl"}, {225, "Left Shift"},
+     {226, "Left Alt"}, {227, "Left GUI"}, {228, "Right Ctrl"}, {229, "Right Shift"}, {230, "Right Alt"},
+     {231, "Right GUI"},
++    // The keypad's numbers with Num Lock off (kNumLockOffFirst).
++    {501, "Keypad End"}, {502, "Keypad Down"}, {503, "Keypad PageDown"}, {504, "Keypad Left"},
++    {505, "Keypad Clear"}, {506, "Keypad Right"}, {507, "Keypad Home"}, {508, "Keypad Up"},
++    {509, "Keypad PageUp"}, {510, "Keypad Insert"}, {511, "Keypad Delete"},
+ };
+ constexpr const char *kMouseNames[] = {"Mouse Left", "Mouse Middle", "Mouse Right", "Mouse 4", "Mouse 5"};
+ constexpr const char *kWheelUpName = "Wheel Up";
+@@ -302,6 +306,24 @@ PadInput read(const Bindings &bindings, const std::function<bool(Binding)> &held
+     return pad;
+ }
+ 
++bool key_held(const Bindings &bindings, int position, bool num_lock, const std::function<bool(int)> &down) {
++    const int number = keypad_number_of(position);
++    if (number < 0) return down(position);
++    // Both of a keypad key's bindings are its number's position, where SDL
++    // reports it whatever Num Lock says.
++    if (!down(number)) return false;
++    const int off = num_lock_off_position(number);
++    const auto bound = [&](int at) {
++        for (const Slots &slots : bindings)
++            for (const Binding binding : slots)
++                if (binding == key(static_cast<std::uint16_t>(at))) return true;
++        return false;
++    };
++    const bool number_bound = bound(number), off_bound = bound(off);
++    if (number_bound && off_bound) return position == (num_lock ? number : off);
++    return position == number ? !off_bound : !number_bound;
++}
++
+ void WheelPresses::add(float notches) {
+     if (notches == 0.0f) return;
+     // A turn the other way drops what is still waiting from the last one.
+diff --git a/host/input/bindings.hpp b/host/input/bindings.hpp
+index ff90ac9..7a745b3 100644
+--- a/host/input/bindings.hpp
++++ b/host/input/bindings.hpp
+@@ -88,6 +88,35 @@ inline constexpr std::uint16_t kKeyPositions = 512u;
+ [[nodiscard]] constexpr int key_position(Binding binding) {
+     return binding != kNone && binding < kKeyPositions ? binding : -1;
+ }
++
++// The keypad's number keys with Num Lock off, as printed under the numbers:
++// Keypad End (1), Down (2), PageDown (3), Left (4), Clear (5), Right (6),
++// Home (7), Up (8), PageUp (9), Insert (0) and Delete (Period). Positions SDL
++// leaves unused (past its dynamic keys, below SDL_SCANCODE_COUNT), so they
++// bind apart from the numbers and one key can press two controls, one with
++// Num Lock on and one with it off.
++inline constexpr std::uint16_t kKeypadFirst = 89u;  // Keypad 1 (SDL_SCANCODE_KP_1)
++inline constexpr std::uint16_t kKeypadLast = 99u;   // Keypad Period
++inline constexpr std::uint16_t kNumLockOffFirst = 501u;
++inline constexpr std::uint16_t kNumLockOffLast = kNumLockOffFirst + (kKeypadLast - kKeypadFirst);
++static_assert(kNumLockOffLast < kKeyPositions);
++// A keypad number key's position with Num Lock off; any other position as it is.
++[[nodiscard]] constexpr int num_lock_off_position(int position) {
++    return position >= kKeypadFirst && position <= kKeypadLast ? position - kKeypadFirst + kNumLockOffFirst
++                                                               : position;
++}
++// The keypad number key a position is, either way (Keypad 8 for Keypad Up
++// and for Keypad 8), or -1 for any other key.
++[[nodiscard]] constexpr int keypad_number_of(int position) {
++    if (position >= kKeypadFirst && position <= kKeypadLast) return position;
++    if (position >= kNumLockOffFirst && position <= kNumLockOffLast) return position - kNumLockOffFirst + kKeypadFirst;
++    return -1;
++}
++// The key a press at `position` is bound as: with Num Lock off, a keypad
++// number key's Num Lock off position.
++[[nodiscard]] constexpr int typed_position(int position, bool num_lock) {
++    return num_lock ? position : num_lock_off_position(position);
++}
+ // The mouse button, 1-5, or 0 for a key, the wheel or none.
+ [[nodiscard]] constexpr int mouse_button_of(Binding binding) {
+     return binding > kMouse && binding <= kMouse + 5u ? binding - kMouse : 0;
+@@ -160,6 +189,16 @@ struct PadInput {
+ };
+ [[nodiscard]] PadInput read(const Bindings &bindings, const std::function<bool(Binding)> &held);
+ 
++// Whether the key bound at `position` is held, given which keys are down by
++// the positions SDL reports (`down`) and Num Lock. Any key but the keypad's
++// numbers is held while it is down. A keypad number key bound both ways
++// presses its number's binding with Num Lock on and its Num Lock off
++// binding with it off; bound only one way, it presses that binding either
++// way, so a keypad bound before Num Lock counted, or with Num Lock off, plays
++// as it did.
++[[nodiscard]] bool key_held(const Bindings &bindings, int position, bool num_lock,
++                            const std::function<bool(int)> &down);
++
+ // The mouse wheel's notches as presses. Each notch holds Wheel Up's or Wheel
+ // Down's action for `hold` of the game's pad reads and lets go for `gap`, so
+ // the game sees one press per notch however fast the wheel turns. Notches
+diff --git a/host/ui/input_script.cpp b/host/ui/input_script.cpp
+index 2787ed7..314a05c 100644
+--- a/host/ui/input_script.cpp
++++ b/host/ui/input_script.cpp
+@@ -81,6 +81,7 @@ void push_key(SDL_Keycode key, bool down) {
+     event.key.windowID = SDL_GetWindowID(Layer::get().renderer().window());
+     event.key.key = key;
+     event.key.scancode = SDL_GetScancodeFromKey(key, nullptr);
++    event.key.mod = SDL_GetModState();
+     event.key.down = down;
+     SDL_PushEvent(&event);
+     // A pushed event does not change SDL's keyboard snapshot, which the game's
+@@ -266,6 +267,11 @@ void run(const Step &step) {
+         else if (what.rfind("scale ", 0) == 0) renderer.set_window_scale(static_cast<std::uint32_t>(std::atoi(what.c_str() + 6)));
+         else std::cout << "[script] unknown window step: " << what << std::endl;
+         std::cout << "[script] window " << what << std::endl;
++    } else if (step.action == "numlock") {
++        // SDL's Num Lock, which the bindings read, not the keyboard's light.
++        const SDL_Keymod mod = SDL_GetModState();
++        SDL_SetModState(step.argument == "off" ? mod & ~SDL_KMOD_NUM : mod | SDL_KMOD_NUM);
++        std::cout << "[script] num lock " << ((SDL_GetModState() & SDL_KMOD_NUM) != 0 ? "on" : "off") << std::endl;
+     } else if (step.action == "quit") {
+         SDL_Event event{};
+         event.type = SDL_EVENT_QUIT;
+diff --git a/host/ui/input_script.hpp b/host/ui/input_script.hpp
+index 8ceb6a1..825ca5d 100644
+--- a/host/ui/input_script.hpp
++++ b/host/ui/input_script.hpp
+@@ -42,6 +42,9 @@
+ //   window fullscreen|windowed|minimize|restore|scale N
+ //                     change the window as the player would (for tests of
+ //                     the swapchain's rebuilds; not saved)
++//   numlock on|off    turn SDL's Num Lock on or off, which decides what the
++//                     keypad's number keys press (input::key_held), as the
++//                     Num Lock key would; the keyboard's own light stays
+ //   quit              close the window
+ //
+ // For example: <prefix>_INPUT_SCRIPT="300:key Escape;330:shot menu;360:pad leftstick+rightstick"
+diff --git a/host/ui/layer.cpp b/host/ui/layer.cpp
+index a4d6a45..dde2937 100644
+--- a/host/ui/layer.cpp
++++ b/host/ui/layer.cpp
+@@ -36,6 +36,15 @@ namespace {
+ // Steam's controller layout rather than by a keyboard.
+ constexpr auto kEscapeWindow = std::chrono::milliseconds(100);
+ 
++// Num Lock as the bindings read it, the same as the game's key read in
++// gpu/vulkan_renderer.cpp: with it off, a keypad number is bound as its Num
++// Lock off key (input::typed_position); <prefix>_NO_NUM_LOCK_KEYS binds the
++// numbers whatever Num Lock says, as before.
++bool num_lock_on(SDL_Keymod mod) {
++    static const bool ignored = portablekit::env_set("NO_NUM_LOCK_KEYS");
++    return ignored || (mod & SDL_KMOD_NUM) != 0;
++}
++
+ // Interface frames are presented with the game's present mode; without vsync
+ // they would spin, so they are held to about 120 per second.
+ constexpr auto kMinFrameTime = std::chrono::microseconds(8'333);
+@@ -248,8 +257,10 @@ bool Layer::handle_event(const SDL_Event &event) {
+     if (capturing_binding_ && interactive_) {
+         std::optional<std::uint16_t> pressed;
+         if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat)
+-            pressed = event.key.key == SDLK_ESCAPE ? input::kNone
+-                                                   : input::key(static_cast<std::uint16_t>(event.key.scancode));
++            pressed = event.key.key == SDLK_ESCAPE
++                          ? input::kNone
++                          : input::key(static_cast<std::uint16_t>(
++                                input::typed_position(event.key.scancode, num_lock_on(event.key.mod))));
+         else if (event.type == SDL_EVENT_KEY_DOWN)
+             return true;
+         else if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN && event.button.button >= 1u && event.button.button <= 5u)
+diff --git a/tests/input_tests.cpp b/tests/input_tests.cpp
+index d54d87f..75cdd69 100644
+--- a/tests/input_tests.cpp
++++ b/tests/input_tests.cpp
+@@ -382,6 +382,63 @@ void test_combos_and_wheel() {
+     check(seen == std::vector<int>({1, 1, 1, 0, 0}), "hold and gap are counted in reads");
+ }
+ 
++// The keypad's numbers with Num Lock on and off: one key, two controls.
++void test_num_lock() {
++    const Binding up = from_name("Keypad Up"), clear = from_name("Keypad Clear");
++    check(name(key(96)) == "Keypad 8" && name(up) == "Keypad Up" && up == key(508) && name(clear) == "Keypad Clear" &&
++              from_name("keypad pageup") == key(509) && name(key(511)) == "Keypad Delete",
++          "the Num Lock off keys have names of their own");
++    check(typed_position(96, true) == 96 && typed_position(96, false) == 508 && typed_position(99, false) == 511 &&
++              typed_position(89, false) == 501 && typed_position(26, false) == 26 && typed_position(82, false) == 82,
++          "with Num Lock off, only the keypad's numbers are typed as their second keys");
++    check(keypad_number_of(508) == 96 && keypad_number_of(96) == 96 && keypad_number_of(82) == -1 &&
++              keypad_number_of(500) == -1 && keypad_number_of(88) == -1,
++          "both keys are one keypad key");
++
++    const auto read_keys = [](const Bindings &b, std::set<int> keys, bool num_lock) {
++        const auto down = [&](int position) { return keys.count(position) != 0; };
++        return read(b, [&](Binding x) {
++            const int position = key_position(x);
++            return position >= 0 && key_held(b, position, num_lock, down);
++        });
++    };
++    // 8 4 5 6 to move with Num Lock on, and the D-pad (a battle's camera) with it off.
++    Bindings b = default_bindings();
++    b[static_cast<std::size_t>(Action::StickUp)] = {from_name("Keypad 8"), kNone};
++    b[static_cast<std::size_t>(Action::StickDown)] = {from_name("Keypad 5"), kNone};
++    b[static_cast<std::size_t>(Action::Up)] = {from_name("Up"), up};
++    b[static_cast<std::size_t>(Action::Down)] = {from_name("Down"), clear};
++    PadInput pad = read_keys(b, {96}, true);
++    check(pad.stick_y == -127 && pad.buttons == 0u, "Num Lock on: Keypad 8 moves");
++    pad = read_keys(b, {96}, false);
++    check(pad.stick_y == 0 && pad.buttons == 0x0010u, "Num Lock off: the same key presses the D-pad's up");
++    pad = read_keys(b, {93}, false);
++    check(pad.stick_y == 0 && pad.buttons == 0x0040u, "and Keypad 5 its down, as Keypad Clear");
++    pad = read_keys(b, {82}, true);
++    check(pad.buttons == 0x0010u && pad.stick_y == 0, "the arrow key is its own key either way");
++
++    // Bound one way, a keypad key plays the same with Num Lock on or off.
++    b = default_bindings();
++    b[static_cast<std::size_t>(Action::StickUp)] = {from_name("Keypad 8"), kNone};
++    check(read_keys(b, {96}, false).stick_y == -127 && read_keys(b, {96}, true).stick_y == -127,
++          "a keypad bound before Num Lock counted still moves with it off");
++    b[static_cast<std::size_t>(Action::StickUp)] = {up, kNone};
++    check(read_keys(b, {96}, true).stick_y == -127 && read_keys(b, {96}, false).stick_y == -127,
++          "a key bound with Num Lock off still moves with it on");
++    check(read_keys(b, {508}, false).stick_y == 0, "only the keypad key presses its Num Lock off binding");
++
++    // The menu binds a key typed with Num Lock off apart from the number.
++    b = default_bindings();
++    assign(b, Action::StickUp, key(static_cast<std::uint16_t>(typed_position(96, true))));
++    assign(b, Action::Up, key(static_cast<std::uint16_t>(typed_position(96, false))));
++    check(slots_of(b, Action::StickUp)[0] == from_name("W") && slots_of(b, Action::StickUp)[1] == key(96) &&
++              slots_of(b, Action::Up)[0] == from_name("Up") && slots_of(b, Action::Up)[1] == up,
++          "binding the key again with Num Lock off leaves its number bound");
++    Slots slots{};
++    check(parse("Up / Keypad Up", slots) && slots[1] == up && format(slots) == "Up / Keypad Up",
++          "they round-trip through settings.ini");
++}
++
+ // Which gamepad each player gets (Controls > Player 1 and Player 2).
+ void test_players() {
+     PlayerDevice parsed;
+@@ -467,6 +524,7 @@ int main() {
+     test_mouse_turn();
+     test_stick();
+     test_combos_and_wheel();
++    test_num_lock();
+     std::cout << (failures ? "FAIL" : "PASS") << ": input bindings (" << failures << " failures)\n";
+     return failures ? 1 : 0;
+ }
+-- 
+2.53.0.windows.1
+

@@ -94,6 +94,8 @@ disassembler and the new `tools/port/` scripts cover the analysis.
   played through a stand-in ATRAC3plus file that PortableKit's sceAtrac fills from the host file (three framework
   commits). A test switch played a generated mod track in place of a Quick Battle's music, looping where its
   manifest says, in the recompiled build with no interpreter. The game-side 2D selector is separate work.
+- [DLC packs](dlc-packs.md): fan-made costumes and music in `<data dir>/dlc/<pack>/`, a folder each, given free slots
+  when two packs were built for the same ones.
 
 ## Local versus (25 October 2026)
 
@@ -197,7 +199,9 @@ disassembler and the new `tools/port/` scripts cover the analysis.
   goes, outside a versus battle (patch 0101).
 - [Keyboard and mouse](keyboard-controls.md) (13 November): one key each for the battle moves made from two
   buttons (dodge, dash, EX Mode, summon, both assists), the mouse wheel as D-pad presses in the game's lists, and
-  prompts that show the bound keys; why clicking the game's menu items was not built (patch 0103).
+  prompts that show the bound keys; why clicking the game's menu items was not built (patch 0103). 18 November: the
+  keypad's keys with Num Lock off bind apart from the numbers, so 8 4 5 6 can move with Num Lock on and turn the
+  camera with it off (patch 0112).
 
 ## Next steps
 

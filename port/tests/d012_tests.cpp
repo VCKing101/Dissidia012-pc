@@ -9,6 +9,7 @@
 #include "checks.hpp"
 #include "d012_battle_relay.hpp"
 #include "d012_discord_rules.hpp"
+#include "d012_dlc_packs_plan.hpp"
 #include "d012_frame_balance.hpp"
 #include "d012_json.hpp"
 #include "d012_mod_manifest.hpp"
@@ -44,6 +45,7 @@
 #include <thread>
 #include <tuple>
 
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -1606,6 +1608,234 @@ void test_frame_balance() {
 
 } // namespace
 
+// DLC packs (host/d012_dlc_packs_plan.cpp): made-up packs, files in memory.
+namespace dlc_test {
+
+namespace packs = d012::dlc_packs;
+using Bytes = std::vector<std::uint8_t>;
+
+struct Stick {
+    std::map<std::string, Bytes> contents;  // by the source file's path
+    int next = 0;
+
+    packs::SourceFile add(packs::Pack &pack, const std::string &game_path, Bytes bytes) {
+        const std::string where = pack.name + "/" + std::to_string(next++);
+        packs::SourceFile file{packs::name_crc(game_path), bytes.size(), where};
+        contents[where] = std::move(bytes);
+        pack.files.push_back(file);
+        return file;
+    }
+    packs::Plan plan(const std::vector<packs::Pack> &list, const packs::Pack &installed = {}) {
+        return packs::plan(list, installed, [this](const packs::SourceFile &file) { return contents.at(file.path.string()); });
+    }
+};
+
+void put_name(Bytes &bytes, std::size_t at, const std::string &name) {
+    std::copy(name.begin(), name.end(), bytes.begin() + static_cast<std::ptrdiff_t>(at));
+}
+
+// One object table, as DissDlcToolkit writes it.
+Bytes object_table(int slot, int id, int character, int costume, int flags, const std::string &model, const std::string &data) {
+    Bytes bytes(8u + 0x44u, 0u);
+    bytes[0] = 0x0Cu;
+    bytes[4] = 1u;
+    bytes[8] = static_cast<std::uint8_t>(id);
+    bytes[9] = static_cast<std::uint8_t>(id >> 8);
+    bytes[8 + 6] = static_cast<std::uint8_t>(character);
+    bytes[8 + 7] = static_cast<std::uint8_t>(costume);
+    bytes[8 + 8] = static_cast<std::uint8_t>(flags);
+    bytes[8 + 9] = static_cast<std::uint8_t>(slot);
+    std::fill_n(bytes.begin() + 8 + 0x1C, 8, std::uint8_t{0xFF});
+    put_name(bytes, 8u + 0x24u, model);
+    put_name(bytes, 8u + 0x34u, data);
+    return bytes;
+}
+
+std::string table_name(int slot) {
+    char text[32];
+    std::snprintf(text, sizeof text, "dlc/obj/dlc_%03doe.bin", slot);
+    return text;
+}
+
+// A costume of Onion Knight (character 5): fighter, assist, model and portrait.
+packs::Pack costume_pack(Stick &stick, const std::string &name, int slot, int assist_slot, int costume) {
+    packs::Pack pack;
+    pack.name = name;
+    char model[16], assist[16];
+    std::snprintf(model, sizeof model, "P_THR100_%XP", static_cast<unsigned>(costume));
+    std::snprintf(assist, sizeof assist, "P_THR100_%XP_A", static_cast<unsigned>(costume));
+    stick.add(pack, table_name(slot), object_table(slot, 0x2C0 + slot - 1, 5, costume, 0, model, "p_thr100"));
+    stick.add(pack, table_name(assist_slot), object_table(assist_slot, 0x2C0 + assist_slot - 1, 5, costume, 8, assist, "p_thr100_a"));
+    stick.add(pack, std::string("obj/") + model + ".gmo", {1, 2, 3});
+    stick.add(pack, std::string("obj/") + assist + ".gmo", {4, 5});
+    stick.add(pack, std::string("menu/jp/battle/chara_image/") + model + ".gim", {6});
+    return pack;
+}
+
+const packs::Served *served(const packs::Plan &plan, const std::string &game_path) {
+    const std::uint32_t crc = packs::name_crc(game_path);
+    for (const packs::Served &file : plan.files)
+        if (file.crc == crc) return &file;
+    return nullptr;
+}
+
+Bytes bgm_table(int slot, const std::vector<std::pair<int, std::string>> &tracks) {
+    Bytes bytes(16u + 0x2Cu * tracks.size(), 0u);
+    std::copy_n("BENT", 4, bytes.begin());
+    bytes[8] = static_cast<std::uint8_t>(tracks.size());
+    for (std::size_t i = 0; i < tracks.size(); ++i) {
+        const std::size_t row = 16u + 0x2Cu * i;
+        bytes[row] = static_cast<std::uint8_t>(tracks[i].first);
+        bytes[row + 1u] = static_cast<std::uint8_t>(tracks[i].first >> 8);
+        put_name(bytes, row + 0x1Cu, tracks[i].second);
+    }
+    (void)slot;
+    return bytes;
+}
+
+packs::Pack music_pack(Stick &stick, const std::string &name, int slot, std::uint8_t mark) {
+    packs::Pack pack;
+    pack.name = name;
+    char table[32], titles[32], track[32];
+    std::snprintf(table, sizeof table, "dlc/bgm/dlc_%03d.bin", slot);
+    std::snprintf(titles, sizeof titles, "text/jp/dlc/bgm_%03dt.bin", slot);
+    std::snprintf(track, sizeof track, "ud_%02d%04x.at3", slot, static_cast<unsigned>(slot << 8));
+    stick.add(pack, table, bgm_table(slot, {{slot << 8, track}}));
+    stick.add(pack, titles, {mark});
+    stick.add(pack, std::string("bgm/") + track, {mark, mark});
+    return pack;
+}
+
+} // namespace dlc_test
+
+void test_dlc_packs() {
+    using namespace dlc_test;
+    expect(packs::name_crc("dlc/obj/dlc_001oe.bin") == 0xEAC7BF53u, "the DLC name hash");
+    expect(packs::name_crc("DLC/OBJ/DLC_001OE.BIN") == 0xEAC7BF53u, "the DLC name hash ignores case");
+    expect(packs::crc_of_file_name("E2734686.EDAT") == 0xE2734686u, "a file name in upper case");
+    expect(packs::crc_of_file_name("e2734686.edat") == 0xE2734686u, "a file name in lower case");
+    expect(!packs::crc_of_file_name("Nepnep.edat"), "a name that is no hash");
+
+    {  // On its own a pack is served as it was made.
+        Stick stick;
+        const packs::Pack pack = costume_pack(stick, "one", 200, 201, 5);
+        const packs::Plan plan = stick.plan({pack});
+        expect(plan.moved.empty() && plan.problems.empty(), "a pack on its own keeps its slots");
+        expect(plan.files.size() == pack.files.size(), "a pack on its own: every file served");
+        const packs::Served *row = served(plan, table_name(200));
+        expect(row != nullptr && row->bytes == stick.contents.at(pack.files[0].path.string()), "a pack on its own: its table unchanged");
+    }
+    {  // Two packs built for the same slots both arrive.
+        Stick stick;
+        const packs::Pack first = costume_pack(stick, "first", 200, 201, 5);
+        const packs::Pack second = costume_pack(stick, "second", 200, 201, 5);
+        const packs::Plan plan = stick.plan({first, second});
+        expect(plan.problems.empty(), "two packs: nothing left out");
+        expect(plan.files.size() == first.files.size() + second.files.size(), "two packs: every file served");
+        const packs::Served *gmo = served(plan, "obj/p_thr100_5p.gmo");
+        expect(gmo != nullptr && gmo->pack == "first", "two packs: the first keeps its costume");
+        const packs::Served *moved = served(plan, "obj/p_thr100_4p.gmo");
+        expect(moved != nullptr && moved->pack == "second", "two packs: the second has the lowest free costume");
+        const packs::Served *assist = served(plan, "obj/p_thr100_4p_a.gmo");
+        expect(assist != nullptr && assist->pack == "second", "two packs: the assist moves with its fighter");
+        expect(served(plan, "menu/jp/battle/chara_image/p_thr100_4p.gim") != nullptr, "two packs: the portrait moves");
+        const packs::Served *row = served(plan, table_name(1));
+        expect(row != nullptr && row->pack == "second", "two packs: the lowest free object slot");
+        if (row != nullptr) {
+            expect(row->bytes[8] == 0xC0u && row->bytes[9] == 0x02u, "a moved row has its slot's id");
+            expect(row->bytes[8 + 7] == 4u, "a moved row has its new costume");
+            expect(row->bytes[8 + 9] == 1u, "a moved row names its slot");
+            expect(std::string(reinterpret_cast<const char *>(&row->bytes[8 + 0x24])) == "P_THR100_4P", "a moved row names its model");
+        }
+    }
+    {  // What is on the memory stick keeps its place.
+        Stick stick;
+        packs::Pack installed;
+        installed.name = "stick";
+        stick.add(installed, table_name(200), object_table(200, 0x2C0 + 199, 5, 5, 0, "P_THR100_5P", "p_thr100"));
+        stick.add(installed, "obj/p_thr100_5p.gmo", {9});
+        const packs::Plan plan = stick.plan({costume_pack(stick, "pack", 200, 201, 5)}, installed);
+        expect(served(plan, "obj/p_thr100_5p.gmo") == nullptr, "the memory stick's file is not replaced");
+        expect(served(plan, "obj/p_thr100_4p.gmo") != nullptr, "a pack moves off the memory stick's costume");
+        expect(served(plan, table_name(200)) == nullptr, "a pack moves off the memory stick's slot");
+    }
+    {  // Nine DLC costumes is all a character has.
+        Stick stick;
+        std::vector<packs::Pack> list;
+        for (int i = 0; i < 10; ++i) list.push_back(costume_pack(stick, "pack" + std::to_string(i), 100 + i * 2, 101 + i * 2, 5));
+        const packs::Plan plan = stick.plan(list);
+        expect(plan.problems.size() == 1u, "a tenth costume is left out");
+        int models = 0;
+        for (const packs::Served &file : plan.files) models += file.pack == "pack9";
+        expect(models == 0, "nothing of a pack left out is served");
+    }
+    {  // Two packs changing one of the game's own costumes: the first does.
+        Stick stick;
+        packs::Pack first, second;
+        first.name = "first";
+        second.name = "second";
+        stick.add(first, table_name(10), object_table(10, 0x13, 5, 1, 0, "P_THR100_1P", "p_thr100"));
+        stick.add(first, "obj/p_thr100_1p.gmo", {1});
+        stick.add(second, table_name(11), object_table(11, 0x13, 5, 1, 0, "P_THR100_1P", "p_thr100"));
+        stick.add(second, "obj/p_thr100_1p.gmo", {2});
+        const packs::Plan plan = stick.plan({first, second});
+        expect(plan.problems.size() == 1u, "one retail costume, two packs: a problem");
+        const packs::Served *gmo = served(plan, "obj/p_thr100_1p.gmo");
+        expect(gmo != nullptr && gmo->pack == "first", "one retail costume, two packs: the first's model");
+        expect(served(plan, table_name(11)) == nullptr, "one retail costume, two packs: no second row");
+    }
+    {  // An attachment that moves takes its links with it.
+        Stick stick;
+        packs::Pack first, second;
+        first.name = "first";
+        second.name = "second";
+        stick.add(first, table_name(60), object_table(60, 0x2C0 + 59, 0, 1, 0, "G_ATT_060", "g_att_060"));
+        stick.add(first, "obj/g_att_060.gmo", {1});
+        stick.add(first, "obj/g_att_060.objx", {2});
+        stick.add(second, table_name(60), object_table(60, 0x2C0 + 59, 0, 1, 0, "G_ATT_060", "g_att_060"));
+        stick.add(second, "obj/g_att_060.gmo", {3});
+        stick.add(second, "obj/g_att_060.objx", {4});
+        Bytes row = object_table(61, 0x2C0 + 60, 5, 6, 0, "P_THR100_6P", "p_thr100");
+        row[8 + 0x1C] = static_cast<std::uint8_t>(0x2C0 + 59);
+        row[8 + 0x1D] = static_cast<std::uint8_t>((0x2C0 + 59) >> 8);
+        stick.add(second, table_name(61), row);
+        const packs::Plan plan = stick.plan({first, second});
+        expect(plan.problems.empty(), "attachments: nothing left out");
+        const packs::Served *gmo = served(plan, "obj/g_att_001.gmo");
+        expect(gmo != nullptr && gmo->pack == "second", "attachments: the second is renamed for its slot");
+        expect(served(plan, "obj/g_att_001.objx") != nullptr, "attachments: its data file too");
+        const packs::Served *linked = served(plan, table_name(61));
+        expect(linked != nullptr && linked->bytes[8 + 0x1C] == 0xC0u && linked->bytes[8 + 0x1D] == 0x02u,
+               "attachments: the costume's link follows the new id");
+    }
+    {  // Two music packs for one slot.
+        Stick stick;
+        const packs::Plan plan = stick.plan({music_pack(stick, "first", 14, 1), music_pack(stick, "second", 14, 2)});
+        expect(plan.problems.empty(), "music: nothing left out");
+        const packs::Served *table = served(plan, "dlc/bgm/dlc_001.bin");
+        expect(table != nullptr && table->pack == "second", "music: the second takes a free slot");
+        if (table != nullptr) {
+            expect(table->bytes[16] == 0x00u && table->bytes[17] == 0x01u, "music: a free track number");
+            expect(std::string(reinterpret_cast<const char *>(&table->bytes[16 + 0x1C])) == "ud_010100.at3", "music: a free file name");
+        }
+        const packs::Served *titles = served(plan, "text/jp/dlc/bgm_001t.bin");
+        expect(titles != nullptr && titles->pack == "second", "music: the titles move with the table");
+        const packs::Served *track = served(plan, "bgm/ud_010100.at3");
+        expect(track != nullptr && track->pack == "second", "music: the track is served at its new name");
+        const packs::Served *kept = served(plan, "bgm/ud_140e00.at3");
+        expect(kept != nullptr && kept->pack == "first", "music: the first keeps its track");
+    }
+    {  // Something that is no object table.
+        Stick stick;
+        packs::Pack pack;
+        pack.name = "bad";
+        stick.add(pack, table_name(5), {0, 'P', 'S', 'P', 'E', 'D', 'A', 'T'});
+        stick.add(pack, "obj/p_thr100_5p.gmo", {1});
+        const packs::Plan plan = stick.plan({pack});
+        expect(plan.problems.size() == 1u && plan.files.empty(), "an unreadable pack is left out whole");
+    }
+}
+
 int main(int argc, char **argv) {
     if (argc == 2 && std::string(argv[1]) == "--print-cases") {
         test_shared_cases(true);
@@ -1630,6 +1860,7 @@ int main(int argc, char **argv) {
     test_relay_status();
     test_relay_introductions();
     test_online_rules();
+    test_dlc_packs();
     test_frame_balance();
     if (g_failures == 0) std::cout << "all passed\n";
     return g_failures == 0 ? 0 : 1;
