@@ -3,7 +3,9 @@
 // be (docs/port/cheats.md).
 //
 // The addresses and values are those of the public CWCheat list for
-// ULUS-10566; they are facts about the game's memory. The names, the grouping
+// ULUS-10566, but for the battle cheats, which find the fighters the game's
+// own way (d012_battle_cheat_codes.hpp); they are facts about the game's
+// memory. The names, the grouping
 // and the choices are this port's. The European disc runs the same
 // executable, so the same addresses hold there.
 //
@@ -17,6 +19,7 @@
 
 #include "d012_cheats.hpp"
 
+#include "d012_battle_cheat_codes.hpp"
 #include "d012_summon_slot_rules.hpp"
 
 #include "cheats/cheats.hpp"
@@ -82,25 +85,18 @@ constexpr CheatChoice kMalaBestia[] = {{nullptr, "0x003BF762 0x00000063\n0x003BF
 constexpr CheatChoice kSummons[] = {{nullptr, summon_slots::kAllSummonsCode}};
 
 // --- Battle ------------------------------------------------------------------
-// Each writes 32 bits at the word at 0x08B633B0 minus an offset (pointer code
-// type 5); the player's fields are 0xE20 bytes below the opponent's. The
-// list follows each with a write of 0 to 0x0880052C, below the game, which
-// these leave out.
-#define D012_FIGHTER(value, offset) "0x603633B0 " value "\n0x00050001 " offset
-constexpr CheatChoice kInfiniteHp[] = {{nullptr, D012_FIGHTER("0x00000000", "0x00000E58")}};
-constexpr CheatChoice kMaxHp[] = {{nullptr, D012_FIGHTER("0x000F423F", "0x00000E54")}};
-constexpr CheatChoice kBravery[] = {{nullptr, D012_FIGHTER("0x0000270F", "0x00000E4C")}};
-constexpr CheatChoice kInfiniteEx[] = {{nullptr, D012_FIGHTER("0x461C4000", "0x00000E48")}};
-constexpr CheatChoice kInfiniteAssist[] = {{nullptr, D012_FIGHTER("0x461C4000", "0x00000E44")}};
-constexpr CheatChoice kLevel100[] = {{nullptr, D012_FIGHTER("0x00000064", "0x00000E60")}};
-constexpr CheatChoice kEnemyBravery[] = {{nullptr, D012_FIGHTER("0x00000000", "0x0000002C")}};
-constexpr CheatChoice kEnemyMaxHp[] = {{nullptr, D012_FIGHTER("0x00000064", "0x00000034")}};
-constexpr CheatChoice kEnemyNoEx[] = {{nullptr, D012_FIGHTER("0x00000000", "0x00000028")}};
-constexpr CheatChoice kEnemyNoAssist[] = {{nullptr, D012_FIGHTER("0x00000000", "0x00000024")}};
-// Only while Select is held: the joker line skips the next two otherwise.
-constexpr CheatChoice kEnemyDefeat[] = {
-    {nullptr, "0xD0000001 0x10000001\n" D012_FIGHTER("0x000F423F", "0x00000038")}};
-#undef D012_FIGHTER
+// The codes are in d012_battle_cheat_codes.hpp.
+constexpr CheatChoice kInfiniteHp[] = {{nullptr, battle_cheat_codes::kInfiniteHp}};
+constexpr CheatChoice kMaxHp[] = {{nullptr, battle_cheat_codes::kMaxHp}};
+constexpr CheatChoice kBravery[] = {{nullptr, battle_cheat_codes::kBravery}};
+constexpr CheatChoice kInfiniteEx[] = {{nullptr, battle_cheat_codes::kInfiniteEx}};
+constexpr CheatChoice kInfiniteAssist[] = {{nullptr, battle_cheat_codes::kInfiniteAssist}};
+constexpr CheatChoice kLevel100[] = {{nullptr, battle_cheat_codes::kLevel100}};
+constexpr CheatChoice kEnemyBravery[] = {{nullptr, battle_cheat_codes::kEnemyBravery}};
+constexpr CheatChoice kEnemyMaxHp[] = {{nullptr, battle_cheat_codes::kEnemyMaxHp}};
+constexpr CheatChoice kEnemyNoEx[] = {{nullptr, battle_cheat_codes::kEnemyNoEx}};
+constexpr CheatChoice kEnemyNoAssist[] = {{nullptr, battle_cheat_codes::kEnemyNoAssist}};
+constexpr CheatChoice kEnemyDefeat[] = {{nullptr, battle_cheat_codes::kEnemyDefeat}};
 
 constexpr const char *kMoney = "Money and points";
 constexpr const char *kItems = "Items";

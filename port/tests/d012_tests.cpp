@@ -7,6 +7,8 @@
 // port/README.md.
 
 #include "checks.hpp"
+#include "cheats/cwcheat.hpp"
+#include "d012_battle_cheat_codes.hpp"
 #include "d012_battle_relay.hpp"
 #include "d012_discord_rules.hpp"
 #include "d012_dlc_packs_plan.hpp"
@@ -1871,6 +1873,102 @@ void test_summon_slots() {
     expect(!slots::marked_but_empty(slots::Slot{60u, 10u, 0u, 3u}), "an owned summon is left alone");
 }
 
+// The game's memory for the battle cheats: everything is RAM, nothing is code.
+class CheatRam final : public portablekit::cheats::Memory {
+public:
+    bool valid(std::uint32_t address, std::uint32_t size) const override {
+        return address >= 0x08800000u && address + size <= 0x0A000000u;
+    }
+    std::uint8_t read8(std::uint32_t address) const override {
+        const auto found = bytes.find(address);
+        return found == bytes.end() ? 0u : found->second;
+    }
+    void write8(std::uint32_t address, std::uint8_t value) override {
+        bytes[address] = value;
+        written.push_back(address);
+    }
+    bool code(std::uint32_t, std::uint32_t) const override { return false; }
+
+    void put32(std::uint32_t address, std::uint32_t value) {
+        for (std::uint32_t i = 0; i < 4u; ++i) bytes[address + i] = static_cast<std::uint8_t>(value >> (8u * i));
+    }
+    std::uint32_t get32(std::uint32_t address) const {
+        std::uint32_t value = 0u;
+        for (std::uint32_t i = 0; i < 4u; ++i) value |= static_cast<std::uint32_t>(read8(address + i)) << (8u * i);
+        return value;
+    }
+
+    std::map<std::uint32_t, std::uint8_t> bytes;
+    std::vector<std::uint32_t> written;
+};
+
+portablekit::cheats::Cheat cheat_of(const char *code) {
+    std::istringstream lines(code);
+    std::string text = "_C1 test\n", line;
+    while (std::getline(lines, line)) text += "_L " + line + "\n";
+    const portablekit::cheats::CheatFile file = portablekit::cheats::parse(text, "ULUS10566");
+    expect(file.cheats.size() == 1u && file.problems == 0u, std::string("the code reads: ") + code);
+    return file.cheats.empty() ? portablekit::cheats::Cheat{} : file.cheats[0];
+}
+
+// Each battle cheat writes the fighter's own status block, whatever the word
+// the public list's codes go through (0x08B633B0) holds: it is 0 in some
+// battles, which is why Defeat with Select sometimes did nothing.
+void test_battle_cheats() {
+    namespace codes = d012::battle_cheat_codes;
+    constexpr std::uint32_t kManagerPointer = 0x089D6A10u, kManager = 0x08B87668u, kListWord = 0x08B633B0u;
+    constexpr std::uint32_t kPlayer = 0x09749190u, kOpponent = 0x09756A00u;
+    constexpr std::uint32_t kPlayerStatus = 0x09765050u, kOpponentStatus = 0x09765E70u;
+    const auto battle = [&](CheatRam &ram, std::uint32_t list_word, bool fighters) {
+        ram.put32(kManagerPointer, kManager);
+        ram.put32(kListWord, list_word);
+        ram.put32(kManager + 0x38u, fighters ? kPlayer : 0u);
+        ram.put32(kManager + 0x3Cu, fighters ? kOpponent : 0u);
+        ram.put32(kPlayer + 0x52Cu, kPlayerStatus);
+        ram.put32(kOpponent + 0x52Cu, kOpponentStatus);
+    };
+    const struct {
+        const char *name, *code;
+        std::uint32_t status, field, value;
+    } cases[] = {
+        {"Level 100", codes::kLevel100, kPlayerStatus, 0x00u, 100u},
+        {"Infinite HP", codes::kInfiniteHp, kPlayerStatus, 0x08u, 0u},
+        {"Max HP", codes::kMaxHp, kPlayerStatus, 0x0Cu, 999999u},
+        {"Bravery", codes::kBravery, kPlayerStatus, 0x14u, 9999u},
+        {"Infinite EX", codes::kInfiniteEx, kPlayerStatus, 0x18u, 0x461C4000u},
+        {"Infinite Assist", codes::kInfiniteAssist, kPlayerStatus, 0x1Cu, 0x461C4000u},
+        {"Opponent Max HP", codes::kEnemyMaxHp, kOpponentStatus, 0x0Cu, 100u},
+        {"Opponent Bravery", codes::kEnemyBravery, kOpponentStatus, 0x14u, 0u},
+        {"Opponent No EX", codes::kEnemyNoEx, kOpponentStatus, 0x18u, 0u},
+        {"Opponent No Assist", codes::kEnemyNoAssist, kOpponentStatus, 0x1Cu, 0u},
+        {"Defeat with Select", codes::kEnemyDefeat, kOpponentStatus, 0x08u, 999999u},
+    };
+    constexpr std::uint32_t kSelect = 0x1u;
+    for (const auto &c : cases) {
+        const portablekit::cheats::Cheat cheat = cheat_of(c.code);
+        const std::string name = c.name;
+        // A battle in which the list's word is empty, and one in which it is elsewhere.
+        for (const std::uint32_t list_word : {0u, 0x09800000u}) {
+            CheatRam ram;
+            battle(ram, list_word, true);
+            ram.put32(c.status + c.field, 0x12345678u);
+            (void)portablekit::cheats::run(cheat, ram, kSelect);
+            expect(ram.get32(c.status + c.field) == c.value, name + " writes the fighter's status block");
+            expect(ram.written.size() == 4u, name + " writes one word and nothing else");
+        }
+        // In the menus there are no fighters.
+        CheatRam menus;
+        battle(menus, 0x09800000u, false);
+        (void)portablekit::cheats::run(cheat, menus, kSelect);
+        expect(menus.written.empty(), name + " writes nothing outside a battle");
+    }
+    // Select not held: the code's every line is skipped.
+    CheatRam idle;
+    battle(idle, 0u, true);
+    (void)portablekit::cheats::run(cheat_of(codes::kEnemyDefeat), idle, 0u);
+    expect(idle.written.empty(), "Defeat with Select writes nothing while Select is up");
+}
+
 int main(int argc, char **argv) {
     if (argc == 2 && std::string(argv[1]) == "--print-cases") {
         test_shared_cases(true);
@@ -1898,6 +1996,7 @@ int main(int argc, char **argv) {
     test_dlc_packs();
     test_frame_balance();
     test_summon_slots();
+    test_battle_cheats();
     if (g_failures == 0) std::cout << "all passed\n";
     return g_failures == 0 ? 0 : 1;
 }
