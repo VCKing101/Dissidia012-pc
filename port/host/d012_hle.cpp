@@ -9,6 +9,7 @@
 #include "d012_dialogs.hpp"
 #include "d012_discord.hpp"
 #include "d012_dlc.hpp"
+#include "d012_dlc_packs.hpp"
 #include "d012_hle.hpp"
 #include "d012_input.hpp"
 #include "d012_math_check.hpp"
@@ -108,6 +109,8 @@ void register_extra_hle(portablekit::HleRegistrar &hle) {
 
     // What DLC the game will find, in the log (d012_dlc.cpp).
     dlc::install(hle);
+    // DLC packs, a folder each in <data dir>/dlc (d012_dlc_packs.cpp).
+    dlc_packs::install(hle);
     // Online play: the log unbuffered and the clock reads traced in network
     // battles (d012_comm_battle.cpp), and the library maths' fingerprint.
     comm_battle::install(hle);
