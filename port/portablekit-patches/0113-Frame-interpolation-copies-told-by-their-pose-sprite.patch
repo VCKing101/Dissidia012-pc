@@ -1,0 +1,455 @@
+From 6a4c4d14ad171a825f5c4ea7b0845311091b230c Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Thu, 19 Nov 2026 09:09:22 +1030
+Subject: [PATCH] Frame interpolation: copies told by their pose, sprites by
+ their place
+
+Two kinds of effect were drawn wrongly on the in-between frames, each in
+a way the pairing of instances could not see.
+
+Copies of one mesh that start from one point differ only in how they are
+turned and sized: the rays of a light, a burst of shards. When one
+expires, each copy after it pairs with its neighbour in drawing order,
+and that neighbour stands at the very same position, so the check that
+a partner is where the camera carries it passed. The in-between frame
+swung every copy towards the next. Dissidia 012's light behind Cosmos
+does this every 16 game frames. Instances now compare their poses too:
+a drawing-order partner must also be turned and sized like the copy, the
+nearest pair counts the difference, and a copy with no partner anything
+like it stays unpaired. Off: <prefix>_INTERPOLATION_NO_INSTANCE_POSES.
+
+Small sprites written into a scratch buffer each frame have no lasting
+address: the same vertices hold another puff of smoke from one frame to
+the next, and blending the two drew a cloud's puffs where neither frame
+had them. Quads of one texture, format and primitive whose partner is
+not where the camera carries it now pair by where they are, whatever
+address they read. A quad that is where it should be keeps its partner:
+quads with their places in their vertices share one matrix, and only
+their addresses tell them apart. Off:
+<prefix>_INTERPOLATION_NO_SPRITE_POOLS.
+
+Verified on Windows with Dissidia 012 (USA disc, clang release build,
+60 fps, internal scale 2, story scenes played through a test switch).
+Checks with more than 5,000 pixels of the halfway frame far from both
+frames: the Cosmos scene 18 of 628 before, 0 after; Zidane's ending 338
+of 397 before, 1 after; as many frames were cut before as after. Quick
+Battles on World of Darkness and Order's Sanctuary drew correctly, with
+World of Darkness rendering in 5.75 ms before and 5.69 ms after; fights
+differ from run to run, so they do not compare frame by frame. The
+framework's tests pass, seven checks of them new; the ad hoc ones were
+not run. Not tested: the Steam Deck, Linux, Android, macOS and other
+games.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/gpu/frame_interpolation.cpp | 209 ++++++++++++++++++++++++++++---
+ host/gpu/frame_interpolation.hpp |  20 +++
+ host/gpu/vulkan_renderer.cpp     |   2 +
+ tests/interpolation_tests.cpp    |  90 +++++++++++++
+ 4 files changed, 305 insertions(+), 16 deletions(-)
+
+diff --git a/host/gpu/frame_interpolation.cpp b/host/gpu/frame_interpolation.cpp
+index 24f163b..718b02e 100644
+--- a/host/gpu/frame_interpolation.cpp
++++ b/host/gpu/frame_interpolation.cpp
+@@ -7,6 +7,60 @@
+ namespace portablekit::gpu::interpolation {
+ namespace {
+ 
++// How a draw is turned and sized in eye space: the three basis vectors of view
++// times world, one after another.
++using Pose = std::array<float, 9>;
++
++Pose eye_pose_of(const DrawSummary &draw) noexcept {
++    Pose pose{};
++    for (std::size_t column = 0; column < 3u; ++column)
++        for (std::size_t row = 0; row < 3u; ++row)
++            for (std::size_t k = 0; k < 4u; ++k)
++                pose[column * 3u + row] += draw.view[k * 4u + row] * draw.world[column * 4u + k];
++    return pose;
++}
++
++// The squared difference of each basis vector against the longer of the two,
++// summed: 0 for the same pose, about 0.1 for a quarter's growth in size, 4(1 -
++// cos a) for a turn by a.
++float pose_difference(const Pose &a, const Pose &b) noexcept {
++    float total = 0.0f;
++    for (std::size_t column = 0; column < 3u; ++column) {
++        float difference = 0.0f, size_a = 0.0f, size_b = 0.0f;
++        for (std::size_t row = 0; row < 3u; ++row) {
++            const float x = a[column * 3u + row], y = b[column * 3u + row];
++            difference += (x - y) * (x - y);
++            size_a += x * x;
++            size_b += y * y;
++        }
++        const float size = std::max(size_a, size_b);
++        if (size > 1e-12f) total += difference / size;
++    }
++    return total;
++}
++
++// A drawing-order partner this close in pose is the same copy (a turn of about
++// 8 degrees, or a growth of 8%, in one game frame).
++constexpr float kSamePose = 0.02f;
++// A copy further from this in pose is another copy (a turn of about 32
++// degrees, or nearly doubling in size).
++constexpr float kOtherPose = 0.6f;
++
++// A sprite: a quad, as a strip or fan of four vertices or two triangles of six.
++constexpr std::uint32_t kSpriteVertices = 6u;
++// The newer sprites each older one considers, nearest first.
++constexpr std::size_t kNearestSprites = 4u;
++// Above this many pairs in one pool of sprites, its draws stay as they paired.
++constexpr std::size_t kMaxSpritePairs = std::size_t{1} << 18u;
++
++// The sprites that may be one another: one texture, vertex format, size,
++// primitive and view, whichever vertices they read.
++std::uint64_t sprite_pool_of(const DrawSummary &draw) noexcept {
++    return std::uint64_t{draw.texture_address} << 32u | std::uint64_t{draw.vertex_type & 0xFFFFFFu} << 8u |
++           std::uint64_t{draw.count & 7u} << 5u | std::uint64_t{static_cast<std::uint8_t>(draw.primitive) & 7u} << 2u |
++           std::uint64_t{draw.split_view & 3u};
++}
++
+ constexpr float kPi = 3.14159265358979f;
+ 
+ float length3(const float *v) noexcept { return std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]); }
+@@ -235,7 +289,8 @@ const Matching &Matcher::match(const std::vector<DrawSummary> &older, const std:
+     // own), so that a copy that left the view does not take its neighbour's
+     // place. In a stream of sparks the nearest to where one was is the one
+     // behind it only when the stream moves more than half its spacing a
+-    // frame, where neither pairing reads as motion.
++    // frame, where neither pairing reads as motion. Copies at one point are
++    // told apart by their poses (CutThresholds::instance_poses).
+     const auto predicted_of = [&](const DrawSummary &from) {
+         const Matrix &c = out.views[std::min<std::size_t>(from.split_view, kViews - 1u)].camera;
+         const std::array<float, 3> before = from.prepared ? from.eye_translation : eye_translation_of(from);
+@@ -252,6 +307,34 @@ const Matching &Matcher::match(const std::vector<DrawSummary> &older, const std:
+     };
+     if (out.camera_found && thresholds.nearest_instances && thresholds.max_own_motion > 0.0f) {
+         const float close = 0.05f * thresholds.max_own_motion;
++        const bool poses = thresholds.instance_poses;
++        // A draw's pose as it was, for what faces the camera, and as the
++        // camera's motion carries it, for what stands in the world.
++        struct OlderPose {
++            Pose eye;
++            Pose carried;
++        };
++        const auto older_pose = [&](const DrawSummary &from) {
++            const Matrix &c = out.views[std::min<std::size_t>(from.split_view, kViews - 1u)].camera;
++            OlderPose pose{eye_pose_of(from), {}};
++            for (std::size_t column = 0; column < 3u; ++column)
++                for (std::size_t row = 0; row < 3u; ++row)
++                    pose.carried[column * 3u + row] = c[row] * pose.eye[column * 3u] +
++                                                      c[4u + row] * pose.eye[column * 3u + 1u] +
++                                                      c[8u + row] * pose.eye[column * 3u + 2u];
++            return pose;
++        };
++        newer_poses_.resize(newer.size());
++        newer_pose_known_.assign(newer.size(), 0u);
++        const auto pose_change = [&](const OlderPose &from, std::int32_t to) {
++            const std::size_t at = static_cast<std::size_t>(to);
++            if (newer_pose_known_[at] == 0u) {
++                newer_poses_[at] = eye_pose_of(newer[at]);
++                newer_pose_known_[at] = 1u;
++            }
++            return std::min(pose_difference(from.carried, newer_poses_[at]),
++                            pose_difference(from.eye, newer_poses_[at]));
++        };
+         taken_.assign(newer.size(), 0u);
+         for (std::size_t i = 0; i < older.size(); ++i)
+             if (out.newer_of[i] >= 0 && shared_[i] == 0u) taken_[static_cast<std::size_t>(out.newer_of[i])] = 1u;
+@@ -264,7 +347,8 @@ const Matching &Matcher::match(const std::vector<DrawSummary> &older, const std:
+         for (std::size_t i = 0; i < older.size(); ++i) {
+             if (!repairable(i)) continue;
+             const std::int32_t in_order = out.newer_of[i];
+-            if (in_order >= 0 && squared_distance(predicted_of(older[i]), in_order) <= close * close) {
++            if (in_order >= 0 && squared_distance(predicted_of(older[i]), in_order) <= close * close &&
++                (!poses || pose_change(older_pose(older[i]), in_order) <= kSamePose)) {
+                 taken_[static_cast<std::size_t>(in_order)] = 1u;
+                 continue;
+             }
+@@ -276,22 +360,115 @@ const Matching &Matcher::match(const std::vector<DrawSummary> &older, const std:
+         for (const auto &[i, in_order] : unsettled_) {
+             const DrawSummary &from = older[static_cast<std::size_t>(i)];
+             const std::array<float, 3> predicted = predicted_of(from);
+-            for (std::int32_t at = slot_for(key_of(from), from).first; at >= 0; at = next_[static_cast<std::size_t>(at)])
+-                if (taken_[static_cast<std::size_t>(at)] == 0u)
+-                    candidates_.push_back({squared_distance(predicted, at), i, at});
++            const OlderPose pose = poses ? older_pose(from) : OlderPose{};
++            for (std::int32_t at = slot_for(key_of(from), from).first; at >= 0; at = next_[static_cast<std::size_t>(at)]) {
++                if (taken_[static_cast<std::size_t>(at)] != 0u) continue;
++                float distance = squared_distance(predicted, at);
++                if (poses) {
++                    const float change = pose_change(pose, at);
++                    if (change > kOtherPose) continue;
++                    distance += close * close * change / kSamePose;
++                }
++                candidates_.push_back({distance, i, at});
++            }
+         }
+-        std::sort(candidates_.begin(), candidates_.end(), [](const Candidate &a, const Candidate &b) {
+-            return a.distance < b.distance || (a.distance == b.distance && a.older < b.older);
+-        });
+-        for (const Candidate &candidate : candidates_) {
+-            std::int32_t &partner = out.newer_of[static_cast<std::size_t>(candidate.older)];
+-            if (partner >= 0 || taken_[static_cast<std::size_t>(candidate.newer)] != 0u) continue;
+-            partner = candidate.newer;
+-            taken_[static_cast<std::size_t>(candidate.newer)] = 1u;
+-            ++out.matched;
++        const auto pair_nearest_first = [&] {
++            std::sort(candidates_.begin(), candidates_.end(), [](const Candidate &a, const Candidate &b) {
++                return a.distance < b.distance || (a.distance == b.distance && a.older < b.older);
++            });
++            for (const Candidate &candidate : candidates_) {
++                std::int32_t &partner = out.newer_of[static_cast<std::size_t>(candidate.older)];
++                if (partner >= 0 || taken_[static_cast<std::size_t>(candidate.newer)] != 0u) continue;
++                partner = candidate.newer;
++                taken_[static_cast<std::size_t>(candidate.newer)] = 1u;
++                ++out.matched;
++            }
++            for (const auto &[i, in_order] : unsettled_)
++                if (out.newer_of[static_cast<std::size_t>(i)] != in_order) ++out.reordered;
++        };
++        pair_nearest_first();
++
++        // Sprites again, by pool: the address a quad was written to says
++        // nothing about which quad it is (CutThresholds::sprite_pools).
++        if (thresholds.sprite_pools) {
++            older_sprites_.clear();
++            newer_sprites_.clear();
++            for (std::size_t i = 0; i < older.size(); ++i)
++                if (older[i].eligible && older[i].count <= kSpriteVertices &&
++                    out.views[std::min<std::size_t>(older[i].split_view, kViews - 1u)].found)
++                    older_sprites_.push_back({sprite_pool_of(older[i]), static_cast<std::int32_t>(i)});
++            for (std::size_t i = 0; i < newer.size(); ++i)
++                if (newer[i].eligible && newer[i].count <= kSpriteVertices)
++                    newer_sprites_.push_back({sprite_pool_of(newer[i]), static_cast<std::int32_t>(i)});
++            std::sort(older_sprites_.begin(), older_sprites_.end());
++            std::sort(newer_sprites_.begin(), newer_sprites_.end());
++            unsettled_.clear();
++            candidates_.clear();
++            const float reach = thresholds.max_own_motion * thresholds.max_own_motion;
++            const auto by_pool = [](const std::pair<std::uint64_t, std::int32_t> &a, std::uint64_t pool) {
++                return a.first < pool;
++            };
++            auto newer_first = newer_sprites_.begin();
++            for (auto first = older_sprites_.begin(); first != older_sprites_.end();) {
++                const std::uint64_t pool = first->first;
++                auto last = first;
++                while (last != older_sprites_.end() && last->first == pool) ++last;
++                newer_first = std::lower_bound(newer_first, newer_sprites_.end(), pool, by_pool);
++                auto newer_last = newer_first;
++                while (newer_last != newer_sprites_.end() && newer_last->first == pool) ++newer_last;
++                const std::size_t olds = static_cast<std::size_t>(last - first);
++                const std::size_t news = static_cast<std::size_t>(newer_last - newer_first);
++                if ((olds >= 2u || news >= 2u) && olds * news <= kMaxSpritePairs) {
++                    // A sprite whose partner is where the camera carries it
++                    // keeps it: quads with their places in their vertices
++                    // share one matrix, and only their addresses tell them
++                    // apart.
++                    const std::size_t pool_start = unsettled_.size();
++                    for (auto sprite = first; sprite != last; ++sprite) {
++                        const DrawSummary &from = older[static_cast<std::size_t>(sprite->second)];
++                        std::int32_t &partner = out.newer_of[static_cast<std::size_t>(sprite->second)];
++                        if (partner >= 0 && squared_distance(predicted_of(from), partner) <= close * close &&
++                            (!poses || pose_change(older_pose(from), partner) <= kSamePose))
++                            continue;
++                        unsettled_.push_back({sprite->second, partner});
++                        if (partner >= 0) {
++                            taken_[static_cast<std::size_t>(partner)] = 0u;
++                            --out.matched;
++                        }
++                        partner = Matching::kNoPartner;
++                    }
++                    for (std::size_t u = pool_start; u < unsettled_.size(); ++u) {
++                        const std::int32_t older_draw = unsettled_[u].first;
++                        const DrawSummary &from = older[static_cast<std::size_t>(older_draw)];
++                        const std::array<float, 3> predicted = predicted_of(from);
++                        std::array<std::pair<float, std::int32_t>, kNearestSprites> nearest{};
++                        std::size_t found = 0u;
++                        for (auto other = newer_first; other != newer_last; ++other) {
++                            if (taken_[static_cast<std::size_t>(other->second)] != 0u) continue;
++                            const float distance = squared_distance(predicted, other->second);
++                            if (distance > reach) continue;
++                            if (found == kNearestSprites && distance >= nearest[found - 1u].first) continue;
++                            std::size_t at = found < kNearestSprites ? found++ : kNearestSprites - 1u;
++                            for (; at > 0u && nearest[at - 1u].first > distance; --at) nearest[at] = nearest[at - 1u];
++                            nearest[at] = {distance, other->second};
++                        }
++                        const OlderPose pose = poses && found != 0u ? older_pose(from) : OlderPose{};
++                        for (std::size_t k = 0; k < found; ++k) {
++                            float distance = nearest[k].first;
++                            if (poses) {
++                                const float change = pose_change(pose, nearest[k].second);
++                                if (change > kOtherPose) continue;
++                                distance += close * close * change / kSamePose;
++                            }
++                            candidates_.push_back({distance, older_draw, nearest[k].second});
++                        }
++                    }
++                }
++                first = last;
++                newer_first = newer_last;
++            }
++            pair_nearest_first();
+         }
+-        for (const auto &[i, in_order] : unsettled_)
+-            if (out.newer_of[static_cast<std::size_t>(i)] != in_order) ++out.reordered;
+     }
+ 
+     // Each pair's own motion: where its view's camera motion would have
+diff --git a/host/gpu/frame_interpolation.hpp b/host/gpu/frame_interpolation.hpp
+index 9aa9060..b5f5636 100644
+--- a/host/gpu/frame_interpolation.hpp
++++ b/host/gpu/frame_interpolation.hpp
+@@ -156,6 +156,21 @@ struct CutThresholds {
+     // guard; off (<prefix>_INTERPOLATION_ORDER_PAIRS), drawing order and the
+     // median turn alone.
+     bool nearest_instances{true};
++    // With `nearest_instances`, an instance is also told by how it is turned
++    // and sized. Copies of one mesh can start from one point and differ only
++    // in that (the rays of a light, a burst of shards): when one expires, the
++    // next in drawing order stands where its neighbour stood, so its position
++    // says nothing, and the in-between frame swung every copy towards its
++    // neighbour. A copy with no partner turned and sized anything like it is
++    // left unpaired. Off: <prefix>_INTERPOLATION_NO_INSTANCE_POSES.
++    bool instance_poses{true};
++    // With `nearest_instances`, small sprites (a quad of smoke, a spark) of one
++    // texture pair up by where they are, whatever vertices they read. A game
++    // writes such quads into a scratch buffer each frame, so the same address
++    // holds another puff from one frame to the next, and blending the two drew
++    // a cloud's puffs where neither frame had them. Off:
++    // <prefix>_INTERPOLATION_NO_SPRITE_POOLS.
++    bool sprite_pools{true};
+     // Blend draws with an orthographic projection too. A 2D game drawn with
+     // transformed vertices (Purun) has nothing else to blend; off, only
+     // perspective draws are, which keeps a 3D game's 2D interface as it is.
+@@ -215,6 +230,11 @@ private:
+     };
+     std::vector<std::pair<std::int32_t, std::int32_t>> unsettled_;
+     std::vector<Candidate> candidates_;
++    std::vector<std::array<float, 9>> newer_poses_;  // for each newer draw, once asked for
++    std::vector<std::uint8_t> newer_pose_known_;
++    // Sprites by pool (CutThresholds::sprite_pools): the pool, and the draw.
++    std::vector<std::pair<std::uint64_t, std::int32_t>> older_sprites_;
++    std::vector<std::pair<std::uint64_t, std::int32_t>> newer_sprites_;
+     std::vector<std::uint8_t> shared_;  // for each older draw: its key had several newer draws
+     Matching result_;
+     // The previous pair's camera motion in each view, when that pair was
+diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
+index a3d856a..ad94586 100644
+--- a/host/gpu/vulkan_renderer.cpp
++++ b/host/gpu/vulkan_renderer.cpp
+@@ -2982,6 +2982,8 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
+     impl.governor = pacing::RateGovernor{};
+     if (portablekit::env("INTERPOLATION_NO_MOTION_GUARD") != nullptr) impl.cut_thresholds.max_own_motion = 0.0f;
+     if (portablekit::env("INTERPOLATION_ORDER_PAIRS") != nullptr) impl.cut_thresholds.nearest_instances = false;
++    if (portablekit::env("INTERPOLATION_NO_INSTANCE_POSES") != nullptr) impl.cut_thresholds.instance_poses = false;
++    if (portablekit::env("INTERPOLATION_NO_SPRITE_POOLS") != nullptr) impl.cut_thresholds.sprite_pools = false;
+     impl.frame_rate = player.frame_rate;
+     impl.governor.set_automatic(player.frame_rate_auto);
+     const std::uint32_t window_scale = std::clamp<std::uint32_t>(player.window_scale, 1u, settings::kMaxWindowScale);
+diff --git a/tests/interpolation_tests.cpp b/tests/interpolation_tests.cpp
+index 4654f64..bf15744 100644
+--- a/tests/interpolation_tests.cpp
++++ b/tests/interpolation_tests.cpp
+@@ -300,6 +300,96 @@ void matching() {
+     check(near(hall_camera.camera_distance, truth.camera_distance, 0.05f) && hall_camera.cut == nullptr,
+           "the camera of a hall of copies is the scenery's");
+ 
++    // Rays of a light: copies of one mesh from one point, each turned its own
++    // way. The first expires as a new one starts at the end of the list, so
++    // in drawing order every ray pairs with the one after it, at the very
++    // same position.
++    const auto rays = [](std::size_t first, std::size_t last, float spin, float size = 1.0f) {
++        std::vector<DrawSummary> frame = scene(40u, 0.0f);
++        for (std::size_t k = first; k < last; ++k) {
++            DrawSummary ray = draw(97u, 0.0f);
++            ray.world = transform(20.0f * static_cast<float>(k) + spin, 0.0f, 0.0f, -500.0f);
++            for (std::size_t element = 0; element < 12u; ++element)
++                if (element % 4u != 3u) ray.world[element] *= size;
++            frame.push_back(ray);
++        }
++        mark_eligible(frame, kShown);
++        return frame;
++    };
++    const std::vector<DrawSummary> rays_before = rays(0u, 8u, 0.0f), rays_after = rays(1u, 9u, 0.5f);
++    Matcher fan;
++    const Matching &own_rays = fan.match(rays_before, rays_after, thresholds);
++    bool each_its_own = true;
++    for (std::size_t k = 1; k < 8u; ++k)
++        each_its_own = each_its_own && own_rays.newer_of[40u + k] == static_cast<std::int32_t>(39u + k);
++    check(each_its_own, "rays from one point pair with themselves when the first expires");
++    check(own_rays.newer_of[40] < 0, "the ray that expired does not swing to the one that started");
++    CutThresholds positions_only = thresholds;
++    positions_only.instance_poses = false;
++    Matcher fan_by_position;
++    const Matching &neighbours = fan_by_position.match(rays_before, rays_after, positions_only);
++    check(neighbours.newer_of[41] == 41, "told by position alone, each ray pairs with the next");
++    // A ray that grows quickly is still the same ray.
++    const std::vector<DrawSummary> grown = rays(0u, 8u, 0.5f, 1.25f);
++    Matcher growing;
++    const Matching &same_rays = growing.match(rays_before, grown, thresholds);
++    bool kept = true;
++    for (std::size_t k = 0; k < 8u; ++k)
++        kept = kept && same_rays.newer_of[40u + k] == static_cast<std::int32_t>(40u + k);
++    check(kept, "rays that grow a quarter in a frame keep their partners");
++
++    // A cloud of quads written into a scratch buffer: one puff fewer ahead of
++    // them moves every puff to the next address, so an address says nothing
++    // about which puff it holds.
++    const auto cloud = [](std::size_t first_slot, float drift) {
++        std::vector<DrawSummary> frame = scene(40u, 0.0f);
++        for (std::size_t k = 0; k < 8u; ++k) {
++            DrawSummary puff = draw(98u, 30.0f * static_cast<float>(k) + drift);
++            puff.vertex_address = 0x09C36000u + static_cast<std::uint32_t>(first_slot + k) * 0x14u;
++            puff.count = 4u;
++            frame.push_back(puff);
++        }
++        mark_eligible(frame, kShown);
++        return frame;
++    };
++    // The same eight addresses, each now holding the puff that was next to it.
++    std::vector<DrawSummary> cloud_before = cloud(0u, 0.0f), cloud_after = cloud(0u, 1.0f);
++    for (std::size_t k = 0; k < 8u; ++k)
++        cloud_after[40u + k].vertex_address = cloud_before[40u + (k + 1u) % 8u].vertex_address;
++    Matcher puffs;
++    const Matching &own_puffs = puffs.match(cloud_before, cloud_after, thresholds);
++    bool each_puff = true;
++    for (std::size_t k = 0; k < 8u; ++k)
++        each_puff = each_puff && own_puffs.newer_of[40u + k] == static_cast<std::int32_t>(40u + k);
++    check(each_puff, "quads of a scratch buffer pair by where they are, not by their address");
++    CutThresholds by_address = thresholds;
++    by_address.sprite_pools = false;
++    Matcher address_puffs;
++    const Matching &slots = address_puffs.match(cloud_before, cloud_after, by_address);
++    check(slots.newer_of[41] == 40, "by address alone, a puff pairs with the one that took its address");
++
++    // Quads with their places in their vertices: one matrix for them all, each
++    // at an address of its own. Their addresses are right, and nothing about
++    // where they stand can tell them apart.
++    const auto baked = [] {
++        std::vector<DrawSummary> frame = scene(40u, 0.0f);
++        for (std::size_t k = 0; k < 40u; ++k) {
++            DrawSummary quad = draw(99u, 0.0f);
++            quad.vertex_address = 0x09C40000u + static_cast<std::uint32_t>(k) * 0x14u;
++            quad.count = 4u;
++            frame.push_back(quad);
++        }
++        mark_eligible(frame, kShown);
++        return frame;
++    };
++    const std::vector<DrawSummary> baked_before = baked(), baked_after = baked();
++    Matcher tiles;
++    const Matching &own_tiles = tiles.match(baked_before, baked_after, thresholds);
++    bool each_tile = true;
++    for (std::size_t k = 0; k < 40u; ++k)
++        each_tile = each_tile && own_tiles.newer_of[40u + k] == static_cast<std::int32_t>(40u + k);
++    check(each_tile && own_tiles.cut == nullptr, "quads under one matrix keep the partners their addresses give");
++
+     std::vector<DrawSummary> flat{draw(1u, 0.0f)};
+     flat[0].perspective = false;
+     mark_eligible(flat, kShown);
+-- 
+2.53.0.windows.1
+
