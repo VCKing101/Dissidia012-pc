@@ -74,7 +74,8 @@ online and test sessions. Bugs and crashes go in [GitHub issues](https://github.
 - **Choose each player's controller**: player 1 and player 2 each on a controller of your choice or on the keyboard
   and mouse (menu's Controls page, **Player 1** and **Player 2**).
 - **More for keyboard players**: one key each for dodge, dash, EX Mode, summon and both assists; the mouse wheel moves
-  through menus and tilts the battle camera; the game's prompts show your keys (menu's Controls page).
+  through menus and tilts the battle camera; the game's prompts show your keys; a keypad key can do one thing with
+  Num Lock on and another with it off (menu's Controls page).
 - **Close the game from the title screen**: press circle there, then choose Yes.
 - **Cheats** on the menu's Cheats page: gil, KP, PP, AP, items and battle cheats, and PPSSPP cheat files
   ([below](#cheats)).

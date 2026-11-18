@@ -61,6 +61,35 @@ controller switches back to its buttons; the textures are drawn again at each sw
 The port's own message, save and keyboard screens answer Enter and Esc on the keyboard, so in the keyboard style
 their hints read "Enter: OK" and "Esc: Back".
 
+## The keypad with Num Lock
+
+> 18 November 2026. PortableKit patch 0112 (`host/input/bindings.*`, the renderer's key read, the Controls page's
+> capture, the input script), the port's `d012_button_prompts.cpp`.
+
+A player on Discord moved with the keypad's 8 4 5 6 on the PSP emulator and pressed Num Lock to turn the same keys
+into camera keys. The emulator saw Windows' keys: with Num Lock off the keypad sends the keys printed under its
+numbers (Up for 8, Left for 4, Right for 6, Clear for 5), and the D-pad, bound to those, turns the camera in a
+battle. The port bound keys by their place on the keyboard and never asked Num Lock, so Keypad 8 was Keypad 8 either
+way.
+
+Now the keypad's numbers with Num Lock off are keys of their own, named after the keys printed under them: Keypad
+Up (8), Keypad Down (2), Keypad Left (4), Keypad Right (6), Keypad Clear (5), Keypad Home (7), Keypad PageUp (9),
+Keypad End (1), Keypad PageDown (3), Keypad Insert (0) and Keypad Delete (Period). On the Controls page a keypad key
+pressed with Num Lock off is bound as that key. A keypad key bound both ways presses one control with Num Lock on and
+the other with it off; bound only one way, it presses that control whatever Num Lock says, so a keypad bound before
+this, or bound with Num Lock off and played with it on, works as before. They are not the arrow keys: the arrows stay
+bound as they were.
+
+The player's layout:
+
+1. Num Lock on: bind Move forward, back, left and right to Keypad 8, 5, 4 and 6.
+2. Num Lock off: add Keypad 8, 5, 4 and 6 to D-pad up, down, left and right. They show as Keypad Up, Keypad Clear,
+   Keypad Left and Keypad Right next to the arrow keys. (Camera up and so on work too; in a battle the D-pad already
+   turns the camera.)
+
+Then Num Lock switches the four keys between moving and the camera, as on the emulator. The prompts draw a Num Lock
+off key as the key printed on it: an arrow for Keypad Up to Right, `HOME`, `PGUP` and so on, `KP5` for Keypad Clear.
+
 ## Clicking the game's menus
 
 Not built. The game moves through most of its menus with one shared list cursor (set up by main `0x088D46E4`, moved
@@ -75,7 +104,10 @@ covers moving through lists; a click-to-select for a few screens remains possibl
 
 - `D012_WHEEL_HOLD=N`, `D012_WHEEL_GAP=N`: the game's pad reads a wheel notch is held and let go (2 each).
 - `D012_BUTTON_PROMPTS=keyboard`: the keyboard style for this run.
-- `D012_TRACE_PAD=1`: logs the bindings (the combos' too) and every change of the buttons the game reads.
+- `D012_NO_NUM_LOCK_KEYS=1`: the keypad's numbers are bound and read as the numbers whatever Num Lock says, as before
+  patch 0112.
+- `D012_TRACE_PAD=1`: logs the bindings (the combos' too), every change of the buttons the game reads, and Num Lock
+  as the bindings see it.
 
 ## Tested
 
@@ -104,3 +136,23 @@ Not tested: a summon (none equipped), other fighters than Lightning, player 2 on
 (the combos are plain buttons in the input record, the wheel plain D-pad presses), a real mouse wheel and a
 touchpad's fractional scrolling, the Linux build, the Steam Deck, the European disc, the screens the route does not
 reach.
+
+Num Lock (18 November), on Windows with the clang build and the USA disc, keyboard only, scripted
+(`numlock on|off` sets SDL's Num Lock):
+
+- With Move on Keypad 8 4 5 6 and the D-pad on Up / Keypad Up, Down / Keypad Clear, Left / Keypad Left and Right /
+  Keypad Right, at the title menu (`D012_TRACE_PAD`): Num Lock on, Keypad 8, 5 and 4 pushed the stick up, down and
+  left; Num Lock off, Keypad 8, 5, 4 and 6 pressed the D-pad's up, down, left and right (`0x10`, `0x40`, `0x80`,
+  `0x20`) and not the stick; the arrow keys pressed the D-pad either way; Keypad 2 and 9, bound neither way, pressed
+  nothing. The title menu's cursor moved for both.
+- With nothing scripted, the game read Num Lock on, as Windows had it, and Keypad 8 moved.
+- The Controls page with Num Lock off: Enter on D-pad up, then Keypad 8, read "Up / Keypad Up"; D-pad down and
+  Keypad 5 read "Down / Keypad Clear"; Move forward kept Keypad 8, and `settings.ini` kept both.
+- Prompts on the main menu with △ on Keypad Down, □ on Keypad Clear and START on Keypad PageUp: a down arrow by
+  "Customization", `KP5` by "Mognet" and `PGUP` on the MANUAL badge.
+- PortableKit's framework tests but the ad hoc ones, the new Num Lock cases among them. The settings tests link
+  again: their target lacked `host/input/players.cpp` (`format_player_device`), which patch 0112 adds.
+
+Not tested: pressing the real Num Lock key while the game runs (the script sets SDL's state; SDL follows the key
+and the system's state when the window gains focus), a battle, Linux and the Steam Deck (which has no keypad), a
+keyboard without a keypad, player 2 on the keyboard.
