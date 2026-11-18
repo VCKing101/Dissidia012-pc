@@ -679,7 +679,17 @@ KeyCap key_cap(input::Binding binding) {
         }
         return cap;
     }
-    const std::string name = input::name(binding);
+    std::string name = input::name(binding);
+    // The keypad's numbers bound with Num Lock off: the keys printed under
+    // the numbers, drawn as those keys are.
+    static constexpr const char *kNumLockOff[] = {"Up",  "Right", "Down",   "Left",     "Home",
+                                                  "End", "PageUp", "PageDown", "Insert", "Delete"};
+    if (name.rfind("Keypad ", 0) == 0)
+        for (const char *second : kNumLockOff)
+            if (name.compare(7, std::string::npos, second) == 0) {
+                name = second;
+                break;
+            }
     static constexpr std::pair<const char *, int> kArrows[] = {{"Up", 0}, {"Right", 1}, {"Down", 2}, {"Left", 3}};
     for (const auto &[arrow_name, arrow] : kArrows)
         if (name == arrow_name) {
@@ -696,7 +706,7 @@ KeyCap key_cap(input::Binding binding) {
         {"Delete", "DEL"},       {"Home", "HOME"},         {"End", "END"},            {"PageUp", "PGUP"},
         {"PageDown", "PGDN"},    {"PrintScreen", "PRTSC"}, {"ScrollLock", "SCRLK"},   {"Pause", "PAUSE"},
         {"Numlock", "NUM"},      {"Keypad Divide", "KP/"}, {"Keypad Multiply", "KP*"}, {"Keypad Minus", "KP-"},
-        {"Keypad Plus", "KP+"},  {"Keypad Period", "KP."}, {"NonUSBackslash", "\\"}};
+        {"Keypad Plus", "KP+"},  {"Keypad Period", "KP."}, {"Keypad Clear", "KP5"},  {"NonUSBackslash", "\\"}};
     cap.kind = KeyCap::Kind::Word;
     for (const auto &[key_name, word] : kWords)
         if (name == key_name) {
