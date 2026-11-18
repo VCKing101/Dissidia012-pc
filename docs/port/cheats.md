@@ -66,13 +66,13 @@ used or shipped.
 | All accessories ×99 | on | the same from `0x08BBEEC6`, 589 | the accessory list, every item ×99 |
 | Mala Bestia accessories ×99 | on | 9 of those counts | Growth Egg, Valor Resin, Chocobo Down, Wing and Feather, Supershine, Mog's Amulet, Qu'Bia Tail ×99 |
 | All summons | on | the 61 summonstones' slots from `0x08BBF89C`: 10 uses and flags 3 | all 61 owned with 10 uses, the empty slots left alone ([All summons](#all-summons-and-the-empty-slots)) |
-| Infinite HP, Max HP 999,999, Bravery 9,999, Infinite EX, Infinite Assist, Level 100 | on | 32 bits at the word at `0x08B633B0` minus `0xE58`, `0xE54`, `0xE4C`, `0xE48`, `0xE44`, `0xE60` | HP stayed at 1242 through a 755-damage HP attack (0 without the cheat); HP 999999; Bravery 9999; Enter EX Mode offered; the Assist gauge full with Use Assist offered; Lv100 |
-| Opponent: Bravery 0, Max HP 100, No EX, No Assist | on | the same minus `0x2C`, `0x34`, `0x28`, `0x24` | Bravery 0 and a Break; max HP 100; against a Very High CPU, its EX and Assist gauges stayed empty (without the cheats it filled both and entered EX Mode) |
-| Opponent: Defeat with Select | on | `0x38` = 999,999 while Select is held (a joker line) | the opponent falls at once |
+| Infinite HP, Max HP 999,999, Bravery 9,999, Infinite EX, Infinite Assist, Level 100 | on | 32 bits in the player's status block, `+0x08`, `+0x0C`, `+0x14`, `+0x18`, `+0x1C`, `+0x00` ([the fighters](#the-battle-cheats-and-the-fighters)) | HP stayed at 1242 through a 755-damage HP attack (0 without the cheat); HP 999999; Bravery 9999; Enter EX Mode offered; the Assist gauge full with Use Assist offered; Lv100 |
+| Opponent: Bravery 0, Max HP 100, No EX, No Assist | on | the opponent's, `+0x14`, `+0x0C`, `+0x18`, `+0x1C` | Bravery 0 and a Break; max HP 100; against a Very High CPU, its EX and Assist gauges stayed empty (without the cheats it filled both and entered EX Mode) |
+| Opponent: Defeat with Select | on | the opponent's `+0x08` = 999,999 while Select is held (a joker line) | the opponent falls at once |
 
 **Level 100 is a real level-up.** It sets the level of the fighter in battle, and the game makes that the character's level: after the cheat is turned off, Customization still shows Lv100 with 1,969,359 EXP and HP 6,999, and the game keeps it when it saves.
 
-The list's codes were changed in six places:
+The list's codes were changed in seven places:
 
 - Its **1,000,000 Gil** writes `0x08FF93F4` and `0x08FFB2D0`; the gil shown stayed at 788, so the port writes its
   Max Gil address, `0x08BBFA00`, for both choices.
@@ -83,6 +83,8 @@ The list's codes were changed in six places:
 - Its longer **accessories** code (672 counts) reaches the summonstones' bytes, so the port uses the shorter one (589).
 - Its **All summons** code starts eight slots too late and runs past the last summon, so the port's starts at the
   first slot ([All summons](#all-summons-and-the-empty-slots)).
+- Its **battle** codes go through a word that is 0 in some battles, so the port's go through the battle manager
+  ([the fighters](#the-battle-cheats-and-the-fighters)).
 - Each **battle** code is followed in the list by a write of 0 to `0x0880052C`, below the game, which the port leaves
   out.
 
@@ -224,6 +226,49 @@ are gone. The summons the list's code gave stay owned, and the first eight are g
 | Clean, All summons never on | the fix | 15 battles finished; nothing emptied |
 
 Not checked: a battle in Arcade or Story Mode with the fix, the European disc, Linux, the Steam Deck and Android.
+
+## The battle cheats and the fighters
+
+> 19 November 2026. `port/host/d012_battle_cheat_codes.hpp`. Windows, clang build, USA disc.
+
+**What went wrong.** The public list's battle codes go through the word at `0x08B633B0`. In most battles it lies just
+after the opponent's status block, so the list's offsets land on the right fields. In others it holds 0 for the whole
+battle, and every battle cheat then does nothing: Defeat with Select left the opponent standing. Which battles depends
+on how the game laid out that battle's memory, so a few battles in a row worked and the next did not.
+
+**What the port does.** Its codes take the game's own way to the fighters, a pointer code with two steps:
+
+| Step | What |
+| --- | --- |
+| The word at `0x089D6A10` | the battle manager |
+| `+0x38`, `+0x3C` | the player's fighter, the opponent's; 0 between battles, when nothing is written |
+| `+0x52C` | the fighter's status block |
+
+| Status block | What | Cheats |
+| --- | --- | --- |
+| `+0x00` | level | Level 100 |
+| `+0x08` | damage taken | Infinite HP, Defeat with Select |
+| `+0x0C` | maximum HP | Max HP 999,999, Opponent Max HP 100 |
+| `+0x14` | Bravery | Bravery 9,999, Opponent Bravery 0 |
+| `+0x18` | EX gauge | Infinite EX, Opponent No EX |
+| `+0x1C` | Assist gauge | Infinite Assist, Opponent No Assist |
+
+Defeat with Select's joker line now skips three lines, as the code is one line longer. The list's codes in a PPSSPP
+cheat file still go through the old word.
+
+**Checked** (won by holding Select; `d012_tests` runs each code through the cheat engine as well):
+
+| Code | Battles | Finished | The opponent fell to Select |
+| --- | --- | --- | --- |
+| The list's, from a cheat file | Quick Battle | 17 | 15; the 2 with the word at 0 did not |
+| The port's | Quick Battle, Select only and with every battle cheat on | 104 | 104, 5 of them with the word at 0 |
+| The port's | Arcade rounds | 7 | 7 |
+| The port's | Quick Battle (Party) fights | 22 | 22 |
+
+With every battle cheat on, each field held its value in each battle, the one with the word at 0 among them.
+
+Not checked: Story Mode with these codes (a test switch that reads the same pointers worked there), the European disc,
+Linux, the Steam Deck and Android.
 
 ## Switches
 
