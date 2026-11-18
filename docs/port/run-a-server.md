@@ -110,7 +110,8 @@ players share an address):
   each copy's input. The two fighters' round trips added are the battle's.
 - **quiet … at most:** the longest time with nothing from that fighter.
 - **slack:** how many ms before it needed them the other fighter's inputs reached that copy (average, and the
-  least). Negative: that copy waited.
+  least). Negative: they came after it needed them, so that copy waited or, with rollback, guessed. The two fighters'
+  slacks should be about the same.
 
 A direct battle passes nothing through the server, so for those the copies' own logs (`data/logs/D012Native.log`,
 its `[battle-net]` lines) are the place to look. The official server keeps a week, with this in

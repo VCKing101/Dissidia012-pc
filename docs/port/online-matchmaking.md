@@ -747,7 +747,46 @@ with `D012_NET_SIM=40`: the relay read copy 1 at 0 ms and copy 2 at 40 ms (39-42
 ms; both copies at 25 ms ± 10: the relay 24 and 23 ms, the copies 50 ms; about 28 frames a second; a direct battle
 logged as "direct, the relay carried none of its input". `d012_tests` passes. The Linux build (WSL GCC 13, the same
 g++ line as before) went onto the official server on 17 November at 21:14 UTC, with nobody online; the old program
-is kept beside it as `dissidia012-server.before-battle-log`. Not yet seen: a real battle through it.
+is kept beside it as `dissidia012-server.before-battle-log`. Two PC copies forced through it the same evening logged
+round trips of 287 and 290 ms, which add up to the 579 ms the copies timed themselves.
+
+## 18. Rollback keeps the two games level (18 November 2026)
+
+Players said Play online got worse as a battle went on, and that games over a VPN (Radmin) felt better. A game over
+a VPN is a hosted or joined session, so it runs the lockstep: nothing on screen is ever corrected.
+
+**The fault (V).** The frames' balance ([Communication Mode](communication-mode.md) 17.1) needs each copy's slack. With
+rollback, `trade_ahead` counted a frame's slack only when the other copy's input had come before the frame ran. At
+one frame of delay and a real distance almost none had, so the copy ahead had no slack to send and nothing held it
+back. A stall of more than 100 ms (the kernel drops what it owes beyond that), or clocks that differ, left the two
+copies apart for the rest of the battle: the copy ahead guessed further and further, and the other hardly at all.
+Whether this is what players felt on release day is inferred (I): no player's log has been read yet.
+
+**The change.** `port/host/d012_frame_balance.hpp` holds the balance. With rollback each input counts when it comes,
+as the time its frame ran less the time it came (`take_slacks`), below 0 when it came late. The copy ahead holds its
+frames back as in the lockstep, at most 1 ms a frame. The packets are the same. The link's report every 900 frames
+(waits, both slacks, time held back, round trip) now runs with rollback too.
+
+**Tested (V).** Two PC copies, Windows clang build, scripted moves, a press about every 1.4 s from each. `D012_NET_SIM`
+made the connection; "redone" is frames run again.
+
+| Test | Before | After |
+| --- | --- | --- |
+| 120 ms round trip, the first minute | Copy 1 went back 2 times; copy 2 81 times, 6.2 frames each | 71 times, 1.5 frames each; 70 times, 1.2 frames each |
+| 200 ms round trip, the first minute | 88 and 84 times, 2.5 frames each | 82 and 76 times, 3.0 and 2.3 frames each |
+| 120 ms, copy 2 frozen 130 ms twice: frames redone per 30 s in the last 90 s | Copy 1 196, 207, 87; copy 2 0, 7, 13 | Copy 1 52, 41, 51; copy 2 52, 41, 32 |
+| 120 ms in a session (lockstep) | 3 frames of delay, nothing corrected, in step | The same |
+
+Every battle stayed in step. Through the official server (two copies forced through the relay, a 579 ms round trip,
+copy 2 frozen 130 ms twice, 3 min 54 s): the server logged the same slack for both fighters, -188 and -188 ms at
+30 s and -187 and -187 ms at 60 s, and each went back about 35 times per 30 s, 6 frames each. At that distance the
+inputs come close to the end of the 7-frame window, and a copy waited for up to 4 s in one 30 s stretch.
+
+`d012_tests` plays two copies out in time: a stall, clocks a thousandth apart, and a 300 ms round trip all come level.
+With late inputs left out, as before, those tests fail.
+
+**Not tested:** real players' battles, the Steam Deck and the phone (the code is shared; the header was only checked
+with GCC 13), and Group Battle's fights with the change.
 
 ## Sources
 

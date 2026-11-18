@@ -10,6 +10,7 @@
 #include "d012_battle_relay.hpp"
 #include "d012_discord_rules.hpp"
 #include "d012_dlc_packs_plan.hpp"
+#include "d012_frame_balance.hpp"
 #include "d012_json.hpp"
 #include "d012_mod_manifest.hpp"
 #include "d012_no_window_rules.hpp"
@@ -45,6 +46,7 @@
 #include <tuple>
 
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -1481,6 +1483,129 @@ void test_online_rules() {
     expect(!text.empty() && (note.empty() || note == rules::kNoServerYet), "online file: the repository's own reads");
 }
 
+// Two copies with rollback played out in time alone: each runs its frames to
+// its own clock without waiting, sends its input for `delay` frames on, and
+// holds itself back as FrameBalance says. What it returns: how far apart the
+// copies ran each frame, in ms.
+struct BalanceRun {
+    int frames = 3000;
+    int one_way_us = 60000;
+    int stall_at = -1;      // copy 1 stops for `stall_us` on this frame
+    int stall_us = 0;
+    int frame_us_0 = 33367;
+    int frame_us_1 = 33367;
+    bool balance = true;
+    long long most_hold_us = 0;  // the most either was held on one frame
+};
+
+std::vector<double> play_balance(BalanceRun &run) {
+    using d012::net::FrameBalance;
+    using Clock = FrameBalance::Clock;
+    constexpr std::uint64_t delay = 1u;
+    struct Packet {
+        long long at;
+        std::uint64_t frame;
+        std::int16_t slack;
+    };
+    struct Copy {
+        FrameBalance balance;
+        std::map<std::uint64_t, Clock::time_point> ran, came;
+        std::vector<Packet> coming;
+        long long next = 0;
+        std::uint64_t frame = 0;
+        std::vector<long long> times;
+    } copies[2];
+    const auto when = [](long long us) { return Clock::time_point{} + std::chrono::microseconds(us); };
+    const std::uint64_t last = static_cast<std::uint64_t>(run.frames);
+    while (copies[0].frame < last || copies[1].frame < last) {
+        const int me = copies[1].frame >= last || (copies[0].frame < last && copies[0].next <= copies[1].next) ? 0 : 1;
+        Copy &c = copies[me];
+        Copy &other = copies[1 - me];
+        const long long now = c.next;
+        for (auto it = c.coming.begin(); it != c.coming.end();) {
+            if (it->at > now) {
+                ++it;
+                continue;
+            }
+            c.came.emplace(it->frame, when(it->at));
+            c.balance.hear(it->slack);
+            it = c.coming.erase(it);
+        }
+        if (c.frame >= delay) c.ran[c.frame] = when(now);
+        const auto slacks = d012::net::take_slacks(c.ran, c.came, c.frame);
+        for (const auto slack : slacks) c.balance.note(slack);
+        long long hold = 0;
+        if (run.balance && !slacks.empty()) hold = c.balance.hold().count();
+        run.most_hold_us = std::max(run.most_hold_us, hold);
+        other.coming.push_back({now + run.one_way_us, c.frame + delay, c.balance.sent_slack()});
+        c.times.push_back(now);
+        c.next = now + (me == 0 ? run.frame_us_0 : run.frame_us_1) + hold;
+        if (me == 1 && static_cast<int>(c.frame) == run.stall_at) c.next += run.stall_us;
+        ++c.frame;
+    }
+    std::vector<double> apart;
+    for (std::size_t i = 0; i < copies[0].times.size(); ++i)
+        apart.push_back(static_cast<double>(std::llabs(copies[0].times[i] - copies[1].times[i])) / 1000.0);
+    return apart;
+}
+
+void test_frame_balance() {
+    using d012::net::FrameBalance;
+    using d012::net::kNoSlack;
+    using Clock = FrameBalance::Clock;
+    using std::chrono::milliseconds;
+    const auto at = [](int ms) { return Clock::time_point{} + milliseconds(ms); };
+
+    // Which inputs count: one before its frame ran, one after, and neither of
+    // the frames still open.
+    std::map<std::uint64_t, Clock::time_point> ran{{5u, at(100)}, {6u, at(133)}, {7u, at(166)}};
+    std::map<std::uint64_t, Clock::time_point> came{{5u, at(70)}, {6u, at(190)}, {9u, at(195)}};
+    const auto slacks = d012::net::take_slacks(ran, came, 7u);
+    expect(slacks.size() == 2u && slacks[0] == milliseconds(30) && slacks[1] == milliseconds(-57),
+           "frame balance: an input that came after its frame counts, as less than 0");
+    expect(ran.size() == 1u && ran.count(7u) == 1u, "frame balance: a frame without its input stays open");
+    expect(came.size() == 1u && came.count(9u) == 1u, "frame balance: an input for a frame to come stays");
+
+    // The hold: nothing until both are known, nothing behind, at most the cap.
+    FrameBalance balance;
+    balance.hear(40);
+    for (std::size_t i = 0; i + 1u < FrameBalance::kFrames; ++i) balance.note(milliseconds(-60));
+    expect(!balance.known() && balance.sent_slack() == kNoSlack && balance.hold().count() == 0,
+           "frame balance: no hold before the slack is known");
+    balance.note(milliseconds(-60));
+    expect(balance.known() && balance.sent_slack() == -60, "frame balance: late inputs make a slack below 0");
+    expect(balance.hold() == FrameBalance::kMostHold, "frame balance: far ahead, the most hold");
+    balance.hear(-60);
+    expect(balance.hold().count() == 0, "frame balance: level, no hold");
+    balance.hear(-80);
+    expect(balance.hold().count() == 0, "frame balance: behind, no hold");
+    balance.hear(-56);
+    expect(balance.hold() == std::chrono::microseconds(62), "frame balance: a sixty-fourth of the difference");
+
+    // A stall of 130 ms on one copy, at a 120 ms round trip with every input
+    // late: the copies come level again, as they do not without the hold.
+    BalanceRun stall;
+    stall.stall_at = 300;
+    stall.stall_us = 130000;
+    const std::vector<double> apart = play_balance(stall);
+    expect(apart[299] < 3.0 && apart[305] > 120.0, "frame balance: the stall puts the copies 130 ms apart");
+    expect(apart[900] < 6.0 && apart[2999] < 6.0, "frame balance: level again within 20 s of a stall");
+    expect(stall.most_hold_us <= FrameBalance::kMostHold.count(), "frame balance: never more than the most hold");
+    BalanceRun without = stall;
+    without.balance = false;
+    expect(play_balance(without)[2999] > 120.0, "frame balance: without the hold the stall stays");
+
+    // Clocks a thousandth apart would drift a frame every 33 s.
+    BalanceRun drift;
+    drift.frames = 9000;
+    drift.frame_us_1 = 33400;
+    const std::vector<double> drifted = play_balance(drift);
+    expect(drifted.back() < 6.0, "frame balance: clocks that differ stay level");
+    BalanceRun distant = stall;
+    distant.one_way_us = 150000;
+    expect(play_balance(distant)[2999] < 6.0, "frame balance: level again at a 300 ms round trip");
+}
+
 } // namespace
 
 // DLC packs (host/d012_dlc_packs_plan.cpp): made-up packs, files in memory.
@@ -1736,6 +1861,7 @@ int main(int argc, char **argv) {
     test_relay_introductions();
     test_online_rules();
     test_dlc_packs();
+    test_frame_balance();
     if (g_failures == 0) std::cout << "all passed\n";
     return g_failures == 0 ? 0 : 1;
 }
