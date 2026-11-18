@@ -77,6 +77,8 @@ portablekit_add_game(D012Native ${d012_corpus}
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_mod_manifest.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_mods.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_dlc.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_dlc_packs.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_dlc_packs_plan.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_android_import.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_voices.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_voice_scenes.cpp"
@@ -388,7 +390,8 @@ add_executable(d012_tests "${CMAKE_CURRENT_SOURCE_DIR}/tests/d012_tests.cpp"
                           "${CMAKE_CURRENT_SOURCE_DIR}/bgm_maker/suggest.cpp")
 target_link_libraries(d012_tests PRIVATE d012_manifest Threads::Threads)
 # The battle relay's STATUS packets (it builds without PortableKit).
-target_sources(d012_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_battle_relay.cpp")
+target_sources(d012_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_battle_relay.cpp"
+                                  "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_dlc_packs_plan.cpp")
 if(WIN32)
     target_link_libraries(d012_tests PRIVATE ws2_32)
 endif()

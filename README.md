@@ -382,6 +382,13 @@ folder inside it.
 - DLC music takes room in the game's list of 256 tracks, so with all 43 of those tracks, mods can add 82 tracks
   rather than 125.
 
+### Fan-made DLC packs
+
+Costumes and music made with [DissDlcToolkit](https://github.com/adriangl/DissDlcToolkit) go in a folder of their own
+in the `dlc` folder: `data\dlc\<any name>\` in the install folder (`build\port\data\dlc\<any name>\` from source).
+Packs built for the same slots work side by side: a pack that wants a slot already in use is given a free one. See
+[DLC packs](docs/port/dlc-packs.md).
+
 ## HD texture packs
 
 The port draws texture packs made for PPSSPP: a folder with a `textures.ini` and the images it names. Put the pack's

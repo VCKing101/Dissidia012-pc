@@ -26,6 +26,7 @@ the menus to Quick Battles, with the HUD's HP bars, billboarded particles and si
 | `host/d012_json.cpp`, `.hpp` | A small JSON reader for the manifests |
 | `host/d012_bgm_playlist.cpp`, `.hpp` | The BGM playlist: the loading screen's music choice by series and track, L2/R2 to switch the D-pad between the screen's menu and the music, mod tracks as rows of the game's BGM table, the pad-read wrapper, the series in the BATTLE BGM box and the track wheel under it ([docs/port/bgm-playlist-design.md](../docs/port/bgm-playlist-design.md), sections 10 and 11) |
 | `host/d012_dlc.cpp`, `.hpp` | DLC: one startup log line saying what DLC the game will find in `ms0:/PSP/GAME/<disc id>`, how many files are still encrypted EDATA, and a warning for `.edat` files in a folder of another name; it only reports ([README](../README.md#downloadable-content-dlc)) |
+| `host/d012_dlc_packs.cpp`, `.hpp`, `host/d012_dlc_packs_plan.cpp`, `.hpp` | DLC packs: the folders of `<data dir>/dlc`, served to the game as memory stick files, with free slots for packs built for the same ones ([docs/port/dlc-packs.md](../docs/port/dlc-packs.md)) |
 | `host/d012_loading_layout.cpp`, `.hpp` | The loading screen's right-half pages moved down and made shorter for the track wheel, by checked edits of the screen's layout data in memory (section 11) |
 | `host/d012_test_switches.cpp`, `.hpp` | Test switches, off by default: `D012_TEST_UNLOCK_FIGHTERS`, `D012_TEST_EX_FULL` ([docs/port/graphics-triage.md](../docs/port/graphics-triage.md)) |
 | `host/d012_brave_pool_guard.cpp` | In battle, the pool of flying Brave numbers is put right before each update: a slot holding anything but one of its entries gets a free entry, or none, instead of crashing the game ([issue 16](https://github.com/VCKing101/Dissidia012-pc/issues/16)) |
@@ -141,6 +142,8 @@ The profile's own switches:
 | `D012_BLOOM=0` or `1` | Bloom off or on for this run, whatever the menu's Video page says (`game.bloom` in `settings.ini`; `port/host/d012_bloom.cpp`: the bloom at `0x0885E150` is left out) |
 | `D012_NO_MODS=1` | Load no mods ([mod-folder.md](../docs/port/mod-folder.md)) |
 | `D012_MODS_DIR=dir` | Read mods from `dir` instead of `<data dir>/mods` |
+| `D012_NO_DLC_PACKS=1` | Read no DLC packs ([dlc-packs.md](../docs/port/dlc-packs.md)) |
+| `D012_DLC_PACKS_DIR=dir` | Read DLC packs from `dir` instead of `<data dir>/dlc` |
 | `D012_TEST_BGM_OVERRIDE=<track id>` | Test only: the next BGM file the game opens plays that mod track instead (`example-tones:intro-loop`, or its number in hex) |
 | `D012_TEST_MODS_DECODE=1` | Test only: decode every mod track at start-up and log its length, level and pitch |
 | `D012_NO_BGM_PLAYLIST=1` | The game's own one-line BGM selector and screen layout: no series, no wheel, no L2/R2 focus, no mod tracks offered |

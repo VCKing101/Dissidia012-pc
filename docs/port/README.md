@@ -94,6 +94,8 @@ disassembler and the new `tools/port/` scripts cover the analysis.
   played through a stand-in ATRAC3plus file that PortableKit's sceAtrac fills from the host file (three framework
   commits). A test switch played a generated mod track in place of a Quick Battle's music, looping where its
   manifest says, in the recompiled build with no interpreter. The game-side 2D selector is separate work.
+- [DLC packs](dlc-packs.md): fan-made costumes and music in `<data dir>/dlc/<pack>/`, a folder each, given free slots
+  when two packs were built for the same ones.
 
 ## Local versus (25 October 2026)
 
