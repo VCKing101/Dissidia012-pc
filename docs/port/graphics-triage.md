@@ -268,3 +268,41 @@ game runs and writes `game.bloom=0`.
 
 **Not verified.** The Steam Deck, every stage, the EX Burst and story cutscenes. The issue's other report, lights
 flickering while dashing, did not show in 60 and 30 fps stills of a dash on Old Chaos Shrine; it needs the reporter's details.
+
+## Cosmos's light and Zidane's cloud flicker between frames
+
+> 18 November 2026. Reported by the owner at 60 fps: the glow behind Cosmos in story cutscenes, and the black cloud and
+> crystals in Zidane's ending after the fight with Kuja. Fixed in patch 0113. Both are faults of frame interpolation's
+> pairing: the frames the game draws are right, and only the frames made between them are wrong.
+
+**The light behind Cosmos.** Its rays are copies of one mesh drawn from one point, each turned its own way. Every 16
+game frames one expires and a new one starts at the end of the list, so in drawing order each ray pairs with the next.
+The partner stands at the same position, so the check patch 0065 added (a partner is where the camera carries the copy)
+passed, and the in-between frame swung every ray towards its neighbour. Copies now compare their poses too: a
+drawing-order partner must be turned and sized like the copy, the nearest pair counts the difference, and a copy with no
+partner anything like it stays unpaired. Off switch `D012_INTERPOLATION_NO_INSTANCE_POSES`.
+
+**The cloud in Zidane's ending.** Its puffs are quads of four vertices that the game writes to a scratch buffer each
+frame, so one address holds a different puff from one frame to the next, and pairs made by address blended unrelated
+puffs. Quads of one texture, vertex format and primitive whose partner is not where the camera carries it now pair by
+where they are. A quad that is where it should be keeps its partner: quads with their places in their vertices share one
+matrix, and only their addresses tell them apart. Off switch `D012_INTERPOLATION_NO_SPRITE_POOLS`.
+
+**Reaching the scenes.** With Japanese voices on, `D012_TEST_SCENE=3DE35414=<scene>,3843E88D=<scene>` plays a scene in
+place of the Prologue's: `1D131C6E` is Cosmos and the Warrior of Light (voice folder `ff01`), `37BBA7B2` is Zidane's ending.
+`D012_CHECK_REPLAY=N` checks only while the game runs at normal speed, and skips frames interpolation cuts, so compare the
+number of checks as well as their results.
+
+**Verified** (Windows, USA disc, clang release build, 60 fps, internal scale 2). Checks with more than 5,000 pixels of the
+halfway frame far from both frames, every third game frame:
+
+| Scene | Before | After |
+| --- | --- | --- |
+| Cosmos and the Warrior of Light | 18 of 628 | 0 of 628 |
+| Zidane's ending | 338 of 397 | 1 of 397 |
+
+As many frames were cut before as after. What the check still counts in the Cosmos scene is her sparkles moving between
+two frames, drawn where they should be. Quick Battles on World of Darkness and Order's Sanctuary drew correctly; fights
+differ from run to run, so they do not compare frame by frame.
+
+**Not verified.** The Steam Deck, Linux, Android, and the other story scenes.
