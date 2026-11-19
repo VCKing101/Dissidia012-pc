@@ -82,6 +82,7 @@
 
 #include "app_paths.hpp"
 #include "d012_update_install.hpp"
+#include "install/installer.hpp"
 #include "install/user_data.hpp"
 #include "kernel/iso_image.hpp"
 #include "overlay_module.hpp"
@@ -1008,6 +1009,20 @@ int run_in_app(bool check_only, std::function<void(const std::string &, unsigned
 
 int needs_compile_code() { return kNeedsCompile; }
 #else
+// A copy that updated itself from the menu (host/d012_update_install.cpp,
+// Linux): the same steps as --compile-game, in this process, with the progress
+// given to `listener`. 0: up to date or compiled; kNeedsCompile with
+// check_only when it must compile; 1: failed, with the reason given to the
+// listener.
+int run_here(bool check_only, std::function<void(const std::string &, unsigned)> listener) {
+    Options options;
+    options.check_only = check_only;
+    g_listener = std::move(listener);
+    const int code = run(options);
+    g_listener = nullptr;
+    return code;
+}
+
 int main(int argc, char **argv) {
     Options options;
     for (int i = 2; i < argc; ++i) {
@@ -1160,6 +1175,9 @@ static int prepare(int argc, char **argv) {
 }
 
 int main(int argc, char **argv) {
+    // A restart (an update, Restart now, Set up game data again): the run that
+    // started this one ends first (PortableKit's install/installer.hpp).
+    portablekit::install::wait_for_previous_run();
     if (argc == 3 && std::string_view(argv[1]) == "--game") return play_from(argv[0], argv[2]);
     if (argc >= 2 && std::string_view(argv[1]) == "--prepare") return prepare(argc, argv);
     if (argc >= 2 && std::string_view(argv[1]) == "--compile-game") return d012::compile_game::main(argc, argv);

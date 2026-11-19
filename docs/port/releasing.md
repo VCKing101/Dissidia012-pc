@@ -85,8 +85,17 @@ from the main checkout's clone; its text files are made LF on the way in, as Por
 beyond the scripts: `sdk/` is copied from it and is in the game code's key, and with Windows line ends a 0.7.2 build
 recompiled every Linux player's game for no change at all.
 
-Test: run the new AppImage over the previous release's install in WSL (`~/d012-linux/setup-test`): the version is
-the new one, the compile skipped or partial as on Windows, the game starts.
+It refuses to make a setup whose program lacks the update signing key's public half (below).
+
+Tests:
+- Run the new AppImage over the previous release's install in WSL (`~/d012-linux/setup-test`): the version is the
+  new one, the compile skipped or partial as on Windows, the game starts.
+- **Download and install**, from the previous release's install, before publishing: start it with
+  `D012_UPDATE_URL=<a copy of GitHub's release JSON naming this version>` and `D012_UPDATE_ASSETS=<the folder with
+  this AppImage, SHA256SUMS and SHA256SUMS.sig>`. The System page offers the update; **Install and restart** puts the
+  new files in place, the game closes and starts again (Steam starts it when Steam started it), compiling first only
+  when the game's C++ changed, with saves, settings and mods kept. On a Steam Deck, test it in Gaming Mode, from a
+  Steam shortcut: a restart started inside the game left the screen black there.
 
 **Cross-play check:** the installed Windows copy hosts and the installed Linux copy joins (relay), a whole battle in
 step, both back to the room. Run the Windows copy from a folder with the owner's firewall Allow rule: a new program
@@ -154,9 +163,10 @@ release can update the app: every player would have to uninstall, which deletes 
 
 ### The update signing key
 
-The game's **Download and install** (Windows setup copies and the Android app) installs only a setup or APK listed in a
-`SHA256SUMS` signed with this key. Its public half is `tools/port/update-signing-key.txt`, compiled into the program;
-`package_installer.py` and `android_build.sh --release` refuse to build a release without it.
+The game's **Download and install** (copies the Windows or Linux setup installed, and the Android app) installs only a
+setup, AppImage or APK listed in a `SHA256SUMS` signed with this key. Its public half is
+`tools/port/update-signing-key.txt`, compiled into the program; `package_installer.py`, `linux_setup.sh` and
+`android_build.sh --release` refuse to build a release without it.
 
 - It is made once, by the owner, who chooses its password:
 

@@ -283,9 +283,9 @@ in Steam on **Default**, not a Proton version. On the Deck, go back to Gaming Mo
 Esc, or L3 + R3 on a controller, opens the port's menu. Your saves are in `data/ms0` in the install folder, and mods
 go in `data/mods`.
 
-**To update:** run the new release's setup and choose the same folder. Your saves, settings and mods stay, and the
-game's code is compiled again only when the new version needs it. The game tells you when there is one
-([Updates](#updates)).
+**To update:** choose **Download and install** on the System page of the port's menu ([Updates](#updates)), or run
+the new release's setup and choose the same folder. Your saves, settings and mods stay, and the game's code is
+compiled again only when the new version needs it.
 
 **If it crashes or freezes,** please [open an issue](https://github.com/VCKing101/Dissidia012-pc/issues/new/choose)
 and attach `data/logs/D012Native.log` from the install folder (and `D012Native-previous.log`, the run before it). A
@@ -338,10 +338,13 @@ until you press a button.
 - **Check for updates** on the System page of the port's menu (Esc, or L3 + R3; on Android the menu button or Back)
   asks again. When a newer version is
   out, **Open the download page** opens its release in your browser. Install it as above, into the same folder.
-- **Download and install**, on the same page, updates a copy installed with the Windows setup, and the Android app. The
-  game downloads the new version and checks that it is the project's signed release. Progress since your last save is
-  lost when it installs, so save first.
+- **Download and install**, on the same page, updates a copy installed with the Windows or Linux setup, and the Android
+  app. The game downloads the new version and checks that it is the project's signed release. Progress since your last
+  save is lost when it installs, so save first.
   - Windows: **Close the game and install** closes the game, installs the update and starts the game again.
+  - Linux and the Steam Deck: **Install and restart** installs the update, closes the game and starts it again. In
+    Steam (Gaming Mode too), Steam starts it again, and its own screen shows for a moment in between. When the new
+    version's game code differs, the game makes it first, which takes a few minutes (about 8 on a Steam Deck).
   - Android: **Install the update** asks Android to install it. Android asks you to confirm, and the first time to
     allow the app to install apps. It then closes the game and installs the update: open the game again afterwards.
 - **Check when the game starts**, on the same page, turns the check at start off. The button still works.

@@ -36,6 +36,8 @@ namespace d012::device_compile {
 bool prepare(portablekit::install::InstallerUi *ui, const std::filesystem::path &executable,
              const std::filesystem::path &disc_image);
 }
+#elif defined(__linux__) && defined(D012_INSTALLER_BUILD)
+#include "d012_update_install.hpp"
 #endif
 
 namespace portablekit {
@@ -244,6 +246,10 @@ const GameProfile &game() {
         // The player's app makes the game's code on the phone from the disc
         // (d012_device_compile.cpp).
         .prepare_game = &d012::device_compile::prepare,
+#elif defined(__linux__) && defined(D012_INSTALLER_BUILD)
+        // A copy the Linux setup installed makes the game's code itself after
+        // an update from the menu (d012_update_install.cpp).
+        .prepare_game = &d012::update_install::prepare_after_update,
 #endif
 
         // Battles pace their 30 Hz logic on two vblanks (main:0x08883F9C,

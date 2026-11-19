@@ -29,7 +29,8 @@
 // The check itself downloads and runs nothing. "Open the download page" opens
 // the release's page in the browser, and only a page of this project's releases
 // (update_rules::kReleasePages). "Download and install", in a copy the Windows
-// setup installed and in the player's Android app, is d012_update_install.cpp.
+// or Linux setup installed and in the player's Android app, is
+// d012_update_install.cpp.
 //
 // MIT licence; see port/README.md.
 
@@ -60,7 +61,7 @@
 #include <SDL3/SDL_system.h>
 #include <jni.h>
 #else
-#include <dlfcn.h>
+#include "d012_curl.hpp"
 #endif
 
 #include <algorithm>
@@ -292,57 +293,8 @@ Answer fetch(const std::string &url) {
     return out;
 }
 #else
-// The few libcurl calls the check makes, opened from the system's libcurl.
-// The option and information numbers are libcurl's stable ABI (curl.h).
-struct Curl {
-    void *(*easy_init)() = nullptr;
-    int (*easy_setopt)(void *, int, ...) = nullptr;
-    int (*easy_perform)(void *) = nullptr;
-    int (*easy_getinfo)(void *, int, ...) = nullptr;
-    void (*easy_cleanup)(void *) = nullptr;
-    const char *(*easy_strerror)(int) = nullptr;
-    void *(*slist_append)(void *, const char *) = nullptr;
-    void (*slist_free_all)(void *) = nullptr;
-};
-constexpr int kOptWriteData = 10001;
-constexpr int kOptUrl = 10002;
-constexpr int kOptUserAgent = 10018;
-constexpr int kOptHttpHeader = 10023;
-constexpr int kOptWriteFunction = 20011;
-constexpr int kOptTimeout = 13;
-constexpr int kOptFollowLocation = 52;
-constexpr int kOptConnectTimeout = 78;
-constexpr int kOptNoSignal = 99;
-constexpr int kInfoResponseCode = 0x200002;
-
-const Curl *curl() {
-    static const Curl loaded = [] {
-        Curl c;
-        void *lib = nullptr;
-        for (const char *name : {"libcurl.so.4", "libcurl-gnutls.so.4", "libcurl.4.dylib"})
-            if ((lib = dlopen(name, RTLD_NOW | RTLD_LOCAL)) != nullptr) break;
-        if (lib == nullptr) {
-            std::cout << "[updates] no libcurl on this system: " << dlerror() << std::endl;
-            return c;
-        }
-        const auto get = [&](auto &slot, const char *name) {
-            slot = reinterpret_cast<std::remove_reference_t<decltype(slot)>>(dlsym(lib, name));
-        };
-        get(c.easy_init, "curl_easy_init");
-        get(c.easy_setopt, "curl_easy_setopt");
-        get(c.easy_perform, "curl_easy_perform");
-        get(c.easy_getinfo, "curl_easy_getinfo");
-        get(c.easy_cleanup, "curl_easy_cleanup");
-        get(c.easy_strerror, "curl_easy_strerror");
-        get(c.slist_append, "curl_slist_append");
-        get(c.slist_free_all, "curl_slist_free_all");
-        return c;
-    }();
-    const Curl &c = loaded;
-    const bool complete = c.easy_init && c.easy_setopt && c.easy_perform && c.easy_getinfo && c.easy_cleanup &&
-                          c.easy_strerror && c.slist_append && c.slist_free_all;
-    return complete ? &c : nullptr;
-}
+// The system's libcurl (d012_curl.hpp).
+using namespace d012::curl;
 
 std::size_t keep(char *data, std::size_t size, std::size_t count, void *to) {
     Answer &out = *static_cast<Answer *>(to);
@@ -354,7 +306,7 @@ std::size_t keep(char *data, std::size_t size, std::size_t count, void *to) {
 
 Answer fetch(const std::string &url) {
     Answer out;
-    const Curl *c = curl();
+    const Api *c = api();
     if (c == nullptr) {
         out.problem = "this system has no libcurl, which the check needs";
         return out;
@@ -636,6 +588,8 @@ void install_rows(const rules::Release &release) {
         ui::RowOptions row;
 #if defined(__ANDROID__)
         row.description = "Downloads version " + release.version + ". Android asks before it installs it.";
+#elif defined(__linux__)
+        row.description = "Downloads version " + release.version + ". The game asks before it restarts to install it.";
 #else
         row.description = "Downloads version " + release.version + ". The game asks before it closes to install it.";
 #endif
@@ -655,7 +609,7 @@ void install_rows(const rules::Release &release) {
         download_row("Download and install");
         break;
     case install::Step::Preparing:
-        ui::info_row("Update", "Getting ready…");
+        ui::info_row("Update##updates", "Getting ready…");
         break;
     case install::Step::Downloading: {
         const float fraction = s.total > 0 ? static_cast<float>(static_cast<double>(s.done) / static_cast<double>(s.total)) : 0.0f;
@@ -667,16 +621,27 @@ void install_rows(const rules::Release &release) {
         break;
     }
     case install::Step::Checking:
-        ui::info_row("Update", "Checking the download…");
+        ui::info_row("Update##updates", "Checking the download…");
+        break;
+    case install::Step::Unpacking:
+        ui::info_row("Update##updates", "Unpacking the update…");
         break;
     case install::Step::Ready: {
 #if defined(__ANDROID__)
-        if (!s.problem.empty()) ui::info_row("Update", s.problem);
+        if (!s.problem.empty()) ui::info_row("Update##updates", s.problem);
         const std::string description =
             "Android asks you to confirm, then closes the game and installs version " + s.version +
             ". Open the game again when it has finished. The first time, Android asks you to allow this app to "
             "install apps. Your saves, settings and mods stay. Progress since your last save is lost.";
         install_row(description.c_str());
+#elif defined(__linux__)
+        ui::RowOptions row;
+        row.description = "Installs version " + s.version +
+                          ", closes the game and starts it again. If its game code differs, the game makes it first, "
+                          "which takes a few minutes. Your saves, settings and mods stay. Progress since your last save "
+                          "is lost.";
+        take_focus();
+        if (ui::button_row("Install and restart", row)) (void)install::install_now();
 #else
         ui::RowOptions row;
         row.description = "Closes the game, installs version " + s.version +
@@ -688,13 +653,13 @@ void install_rows(const rules::Release &release) {
         break;
     }
     case install::Step::Installing:
-        ui::info_row("Update", "Waiting for you to confirm in Android's window");
+        ui::info_row("Update##updates", "Waiting for you to confirm in Android's window");
 #if defined(__ANDROID__)
         install_row("Asks Android again, if its window has gone.");
 #endif
         break;
     case install::Step::Failed:
-        ui::info_row("Update", "Could not update: " + s.problem);
+        ui::info_row("Update##updates", "Could not update: " + s.problem);
         download_row("Try again");
         break;
     }
@@ -730,13 +695,13 @@ void system_rows() {
     case Stage::Idle:
         break;
     case Stage::Checking:
-        ui::info_row("Status", "Checking…");
+        ui::info_row("Status##updates", "Checking…");
         break;
     case Stage::Newest:
-        ui::info_row("Status", std::string("This is the newest version (") + kVersion + ")");
+        ui::info_row("Status##updates", std::string("This is the newest version (") + kVersion + ")");
         break;
     case Stage::Available: {
-        ui::info_row("Status", "Version " + r.latest + " is available");
+        ui::info_row("Status##updates", "Version " + r.latest + " is available");
         if (r.release && update_install::can_install(*r.release)) install_rows(*r.release);
         ui::RowOptions open;
 #if defined(__ANDROID__)
@@ -748,11 +713,11 @@ void system_rows() {
 #endif
         if (ui::button_row("Open the download page", open) && !SDL_OpenURL(r.page.c_str()))
             std::cout << "[updates] cannot open " << r.page << ": " << SDL_GetError() << std::endl;
-        ui::info_row("Page", r.page);
+        ui::info_row("Page##updates", r.page);
         break;
     }
     case Stage::Failed:
-        ui::info_row("Status", "Could not check: " + r.problem);
+        ui::info_row("Status##updates", "Could not check: " + r.problem);
         break;
     }
 }
