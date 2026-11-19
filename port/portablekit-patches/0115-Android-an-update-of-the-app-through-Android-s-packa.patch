@@ -1,0 +1,344 @@
+From a99144ccab2ea1b885ea766173da358ab19aff13 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Thu, 19 Nov 2026 20:25:48 +1030
+Subject: [PATCH] Android: an update of the app through Android's package
+ installer
+
+GameActivity.installPackage hands an APK in the app's own storage to
+Android's PackageInstaller as an update of this app (setAppPackageName,
+so no other package). Android asks the player to confirm, the first time
+to let the app install apps, then stops the app and installs it over
+itself. Its answers come back to the activity through a PendingIntent
+(onNewIntent): the question to the player is shown, and a cancel or a
+refusal is kept for installState(), installStatus() and installMessage().
+
+- host/platform/android_jni: install_package() and install_answer().
+- build_apk.sh: EXTRA_PERMISSIONS adds permissions to the manifest, such
+  as REQUEST_INSTALL_PACKAGES, which only a game whose app installs its
+  own updates asks for.
+
+Tested with Dissidia 012's player app on a Galaxy S25 Ultra (Android 17):
+an update from 0.7.98 to 0.7.99 installed over the app with its data kept;
+going to Settings to allow installs came back as a cancel. Not tested:
+other phones and Android versions, a refusal (another key, no space).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/platform/android_jni.cpp                 |  36 +++++
+ host/platform/android_jni.hpp                 |  26 +++-
+ packaging/android/README.md                   |   4 +-
+ packaging/android/build_apk.sh                |  13 +-
+ .../teamgdb/portablekit/GameActivity.java     | 133 +++++++++++++++++-
+ 5 files changed, 203 insertions(+), 9 deletions(-)
+
+diff --git a/host/platform/android_jni.cpp b/host/platform/android_jni.cpp
+index 5073494..b5fabbf 100644
+--- a/host/platform/android_jni.cpp
++++ b/host/platform/android_jni.cpp
+@@ -162,4 +162,40 @@ int open_document(const std::string &uri, const char *mode) {
+     return fd;
+ }
+ 
++bool install_package(const std::string &path) {
++    Call call;
++    if (!call.ok()) return false;
++    jmethodID id = call.method("installPackage", "(Ljava/lang/String;)Z");
++    if (id == nullptr) return false;
++    jstring file = call.string(path);
++    const jboolean handed = call.env->CallStaticBooleanMethod(call.type, id, file);
++    call.env->DeleteLocalRef(file);
++    if (call.failed()) return false;
++    return handed == JNI_TRUE;
++}
++
++InstallAnswer install_answer() {
++    InstallAnswer answer;
++    Call call;
++    if (!call.ok()) return answer;
++    jmethodID state = call.method("installState", "()I");
++    jmethodID status = call.method("installStatus", "()I");
++    jmethodID message = call.method("installMessage", "()Ljava/lang/String;");
++    if (state == nullptr || status == nullptr || message == nullptr) return answer;
++    const jint value = call.env->CallStaticIntMethod(call.type, state);
++    if (call.failed()) return answer;
++    switch (value) {
++    case 1: answer.state = InstallAnswer::State::Waiting; break;
++    case 2: answer.state = InstallAnswer::State::Cancelled; break;
++    case 3: answer.state = InstallAnswer::State::Failed; break;
++    default: break;
++    }
++    if (answer.state != InstallAnswer::State::Failed) return answer;
++    answer.status = call.env->CallStaticIntMethod(call.type, status);
++    if (call.failed()) answer.status = 1;  // STATUS_FAILURE
++    jobject text = call.env->CallStaticObjectMethod(call.type, message);
++    if (!call.failed()) answer.message = call.text(text).value_or(std::string());
++    return answer;
++}
++
+ } // namespace portablekit::android
+diff --git a/host/platform/android_jni.hpp b/host/platform/android_jni.hpp
+index 08cb1cf..6d3ebfe 100644
+--- a/host/platform/android_jni.hpp
++++ b/host/platform/android_jni.hpp
+@@ -1,8 +1,9 @@
+ #pragma once
+ 
+ // What the Android app asks of its Java activity (GameActivity, packaging/android/java) through JNI:
+-// the display cutout, and folders the player picks through the system's
+-// document picker, read and written as content:// documents. Only in the
++// the display cutout, folders the player picks through the system's
++// document picker, read and written as content:// documents, and an update
++// of the app through Android's package installer. Only in the
+ // Android app (PORTABLEKIT_ANDROID_APP); every call runs on the calling thread and
+ // the picker blocks it until the player has chosen.
+ 
+@@ -45,4 +46,25 @@ struct Entry {
+ // truncating); -1 on failure.
+ [[nodiscard]] int open_document(const std::string &uri, const char *mode);
+ 
++// Hands an APK in the app's own storage (`path`) to Android's package
++// installer as an update of this app. Android asks the player to confirm,
++// then stops the app and installs it. The app must ask for
++// android.permission.REQUEST_INSTALL_PACKAGES (build_apk.sh EXTRA_PERMISSIONS).
++// Blocks while the package is copied to the installer; false when that failed,
++// with install_answer() saying why.
++[[nodiscard]] bool install_package(const std::string &path);
++
++struct InstallAnswer {
++    enum class State {
++        None,       // nothing asked yet
++        Waiting,    // for Android or the player
++        Cancelled,  // the player said no
++        Failed,     // Android refused it
++    } state = State::None;
++    int status = 0;       // Failed: PackageInstaller's STATUS_FAILURE_* code
++    std::string message;  // Failed: Android's own words, for a log
++};
++// What Android has answered about the latest install_package().
++[[nodiscard]] InstallAnswer install_answer();
++
+ } // namespace portablekit::android
+diff --git a/packaging/android/README.md b/packaging/android/README.md
+index 7cd09f7..5ba866c 100644
+--- a/packaging/android/README.md
++++ b/packaging/android/README.md
+@@ -5,9 +5,9 @@ What a game's Android app is made of besides the native code. A game builds `lib
+ | File | What it is |
+ | --- | --- |
+ | `AndroidManifest.xml` | The app: Android 10 (API 29) and Vulkan 1.1 required, landscape, the libraries extracted so the overlay loader can list them, the backup rules. `build_apk.sh` renames its package to the game's `APP_ID` |
+-| `java/…/GameActivity.java` | SDL's activity plus what the host needs from Android: the display cutout, the document picker for folders and files, restarting the app |
++| `java/…/GameActivity.java` | SDL's activity plus what the host needs from Android: the display cutout, the document picker for folders and files, restarting the app, and an update of the app through Android's package installer (`installPackage`, `host/platform/android_jni.hpp`), which needs `EXTRA_PERMISSIONS=android.permission.REQUEST_INSTALL_PACKAGES` |
+ | `res/` | The theme without a title bar, the adaptive icon's layout and the backup rules (saves and settings only). The game's own resources (`GAME_RES`) are laid over these: its name (`values/strings.xml`), its launcher icons, and its own backup rules if it needs to leave a folder out |
+-| `build_apk.sh` | Packs and signs an APK without Gradle, with the SDK's own tools |
++| `build_apk.sh` | Packs and signs an APK without Gradle, with the SDK's own tools; `EXTRA_PERMISSIONS` adds permissions a game's app needs beyond the manifest's |
+ | `make_icons.sh` | Makes a game's launcher icons from an SVG emblem; needs `rsvg-convert` and ImageMagick |
+ 
+ SDL's own Java classes come from the SDL3 source the build uses, not from this directory.
+diff --git a/packaging/android/build_apk.sh b/packaging/android/build_apk.sh
+index b44533f..f4140d1 100755
+--- a/packaging/android/build_apk.sh
++++ b/packaging/android/build_apk.sh
+@@ -37,7 +37,10 @@
+ # EXTRA_LIBS may name a directory of more lib*.so files to pack, such as
+ # programs the app runs: Android runs programs only from the app's native
+ # library folder, never from files the app wrote. EXTRA_ASSETS may name a
+-# directory laid into the APK's assets.
++# directory laid into the APK's assets. EXTRA_PERMISSIONS may list more
++# permissions the app asks for, separated by spaces, such as
++# android.permission.REQUEST_INSTALL_PACKAGES for an app that installs its own
++# updates (GameActivity.installPackage).
+ # The overlay limit packs only the first N overlay libraries, to keep a test
+ # APK small; without it every one is packed.
+ set -euo pipefail
+@@ -97,7 +100,13 @@ assets=(-A "$work/assets")
+ repo="${GAME_REPO:-$(git -C "$game_res" rev-parse --show-toplevel 2>/dev/null || echo "$game_res")}"
+ version_name="${VERSION_NAME:-$(git -C "$repo" describe --tags --always --dirty 2>/dev/null || echo 0.0)}"
+ version_code="${VERSION_CODE:-$(git -C "$repo" rev-list --count HEAD 2>/dev/null || echo 1)}"
+-"$build_tools/aapt2" link -I "$android_jar" --manifest "$here/AndroidManifest.xml" \
++manifest="$work/AndroidManifest.xml"
++cp "$here/AndroidManifest.xml" "$manifest"
++for permission in ${EXTRA_PERMISSIONS:-}; do
++    [[ "$permission" =~ ^[A-Za-z0-9_.]+$ ]] || { echo "error: $permission is not a permission name" >&2; exit 1; }
++    sed -i "s|^\( *\)<application |\1<uses-permission android:name=\"$permission\" />\n&|" "$manifest"
++done
++"$build_tools/aapt2" link -I "$android_jar" --manifest "$manifest" \
+     --min-sdk-version "$min_sdk" --target-sdk-version 35 --version-name "$version_name" \
+     --version-code "$version_code" ${DEBUGGABLE:+--debug-mode} "${assets[@]}" -o "$work/unsigned.apk" \
+     --rename-manifest-package "$app_id" "$work/res.zip" -R "$work/game-res.zip" --auto-add-overlay
+diff --git a/packaging/android/java/io/github/teamgdb/portablekit/GameActivity.java b/packaging/android/java/io/github/teamgdb/portablekit/GameActivity.java
+index cec636d..b19ed9e 100644
+--- a/packaging/android/java/io/github/teamgdb/portablekit/GameActivity.java
++++ b/packaging/android/java/io/github/teamgdb/portablekit/GameActivity.java
+@@ -1,8 +1,10 @@
+ package io.github.teamgdb.portablekit;
+ 
++import android.app.PendingIntent;
+ import android.content.ContentResolver;
+ import android.content.Intent;
+ import android.content.pm.ActivityInfo;
++import android.content.pm.PackageInstaller;
+ import android.database.Cursor;
+ import android.graphics.Insets;
+ import android.net.Uri;
+@@ -15,6 +17,10 @@ import android.view.WindowInsets;
+ 
+ import org.libsdl.app.SDLActivity;
+ 
++import java.io.File;
++import java.io.FileInputStream;
++import java.io.InputStream;
++import java.io.OutputStream;
+ import java.util.ArrayList;
+ 
+ /**
+@@ -22,9 +28,10 @@ import java.util.ArrayList;
+  * offer: the display cutout alone (SDL's safe area also counts the gesture
+  * areas of hidden system bars), and the system's document picker for whole
+  * folders, with the documents in them read and written through file
+- * descriptors. The native side calls the static methods through JNI from the
+- * game's thread; each picker call blocks that thread until the player has
+- * chosen, never the UI thread.
++ * descriptors, and Android's package installer for an update of the app. The
++ * native side calls the static methods through JNI from the game's thread;
++ * each picker call blocks that thread until the player has chosen, never the
++ * UI thread.
+  */
+ public class GameActivity extends SDLActivity {
+     private static final int kPickTree = 0x59414b01;
+@@ -32,6 +39,17 @@ public class GameActivity extends SDLActivity {
+     private static boolean sPickDone;
+     private static String sPickResult;
+ 
++    // What Android answered about the latest installPackage(): installState().
++    private static final String kInstallStatus = "io.github.teamgdb.portablekit.INSTALL_STATUS";
++    private static final int kInstallNone = 0;
++    private static final int kInstallWaiting = 1;
++    private static final int kInstallCancelled = 2;
++    private static final int kInstallFailed = 3;
++    private static final Object sInstallLock = new Object();
++    private static int sInstallState = kInstallNone;
++    private static int sInstallStatus;
++    private static String sInstallMessage = "";
++
+     /**
+      * Keeps the game in landscape, either way up, as the manifest asks. SDL
+      * calls this when it makes the window and would otherwise ask for every
+@@ -129,6 +147,115 @@ public class GameActivity extends SDLActivity {
+         super.onActivityResult(requestCode, resultCode, data);
+     }
+ 
++    /**
++     * Hands an APK in the app's own storage to Android's package installer, as
++     * an update of this app: Android asks the player to confirm, then stops the
++     * app and installs it. The app needs android.permission.REQUEST_INSTALL_PACKAGES
++     * (build_apk.sh, EXTRA_PERMISSIONS); the first time, Android also asks the
++     * player to let it install apps. Blocks while the package is copied to the
++     * installer; false when that failed. installState() follows Android's answer.
++     */
++    public static boolean installPackage(String path) {
++        if (mSingleton == null) return false;
++        setInstall(kInstallWaiting, 0, "");
++        PackageInstaller installer = mSingleton.getPackageManager().getPackageInstaller();
++        PackageInstaller.SessionParams params =
++            new PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL);
++        // Only this app: a package with another name is refused.
++        params.setAppPackageName(mSingleton.getPackageName());
++        File file = new File(path);
++        params.setSize(file.length());
++        int id = -1;
++        try {
++            id = installer.createSession(params);
++            try (PackageInstaller.Session session = installer.openSession(id)) {
++                try (InputStream in = new FileInputStream(file);
++                     OutputStream out = session.openWrite("base.apk", 0, file.length())) {
++                    byte[] buffer = new byte[1 << 16];
++                    for (int n; (n = in.read(buffer)) > 0;) out.write(buffer, 0, n);
++                    session.fsync(out);
++                }
++                // Android's answers come back to this activity (onNewIntent).
++                // It fills in the intent's extras, so from Android 12 the
++                // intent must be mutable, and then explicit.
++                Intent answer = new Intent(mSingleton, GameActivity.class).setAction(kInstallStatus);
++                int flags = PendingIntent.FLAG_UPDATE_CURRENT;
++                if (Build.VERSION.SDK_INT >= 31) flags |= PendingIntent.FLAG_MUTABLE;
++                PendingIntent pending = PendingIntent.getActivity(mSingleton, id, answer, flags);
++                session.commit(pending.getIntentSender());
++            }
++            return true;
++        } catch (Exception e) {
++            if (id != -1) {
++                try {
++                    installer.abandonSession(id);
++                } catch (Exception ignored) {
++                }
++            }
++            setInstall(kInstallFailed, PackageInstaller.STATUS_FAILURE, e.toString());
++            return false;
++        }
++    }
++
++    /** 0 nothing asked, 1 waiting for Android or the player, 2 the player said no, 3 Android refused. */
++    public static int installState() {
++        synchronized (sInstallLock) {
++            return sInstallState;
++        }
++    }
++
++    /** With installState() 3: PackageInstaller's STATUS_FAILURE_* code. */
++    public static int installStatus() {
++        synchronized (sInstallLock) {
++            return sInstallStatus;
++        }
++    }
++
++    /** With installState() 3: Android's own words, for a log. */
++    public static String installMessage() {
++        synchronized (sInstallLock) {
++            return sInstallMessage;
++        }
++    }
++
++    private static void setInstall(int state, int status, String message) {
++        synchronized (sInstallLock) {
++            sInstallState = state;
++            sInstallStatus = status;
++            sInstallMessage = message != null ? message : "";
++        }
++    }
++
++    @Override
++    protected void onNewIntent(Intent intent) {
++        if (intent == null || !kInstallStatus.equals(intent.getAction())) {
++            super.onNewIntent(intent);
++            return;
++        }
++        int status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE);
++        String message = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE);
++        if (status == PackageInstaller.STATUS_PENDING_USER_ACTION) {
++            // Android's question to the player: shown over the game.
++            Intent confirm = intent.getParcelableExtra(Intent.EXTRA_INTENT);
++            if (confirm != null) {
++                try {
++                    startActivity(confirm);
++                    return;
++                } catch (Exception e) {
++                    message = e.toString();
++                }
++            }
++            setInstall(kInstallFailed, PackageInstaller.STATUS_FAILURE, message);
++        } else if (status == PackageInstaller.STATUS_SUCCESS) {
++            // Usually never seen: Android stops the app to update it.
++            setInstall(kInstallNone, status, "");
++        } else if (status == PackageInstaller.STATUS_FAILURE_ABORTED) {
++            setInstall(kInstallCancelled, status, message);
++        } else {
++            setInstall(kInstallFailed, status, message);
++        }
++    }
++
+     /** Starts the app afresh: this process ends and a new one opens the activity. */
+     public static void relaunch() {
+         if (mSingleton == null) return;
+-- 
+2.53.0.windows.1
+

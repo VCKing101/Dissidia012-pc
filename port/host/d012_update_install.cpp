@@ -1,22 +1,24 @@
 // Installing a newer version from the menu (d012_update_install.hpp).
 //
-// Only in a copy the Windows setup installed (unins000.exe beside the program)
-// and only when this build carries the release key's public half
-// (d012::kUpdateSigningKey). Elsewhere the System page keeps "Open the download
-// page": RecompLauncher updates its own copies, and Linux and Android have no
-// install from the menu yet.
+// Only when this build carries the release key's public half
+// (d012::kUpdateSigningKey), and only in a copy the Windows setup installed
+// (unins000.exe beside the program) or in the player's Android app (the
+// installer build, D012_INSTALLER_BUILD). Elsewhere the System page keeps
+// "Open the download page": RecompLauncher updates its own copies, and Linux
+// has no install from the menu yet.
 //
 // The steps, on a thread of their own while the game goes on:
 //  1. SHA256SUMS and SHA256SUMS.sig are fetched, and the list is refused unless
-//     the signature is the release key's. The list names the setup with its
+//     the signature is the release key's. The list names the program with its
 //     version, so an older release's list cannot pass for this one.
-//  2. The setup is downloaded to update-download/ beside the program, as
-//     <name>.part, which a later attempt continues.
+//  2. The program (the Windows setup, the Android app) is downloaded to
+//     update-download/, as <name>.part, which a later attempt continues: beside
+//     the program on Windows, in the app's own storage on Android.
 //  3. Its SHA-256 must be the one the signed list gives. Only then does it get
-//     its own name, and only a file with its own name is ever started.
+//     its own name, and only a file with its own name is ever installed.
 //
-// When the player chooses to install, update-download/pending.txt is written
-// with the version, the setup starts, and the game closes. The setup
+// Windows: when the player chooses to install, update-download/pending.txt is
+// written with the version, the setup starts, and the game closes. The setup
 // (tools/port/installer/dissidia012.iss, /UPDATE=1) waits for the game to end,
 // replaces the program, compiles the game's code when it must, deletes
 // pending.txt and starts the game. A run that finds pending.txt naming its own
@@ -24,8 +26,16 @@
 // the game's code, and offers to finish; naming another version, the program
 // was never replaced and nothing needs doing.
 //
+// Android: the app goes to Android's package installer (PortableKit's
+// android::install_package), which asks the player to confirm, stops the game
+// and installs the app over itself, keeping its data; Android also checks that
+// it is signed with the same key. The player opens the game again, which
+// compiles the game's code first only when the new version's differs
+// (host/d012_device_compile.cpp). The next start deletes the download.
+//
 // Tests: D012_UPDATE_ASSETS=<folder> takes those of the three files that are in
 // the folder from there instead of GitHub; every check is made all the same.
+// (On Android, test-environment.txt sets it: host/d012_portable.cpp.)
 //
 // MIT licence; see port/README.md.
 
@@ -48,6 +58,12 @@
 #endif
 #include <windows.h>
 #include <winhttp.h>
+#elif defined(PORTABLEKIT_ANDROID_APP) && defined(D012_INSTALLER_BUILD)
+#include "install/user_data.hpp"
+#include "platform/android_jni.hpp"
+
+#include <SDL3/SDL_system.h>
+#include <jni.h>
 #endif
 
 #include <algorithm>
@@ -62,24 +78,48 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
-namespace d012::update_install {
-namespace {
+// Where a copy can install an update itself.
+#if defined(_WIN32)
+#define D012_INSTALLS_UPDATES 1
+#define D012_INSTALLS_ON_WINDOWS 1
+#elif defined(PORTABLEKIT_ANDROID_APP) && defined(D012_INSTALLER_BUILD)
+#define D012_INSTALLS_UPDATES 1
+#define D012_INSTALLS_ON_ANDROID 1
+#endif
 
-namespace fs = std::filesystem;
+namespace d012::update_install {
+
 namespace rules = update_rules;
 
-#if defined(_WIN32)
+namespace {
 
+#if defined(D012_INSTALLS_UPDATES)
+
+namespace fs = std::filesystem;
+
+#if defined(D012_INSTALLS_ON_WINDOWS)
 // Room for the setup, what it unpacks and the game's code it may compile.
-constexpr std::uint64_t kSpaceBesidesSetup = 1500ull * 1024u * 1024u;
+constexpr std::uint64_t kSpaceBesidesProgram = 1500ull * 1024u * 1024u;
+// The setups' names: rules::setup_file_name.
+constexpr std::string_view kProgramPrefix = "Dissidia012-PC-Setup-";
+constexpr std::string_view kProgramSuffix = ".exe";
 constexpr const char *kPendingFile = "pending.txt";
+#else
+// Room for Android's copy of the app, its libraries unpacked, and the game's
+// code the app may compile again.
+constexpr std::uint64_t kSpaceBesidesProgram = 1024ull * 1024u * 1024u;
+// The apps' names: rules::android_file_name.
+constexpr std::string_view kProgramPrefix = "Dissidia012-";
+constexpr std::string_view kProgramSuffix = "-Android-arm64.apk";
+#endif
 
 std::mutex g_mutex;
 Status g_status;
-fs::path g_setup;  // Ready: the checked setup
+fs::path g_program;  // Ready: the checked download
 std::atomic<bool> g_busy{false};
 std::atomic<bool> g_cancel{false};
 
@@ -88,12 +128,28 @@ struct Problem {
     std::string text;
 };
 
+#if defined(D012_INSTALLS_ON_WINDOWS)
 fs::path folder() { return portablekit::executable_directory() / "update-download"; }
+#else
+fs::path folder() { return portablekit::install::user_data_directory() / "update-download"; }
+#endif
+
+std::optional<rules::UpdateFiles> update_files(const rules::Release &release) {
+#if defined(D012_INSTALLS_ON_WINDOWS)
+    return rules::windows_update(release);
+#else
+    return rules::android_update(release);
+#endif
+}
 
 void set_step(Step step) {
     std::lock_guard lock(g_mutex);
     g_status.step = step;
 }
+
+// --- Downloading -----------------------------------------------------------
+
+#if defined(D012_INSTALLS_ON_WINDOWS)
 
 // Asked every frame the System page shows an update, and neither can change.
 bool running_under_wine() {
@@ -111,8 +167,6 @@ bool installed_by_the_setup() {
     }();
     return installed;
 }
-
-// --- Downloading -----------------------------------------------------------
 
 std::wstring wide(const std::string &text) { return std::wstring(text.begin(), text.end()); }  // ASCII addresses
 
@@ -216,6 +270,149 @@ void download(const std::string &url, const fs::path &part, std::uint64_t size) 
     if (have != size) throw Problem{"the download was interrupted. Try again to continue it"};
 }
 
+#else  // Android
+
+// `url` into `part` through Java's HttpURLConnection, continuing what is
+// there, with `size` bytes expected. It follows GitHub's redirect to its
+// download server by itself (https to https).
+void download(const std::string &url, const fs::path &part, std::uint64_t size) {
+    if (url.rfind("https://", 0) != 0) throw Problem{"the download's address cannot be used"};
+    std::error_code ec;
+    std::uint64_t have = fs::is_regular_file(part, ec) ? fs::file_size(part, ec) : 0u;
+    if (ec || have > size) {
+        fs::remove(part, ec);
+        have = 0;
+    }
+
+    auto *jni = static_cast<JNIEnv *>(SDL_GetAndroidJNIEnv());
+    if (jni == nullptr || jni->PushLocalFrame(32) != JNI_OK) {
+        std::cout << "[update] no Java environment: " << SDL_GetError() << std::endl;
+        throw Problem{"the download could not start"};
+    }
+    struct Frame {
+        JNIEnv *jni;
+        ~Frame() { jni->PopLocalFrame(nullptr); }
+    } frame{jni};
+    // A Java exception ends the attempt; its text goes to the log.
+    const auto thrown = [&](const char *step) {
+        if (!jni->ExceptionCheck()) return false;
+        jthrowable error = jni->ExceptionOccurred();
+        jni->ExceptionClear();
+        std::string text = "?";
+        if (jclass object = jni->FindClass("java/lang/Object"); object != nullptr) {
+            const jmethodID to_string = jni->GetMethodID(object, "toString", "()Ljava/lang/String;");
+            if (auto *s = static_cast<jstring>(jni->CallObjectMethod(error, to_string)); s != nullptr) {
+                if (const char *chars = jni->GetStringUTFChars(s, nullptr); chars != nullptr) {
+                    text = chars;
+                    jni->ReleaseStringUTFChars(s, chars);
+                }
+            }
+        }
+        jni->ExceptionClear();
+        std::cout << "[update] " << step << ": " << text << std::endl;
+        return true;
+    };
+    const auto lost = [](const char *) -> Problem { return Problem{"the download was interrupted. Try again to continue it"}; };
+
+    jclass url_class = jni->FindClass("java/net/URL");
+    jclass http = jni->FindClass("java/net/HttpURLConnection");
+    jclass stream_class = jni->FindClass("java/io/InputStream");
+    if (thrown("classes") || url_class == nullptr || http == nullptr || stream_class == nullptr)
+        throw Problem{"the download could not start"};
+    jobject address = jni->NewObject(url_class, jni->GetMethodID(url_class, "<init>", "(Ljava/lang/String;)V"),
+                                     jni->NewStringUTF(url.c_str()));
+    if (thrown("URL")) throw Problem{"the download's address cannot be used"};
+    jobject connection =
+        jni->CallObjectMethod(address, jni->GetMethodID(url_class, "openConnection", "()Ljava/net/URLConnection;"));
+    if (thrown("openConnection") || connection == nullptr || !jni->IsInstanceOf(connection, http))
+        throw lost("openConnection");
+    const jmethodID disconnect_method = jni->GetMethodID(http, "disconnect", "()V");
+    const auto disconnect = [&] {
+        jni->CallVoidMethod(connection, disconnect_method);
+        (void)thrown("disconnect");
+    };
+    const jmethodID property = jni->GetMethodID(http, "setRequestProperty", "(Ljava/lang/String;Ljava/lang/String;)V");
+    const std::string agent = std::string("Dissidia012-pc/") + kVersion;
+    jni->CallVoidMethod(connection, property, jni->NewStringUTF("User-Agent"), jni->NewStringUTF(agent.c_str()));
+    if (have > 0) {
+        const std::string range = "bytes=" + std::to_string(have) + "-";
+        jni->CallVoidMethod(connection, property, jni->NewStringUTF("Range"), jni->NewStringUTF(range.c_str()));
+    }
+    jni->CallVoidMethod(connection, jni->GetMethodID(http, "setConnectTimeout", "(I)V"), 15000);
+    jni->CallVoidMethod(connection, jni->GetMethodID(http, "setReadTimeout", "(I)V"), 30000);
+    const jint status = jni->CallIntMethod(connection, jni->GetMethodID(http, "getResponseCode", "()I"));
+    if (thrown("getResponseCode")) {
+        disconnect();
+        throw lost("getResponseCode");
+    }
+    if (have > 0 && (status == 416 || status == 200)) {
+        // GitHub will not continue this one: from the start.
+        disconnect();
+        fs::remove(part, ec);
+        download(url, part, size);
+        return;
+    }
+    if (status != 200 && status != 206) {
+        disconnect();
+        throw Problem{"GitHub answered with error " + std::to_string(status)};
+    }
+    if (have > 0) std::cout << "[update] continuing the download from byte " << have << std::endl;
+
+    jobject stream = jni->CallObjectMethod(connection, jni->GetMethodID(http, "getInputStream", "()Ljava/io/InputStream;"));
+    if (thrown("getInputStream") || stream == nullptr) {
+        disconnect();
+        throw lost("getInputStream");
+    }
+    const jmethodID read_method = jni->GetMethodID(stream_class, "read", "([B)I");
+    const jmethodID close_method = jni->GetMethodID(stream_class, "close", "()V");
+    const auto close = [&] {
+        jni->CallVoidMethod(stream, close_method);
+        (void)thrown("close");
+        disconnect();
+    };
+    std::ofstream out(part, std::ios::binary | std::ios::app);
+    if (!out) {
+        close();
+        throw Problem{"the download cannot be written to the app's storage"};
+    }
+    constexpr jsize kChunk = 256 * 1024;
+    jbyteArray buffer = jni->NewByteArray(kChunk);
+    std::vector<char> bytes(static_cast<std::size_t>(kChunk));
+    for (;;) {
+        if (g_cancel.load()) {
+            close();
+            throw Cancelled{};
+        }
+        const jint got = jni->CallIntMethod(stream, read_method, buffer);
+        if (thrown("reading")) {
+            close();
+            throw lost("reading");
+        }
+        if (got < 0) break;
+        if (got == 0) continue;
+        jni->GetByteArrayRegion(buffer, 0, got, reinterpret_cast<jbyte *>(bytes.data()));
+        have += static_cast<std::uint64_t>(got);
+        if (have > size) {
+            close();
+            out.close();
+            fs::remove(part, ec);
+            throw Problem{"the download is larger than the release says"};
+        }
+        out.write(bytes.data(), got);
+        if (!out) {
+            close();
+            throw Problem{"the download cannot be written to the app's storage: check the free space"};
+        }
+        std::lock_guard lock(g_mutex);
+        g_status.done = have;
+    }
+    close();
+    out.close();
+    if (have != size) throw lost("the end");
+}
+
+#endif
+
 // D012_UPDATE_ASSETS's copy of a file of the release, when it has one.
 std::optional<fs::path> test_copy(const rules::Asset &asset) {
     const char *dir = std::getenv("D012_UPDATE_ASSETS");
@@ -241,53 +438,53 @@ std::string fetch_small(const rules::Asset &asset) {
 // --- The steps -------------------------------------------------------------
 
 void work(const rules::Release &release) {
-    const std::optional<rules::WindowsUpdate> update = rules::windows_update(release);
+    const std::optional<rules::UpdateFiles> update = update_files(release);
     if (!update) throw Problem{"this release cannot be installed from here"};
 
     const std::string sums = fetch_small(update->sums);
     const std::string signature = fetch_small(update->signature);
     if (!rules::sums_signed(sums, signature, kUpdateSigningKey))
         throw Problem{"the release's signature is not valid, so nothing was installed"};
-    const std::string expected = rules::listed_hash(sums, update->setup.name);
-    if (expected.empty()) throw Problem{"the release's signed list does not name its setup"};
+    const std::string expected = rules::listed_hash(sums, update->program.name);
+    if (expected.empty()) throw Problem{"the release's signed list does not name this download"};
 
     std::error_code ec;
     const fs::path dir = folder();
     fs::create_directories(dir, ec);
-    if (ec) throw Problem{"the folder for the download cannot be made beside the game"};
-    const fs::path setup = dir / update->setup.name;
-    const fs::path part = fs::path(setup).concat(".part");
+    if (ec) throw Problem{"the folder for the download cannot be made"};
+    const fs::path program = dir / update->program.name;
+    const fs::path part = fs::path(program).concat(".part");
     // Downloads of other versions go.
     for (const fs::directory_entry &entry : fs::directory_iterator(dir, ec))
-        if (entry.path() != setup && entry.path() != part) fs::remove(entry.path(), ec);
+        if (entry.path() != program && entry.path() != part) fs::remove(entry.path(), ec);
 
     const auto is_good = [&](const fs::path &file) { return psprecomp::sha256_file(file) == expected; };
-    if (fs::is_regular_file(setup, ec)) {
+    if (fs::is_regular_file(program, ec)) {
         set_step(Step::Checking);
-        if (is_good(setup)) {
+        if (is_good(program)) {
             std::lock_guard lock(g_mutex);
-            g_setup = setup;
+            g_program = program;
             g_status.step = Step::Ready;
             return;
         }
-        fs::remove(setup, ec);
+        fs::remove(program, ec);
     }
 
     const fs::space_info space = fs::space(dir, ec);
-    if (!ec && space.available < update->setup.size + kSpaceBesidesSetup)
-        throw Problem{"there is not enough free space on this drive"};
+    if (!ec && space.available < update->program.size + kSpaceBesidesProgram)
+        throw Problem{"there is not enough free space on this device"};
 
     {
         std::lock_guard lock(g_mutex);
         g_status.step = Step::Downloading;
-        g_status.total = update->setup.size;
+        g_status.total = update->program.size;
         g_status.done = fs::is_regular_file(part, ec) ? fs::file_size(part, ec) : 0u;
     }
-    if (const std::optional<fs::path> file = test_copy(update->setup)) {
+    if (const std::optional<fs::path> file = test_copy(update->program)) {
         fs::copy_file(*file, part, fs::copy_options::overwrite_existing, ec);
-        if (ec) throw Problem{"the test folder's setup cannot be copied"};
+        if (ec) throw Problem{"the test folder's copy cannot be copied"};
     } else {
-        download(update->setup.url, part, update->setup.size);
+        download(update->program.url, part, update->program.size);
     }
 
     set_step(Step::Checking);
@@ -295,12 +492,35 @@ void work(const rules::Release &release) {
         fs::remove(part, ec);
         throw Problem{"the download is damaged, so nothing was installed. Try again"};
     }
-    fs::rename(part, setup, ec);
-    if (ec) throw Problem{"the download cannot be kept beside the game"};
+    fs::rename(part, program, ec);
+    if (ec) throw Problem{"the download cannot be kept"};
     std::lock_guard lock(g_mutex);
-    g_setup = setup;
+    g_program = program;
     g_status.step = Step::Ready;
 }
+
+// Downloads of this version or older have served their turn.
+void clear_finished_downloads() {
+    std::error_code ec;
+    const fs::path dir = folder();
+    if (!fs::is_directory(dir, ec)) return;
+    for (const fs::directory_entry &entry : fs::directory_iterator(dir, ec)) {
+        std::string name = entry.path().filename().string();
+        if (name.size() > 5 && name.ends_with(".part")) name.resize(name.size() - 5);
+        if (name.size() <= kProgramPrefix.size() + kProgramSuffix.size() || !name.starts_with(kProgramPrefix) ||
+            !name.ends_with(kProgramSuffix))
+            continue;
+        const std::string version =
+            name.substr(kProgramPrefix.size(), name.size() - kProgramPrefix.size() - kProgramSuffix.size());
+        if (rules::is_version(version) && rules::compare_versions(version, kVersion) <= 0)
+            fs::remove(entry.path(), ec);
+    }
+    fs::remove(dir, ec);  // only when empty
+}
+
+// --- Installing ------------------------------------------------------------
+
+#if defined(D012_INSTALLS_ON_WINDOWS)
 
 // The environment without the port's own switches, which are this run's only.
 std::vector<wchar_t> clean_environment() {
@@ -362,36 +582,62 @@ std::string read_pending() {
     return version;
 }
 
-// Downloads of this version or older have served their turn.
-void clear_finished_downloads() {
-    std::error_code ec;
-    const fs::path dir = folder();
-    if (!fs::is_directory(dir, ec)) return;
-    const std::string prefix = "Dissidia012-PC-Setup-";
-    for (const fs::directory_entry &entry : fs::directory_iterator(dir, ec)) {
-        std::string name = entry.path().filename().string();
-        if (name.size() > 5 && name.ends_with(".part")) name.resize(name.size() - 5);
-        if (!name.starts_with(prefix) || !name.ends_with(".exe")) continue;
-        const std::string version = name.substr(prefix.size(), name.size() - prefix.size() - 4);
-        if (rules::is_version(version) && rules::compare_versions(version, kVersion) <= 0)
-            fs::remove(entry.path(), ec);
+#else  // Android
+
+// Set once Android's installer has the app, so that its answer about an
+// earlier attempt is never taken for this one's.
+std::atomic<bool> g_asked{false};
+std::atomic<bool> g_handing{false};
+
+// Android's refusal, for the player (PackageInstaller's STATUS_FAILURE_*).
+std::string refusal(int status) {
+    switch (status) {
+    case 2: return "Android blocked the install";
+    case 4: return "Android says the download is not a valid app";
+    case 5: return "Android refused it: this copy of the app was signed with another key. Install the update from its "
+                   "page";
+    case 6: return "there is not enough free space on this device";
+    case 7: return "Android says this update does not suit this device";
+    default: return "Android could not install it";
     }
-    fs::remove(dir, ec);  // only when empty
 }
 
-#endif  // _WIN32
+#endif
+
+#endif  // D012_INSTALLS_UPDATES
 
 } // namespace
 
-#if defined(_WIN32)
+#if defined(D012_INSTALLS_UPDATES)
 
 bool can_install(const rules::Release &release) {
+#if defined(D012_INSTALLS_ON_WINDOWS)
     return !kFromSource && *kUpdateSigningKey != '\0' && installed_by_the_setup() && !running_under_wine() &&
-           rules::windows_update(release).has_value();
+           update_files(release).has_value();
+#else
+    return !kFromSource && *kUpdateSigningKey != '\0' && update_files(release).has_value();
+#endif
 }
 
 Status status() {
     std::lock_guard lock(g_mutex);
+#if defined(D012_INSTALLS_ON_ANDROID)
+    if (g_status.step == Step::Installing && g_asked.load()) {
+        const portablekit::android::InstallAnswer answer = portablekit::android::install_answer();
+        using State = portablekit::android::InstallAnswer::State;
+        if (answer.state == State::Cancelled) {
+            std::cout << "[update] the player did not install it" << std::endl;
+            g_asked.store(false);
+            g_status.step = Step::Ready;
+            g_status.problem = "The update was not installed";
+        } else if (answer.state == State::Failed) {
+            std::cout << "[update] Android refused it: status " << answer.status << ", " << answer.message << std::endl;
+            g_asked.store(false);
+            g_status.step = Step::Failed;
+            g_status.problem = refusal(answer.status);
+        }
+    }
+#endif
     return g_status;
 }
 
@@ -403,7 +649,7 @@ void start(const rules::Release &release) {
         g_status = Status{};
         g_status.step = Step::Preparing;
         g_status.version = release.version;
-        g_setup.clear();
+        g_program.clear();
     }
     std::cout << "[update] getting version " << release.version << std::endl;
     const auto failed = [](const std::string &text) {
@@ -437,6 +683,8 @@ void start(const rules::Release &release) {
 
 void cancel() { g_cancel.store(true); }
 
+#if defined(D012_INSTALLS_ON_WINDOWS)
+
 bool install_now() {
     // Once: the game may draw another frame before it closes.
     static std::atomic<bool> started{false};
@@ -445,7 +693,7 @@ bool install_now() {
     {
         std::lock_guard lock(g_mutex);
         if (g_status.step != Step::Ready) return false;
-        setup = g_setup;
+        setup = g_program;
         version = g_status.version;
     }
     if (started.exchange(true)) return true;
@@ -499,6 +747,55 @@ bool finish_at_start() {
     if (answer != IDYES) return false;
     return start_setup(setup, true);
 }
+
+#else  // Android
+
+bool install_now() {
+    fs::path app;
+    {
+        std::lock_guard lock(g_mutex);
+        if (g_status.step != Step::Ready && g_status.step != Step::Installing) return false;
+        app = g_program;
+        g_status.step = Step::Installing;
+        g_status.problem.clear();
+    }
+    // One hand-over at a time; pressed again, Android is asked again.
+    if (g_handing.exchange(true)) return true;
+    g_asked.store(false);
+    std::cout << "[update] handing " << app.filename().string() << " to Android's installer" << std::endl;
+    try {
+        std::thread([app] {
+            if (portablekit::android::install_package(app.string())) {
+                std::cout << "[update] Android asks the player to install it" << std::endl;
+                g_asked.store(true);
+            } else {
+                const portablekit::android::InstallAnswer answer = portablekit::android::install_answer();
+                std::cout << "[update] Android's installer did not take it: " << answer.message << std::endl;
+                std::lock_guard lock(g_mutex);
+                g_status.step = Step::Failed;
+                g_status.problem = "Android's installer could not take the update";
+            }
+            g_handing.store(false);
+        }).detach();
+    } catch (const std::exception &e) {
+        std::cout << "[update] " << e.what() << std::endl;
+        g_handing.store(false);
+        std::lock_guard lock(g_mutex);
+        g_status.step = Step::Failed;
+        g_status.problem = "Android's installer could not take the update";
+        return false;
+    }
+    return true;
+}
+
+bool finish_at_start() {
+    // Android installed the app, or the player chose not to: either way a
+    // download of this version or older has served its turn.
+    clear_finished_downloads();
+    return false;
+}
+
+#endif
 
 #else
 

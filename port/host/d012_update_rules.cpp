@@ -14,7 +14,7 @@ namespace d012::update_rules {
 namespace {
 
 // The largest sizes the three files of an update can have.
-constexpr std::uint64_t kMaxSetupBytes = 1024ull * 1024u * 1024u;
+constexpr std::uint64_t kMaxProgramBytes = 1024ull * 1024u * 1024u;
 constexpr std::uint64_t kMaxSumsBytes = 64u * 1024u;
 constexpr std::uint64_t kSignatureBytes = 64u;
 
@@ -129,15 +129,31 @@ std::string setup_file_name(std::string_view version) {
     return "Dissidia012-PC-Setup-" + std::string(version) + ".exe";
 }
 
-std::optional<WindowsUpdate> windows_update(const Release &release) {
-    const Asset *setup = find_asset(release, setup_file_name(release.version));
+std::string android_file_name(std::string_view version) {
+    return "Dissidia012-" + std::string(version) + "-Android-arm64.apk";
+}
+
+namespace {
+
+std::optional<UpdateFiles> update_files(const Release &release, const std::string &program_name) {
+    const Asset *program = find_asset(release, program_name);
     const Asset *sums = find_asset(release, kSumsFile);
     const Asset *signature = find_asset(release, kSignatureFile);
-    if (setup == nullptr || sums == nullptr || signature == nullptr) return std::nullopt;
-    if (setup->size == 0 || setup->size > kMaxSetupBytes || sums->size == 0 || sums->size > kMaxSumsBytes ||
+    if (program == nullptr || sums == nullptr || signature == nullptr) return std::nullopt;
+    if (program->size == 0 || program->size > kMaxProgramBytes || sums->size == 0 || sums->size > kMaxSumsBytes ||
         signature->size != kSignatureBytes)
         return std::nullopt;
-    return WindowsUpdate{*setup, *sums, *signature};
+    return UpdateFiles{*program, *sums, *signature};
+}
+
+} // namespace
+
+std::optional<UpdateFiles> windows_update(const Release &release) {
+    return update_files(release, setup_file_name(release.version));
+}
+
+std::optional<UpdateFiles> android_update(const Release &release) {
+    return update_files(release, android_file_name(release.version));
 }
 
 bool sums_signed(std::string_view sums, std::string_view signature, std::string_view public_key) {

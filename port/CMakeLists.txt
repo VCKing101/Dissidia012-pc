@@ -225,11 +225,14 @@ if(PORTABLEKIT_RELEASE)
 endif()
 if(D012_INSTALLER_BUILD)
     # The setup's build also says why and ends when the game cannot open its
-    # window (host/d012_no_window.cpp); a developer's runs on without one.
+    # window (host/d012_no_window.cpp); a developer's runs on without one. The
+    # player's Android app installs updates from the menu
+    # (host/d012_update_install.cpp); a developer's does not.
     set_property(SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_portable.cpp"
                         "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_no_window.cpp"
                         "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_profile.cpp"
-                        "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_device_compile.cpp" APPEND PROPERTY
+                        "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_device_compile.cpp"
+                        "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_update_install.cpp" APPEND PROPERTY
         COMPILE_DEFINITIONS D012_INSTALLER_BUILD=1)
 endif()
 if(D012_INSTALLER_BUILD AND ANDROID)

@@ -896,9 +896,20 @@ void test_update_rules() {
     release = with_assets(setup + "," + sums + "," + signature);
     expect(release && release->assets.size() == 3, "a release's files are read: " + error);
     const auto update = release ? rules::windows_update(*release) : std::nullopt;
-    expect(update && update->setup.size == 80000000 && update->setup.url == downloads + "Dissidia012-PC-Setup-0.5.5.exe" &&
+    expect(update && update->program.size == 80000000 &&
+               update->program.url == downloads + "Dissidia012-PC-Setup-0.5.5.exe" &&
                update->sums.name == "SHA256SUMS" && update->signature.name == "SHA256SUMS.sig",
            "a signed release can be installed");
+    expect(release && !rules::android_update(*release), "a release without the app is installed on Android from its page");
+    const auto with_app = with_assets(setup + "," + asset("Dissidia012-0.5.5-Android-arm64.apk", 77000000, downloads) +
+                                      "," + sums + "," + signature);
+    const auto app = with_app ? rules::android_update(*with_app) : std::nullopt;
+    expect(app && app->program.name == "Dissidia012-0.5.5-Android-arm64.apk" && app->program.size == 77000000 &&
+               app->signature.size == 64,
+           "a signed release can be installed on Android");
+    const auto older_app =
+        with_assets(asset("Dissidia012-0.5.4-Android-arm64.apk", 77000000, downloads) + "," + sums + "," + signature);
+    expect(older_app && !rules::android_update(*older_app), "another version's app is not this release's");
     const auto installs = [&](const std::string &assets) {
         const auto read = with_assets(assets);
         return read && rules::windows_update(*read).has_value();
