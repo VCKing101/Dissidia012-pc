@@ -67,6 +67,16 @@ if [[ "$build" -eq 1 ]]; then
     bash "$repo/tools/port/linux_build.sh" --installer --jobs "$jobs"
 fi
 [[ -x "$root/setup/payload/D012Native" ]] || { echo "error: no installer build in $root/setup/payload" >&2; exit 1; }
+# The update signing key's public half must be in the program, or no copy of
+# this release could install the next one from its menu (docs/port/releasing.md).
+# D012_UPDATE_PUBLIC_KEY (tools/port/linux_build.sh) is for test setups only.
+key_file="${D012_UPDATE_PUBLIC_KEY:-$repo/tools/port/update-signing-key.txt}"
+key="$(tr -d '[:space:]' < "$key_file" 2>/dev/null || true)"
+[[ "$key" =~ ^[0-9a-f]{64}$ ]] ||
+    { echo "error: $key_file does not hold the update signing key's public half (docs/port/releasing.md)" >&2; exit 1; }
+grep -q "kUpdateSigningKey = \"$key\";" "$root/build-installer/generated/d012_version.hpp" ||
+    { echo "error: the installer build does not carry that key: build it again (without --no-build)" >&2; exit 1; }
+[[ -z "${D012_UPDATE_PUBLIC_KEY:-}" ]] || echo "note: a test setup, trusting $key_file, not the release key"
 if [[ ! -x "$root/toolchain/bin/clang++" ]]; then
     bash "$repo/tools/port/linux_toolchain.sh"
 fi

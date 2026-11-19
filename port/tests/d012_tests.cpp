@@ -910,6 +910,13 @@ void test_update_rules() {
     const auto older_app =
         with_assets(asset("Dissidia012-0.5.4-Android-arm64.apk", 77000000, downloads) + "," + sums + "," + signature);
     expect(older_app && !rules::android_update(*older_app), "another version's app is not this release's");
+    expect(with_app && !rules::linux_update(*with_app), "a release without the AppImage is installed on Linux from its page");
+    const auto with_appimage =
+        with_assets(asset("Dissidia012-Setup-0.5.5-x86_64.AppImage", 190000000, downloads) + "," + sums + "," + signature);
+    const auto appimage = with_appimage ? rules::linux_update(*with_appimage) : std::nullopt;
+    expect(appimage && appimage->program.name == "Dissidia012-Setup-0.5.5-x86_64.AppImage" &&
+               appimage->program.url == downloads + "Dissidia012-Setup-0.5.5-x86_64.AppImage",
+           "a signed release can be installed on Linux");
     const auto installs = [&](const std::string &assets) {
         const auto read = with_assets(assets);
         return read && rules::windows_update(*read).has_value();

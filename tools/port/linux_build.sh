@@ -71,6 +71,13 @@ cp "$repo/tools/port/linux_build_in_sdk.sh" "$repo/LICENSE" "$root/src/"
 # The release number port/CMakeLists.txt compiles in (d012::kVersion).
 mkdir -p "$root/src/tools/port"
 cp "$repo/tools/port/release-version.txt" "$root/src/tools/port/"
+# The public key updates are signed with, which a copy the setup installed
+# checks before it installs one (host/d012_update_install.cpp).
+# D012_UPDATE_PUBLIC_KEY names another, for a test of updates signed with a
+# throwaway key; never for a release.
+update_key="${D012_UPDATE_PUBLIC_KEY:-$repo/tools/port/update-signing-key.txt}"
+rm -f "$root/src/tools/port/update-signing-key.txt"
+if [[ -f "$update_key" ]]; then cp "$update_key" "$root/src/tools/port/update-signing-key.txt"; fi
 # The launcher icon, if the main checkout's build/port/launcher has it.
 icon="$main_repo/build/port/launcher/dissidia012.ico"
 [[ -f "$icon" ]] && cp "$icon" "$root/src/"

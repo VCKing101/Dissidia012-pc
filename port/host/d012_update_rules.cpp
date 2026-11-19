@@ -133,6 +133,10 @@ std::string android_file_name(std::string_view version) {
     return "Dissidia012-" + std::string(version) + "-Android-arm64.apk";
 }
 
+std::string linux_file_name(std::string_view version) {
+    return "Dissidia012-Setup-" + std::string(version) + "-x86_64.AppImage";
+}
+
 namespace {
 
 std::optional<UpdateFiles> update_files(const Release &release, const std::string &program_name) {
@@ -154,6 +158,10 @@ std::optional<UpdateFiles> windows_update(const Release &release) {
 
 std::optional<UpdateFiles> android_update(const Release &release) {
     return update_files(release, android_file_name(release.version));
+}
+
+std::optional<UpdateFiles> linux_update(const Release &release) {
+    return update_files(release, linux_file_name(release.version));
 }
 
 bool sums_signed(std::string_view sums, std::string_view signature, std::string_view public_key) {

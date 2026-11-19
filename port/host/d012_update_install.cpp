@@ -2,18 +2,19 @@
 //
 // Only when this build carries the release key's public half
 // (d012::kUpdateSigningKey), and only in a copy the Windows setup installed
-// (unins000.exe beside the program) or in the player's Android app (the
-// installer build, D012_INSTALLER_BUILD). Elsewhere the System page keeps
-// "Open the download page": RecompLauncher updates its own copies, and Linux
-// has no install from the menu yet.
+// (unins000.exe beside the program), a copy the Linux setup installed
+// (setup.ini beside the program, in a folder it can write) or the player's
+// Android app (the installer build, D012_INSTALLER_BUILD). Elsewhere the System
+// page keeps "Open the download page": RecompLauncher updates its own copies.
 //
 // The steps, on a thread of their own while the game goes on:
 //  1. SHA256SUMS and SHA256SUMS.sig are fetched, and the list is refused unless
 //     the signature is the release key's. The list names the program with its
 //     version, so an older release's list cannot pass for this one.
-//  2. The program (the Windows setup, the Android app) is downloaded to
-//     update-download/, as <name>.part, which a later attempt continues: beside
-//     the program on Windows, in the app's own storage on Android.
+//  2. The program (the Windows setup, the Android app, the Linux AppImage) is
+//     downloaded to update-download/, as <name>.part, which a later attempt
+//     continues: beside the program on Windows and Linux, in the app's own
+//     storage on Android.
 //  3. Its SHA-256 must be the one the signed list gives. Only then does it get
 //     its own name, and only a file with its own name is ever installed.
 //
@@ -32,6 +33,19 @@
 // it is signed with the same key. The player opens the game again, which
 // compiles the game's code first only when the new version's differs
 // (host/d012_device_compile.cpp). The next start deletes the download.
+//
+// Linux: the AppImage unpacks itself (--appimage-extract, which needs no FUSE)
+// into update-download/squashfs-root/, and its VERSION must be the release's.
+// When the player chooses to install, each of the program's files and folders
+// (the AppImage's payload/, what the setup copies: tools/port/linux_setup/AppRun)
+// is moved into update-old/ and the new one into its place. Linux lets a
+// running program be moved, never written over. setup.ini gets the new version,
+// and the game quits and starts again (PortableKit's restart on exit, in its
+// install/installer.hpp: under Steam, Steam starts it again once it has ended,
+// the one way that worked in the Steam Deck's Gaming Mode; elsewhere it
+// starts the new program as it exits). The new program finds update-old/ (prepare_after_update): it
+// compiles the game's code on the setup's screens when the new version's
+// differs, then deletes update-old/ and the download.
 //
 // Tests: D012_UPDATE_ASSETS=<folder> takes those of the three files that are in
 // the folder from there instead of GitHub; every check is made all the same.
@@ -64,6 +78,23 @@
 
 #include <SDL3/SDL_system.h>
 #include <jni.h>
+#elif defined(__linux__) && defined(D012_INSTALLER_BUILD)
+#include "d012_curl.hpp"
+
+#include "install/installer.hpp"
+
+#if defined(PORTABLEKIT_HAS_RENDERER)
+#include <SDL3/SDL.h>
+#endif
+
+#include <fcntl.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+#include <cerrno>
+#include <cstdio>
+#include <functional>
+#include <memory>
 #endif
 
 #include <algorithm>
@@ -89,6 +120,16 @@
 #elif defined(PORTABLEKIT_ANDROID_APP) && defined(D012_INSTALLER_BUILD)
 #define D012_INSTALLS_UPDATES 1
 #define D012_INSTALLS_ON_ANDROID 1
+#elif defined(__linux__) && defined(D012_INSTALLER_BUILD)
+#define D012_INSTALLS_UPDATES 1
+#define D012_INSTALLS_ON_LINUX 1
+#endif
+
+#if defined(D012_INSTALLS_ON_LINUX)
+namespace d012::compile_game {
+// host/d012_compile_game.cpp: --compile-game's steps in this process.
+int run_here(bool check_only, std::function<void(const std::string &, unsigned)> listener);
+}
 #endif
 
 namespace d012::update_install {
@@ -108,13 +149,26 @@ constexpr std::uint64_t kSpaceBesidesProgram = 1500ull * 1024u * 1024u;
 constexpr std::string_view kProgramPrefix = "Dissidia012-PC-Setup-";
 constexpr std::string_view kProgramSuffix = ".exe";
 constexpr const char *kPendingFile = "pending.txt";
-#else
+#elif defined(D012_INSTALLS_ON_ANDROID)
 // Room for Android's copy of the app, its libraries unpacked, and the game's
 // code the app may compile again.
 constexpr std::uint64_t kSpaceBesidesProgram = 1024ull * 1024u * 1024u;
 // The apps' names: rules::android_file_name.
 constexpr std::string_view kProgramPrefix = "Dissidia012-";
 constexpr std::string_view kProgramSuffix = "-Android-arm64.apk";
+#else
+// Room for the AppImage's files unpacked (about 550 MB) and the game's code it
+// may compile.
+constexpr std::uint64_t kSpaceBesidesProgram = 1500ull * 1024u * 1024u;
+// The AppImages' names: rules::linux_file_name.
+constexpr std::string_view kProgramPrefix = "Dissidia012-Setup-";
+constexpr std::string_view kProgramSuffix = "-x86_64.AppImage";
+// In update-download/: what the AppImage unpacks to, and its output.
+constexpr const char *kUnpacked = "squashfs-root";
+constexpr const char *kUnpackLog = "unpack.log";
+// Beside the program: the files an update replaced, until the new version
+// has started.
+constexpr const char *kOldFiles = "update-old";
 #endif
 
 std::mutex g_mutex;
@@ -128,17 +182,21 @@ struct Problem {
     std::string text;
 };
 
-#if defined(D012_INSTALLS_ON_WINDOWS)
-fs::path folder() { return portablekit::executable_directory() / "update-download"; }
-#else
+#if defined(D012_INSTALLS_ON_ANDROID)
 fs::path folder() { return portablekit::install::user_data_directory() / "update-download"; }
+#else
+// The program's folder as it was at the start (PortableKit remembers it), so
+// an update that moved the program aside does not move this.
+fs::path folder() { return portablekit::executable_directory() / "update-download"; }
 #endif
 
 std::optional<rules::UpdateFiles> update_files(const rules::Release &release) {
 #if defined(D012_INSTALLS_ON_WINDOWS)
     return rules::windows_update(release);
-#else
+#elif defined(D012_INSTALLS_ON_ANDROID)
     return rules::android_update(release);
+#else
+    return rules::linux_update(release);
 #endif
 }
 
@@ -270,7 +328,7 @@ void download(const std::string &url, const fs::path &part, std::uint64_t size) 
     if (have != size) throw Problem{"the download was interrupted. Try again to continue it"};
 }
 
-#else  // Android
+#elif defined(D012_INSTALLS_ON_ANDROID)
 
 // `url` into `part` through Java's HttpURLConnection, continuing what is
 // there, with `size` bytes expected. It follows GitHub's redirect to its
@@ -411,6 +469,177 @@ void download(const std::string &url, const fs::path &part, std::uint64_t size) 
     if (have != size) throw lost("the end");
 }
 
+#else  // Linux
+
+// A copy the Linux setup installed: it writes setup.ini beside the program
+// (tools/port/linux_setup/AppRun), and the folder must take the new files.
+bool installed_by_the_setup() {
+    static const bool installed = [] {
+        std::error_code ec;
+        const fs::path dir = portablekit::executable_directory();
+        return !dir.empty() && fs::is_regular_file(dir / "setup.ini", ec) && access(dir.c_str(), W_OK) == 0;
+    }();
+    return installed;
+}
+
+// What the download's callback keeps.
+struct Transfer {
+    std::FILE *out = nullptr;
+    void *handle = nullptr;
+    const curl::Api *c = nullptr;
+    std::uint64_t have = 0;
+    std::uint64_t size = 0;
+    bool answered = false;   // the first bytes have come, and the answer's status is known
+    bool cancelled = false;
+    bool too_large = false;
+    bool unwritable = false;
+};
+
+std::size_t take(char *data, std::size_t size, std::size_t count, void *to) {
+    Transfer &t = *static_cast<Transfer *>(to);
+    const std::size_t bytes = size * count;
+    if (g_cancel.load()) {
+        t.cancelled = true;
+        return 0;
+    }
+    if (!t.answered) {
+        t.answered = true;
+        long status = 0;
+        t.c->easy_getinfo(t.handle, curl::kInfoResponseCode, &status);
+        if (t.have > 0 && status == 200) {
+            // GitHub sent the whole file, not the rest: from the start.
+            std::fflush(t.out);
+            if (ftruncate(fileno(t.out), 0) != 0) {
+                t.unwritable = true;
+                return 0;
+            }
+            t.have = 0;
+        }
+    }
+    if (t.have + bytes > t.size) {
+        t.too_large = true;
+        return 0;
+    }
+    if (std::fwrite(data, 1, bytes, t.out) != bytes) {
+        t.unwritable = true;
+        return 0;
+    }
+    t.have += bytes;
+    std::lock_guard lock(g_mutex);
+    g_status.done = t.have;
+    return bytes;
+}
+
+// `url` into `part` through the system's libcurl, continuing what is there,
+// with `size` bytes expected. It follows GitHub's redirect to its download
+// server, and only to https.
+void download(const std::string &url, const fs::path &part, std::uint64_t size) {
+    const curl::Api *c = curl::api();
+    if (c == nullptr) throw Problem{"this system has no libcurl, which the download needs"};
+    if (url.rfind("https://", 0) != 0) throw Problem{"the download's address cannot be used"};
+    std::error_code ec;
+    std::uint64_t have = fs::is_regular_file(part, ec) ? fs::file_size(part, ec) : 0u;
+    if (ec || have > size) {
+        fs::remove(part, ec);
+        have = 0;
+    }
+    if (have > 0) std::cout << "[update] continuing the download from byte " << have << std::endl;
+
+    Transfer t;
+    t.out = std::fopen(part.c_str(), "ab");
+    if (t.out == nullptr) throw Problem{"the download cannot be written beside the game"};
+    t.handle = c->easy_init();
+    if (t.handle == nullptr) {
+        std::fclose(t.out);
+        throw Problem{"the download could not start"};
+    }
+    t.c = c;
+    t.have = have;
+    t.size = size;
+    const std::string agent = std::string("Dissidia012-pc/") + kVersion;
+    void *h = t.handle;
+    c->easy_setopt(h, curl::kOptUrl, url.c_str());
+    c->easy_setopt(h, curl::kOptUserAgent, agent.c_str());
+    c->easy_setopt(h, curl::kOptWriteFunction, &take);
+    c->easy_setopt(h, curl::kOptWriteData, static_cast<void *>(&t));
+    c->easy_setopt(h, curl::kOptFollowLocation, 1L);
+    c->easy_setopt(h, curl::kOptProtocols, curl::kProtocolHttps);
+    c->easy_setopt(h, curl::kOptRedirectProtocols, curl::kProtocolHttps);
+    c->easy_setopt(h, curl::kOptFailOnError, 1L);
+    c->easy_setopt(h, curl::kOptConnectTimeout, 15L);
+    // No time limit on the whole: given up only when nothing comes for 30 s.
+    c->easy_setopt(h, curl::kOptLowSpeedLimit, 1L);
+    c->easy_setopt(h, curl::kOptLowSpeedTime, 30L);
+    c->easy_setopt(h, curl::kOptNoSignal, 1L);
+    if (have > 0) c->easy_setopt(h, curl::kOptResumeFromLarge, static_cast<long long>(have));
+    const int code = c->easy_perform(h);
+    long status = 0;
+    c->easy_getinfo(h, curl::kInfoResponseCode, &status);
+    if (code != 0) std::cout << "[update] libcurl: " << c->easy_strerror(code) << " (HTTP " << status << ")" << std::endl;
+    c->easy_cleanup(h);
+    const bool closed = std::fclose(t.out) == 0;
+    if (t.cancelled) throw Cancelled{};
+    if (t.too_large) {
+        fs::remove(part, ec);
+        throw Problem{"the download is larger than the release says"};
+    }
+    if (t.unwritable || !closed) throw Problem{"the download cannot be written beside the game: check the free space"};
+    if (code != 0 && have > 0 && status == 416) {
+        // GitHub will not continue this one: from the start.
+        fs::remove(part, ec);
+        download(url, part, size);
+        return;
+    }
+    if (code != 0 && status >= 400) throw Problem{"GitHub answered with error " + std::to_string(status)};
+    if (code != 0 || t.have != size) throw Problem{"the download was interrupted. Try again to continue it"};
+}
+
+// The AppImage's files, unpacked by the AppImage itself into
+// update-download/squashfs-root/: payload/ holds what the setup installs, and
+// VERSION must name the release.
+void unpack(const fs::path &appimage, const std::string &version) {
+    set_step(Step::Unpacking);
+    std::error_code ec;
+    const fs::path dir = appimage.parent_path();
+    fs::remove_all(dir / kUnpacked, ec);
+    fs::permissions(appimage, fs::perms::owner_exec, fs::perm_options::add, ec);
+    const int log = open((dir / kUnpackLog).c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+    const int null = open("/dev/null", O_RDWR | O_CLOEXEC);
+    const pid_t child = fork();
+    if (child == 0) {
+        // Only what is safe between fork and exec in a program with threads.
+        if (null >= 0) {
+            dup2(null, STDIN_FILENO);
+            dup2(null, STDOUT_FILENO);  // a line for every file
+        }
+        if (log >= 0) dup2(log, STDERR_FILENO);
+        if (chdir(dir.c_str()) != 0) _exit(126);
+        const char *argv[] = {appimage.c_str(), "--appimage-extract", nullptr};
+        execv(appimage.c_str(), const_cast<char *const *>(argv));
+        _exit(127);
+    }
+    if (log >= 0) close(log);
+    if (null >= 0) close(null);
+    if (child < 0) throw Problem{"the update could not be unpacked"};
+    int status = 0;
+    while (waitpid(child, &status, 0) < 0 && errno == EINTR) {
+    }
+    const fs::path unpacked = dir / kUnpacked;
+    std::ifstream in(unpacked / "VERSION");
+    std::string found;
+    std::getline(in, found);
+    while (!found.empty() && (found.back() == '\r' || found.back() == ' ')) found.pop_back();
+    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0 || !fs::is_regular_file(unpacked / "payload" / "D012Native", ec)) {
+        std::cout << "[update] the AppImage did not unpack (status " << status << "); see " << (dir / kUnpackLog).string()
+                  << std::endl;
+        throw Problem{"the update could not be unpacked: check the free space"};
+    }
+    if (found != version) {
+        std::cout << "[update] the AppImage says it is version " << found << ", not " << version << std::endl;
+        throw Problem{"the download is not version " + version};
+    }
+}
+
 #endif
 
 // D012_UPDATE_ASSETS's copy of a file of the release, when it has one.
@@ -437,6 +666,16 @@ std::string fetch_small(const rules::Asset &asset) {
 
 // --- The steps -------------------------------------------------------------
 
+// The checked download, ready to install.
+void ready(const fs::path &program, [[maybe_unused]] const std::string &version) {
+#if defined(D012_INSTALLS_ON_LINUX)
+    unpack(program, version);
+#endif
+    std::lock_guard lock(g_mutex);
+    g_program = program;
+    g_status.step = Step::Ready;
+}
+
 void work(const rules::Release &release) {
     const std::optional<rules::UpdateFiles> update = update_files(release);
     if (!update) throw Problem{"this release cannot be installed from here"};
@@ -454,17 +693,15 @@ void work(const rules::Release &release) {
     if (ec) throw Problem{"the folder for the download cannot be made"};
     const fs::path program = dir / update->program.name;
     const fs::path part = fs::path(program).concat(".part");
-    // Downloads of other versions go.
+    // Downloads of other versions go, and what was unpacked from any.
     for (const fs::directory_entry &entry : fs::directory_iterator(dir, ec))
-        if (entry.path() != program && entry.path() != part) fs::remove(entry.path(), ec);
+        if (entry.path() != program && entry.path() != part) fs::remove_all(entry.path(), ec);
 
     const auto is_good = [&](const fs::path &file) { return psprecomp::sha256_file(file) == expected; };
     if (fs::is_regular_file(program, ec)) {
         set_step(Step::Checking);
         if (is_good(program)) {
-            std::lock_guard lock(g_mutex);
-            g_program = program;
-            g_status.step = Step::Ready;
+            ready(program, release.version);
             return;
         }
         fs::remove(program, ec);
@@ -472,7 +709,7 @@ void work(const rules::Release &release) {
 
     const fs::space_info space = fs::space(dir, ec);
     if (!ec && space.available < update->program.size + kSpaceBesidesProgram)
-        throw Problem{"there is not enough free space on this device"};
+        throw Problem{"there is not enough free space on this drive"};
 
     {
         std::lock_guard lock(g_mutex);
@@ -494,16 +731,19 @@ void work(const rules::Release &release) {
     }
     fs::rename(part, program, ec);
     if (ec) throw Problem{"the download cannot be kept"};
-    std::lock_guard lock(g_mutex);
-    g_program = program;
-    g_status.step = Step::Ready;
+    ready(program, release.version);
 }
 
-// Downloads of this version or older have served their turn.
+// Downloads of this version or older have served their turn, and so has what
+// was unpacked from them.
 void clear_finished_downloads() {
     std::error_code ec;
     const fs::path dir = folder();
     if (!fs::is_directory(dir, ec)) return;
+#if defined(D012_INSTALLS_ON_LINUX)
+    fs::remove_all(dir / kUnpacked, ec);
+    fs::remove(dir / kUnpackLog, ec);
+#endif
     for (const fs::directory_entry &entry : fs::directory_iterator(dir, ec)) {
         std::string name = entry.path().filename().string();
         if (name.size() > 5 && name.ends_with(".part")) name.resize(name.size() - 5);
@@ -582,7 +822,7 @@ std::string read_pending() {
     return version;
 }
 
-#else  // Android
+#elif defined(D012_INSTALLS_ON_ANDROID)
 
 // Set once Android's installer has the app, so that its answer about an
 // earlier attempt is never taken for this one's.
@@ -602,6 +842,63 @@ std::string refusal(int status) {
     }
 }
 
+#else  // Linux
+
+// The new program's files in place of this one's: each of payload/'s files
+// and folders moves the old one into update-old/ and itself into the program's
+// folder. Renames on one drive, so all or none: what was moved goes back when
+// one fails.
+void swap_in(const std::string &version) {
+    std::error_code ec;
+    const fs::path dir = portablekit::executable_directory();
+    const fs::path payload = folder() / kUnpacked / "payload";
+    const fs::path old = dir / kOldFiles;
+    fs::remove_all(old, ec);
+    fs::create_directory(old, ec);
+    if (ec) throw Problem{"the folder for the old files cannot be made"};
+    std::vector<std::string> names;
+    for (const fs::directory_entry &entry : fs::directory_iterator(payload, ec)) names.push_back(entry.path().filename().string());
+    if (ec || std::find(names.begin(), names.end(), "D012Native") == names.end())
+        throw Problem{"the unpacked update is incomplete"};
+
+    std::vector<std::string> set_aside;
+    std::vector<std::string> put_in;
+    const auto undo = [&] {
+        std::error_code ignored;
+        for (auto name = put_in.rbegin(); name != put_in.rend(); ++name) fs::rename(dir / *name, payload / *name, ignored);
+        for (auto name = set_aside.rbegin(); name != set_aside.rend(); ++name)
+            fs::rename(old / *name, dir / *name, ignored);
+    };
+    for (const std::string &name : names) {
+        if (!fs::exists(fs::symlink_status(dir / name, ec))) continue;
+        fs::rename(dir / name, old / name, ec);
+        if (ec) {
+            std::cout << "[update] cannot move " << name << " aside: " << ec.message() << std::endl;
+            undo();
+            throw Problem{"the old files could not be moved aside, so nothing was installed"};
+        }
+        set_aside.push_back(name);
+    }
+    for (const std::string &name : names) {
+        fs::rename(payload / name, dir / name, ec);
+        if (ec) {
+            std::cout << "[update] cannot put " << name << " in place: " << ec.message() << std::endl;
+            undo();
+            throw Problem{"the new files could not be put in place, so nothing was installed"};
+        }
+        put_in.push_back(name);
+    }
+
+    // setup.ini's version, as the setup writes it (iso= and copy_iso= stay).
+    std::ifstream in(dir / "setup.ini");
+    std::string text;
+    for (std::string line; std::getline(in, line);)
+        if (!line.starts_with("version=")) text += line + "\n";
+    in.close();
+    std::ofstream out(dir / "setup.ini", std::ios::trunc);
+    out << text << "version=" << version << "\n";
+}
+
 #endif
 
 #endif  // D012_INSTALLS_UPDATES
@@ -614,8 +911,10 @@ bool can_install(const rules::Release &release) {
 #if defined(D012_INSTALLS_ON_WINDOWS)
     return !kFromSource && *kUpdateSigningKey != '\0' && installed_by_the_setup() && !running_under_wine() &&
            update_files(release).has_value();
-#else
+#elif defined(D012_INSTALLS_ON_ANDROID)
     return !kFromSource && *kUpdateSigningKey != '\0' && update_files(release).has_value();
+#else
+    return !kFromSource && *kUpdateSigningKey != '\0' && installed_by_the_setup() && update_files(release).has_value();
 #endif
 }
 
@@ -748,7 +1047,7 @@ bool finish_at_start() {
     return start_setup(setup, true);
 }
 
-#else  // Android
+#elif defined(D012_INSTALLS_ON_ANDROID)
 
 bool install_now() {
     fs::path app;
@@ -795,6 +1094,45 @@ bool finish_at_start() {
     return false;
 }
 
+#else  // Linux
+
+bool install_now() {
+    // Once: the game may draw another frame before it quits.
+    static std::atomic<bool> started{false};
+    std::string version;
+    {
+        std::lock_guard lock(g_mutex);
+        if (g_status.step != Step::Ready) return false;
+        version = g_status.version;
+    }
+    if (started.exchange(true)) return true;
+    try {
+        swap_in(version);
+    } catch (const Problem &problem) {
+        started.store(false);
+        std::cout << "[update] " << problem.text << std::endl;
+        std::lock_guard lock(g_mutex);
+        g_status.step = Step::Failed;
+        g_status.problem = problem.text;
+        return false;
+    }
+    std::cout << "[update] version " << version << " is in place; the game starts again" << std::endl;
+    portablekit::install::request_restart_on_exit();
+#if defined(PORTABLEKIT_HAS_RENDERER)
+    portablekit::ui::request_quit();
+#endif
+    return true;
+}
+
+bool finish_at_start() {
+    // After an update, prepare_after_update clears up once the game's code is
+    // ready; otherwise what a download left goes now.
+    std::error_code ec;
+    if (!kFromSource && !fs::is_directory(portablekit::executable_directory() / kOldFiles, ec))
+        clear_finished_downloads();
+    return false;
+}
+
 #endif
 
 #else
@@ -805,6 +1143,76 @@ void start(const rules::Release &) {}
 void cancel() {}
 bool install_now() { return false; }
 bool finish_at_start() { return false; }
+
+#endif
+
+#if defined(D012_INSTALLS_ON_LINUX)
+
+bool prepare_after_update(portablekit::install::InstallerUi *given, const fs::path &, const fs::path &) {
+    std::error_code ec;
+    const fs::path old = portablekit::executable_directory() / kOldFiles;
+    if (!fs::is_directory(old, ec)) return true;
+    std::cout << "[update] this copy was just updated: checking the game's code" << std::endl;
+    if (compile_game::run_here(true, {}) != 0) {
+        // The setup's screens, as the Android app's compile uses them
+        // (d012_device_compile.cpp).
+        std::unique_ptr<portablekit::install::InstallerUi> own;
+        if (given == nullptr) own = portablekit::install::make_installer_ui();
+        portablekit::install::InstallerUi *ui = given != nullptr ? given : own.get();
+        std::string failure;
+        int code = 1;
+#if defined(PORTABLEKIT_HAS_RENDERER)
+        // The screen stays on: the work can take many minutes.
+        SDL_DisableScreenSaver();
+#endif
+        const auto work = [&] {
+            // Called from the compile's worker threads too: it must not throw,
+            // so the screen's Cancel is not honoured while it compiles.
+            std::mutex lock;
+            code = compile_game::run_here(false, [&](const std::string &message, unsigned percent) {
+                const std::lock_guard<std::mutex> guard(lock);
+                failure = message;
+                if (!ui) return;
+                try {
+                    ui->progress(message, percent, 100u);
+                } catch (...) {
+                }
+            });
+        };
+        try {
+            if (ui) ui->run_task("Making the game's code for version " + std::string(kVersion), work);
+            else work();
+        } catch (const portablekit::install::InstallCancelled &) {
+#if defined(PORTABLEKIT_HAS_RENDERER)
+            SDL_EnableScreenSaver();
+#endif
+            return false;
+        }
+#if defined(PORTABLEKIT_HAS_RENDERER)
+        SDL_EnableScreenSaver();
+#endif
+        if (code != 0) {
+            portablekit::install::report_problem(
+                "The game could not be made",
+                "Making the game's code for the new version did not succeed:\n\n" + failure +
+                    "\n\nStart the game again to try again, or run the newest setup from the project's releases page "
+                    "and install into this folder. The log is game-code-build.log in the game's folder.",
+                false);
+            return false;
+        }
+    }
+    fs::remove_all(old, ec);
+    clear_finished_downloads();
+    std::cout << "[update] version " << kVersion << " is ready" << std::endl;
+    return true;
+}
+
+#else
+
+bool prepare_after_update(portablekit::install::InstallerUi *, const std::filesystem::path &,
+                          const std::filesystem::path &) {
+    return true;
+}
 
 #endif
 

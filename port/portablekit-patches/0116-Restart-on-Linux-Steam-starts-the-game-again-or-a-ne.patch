@@ -1,0 +1,395 @@
+From 4c48968b97a7ca29f9e6102f4b2f0ebe115d9d15 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Fri, 20 Nov 2026 10:04:55 +1030
+Subject: [PATCH] Restart on Linux: Steam starts the game again, or a new run
+ as this one exits
+
+Restart now (after a save import) and Set up game data again replaced the
+process in place (exec), with the window and the graphics still open. In
+the Steam Deck's Gaming Mode that left a black screen, the Steam button
+doing nothing, until the Deck slept. Starting the new run inside the game
+as a process of its own, once the old one had quit as usual, did the same
+more often than not: gamescope does not reliably show a window that takes
+over from the game's previous one moments after it closed.
+
+Now the program quits as it always does, and then:
+- Under Steam (its launcher sets SteamGameId; systemd-run and steam on
+  PATH), Steam starts the game again, as the player's Play would. As it
+  exits the program starts a helper as a user service of its own
+  (systemd-run --user), so that it is none of the game's processes; it
+  waits for the game and Steam's launcher of it (reaper) to end, then runs
+  steam -ifrunning steam://rungameid/<id>. Steam's screen shows for a
+  moment in between. The setup's restart leaves the setup marker
+  (kSetupMarkerFile, until now Android's), which main now also reads on
+  Linux, as Steam cannot pass --install.
+- Elsewhere, the program starts the new run as it exits, as a process of
+  its own with only the standard streams, and the new run waits for it to
+  be gone (install::wait_for_previous_run, which main calls first; a port
+  with a main of its own in front calls it too).
+<PREFIX>_RESTART_IN_PLACE=1 restarts in place as before;
+<PREFIX>_RESTART_NOT_THROUGH_STEAM=1 skips Steam.
+
+executable_path() on Linux remembers where the program was at start:
+/proc/self/exe follows the running file, so after a game moved its program
+aside to update itself, a restart would have run the old program again.
+
+Tested with Dissidia 012 on a Steam Deck in Gaming Mode, from a Steam
+shortcut: an update's restart came back on screen through Steam, and Set up
+game data again came back on the setup screen; the in-process restarts went
+black three times out of four. Off Steam, in WSL: the new run started as
+the old one exited and waited for it. Not tested: Restart now after a save
+import (the same restart as the update's), other Linux desktops with Steam,
+macOS and Windows (unchanged).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/app_paths.cpp         |  13 ++-
+ host/app_paths.hpp         |   3 +-
+ host/install/installer.cpp | 171 +++++++++++++++++++++++++++++++++++++
+ host/install/installer.hpp |  35 +++++++-
+ host/install/user_data.hpp |   3 +-
+ host/main.cpp              |   8 +-
+ 6 files changed, 222 insertions(+), 11 deletions(-)
+
+diff --git a/host/app_paths.cpp b/host/app_paths.cpp
+index 8c8d1ce..8aab4f2 100644
+--- a/host/app_paths.cpp
++++ b/host/app_paths.cpp
+@@ -38,9 +38,16 @@ std::filesystem::path executable_path() {
+     if (dladdr(reinterpret_cast<const void *>(&executable_path), &info) == 0 || info.dli_fname == nullptr) return {};
+     return std::filesystem::path(info.dli_fname);
+ #else
+-    std::error_code ec;
+-    const std::filesystem::path self = std::filesystem::read_symlink("/proc/self/exe", ec);
+-    return ec ? std::filesystem::path{} : self;
++    // Where the program was when it started: /proc/self/exe follows the
++    // running file, so after a game updates itself by moving it aside and
++    // putting the new one in its place, it would name the old one (or end in
++    // " (deleted)"), and a restart would run the old program again.
++    static const std::filesystem::path self = [] {
++        std::error_code ec;
++        std::filesystem::path path = std::filesystem::read_symlink("/proc/self/exe", ec);
++        return ec ? std::filesystem::path{} : path;
++    }();
++    return self;
+ #endif
+ }
+ 
+diff --git a/host/app_paths.hpp b/host/app_paths.hpp
+index 8f224d7..16fdc80 100644
+--- a/host/app_paths.hpp
++++ b/host/app_paths.hpp
+@@ -6,7 +6,8 @@
+ namespace portablekit {
+ 
+ // The running executable, resolved through the operating system rather than
+-// argv[0]; empty if it cannot be determined.
++// argv[0]; empty if it cannot be determined. On Linux, where it was when the
++// program started, even if it has been moved or replaced since.
+ [[nodiscard]] std::filesystem::path executable_path();
+ 
+ // The directory the executable is in. A release keeps everything it ships
+diff --git a/host/install/installer.cpp b/host/install/installer.cpp
+index 0026d72..9ec666d 100644
+--- a/host/install/installer.cpp
++++ b/host/install/installer.cpp
+@@ -33,6 +33,14 @@
+ #else
+ #include <unistd.h>
+ #endif
++#if defined(__linux__) && !defined(PORTABLEKIT_ANDROID_APP)
++#include <dirent.h>
++#include <fcntl.h>
++#include <spawn.h>
++#include <sys/wait.h>
++
++#include <cstdio>
++#endif
+ 
+ namespace portablekit::install {
+ namespace {
+@@ -432,6 +440,154 @@ std::uint64_t space_needed_to_copy(const ImageInfo &info) { return info.size_byt
+ namespace {
+ bool setup_on_exit = false;
+ bool restart_on_exit = false;
++
++#if defined(__linux__) && !defined(PORTABLEKIT_ANDROID_APP)
++// The new run's program and command line, started as this run exits.
++std::string next_program;
++std::vector<std::string> next_arguments;
++
++std::string wait_variable() { return env_name("RESTART_WAIT_PID"); }
++
++// Only the standard streams (the log) go to the new run.
++void close_on_exec_all() {
++    DIR *dir = opendir("/proc/self/fd");
++    if (dir == nullptr) return;
++    const int own = dirfd(dir);
++    while (const dirent *entry = readdir(dir)) {
++        if (entry->d_name[0] < '0' || entry->d_name[0] > '9') continue;
++        const int fd = std::atoi(entry->d_name);
++        if (fd > 2 && fd != own) fcntl(fd, F_SETFD, FD_CLOEXEC);
++    }
++    closedir(dir);
++}
++
++// At exit (std::atexit): the new run, with this run's environment and its pid
++// in <PREFIX>_RESTART_WAIT_PID.
++void start_next_run() {
++    std::fflush(nullptr);
++    close_on_exec_all();
++    std::vector<char *> argv;
++    for (std::string &argument : next_arguments) argv.push_back(argument.data());
++    argv.push_back(nullptr);
++    const std::string prefix = wait_variable() + "=";
++    std::vector<std::string> variables;
++    for (char **variable = environ; *variable != nullptr; ++variable)
++        if (std::strncmp(*variable, prefix.c_str(), prefix.size()) != 0) variables.emplace_back(*variable);
++    variables.push_back(prefix + std::to_string(getpid()));
++    std::vector<char *> envp;
++    for (std::string &variable : variables) envp.push_back(variable.data());
++    envp.push_back(nullptr);
++    pid_t child = 0;
++    const int error = next_program.find('/') != std::string::npos
++                          ? posix_spawn(&child, next_program.c_str(), nullptr, nullptr, argv.data(), envp.data())
++                          : posix_spawnp(&child, next_program.c_str(), nullptr, nullptr, argv.data(), envp.data());
++    if (error != 0)
++        std::fprintf(stderr, "Cannot start %s again (%s); start it again yourself\n", next_program.c_str(),
++                     std::strerror(error));
++}
++
++// Under Steam: the game id Steam launched this run as (its launcher sets
++// SteamGameId; a non-Steam shortcut's is a 64-bit number), and a program
++// found on PATH.
++std::string steam_game;
++
++bool on_path(const char *program) {
++    const char *path = std::getenv("PATH");
++    if (path == nullptr) return false;
++    std::string list = path;
++    for (std::size_t start = 0; start <= list.size();) {
++        const std::size_t end = std::min(list.find(':', start), list.size());
++        const std::string dir = list.substr(start, end - start);
++        if (!dir.empty() && access((dir + "/" + program).c_str(), X_OK) == 0) return true;
++        start = end + 1;
++    }
++    return false;
++}
++
++// At exit (std::atexit): a helper, as a user service of its own so that it is
++// not one of the game's processes, which waits for this run and Steam's
++// launcher of it (reaper, this run's parent) to be gone, then asks Steam to
++// launch the game again, as the player's Play would.
++void ask_steam_at_exit() {
++    std::fflush(nullptr);
++    close_on_exec_all();
++    const std::string self = std::to_string(getpid());
++    // Waits for a process to be gone, at most a minute. No "$" anywhere:
++    // systemd would replace it in the service's command line.
++    const auto wait_for = [](const std::string &pid) {
++        return "timeout 60 tail -s 0.2 --pid=" + pid + " -f /dev/null; ";
++    };
++    std::string script = wait_for(self);
++    {
++        std::ifstream comm("/proc/" + std::to_string(getppid()) + "/comm");
++        std::string name;
++        std::getline(comm, name);
++        if (name == "reaper") script += wait_for(std::to_string(getppid()));
++    }
++    // Then a second for Steam to see the game end.
++    script += "sleep 1; exec steam -ifrunning steam://rungameid/" + steam_game;
++    const std::string unit = "--unit=portablekit-restart-" + self;
++    std::vector<std::string> arguments{"systemd-run", "--user", "--collect", "--quiet", unit, "/bin/sh", "-c", script};
++    std::vector<char *> argv;
++    for (std::string &argument : arguments) argv.push_back(argument.data());
++    argv.push_back(nullptr);
++    pid_t child = 0;
++    if (const int error = posix_spawnp(&child, "systemd-run", nullptr, nullptr, argv.data(), environ); error != 0) {
++        std::fprintf(stderr, "Cannot ask Steam to start the game again (%s); start it again yourself\n",
++                     std::strerror(error));
++        return;
++    }
++    // systemd-run returns once the service is there; a few seconds at most.
++    for (int i = 0; i < 100; ++i) {
++        int status = 0;
++        if (waitpid(child, &status, WNOHANG) != 0) break;
++        usleep(50000);
++    }
++}
++
++// Arranges the new run (see installer.hpp) unless <PREFIX>_RESTART_IN_PLACE
++// asks for the old way; true when it did. Under Steam, Steam starts it; with
++// `setup`, through the setup marker (kSetupMarkerFile), since Steam cannot
++// pass --install.
++bool restart_at_exit(std::string program, std::vector<std::string> arguments, bool setup) {
++    if (env_set("RESTART_IN_PLACE")) return false;
++    const char *game = std::getenv("SteamGameId");
++    const bool steam = game != nullptr && *game != '\0' && std::strspn(game, "0123456789") == std::strlen(game) &&
++                       std::strcmp(game, "0") != 0 && !env_set("RESTART_NOT_THROUGH_STEAM") &&
++                       on_path("systemd-run") && on_path("steam");
++    if (steam) {
++        if (setup) {
++            std::ofstream marker(user_data_directory() / kSetupMarkerFile);
++            marker << "setup\n";
++            if (!marker) return false;
++        }
++        steam_game = game;
++        if (std::atexit(&ask_steam_at_exit) != 0) return false;
++        std::cout << "[restart] Steam starts the game again (" << steam_game << ") once this run has ended"
++                  << std::endl;
++        return true;
++    }
++    next_program = std::move(program);
++    next_arguments = std::move(arguments);
++    if (std::atexit(&start_next_run) != 0) return false;
++    std::cout << "[restart] " << next_program << " starts again as this run exits" << std::endl;
++    return true;
++}
++#endif
++}
++
++void wait_for_previous_run() {
++#if defined(__linux__) && !defined(PORTABLEKIT_ANDROID_APP)
++    const std::string name = wait_variable();
++    const char *text = std::getenv(name.c_str());
++    if (text == nullptr || *text == '\0') return;
++    const pid_t previous = static_cast<pid_t>(std::atol(text));
++    unsetenv(name.c_str());
++    if (previous <= 0) return;
++    // Until it has exited: this process is then no longer its child.
++    for (int i = 0; i < 600 && getppid() == previous; ++i) usleep(50000);
++    if (getppid() == previous) std::cout << "[restart] the previous run has not ended after 30 s; starting all the same\n";
++#endif
+ }
+ 
+ void request_restart_on_exit() { restart_on_exit = true; }
+@@ -449,6 +605,14 @@ int restart(char **argv) {
+ #endif
+     const std::filesystem::path self = executable_path();
+     const std::string program = self.empty() ? std::string(argv[0]) : self.string();
++#if defined(__linux__) && !defined(PORTABLEKIT_ANDROID_APP)
++    {
++        std::vector<std::string> arguments;
++        for (char **argument = argv; *argument != nullptr; ++argument) arguments.emplace_back(*argument);
++        if (arguments.empty()) arguments.push_back(program);
++        if (restart_at_exit(program, std::move(arguments), false)) return 0;
++    }
++#endif
+ #if defined(_WIN32)
+     const intptr_t result = _execv(program.c_str(), argv);
+     (void)result;
+@@ -483,6 +647,13 @@ int restart_for_setup(const char *program) {
+     (void)result;
+ #else
+     unsetenv(env_name("GAME_DIR").c_str());
++#if defined(__linux__) && !defined(PORTABLEKIT_ANDROID_APP)
++    {
++        const std::filesystem::path self = executable_path();
++        const std::string path = self.empty() ? std::string(program) : self.string();
++        if (restart_at_exit(path, {program, "--install"}, true)) return 0;
++    }
++#endif
+     execlp(program, program, "--install", static_cast<char *>(nullptr));
+ #endif
+     std::cerr << "Cannot restart " << program << " for the setup; start it with --install\n";
+diff --git a/host/install/installer.hpp b/host/install/installer.hpp
+index 933da33..3179c9c 100644
+--- a/host/install/installer.hpp
++++ b/host/install/installer.hpp
+@@ -117,12 +117,32 @@ std::unique_ptr<InstallerUi> make_dialog_ui();
+ bool report_problem(const std::string &title, const std::string &message, bool ask_setup);
+ bool report_problem_in_dialog(const std::string &title, const std::string &message, bool ask_setup);
+ 
++// Both restarts below, on Linux: the program quits as it always does, and the
++// new run starts once it has exited.
++// - Under Steam (its launcher sets SteamGameId), Steam starts it, as the
++//   player's Play would: a helper, a user service of its own (systemd-run
++//   --user) so that it is none of the game's processes, waits for the game and
++//   Steam's launcher of it to end, then asks Steam to run the game
++//   (steam -ifrunning steam://rungameid/<id>). Steam's screen shows for a
++//   moment between the two. The setup's restart leaves kSetupMarkerFile for
++//   the next start, as Steam cannot pass --install. Any new run started inside
++//   the game instead, in place (exec) or as a process of its own, left the
++//   Steam Deck's Gaming Mode on a black screen, with the Steam button doing
++//   nothing, until the Deck slept, more often than not.
++//   <PREFIX>_RESTART_NOT_THROUGH_STEAM=1 starts it as off Steam.
++// - Off Steam, or without systemd-run: the program starts the new run as it
++//   exits, as a process of its own, which waits for it to be gone
++//   (wait_for_previous_run) before it does anything.
++// <PREFIX>_RESTART_IN_PLACE=1 replaces the process in place, as before.
++// Windows starts the new run at once (_exec does), and macOS replaces the
++// process.
++
+ // "Set up game data again" in the in-game menu: the game quits, and the
+ // program starts again with --install once it has shut down.
+ void request_setup_on_exit();
+ [[nodiscard]] bool setup_requested_on_exit();
+-// Replaces this process with `program --install`. Returns only on failure,
+-// with the exit code to use.
++// Starts `program --install` (see above). The exit code to use: on Linux the
++// new run starts as this one exits; elsewhere this returns only on failure.
+ int restart_for_setup(const char *program);
+ 
+ // "Restart now" after a save import in the in-game menu: the game quits, and
+@@ -130,8 +150,15 @@ int restart_for_setup(const char *program);
+ // screen, where the game reads its saves.
+ void request_restart_on_exit();
+ [[nodiscard]] bool restart_requested_on_exit();
+-// Replaces this process with a new run of the same program and arguments.
+-// Returns only on failure, with the exit code to use.
++// Starts a new run of the same program and arguments (see above). The exit
++// code to use: on Linux the new run starts as this one exits; elsewhere this
++// returns only on failure.
+ int restart(char **argv);
+ 
++// First thing in the program: when one of the restarts above started this
++// run, waits for the run that started it to have exited (at most 30 seconds).
++// The host's main does it; a port with a main of its own in front calls it
++// first. Nothing elsewhere than Linux.
++void wait_for_previous_run();
++
+ } // namespace portablekit::install
+diff --git a/host/install/user_data.hpp b/host/install/user_data.hpp
+index 5d2eb39..eddfbce 100644
+--- a/host/install/user_data.hpp
++++ b/host/install/user_data.hpp
+@@ -16,7 +16,8 @@ namespace portablekit::install {
+ // Save data is not here yet: ms0 stays where the host has always kept it.
+ inline constexpr const char *kExecutableFile = "EBOOT.ELF";
+ inline constexpr const char *kCopiedImageFile = "disc.iso";
+-// Android: asks the next start to run the setup, as --install does elsewhere.
++// Asks the next start to run the setup, as --install does: on Android, and on
++// Linux when Steam starts the game again (install/installer.hpp).
+ inline constexpr const char *kSetupMarkerFile = "setup-requested";
+ inline constexpr const char *kSettingsFile = "settings.ini";
+ 
+diff --git a/host/main.cpp b/host/main.cpp
+index a74110a..c77018f 100644
+--- a/host/main.cpp
++++ b/host/main.cpp
+@@ -344,6 +344,8 @@ int PORTABLEKIT_HOST_MAIN_NAME(int argc, char **argv) {
+ int main(int argc, char **argv) {
+ #endif
+ #if defined(__linux__) && !defined(PORTABLEKIT_ANDROID_APP)
++    // A restart (install/installer.hpp): the run that started this one ends first.
++    portablekit::install::wait_for_previous_run();
+     ensure_main_stack(argv);
+ #endif
+     try {
+@@ -360,9 +362,11 @@ int main(int argc, char **argv) {
+             return 2;
+         }
+         if (options.install_image) return install_from_command_line(options);
+-#if defined(PORTABLEKIT_ANDROID_APP)
++#if defined(PORTABLEKIT_ANDROID_APP) || defined(__linux__)
+         {
+-            // "Set up game data again" from the menu, left for this start.
++            // "Set up game data again" from the menu, left for this start: an
++            // app, or a game Steam starts again (install/installer.hpp), is
++            // not started with --install.
+             std::error_code ec;
+             const std::filesystem::path marker =
+                 portablekit::install::user_data_directory() / portablekit::install::kSetupMarkerFile;
+-- 
+2.53.0.windows.1
+

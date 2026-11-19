@@ -539,13 +539,13 @@ void system_rows() {
     switch (status) {
     case Status::Off:
     case Status::Waiting:
-        ui::info_row("Status", "Discord is not open");
+        ui::info_row("Status##discord", "Discord is not open");
         break;
     case Status::Showing:
-        ui::info_row("Status", "Showing");
+        ui::info_row("Status##discord", "Showing");
         break;
     case Status::Refused:
-        ui::info_row("Status", refusal.empty() ? std::string("Discord refused it") : "Discord refused it: " + refusal);
+        ui::info_row("Status##discord", refusal.empty() ? std::string("Discord refused it") : "Discord refused it: " + refusal);
         break;
     }
 }
