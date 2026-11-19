@@ -44,6 +44,7 @@ BUILD = ROOT / "tools" / "local" / "port" / "build-d012-installer"
 LLVM = ROOT / "tools" / "local" / "llvm-mingw-20260922-ucrt-x86_64"
 ISCC = ROOT / "tools" / "local" / "innosetup" / "ISCC.exe"
 WRAPPER = ROOT / "tools" / "port" / "pk_cmake_mingw.cmd"
+UPDATE_KEY = ROOT / "tools" / "port" / "update-signing-key.txt"
 INSTALLER = ROOT / "tools" / "port" / "installer"
 OUT = ROOT / "build" / "port" / "installer"
 STAGE = OUT / "stage"
@@ -89,6 +90,20 @@ def build(portablekit):
              "-DPORTABLEKIT_RELEASE=ON", f"-DD012_PORTABLEKIT_DIR={portablekit.as_posix()}"])
     run(["cmd", "/c", WRAPPER, "--build", BUILD, "-j", str(max(2, (os.cpu_count() or 4) // 2))])
     build_atracdenc()
+
+
+def check_update_key():
+    """A release carries the public key its updates are checked with, or it could never install one from its menu."""
+    cache = BUILD / "CMakeCache.txt"
+    key_file = UPDATE_KEY
+    if cache.is_file():
+        found = re.search(r"^D012_UPDATE_KEY_FILE:FILEPATH=(.*)$", cache.read_text(errors="replace"), re.M)
+        if found:
+            key_file = Path(found.group(1).strip())
+    text = key_file.read_text().strip() if key_file.is_file() else ""
+    if not re.fullmatch(r"[0-9a-f]{64}", text):
+        raise PackagingError(f"{key_file} does not hold the update signing key's public half: "
+                             "run tools/port/release_signing.sh new (docs/port/releasing.md)")
 
 
 def atracdenc_commit():
@@ -343,6 +358,7 @@ def main():
     if not re.fullmatch(r"\d+\.\d+\.\d+", options.version):
         parser.error("--version must look like 0.3.0")
     try:
+        check_update_key()
         print("1. building the installer build")
         if not options.no_build:
             build(options.portablekit)

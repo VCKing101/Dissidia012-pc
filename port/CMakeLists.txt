@@ -113,7 +113,9 @@ portablekit_add_game(D012Native ${d012_corpus}
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_crash_report.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_test_switches.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_portable.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_ed25519.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_update_rules.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_update_install.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_updates.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_discord_rules.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_discord.cpp"
@@ -144,6 +146,20 @@ if(D012_INSTALLER_BUILD OR ANDROID)
 else()
     set(d012_from_source true)
 endif()
+# The public half of the key that signs releases (tools/port/release_signing.sh):
+# a copy installs only an update signed with it. Without the file it offers none.
+set(D012_UPDATE_KEY_FILE "${D012_REPO_ROOT}/tools/port/update-signing-key.txt" CACHE FILEPATH
+    "The public key updates are signed with: 64 hexadecimal digits")
+set(d012_update_key "")
+if(EXISTS "${D012_UPDATE_KEY_FILE}")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${D012_UPDATE_KEY_FILE}")
+    file(READ "${D012_UPDATE_KEY_FILE}" d012_update_key)
+    string(STRIP "${d012_update_key}" d012_update_key)
+    string(LENGTH "${d012_update_key}" d012_update_key_length)
+    if(NOT d012_update_key MATCHES "^[0-9a-f]+$" OR NOT d012_update_key_length EQUAL 64)
+        message(FATAL_ERROR "${D012_UPDATE_KEY_FILE} does not hold a public key: 64 hexadecimal digits")
+    endif()
+endif()
 file(CONFIGURE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/generated/d012_version.hpp" CONTENT
 "#pragma once
 
@@ -153,6 +169,9 @@ inline constexpr const char *kVersion = \"${d012_version}\";
 // True unless this is the setup's build (D012_INSTALLER_BUILD) or an Android
 // app: a copy built from source updates with git, not with a setup.
 inline constexpr bool kFromSource = ${d012_from_source};
+// The public key updates are signed with (tools/port/update-signing-key.txt);
+// empty when this build has none, and then no update is installed from the menu.
+inline constexpr const char *kUpdateSigningKey = \"${d012_update_key}\";
 }
 ")
 target_include_directories(D012Native PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
@@ -296,6 +315,7 @@ endif()
 # installer ships it as it is. SDL3 and Vulkan are the targets
 # portablekit_add_game() found above.
 add_library(d012_manifest STATIC "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_json.cpp"
+                                 "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_ed25519.cpp"
                                  "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_update_rules.cpp"
                                  "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_online_rules.cpp"
                                  "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_discord_rules.cpp"

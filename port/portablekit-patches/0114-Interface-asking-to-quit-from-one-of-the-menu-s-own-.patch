@@ -1,0 +1,34 @@
+From 395d403aeaa48c977d8d1b638863e4f1ea8008ad Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Thu, 19 Nov 2026 13:26:50 +1030
+Subject: [PATCH] Interface: asking to quit from one of the menu's own rows
+ closes the menu
+
+request_quit() was only seen by the game's next flip, and the game does not
+flip while the pausing menu is open, so a row that asked to quit left the
+menu on screen. The menu now closes as soon as a quit is asked for, and the
+game's next flip quits.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/ui/menu.cpp | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/host/ui/menu.cpp b/host/ui/menu.cpp
+index edfb87d..19ab15e 100644
+--- a/host/ui/menu.cpp
++++ b/host/ui/menu.cpp
+@@ -2289,7 +2289,9 @@ bool run_menu() {
+     layer.renderer().set_game_input(false);
+     layer.set_interactive(true);
+     Menu menu(true);
+-    const bool window_open = layer.run([&] { return menu.frame(); }, true);
++    // request_quit() from one of the menu's own rows closes the menu; the
++    // game's next flip then quits.
++    const bool window_open = layer.run([&] { return !quit_requested().load() && menu.frame(); }, true);
+     layer.set_interactive(false);
+     layer.renderer().set_game_input(true);
+     note_menu_closed(menu.quit());
+-- 
+2.53.0.windows.1
+

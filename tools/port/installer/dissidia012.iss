@@ -9,6 +9,10 @@
 ;   ISCC /DAppVersion=0.3.0 /DStage=<staged folder> /DOutputDir=<dir> dissidia012.iss
 ; Silent install for tests: setup.exe /VERYSILENT /CURRENTUSER /ISO="<path>" [/DIR="<folder>"] [/COPYISO]
 ;
+; The game starts it to install an update from its menu (port/host/d012_update_install.cpp):
+;   setup.exe /UPDATE=1 /WAITPID=<the game> /DIR="<its folder>" /SILENT /SUPPRESSMSGBOXES ...
+; It waits for the game to end, uses the disc image the copy already has, and starts the game when all is done.
+;
 ; MIT licence; see README.md at the repository root.
 
 #ifndef AppVersion
@@ -105,6 +109,8 @@ Type: filesandordirs; Name: "{app}\game-code-cache"
 Type: files; Name: "{app}\game-code-status.txt"
 Type: files; Name: "{app}\game-code-build.log"
 Type: files; Name: "{app}\setup-install.log"
+Type: files; Name: "{app}\setup-update.log"
+Type: filesandordirs; Name: "{app}\update-download"
 Type: files; Name: "{app}\data\EBOOT.ELF"
 Type: files; Name: "{app}\data\disc.iso"
 Type: dirifempty; Name: "{app}"
@@ -115,12 +121,43 @@ const
     + 'Setup reads the game from it, decrypts its program and compiles the game''s code for your PC. '
     + 'Nothing is downloaded, and nothing made from your disc leaves your PC.';
   MinimumIsoBytes = 100000000;
+  SynchronizeAccess = $00100000;
+  GameExitWaitMs = 60000;
 
 var
   IsoPage: TInputFileWizardPage;
   CopyIsoBox: TNewCheckBox;
   ProgressPage: TOutputProgressWizardPage;
   LastLine: String;
+  GameIsReady: Boolean;
+
+function OpenProcess(Access: DWORD; Inherit: BOOL; ProcessId: DWORD): THandle;
+  external 'OpenProcess@kernel32.dll stdcall';
+function WaitForSingleObject(Handle: THandle; Milliseconds: DWORD): DWORD;
+  external 'WaitForSingleObject@kernel32.dll stdcall';
+function CloseHandle(Handle: THandle): BOOL;
+  external 'CloseHandle@kernel32.dll stdcall';
+
+{ Started by the game's menu to install an update. }
+function IsMenuUpdate(): Boolean;
+begin
+  Result := ExpandConstant('{param:UPDATE|0}') = '1';
+end;
+
+{ The game that started this closes first: its files are about to be replaced. }
+function InitializeSetup(): Boolean;
+var
+  ProcessId: Integer;
+  Game: THandle;
+begin
+  Result := True;
+  ProcessId := StrToIntDef(ExpandConstant('{param:WAITPID|0}'), 0);
+  if ProcessId = 0 then exit;
+  Game := OpenProcess(SynchronizeAccess, False, ProcessId);
+  if Game = 0 then exit;
+  WaitForSingleObject(Game, GameExitWaitMs);
+  CloseHandle(Game);
+end;
 
 function IsoPath(): String;
 begin
@@ -166,7 +203,8 @@ var
   Size: Int64;
 begin
   Result := True;
-  if (IsoPage <> nil) and (CurPageID = IsoPage.ID) then begin
+  { An update keeps the disc image the copy plays from, which the original path may no longer name. }
+  if (IsoPage <> nil) and (CurPageID = IsoPage.ID) and not IsMenuUpdate() then begin
     if not FileExists(IsoPage.Values[0]) then begin
       MsgBox('Choose your disc image: the file was not found.', mbError, MB_OK);
       Result := False;
@@ -222,14 +260,19 @@ function AlreadyInstalledFrom(const Iso: String): Boolean;
 begin
   { The decrypted executable is there and was made from this disc image, kept where it was. }
   Result := FileExists(ExpandConstant('{app}\data\EBOOT.ELF'))
-    and (CompareText(GetPreviousData('IsoPath', ''), Iso) = 0)
-    and (GetPreviousData('CopyIso', '0') = IntToStr(Ord(CopyIso())));
+    and (IsMenuUpdate()
+      or ((CompareText(GetPreviousData('IsoPath', ''), Iso) = 0)
+        and (GetPreviousData('CopyIso', '0') = IntToStr(Ord(CopyIso())))));
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   Iso, Params: String;
+  Code: Integer;
 begin
+  { After the compile: [Run] entries would start the game before it. }
+  if (CurStep = ssDone) and IsMenuUpdate() and GameIsReady then
+    Exec(ExpandConstant('{app}\{#AppExe}'), '', ExpandConstant('{app}'), SW_SHOWNORMAL, ewNoWait, Code);
   if CurStep <> ssPostInstall then exit;
   Iso := IsoPath();
   ProgressPage.Show;
@@ -242,7 +285,9 @@ begin
       if not Run(Params, 'Setting the game up from your disc image') then exit;
     end;
     ProgressPage.SetText('Making the game''s code for your PC', '');
-    Run('--compile-game', 'Compiling the game''s code');
+    GameIsReady := Run('--compile-game', 'Compiling the game''s code');
+    { The update from the game's menu is finished (port/host/d012_update_install.cpp). }
+    if GameIsReady then DeleteFile(ExpandConstant('{app}\update-download\pending.txt'));
   finally
     ProgressPage.Hide;
   end;

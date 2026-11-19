@@ -13,6 +13,7 @@ all named with the version in `tools/port/release-version.txt`:
 | `Dissidia012-Setup-<version>-x86_64.AppImage` | Linux and the Steam Deck | `tools/port/linux_setup.sh` (WSL) |
 | `Dissidia012-<version>-Android-arm64.apk` | Android 10 and later, arm64 | `tools/port/android_build.sh --release` (WSL) |
 | `SHA256SUMS` | all four, `sha256sum -c` format (two spaces) | collected by hand from the three |
+| `SHA256SUMS.sig` | the game's **Download and install**: the list's signature | `tools/port/release_signing.sh sign` |
 
 None of them carries anything of the game: each setup and the app make the game's code on the player's machine from
 their own disc. The scripts check that (no game file by name or content, no program with the game's code linked in,
@@ -60,6 +61,10 @@ Tests:
   uninstall it at the end.
 - The setup again, over the previous release's install: "already compiled and up to date" when the game's C++ did not
   change, or only the changed parts compiled (`game-code-cache/`); saves, settings and mods kept.
+- **Download and install**, from the previous release's install, before publishing: start it with `D012_UPDATE_URL=<a
+  copy of GitHub's release JSON naming this version>` and `D012_UPDATE_ASSETS=<the folder with this setup, SHA256SUMS and
+  SHA256SUMS.sig>`. The System page offers the update; **Close the game and install** closes the game, the setup runs
+  without asking anything, and the new version starts with saves, settings and mods kept.
 - The zip: unpacked, `D012Native.exe --prepare --game <iso>` prints `progress` lines and ends in a compiled game
   (it is a windowed program: from PowerShell, `Start-Process -Wait -RedirectStandardOutput`, since `&` does not
   wait for it and its output is lost);
@@ -139,11 +144,38 @@ release can update the app: every player would have to uninstall, which deletes 
 - The developer key (`keys/dev.keystore`) signs only `android_build.sh` and `--player` builds for the owner's own
   phone; those cannot update a release install, nor a release one of them.
 
+### The update signing key
+
+The game's **Download and install** (Windows setup copies) runs only a setup listed in a `SHA256SUMS` signed with this
+key. Its public half is `tools/port/update-signing-key.txt`, compiled into the program; `package_installer.py` refuses to
+build a release without it.
+
+- It is made once, by the owner, who chooses its password:
+
+  ```bash
+  wsl -d Ubuntu-24.04 -- bash tools/port/release_signing.sh new
+  ```
+
+  Commit the public half it writes. The private key is `~/d012-android/keys/update-signing.pem` in WSL.
+- It never goes into the repository or a release, and is backed up off the machine (with the password, kept apart).
+- Lost or replaced, installed copies refuse the next release's signature: their players update once from the release's
+  page, and the version they install then trusts the new key.
+
 ## 5. The release files and notes
 
 Copy the four files into `build/port/release/v<version>-files/` and write `SHA256SUMS` there for all four
-(`sha256sum Dissidia012-* > SHA256SUMS`; check with `sha256sum -c SHA256SUMS`). The notes go in
-`build/port/release/v<version>-notes.md`. They are a changelog, kept short:
+(`sha256sum Dissidia012-* > SHA256SUMS`; check with `sha256sum -c SHA256SUMS`). Then sign the list, with the owner
+typing the key's password in a terminal:
+
+```bash
+wsl -d Ubuntu-24.04 -- bash tools/port/release_signing.sh sign build/port/release/v<version>-files
+```
+
+It writes `SHA256SUMS.sig` and checks it with the public key in the repository. Any change to a file after this means
+writing `SHA256SUMS` and signing it again. A release without a good signature can still be installed from its page, but
+**Download and install** does not offer it.
+
+The notes go in `build/port/release/v<version>-notes.md`. They are a changelog, kept short:
 
 - **What's new** and **Fixes:** one bullet each, with the issue or pull request.
 - **Install:** one line per system naming its file and linking to the README's quick start
@@ -165,8 +197,8 @@ Each with the owner's yes, in this order:
 
 1. Push `main` (`gh auth status` shows VCKing101 active; never the work account).
 2. An annotated tag `v<version>` on the release commit (tagger VCKing101 with the noreply address), pushed.
-3. The GitHub release `v<version>`, full (latest) unless the owner says pre-release, with the four files, `SHA256SUMS`
-   and the notes. Check that GitHub's digests match `SHA256SUMS`.
+3. The GitHub release `v<version>`, full (latest) unless the owner says pre-release, with the four files, `SHA256SUMS`,
+   `SHA256SUMS.sig` and the notes. Check that GitHub's digests match `SHA256SUMS`.
 4. Tell those waiting on it (RecompLauncher, an issue's reporter); a Discord announcement, which the owner posts.
 
 ## Afterwards
