@@ -47,10 +47,13 @@ struct Release {
 
 // "Dissidia012-PC-Setup-0.5.5.exe"
 [[nodiscard]] std::string setup_file_name(std::string_view version);
+// "Dissidia012-0.5.5-Android-arm64.apk"
+[[nodiscard]] std::string android_file_name(std::string_view version);
 
-// The three files that install a release on Windows.
-struct WindowsUpdate {
-    Asset setup;
+// The three files that install a release: the program for one platform (the
+// Windows setup, the Android app), the list of hashes and its signature.
+struct UpdateFiles {
+    Asset program;
     Asset sums;
     Asset signature;
 };
@@ -58,7 +61,8 @@ struct WindowsUpdate {
 // Nothing when the release lacks one of them, or one has a size it cannot
 // have: an older release, made before releases were signed, is installed from
 // its page.
-[[nodiscard]] std::optional<WindowsUpdate> windows_update(const Release &release);
+[[nodiscard]] std::optional<UpdateFiles> windows_update(const Release &release);
+[[nodiscard]] std::optional<UpdateFiles> android_update(const Release &release);
 
 // Whether `signature` (64 bytes) is the signature of `sums`, by the key written
 // as 64 hexadecimal digits in `public_key`.

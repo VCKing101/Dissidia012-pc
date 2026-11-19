@@ -29,7 +29,7 @@
 // The check itself downloads and runs nothing. "Open the download page" opens
 // the release's page in the browser, and only a page of this project's releases
 // (update_rules::kReleasePages). "Download and install", in a copy the Windows
-// setup installed, is d012_update_install.cpp.
+// setup installed and in the player's Android app, is d012_update_install.cpp.
 //
 // MIT licence; see port/README.md.
 
@@ -634,10 +634,22 @@ void install_rows(const rules::Release &release) {
     const auto megabytes = [](std::uint64_t bytes) { return std::to_string((bytes + 512u * 1024u) / (1024u * 1024u)); };
     const auto download_row = [&](const char *label) {
         ui::RowOptions row;
+#if defined(__ANDROID__)
+        row.description = "Downloads version " + release.version + ". Android asks before it installs it.";
+#else
         row.description = "Downloads version " + release.version + ". The game asks before it closes to install it.";
+#endif
         take_focus();
         if (ui::button_row(label, row)) install::start(release);
     };
+#if defined(__ANDROID__)
+    const auto install_row = [&](const char *description) {
+        ui::RowOptions row;
+        row.description = description;
+        take_focus();
+        if (ui::button_row("Install the update", row)) (void)install::install_now();
+    };
+#endif
     switch (s.step) {
     case install::Step::Idle:
         download_row("Download and install");
@@ -658,14 +670,29 @@ void install_rows(const rules::Release &release) {
         ui::info_row("Update", "Checking the download…");
         break;
     case install::Step::Ready: {
+#if defined(__ANDROID__)
+        if (!s.problem.empty()) ui::info_row("Update", s.problem);
+        const std::string description =
+            "Android asks you to confirm, then closes the game and installs version " + s.version +
+            ". Open the game again when it has finished. The first time, Android asks you to allow this app to "
+            "install apps. Your saves, settings and mods stay. Progress since your last save is lost.";
+        install_row(description.c_str());
+#else
         ui::RowOptions row;
         row.description = "Closes the game, installs version " + s.version +
                           " and starts it again. Your saves, settings and mods stay. Progress since your last save "
                           "is lost.";
         take_focus();
         if (ui::button_row("Close the game and install", row)) (void)install::install_now();
+#endif
         break;
     }
+    case install::Step::Installing:
+        ui::info_row("Update", "Waiting for you to confirm in Android's window");
+#if defined(__ANDROID__)
+        install_row("Asks Android again, if its window has gone.");
+#endif
+        break;
     case install::Step::Failed:
         ui::info_row("Update", "Could not update: " + s.problem);
         download_row("Try again");
@@ -737,6 +764,11 @@ void install(portablekit::HleRegistrar &) {
     static bool installed = false;
     if (installed) return;
     installed = true;
+#if defined(__ANDROID__)
+    // Android installs an update itself (Windows' setup does this at the
+    // program's start, d012_compile_game.cpp): what is left is the download.
+    (void)update_install::finish_at_start();
+#endif
     if (const char *forced = env("D012_UPDATE_CHECK"); forced != nullptr && std::strcmp(forced, "1") == 0) {
 #if defined(PORTABLEKIT_HAS_RENDERER)
         g_started.store(true);

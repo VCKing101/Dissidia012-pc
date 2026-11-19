@@ -128,6 +128,18 @@ done < <(grep -rlIZ $'\r' "$root/src/PortableKit" || true)
 echo "$kit_tree" > "$kit_stamp"
 echo "PortableKit from $kit_tree"
 cp "$repo/tools/port/release-version.txt" "$root/src/tools/port/"
+# The public key updates are signed with, which the player's app checks before
+# it installs one (host/d012_update_install.cpp). D012_UPDATE_PUBLIC_KEY names
+# another, for a test of updates signed with a throwaway key; never for a
+# release.
+update_key="${D012_UPDATE_PUBLIC_KEY:-$repo/tools/port/update-signing-key.txt}"
+if [[ "$release" -eq 1 ]]; then
+    [[ -z "${D012_UPDATE_PUBLIC_KEY:-}" ]] || fail "D012_UPDATE_PUBLIC_KEY is for tests, not a release"
+    [[ "$(tr -d '[:space:]' < "$update_key" 2>/dev/null)" =~ ^[0-9a-f]{64}$ ]] ||
+        fail "$update_key does not hold the update signing key's public half (docs/port/releasing.md)"
+fi
+rm -f "$root/src/tools/port/update-signing-key.txt"
+if [[ -f "$update_key" ]]; then cp "$update_key" "$root/src/tools/port/update-signing-key.txt"; fi
 cp "$repo/LICENSE" "$root/src/"
 for part in generated overlays config; do
     [[ "$player" -eq 1 ]] && break
@@ -254,7 +266,10 @@ if [[ "$player" -eq 1 ]]; then
     mkdir -p "$assets/licenses"
     cp "$rt/android-runtime/licenses/"* "$rt/android-runtime/SOURCES.txt" "$assets/licenses/"
     cp "$root/src/port/fonts/GoudyBookletter1911-OFL.txt" "$assets/licenses/"
-    extra=(EXTRA_LIBS="$programs" EXTRA_ASSETS="$assets" NOTICES="$root/src/port/android/THIRD_PARTY_NOTICES.md")
+    # The player's app installs its own updates from the menu: Android's
+    # installer asks the player each time (host/d012_update_install.cpp).
+    extra=(EXTRA_LIBS="$programs" EXTRA_ASSETS="$assets" NOTICES="$root/src/port/android/THIRD_PARTY_NOTICES.md"
+           EXTRA_PERMISSIONS=android.permission.REQUEST_INSTALL_PACKAGES)
 fi
 signing=(KEYSTORE="$keystore" KEYSTORE_PASS=d012dev KEY_ALIAS=d012dev DEBUGGABLE=1)
 version_code="$(date +%s)"
@@ -287,6 +302,8 @@ if [[ "$release" -eq 1 ]]; then
     "$sdk/build-tools/$(ls "$sdk/build-tools" | sort -V | tail -1)/aapt2" dump badging "$apk" |
         grep -q "application-debuggable" && fail "$apk is debuggable"
     unzip -l "$apk" | grep -E "lib/arm64-v8a/libovl|game-code|generated_unit" && fail "$apk carries game code"
+    grep -q "inline constexpr const char \*kUpdateSigningKey = \"$(tr -d '[:space:]' < "$update_key")\";" \
+        "$build/generated/d012_version.hpp" || fail "the build does not carry the update signing key"
     echo "release APK: not debuggable, no game code, version $version ($version_code); symbols in $symbols"
 fi
 sha256sum "$apk"

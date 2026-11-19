@@ -41,6 +41,12 @@
 // configured with PORTABLEKIT_RELEASE=ON (D012_RELEASE_BUILD) turns the
 // interpreter off by default wherever it runs.
 //
+// An Android app has no environment a tester can set. Its files directory may
+// hold test-environment.txt, NAME=VALUE lines that are set before anything
+// here reads them (blank lines and # lines skipped). Only the app itself and
+// `adb shell run-as` on a debuggable build can write there, and the app never
+// does. docs/port/releasing.md uses it to test an update on a phone.
+//
 // It works through the environment because PortableKit reads these paths
 // there (host/main.cpp, host/install/user_data.cpp) and has no hook that runs
 // before it locates the game; nothing here is specific to the framework's
@@ -56,6 +62,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <string>
 #include <system_error>
@@ -149,6 +156,30 @@ void print_to(const std::string &log) {
     if (std::freopen(log.c_str(), "a", stderr) != nullptr) std::setvbuf(stderr, nullptr, _IONBF, 0);
 }
 
+#if defined(PORTABLEKIT_ANDROID_APP)
+// <files>/test-environment.txt (see the top of this file). The files directory
+// is worked out as PortableKit's user_data_directory() does, without asking
+// the profile, which may not be set up this early: /data/user/<user>/<package>.
+void read_test_environment() {
+    std::ifstream cmdline("/proc/self/cmdline", std::ios::binary);
+    std::string package;
+    std::getline(cmdline, package, '\0');
+    package = package.substr(0, package.find(':'));
+    if (package.empty() || package.find('/') != std::string::npos) return;
+    const std::filesystem::path file = std::filesystem::path("/data/user") / std::to_string(getuid() / 100000u) /
+                                       package / "files" / "test-environment.txt";
+    std::error_code ec;
+    if (!std::filesystem::is_regular_file(file, ec)) return;
+    std::ifstream in(file);
+    for (std::string line; std::getline(in, line);) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        const std::size_t equals = line.find('=');
+        if (line.empty() || line[0] == '#' || equals == 0 || equals == std::string::npos) continue;
+        setenv(line.substr(0, equals).c_str(), line.substr(equals + 1).c_str(), 1);
+    }
+}
+#endif
+
 // D012_LOG_FILE=<path> sends what the program prints to that file, for a copy
 // whose output nothing else collects. Under Proton the path is a Windows one
 // (Z:/home/deck/...).
@@ -207,6 +238,9 @@ void log_when_output_is_lost(const std::filesystem::path &data) {
 
 struct PortableLayout {
     PortableLayout() {
+#if defined(PORTABLEKIT_ANDROID_APP)
+        read_test_environment();
+#endif
         log_to_named_file();
         try {
             apply();

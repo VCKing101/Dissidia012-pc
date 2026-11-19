@@ -127,6 +127,14 @@ The app carries clang, lld and the recompiler, and compiles the game's code on t
      shows "All set", and the game starts.
    - The log: `adb shell run-as` does not work on a release APK (not debuggable); test with a `--player` build of the
      same commit when the log is needed.
+   - **Download and install**, before publishing, with `--player` builds under a test app id (so the phone's own install
+     is never touched): build the previous version and this one with `D012_APP_ID_PLAYER=<test id>` and
+     `D012_UPDATE_PUBLIC_KEY=<a throwaway key's public half>`, install the first, and give it the ISO. Then write
+     `files/test-environment.txt` in its storage (`adb shell run-as <test id>`; lines `D012_UPDATE_URL=<a copy of
+     GitHub's release JSON naming this version>` and `D012_UPDATE_ASSETS=<a folder holding this APK, SHA256SUMS and
+     SHA256SUMS.sig, signed with the throwaway key>`, both in the app's storage). The System page offers the update;
+     **Install the update** shows Android's question, and after it the app is the new version with its data kept. Delete
+     the test app at the end.
 
 ### The release key
 
@@ -146,9 +154,9 @@ release can update the app: every player would have to uninstall, which deletes 
 
 ### The update signing key
 
-The game's **Download and install** (Windows setup copies) runs only a setup listed in a `SHA256SUMS` signed with this
-key. Its public half is `tools/port/update-signing-key.txt`, compiled into the program; `package_installer.py` refuses to
-build a release without it.
+The game's **Download and install** (Windows setup copies and the Android app) installs only a setup or APK listed in a
+`SHA256SUMS` signed with this key. Its public half is `tools/port/update-signing-key.txt`, compiled into the program;
+`package_installer.py` and `android_build.sh --release` refuse to build a release without it.
 
 - It is made once, by the owner, who chooses its password:
 

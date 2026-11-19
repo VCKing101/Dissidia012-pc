@@ -319,8 +319,9 @@ go straight to the game. The ISO in Download can be deleted afterwards.
 **5. Play** with the touch controls or a controller. The menu button at the top of the touch controls, Back, or
 L3 + R3 on a controller opens the port's menu. **System, Add content** there imports mods and DLC.
 
-**To update:** download the new release's APK and install it over the app. Your saves, settings and mods stay, and
-the game's code is made again only for the parts the new version changes.
+**To update:** choose **Download and install** on the System page of the port's menu ([Updates](#updates)), or
+download the new release's APK and install it over the app. Your saves, settings and mods stay, and the game's code is
+made again only for the parts the new version changes.
 
 You need a 64-bit phone or tablet with Android 10 or later and about 2 GB of free space for the app, the copy of
 your ISO and the game's code, plus room for the ISO itself while it is copied in.
@@ -337,9 +338,12 @@ until you press a button.
 - **Check for updates** on the System page of the port's menu (Esc, or L3 + R3; on Android the menu button or Back)
   asks again. When a newer version is
   out, **Open the download page** opens its release in your browser. Install it as above, into the same folder.
-- **Download and install**, on the same page, updates a copy installed with the Windows setup. The game downloads the
-  new version and checks that it is the project's signed release. **Close the game and install** then closes the game,
-  installs the update and starts the game again. Progress since your last save is lost, so save first.
+- **Download and install**, on the same page, updates a copy installed with the Windows setup, and the Android app. The
+  game downloads the new version and checks that it is the project's signed release. Progress since your last save is
+  lost when it installs, so save first.
+  - Windows: **Close the game and install** closes the game, installs the update and starts the game again.
+  - Android: **Install the update** asks Android to install it. Android asks you to confirm, and the first time to
+    allow the app to install apps. It then closes the game and installs the update: open the game again afterwards.
 - **Check when the game starts**, on the same page, turns the check at start off. The button still works.
 - The check sends GitHub only its request, which names the port's version. Nothing is downloaded or installed unless you
   choose to.
