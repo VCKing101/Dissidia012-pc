@@ -26,15 +26,17 @@
 // D012_UPDATE_URL=<file> reads the answer from a file instead of GitHub, for
 // tests (it also checks at start in a scripted run).
 //
-// It never downloads or runs anything: "Open the download page" opens the
-// release's page in the browser, and only a page of this project's releases
-// (update_rules::kReleasePages).
+// The check itself downloads and runs nothing. "Open the download page" opens
+// the release's page in the browser, and only a page of this project's releases
+// (update_rules::kReleasePages). "Download and install", in a copy the Windows
+// setup installed, is d012_update_install.cpp.
 //
 // MIT licence; see port/README.md.
 
 #include "d012_updates.hpp"
 
 #include "d012_input.hpp"
+#include "d012_update_install.hpp"
 #include "d012_update_rules.hpp"
 #include "d012_version.hpp"
 
@@ -421,6 +423,7 @@ struct Result {
     Stage stage = Stage::Idle;
     std::string latest;   // Newest, Available: the release's version; empty when there is none
     std::string page;     // Available
+    std::optional<rules::Release> release;  // Available
     std::string problem;  // Failed
     Clock::time_point when{};
 };
@@ -474,6 +477,7 @@ Result check() {
     if (rules::compare_versions(release->version, kVersion) > 0) {
         r.stage = Stage::Available;
         r.page = release->page;
+        r.release = release;
     } else {
         r.stage = Stage::Newest;
     }
@@ -614,6 +618,61 @@ void notice_draw() {
 
 // --- The System page -------------------------------------------------------
 
+// Downloading and installing `release`, in a copy that can.
+void install_rows(const rules::Release &release) {
+    namespace ui = portablekit::ui;
+    namespace install = update_install;
+    const install::Status s = install::status();
+    // A row that replaces the one the player pressed takes its focus, so a
+    // controller is never left with nothing selected.
+    static install::Step drawn = install::Step::Idle;
+    const bool arrived = s.step != drawn;
+    drawn = s.step;
+    const auto take_focus = [&] {
+        if (arrived) ui::focus_next_row();
+    };
+    const auto megabytes = [](std::uint64_t bytes) { return std::to_string((bytes + 512u * 1024u) / (1024u * 1024u)); };
+    const auto download_row = [&](const char *label) {
+        ui::RowOptions row;
+        row.description = "Downloads version " + release.version + ". The game asks before it closes to install it.";
+        take_focus();
+        if (ui::button_row(label, row)) install::start(release);
+    };
+    switch (s.step) {
+    case install::Step::Idle:
+        download_row("Download and install");
+        break;
+    case install::Step::Preparing:
+        ui::info_row("Update", "Getting ready…");
+        break;
+    case install::Step::Downloading: {
+        const float fraction = s.total > 0 ? static_cast<float>(static_cast<double>(s.done) / static_cast<double>(s.total)) : 0.0f;
+        ui::progress_bar(fraction, "Downloading: " + megabytes(s.done) + " of " + megabytes(s.total) + " MB");
+        ui::RowOptions row;
+        row.description = "Stops the download. Choosing Download and install again continues it.";
+        take_focus();
+        if (ui::button_row("Cancel the download", row)) install::cancel();
+        break;
+    }
+    case install::Step::Checking:
+        ui::info_row("Update", "Checking the download…");
+        break;
+    case install::Step::Ready: {
+        ui::RowOptions row;
+        row.description = "Closes the game, installs version " + s.version +
+                          " and starts it again. Your saves, settings and mods stay. Progress since your last save "
+                          "is lost.";
+        take_focus();
+        if (ui::button_row("Close the game and install", row)) (void)install::install_now();
+        break;
+    }
+    case install::Step::Failed:
+        ui::info_row("Update", "Could not update: " + s.problem);
+        download_row("Try again");
+        break;
+    }
+}
+
 void system_rows() {
     namespace ui = portablekit::ui;
     ui::section("Updates");
@@ -651,6 +710,7 @@ void system_rows() {
         break;
     case Stage::Available: {
         ui::info_row("Status", "Version " + r.latest + " is available");
+        if (r.release && update_install::can_install(*r.release)) install_rows(*r.release);
         ui::RowOptions open;
 #if defined(__ANDROID__)
         open.description = "Opens the release's page in your browser, with the Android app (the .apk). Install it "

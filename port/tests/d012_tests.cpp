@@ -878,6 +878,72 @@ void test_update_rules() {
            "a page elsewhere is not opened");
     expect(!rules::parse_release(answer("\"message\": \"Not Found\""), error), "an answer without a release is refused");
     expect(!rules::parse_release("<html>", error), "an answer that is not JSON is refused");
+
+    // The files of a release, and which of them install it on Windows.
+    const std::string downloads = std::string(rules::kReleaseDownloads) + "v0.5.5/";
+    const auto asset = [&](const std::string &name, std::uint64_t size, const std::string &base) {
+        return "{\"name\": \"" + name + "\", \"size\": " + std::to_string(size) + ", \"browser_download_url\": \"" +
+               base + name + "\"}";
+    };
+    const auto with_assets = [&](const std::string &assets) {
+        return rules::parse_release(answer("\"tag_name\": \"v0.5.5\", \"html_url\": \"" + page + "\", \"assets\": [" +
+                                           assets + "]"),
+                                    error);
+    };
+    const std::string setup = asset("Dissidia012-PC-Setup-0.5.5.exe", 80000000, downloads);
+    const std::string sums = asset("SHA256SUMS", 408, downloads);
+    const std::string signature = asset("SHA256SUMS.sig", 64, downloads);
+    release = with_assets(setup + "," + sums + "," + signature);
+    expect(release && release->assets.size() == 3, "a release's files are read: " + error);
+    const auto update = release ? rules::windows_update(*release) : std::nullopt;
+    expect(update && update->setup.size == 80000000 && update->setup.url == downloads + "Dissidia012-PC-Setup-0.5.5.exe" &&
+               update->sums.name == "SHA256SUMS" && update->signature.name == "SHA256SUMS.sig",
+           "a signed release can be installed");
+    const auto installs = [&](const std::string &assets) {
+        const auto read = with_assets(assets);
+        return read && rules::windows_update(*read).has_value();
+    };
+    expect(!installs(setup + "," + sums), "a release with no signature is installed from its page");
+    expect(!installs(sums + "," + signature), "a release with no setup is installed from its page");
+    expect(!installs(asset("Dissidia012-PC-Setup-0.5.4.exe", 80000000, downloads) + "," + sums + "," + signature),
+           "another version's setup is not this release's");
+    expect(!installs(asset("Dissidia012-PC-Setup-0.5.5.exe", 80000000, "https://example.com/") + "," + sums + "," +
+                     signature),
+           "a setup from elsewhere is left out");
+    expect(!installs(setup + "," + sums + "," + asset("SHA256SUMS.sig", 65, downloads)),
+           "a signature of the wrong size is refused");
+    expect(!installs(asset("Dissidia012-PC-Setup-0.5.5.exe", 0, downloads) + "," + sums + "," + signature),
+           "an empty setup is refused");
+
+    // The list of hashes.
+    const std::string hash(64, 'a');
+    const std::string list = std::string(64, 'b') + "  Dissidia012-0.5.5-Android-arm64.apk\n" + hash +
+                             "  Dissidia012-PC-Setup-0.5.5.exe\n";
+    expect(rules::listed_hash(list, "Dissidia012-PC-Setup-0.5.5.exe") == hash, "a file's hash is found");
+    expect(rules::listed_hash(list, "Dissidia012-PC-Setup-0.5.4.exe").empty(), "another version's hash is not");
+    expect(rules::listed_hash(list, "Setup-0.5.5.exe").empty(), "a part of a name does not match");
+    expect(rules::listed_hash(std::string(64, 'A') + " *a.exe\r\n", "a.exe") == hash, "binary mode and capitals are read");
+    expect(rules::listed_hash(std::string(64, 'x') + "  a.exe\n", "a.exe").empty(), "a hash that is not one is refused");
+
+    // RFC 8032, section 7.1, test 3.
+    const std::string key = "fc51cd8e6218a1a38da47ed00230f0580816ed13ba3303ac5deb911548908025";
+    const std::string message = "\xaf\x82";
+    const std::string signed_hex = "6291d657deec24024827e69c3abe01a30ce548a284743a445e3680d7db5ac3ac"
+                                   "18ff9b538d16f290ae67f760984dc6594a7c15e9716ed28dc027beceea1ec40a";
+    std::string good;
+    for (std::size_t i = 0; i < signed_hex.size(); i += 2)
+        good.push_back(static_cast<char>(std::stoi(signed_hex.substr(i, 2), nullptr, 16)));
+    expect(rules::sums_signed(message, good, key), "a good signature is accepted");
+    std::string damaged = good;
+    damaged[10] = static_cast<char>(damaged[10] ^ 1);
+    expect(!rules::sums_signed(message, damaged, key), "a damaged signature is refused");
+    damaged = good;
+    damaged[63] = static_cast<char>(damaged[63] ^ 0x40);
+    expect(!rules::sums_signed(message, damaged, key), "a signature with an S out of range is refused");
+    expect(!rules::sums_signed("\xaf\x83", good, key), "a changed list is refused");
+    expect(!rules::sums_signed(message, good, std::string(key.size() - 1, 'f') + "e"), "another key's list is refused");
+    expect(!rules::sums_signed(message, good, ""), "no key refuses everything");
+    expect(!rules::sums_signed(message, good.substr(1), key), "a short signature is refused");
 }
 
 // What the player is told when the game cannot open its window, and its off

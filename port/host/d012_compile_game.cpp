@@ -81,6 +81,7 @@
 // MIT licence; see port/README.md.
 
 #include "app_paths.hpp"
+#include "d012_update_install.hpp"
 #include "install/user_data.hpp"
 #include "kernel/iso_image.hpp"
 #include "overlay_module.hpp"
@@ -1162,6 +1163,8 @@ int main(int argc, char **argv) {
     if (argc == 3 && std::string_view(argv[1]) == "--game") return play_from(argv[0], argv[2]);
     if (argc >= 2 && std::string_view(argv[1]) == "--prepare") return prepare(argc, argv);
     if (argc >= 2 && std::string_view(argv[1]) == "--compile-game") return d012::compile_game::main(argc, argv);
+    // An update that stopped half way is finished before the game's code loads.
+    if (argc == 1 && d012::update_install::finish_at_start()) return 0;
     return d012_portablekit_main(argc, argv);
 }
 #endif

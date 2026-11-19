@@ -210,9 +210,9 @@ disc leaves your PC. Tick **Battle BGM Maker** if you want to make your own musi
 or L3 + R3 on a controller, opens the port's menu. Your saves are in `data\ms0` in the install folder, and mods go in
 `data\mods` (the Start menu has a shortcut to it).
 
-**To update:** run the new release's setup and install into the same folder. Your saves, settings and mods stay, and
-the game's code is compiled again only when the new version needs it. The game tells you when there is one
-([Updates](#updates)).
+**To update:** choose **Download and install** on the System page of the port's menu ([Updates](#updates)), or run the
+new release's setup and install into the same folder. Your saves, settings and mods stay, and the game's code is
+compiled again only when the new version needs it.
 
 **If it crashes or freezes,** please [open an issue](https://github.com/VCKing101/Dissidia012-pc/issues/new/choose)
 and attach the log, `data\logs\D012Native.log` in the install folder. Starting the game again renames it to
@@ -337,9 +337,14 @@ until you press a button.
 - **Check for updates** on the System page of the port's menu (Esc, or L3 + R3; on Android the menu button or Back)
   asks again. When a newer version is
   out, **Open the download page** opens its release in your browser. Install it as above, into the same folder.
+- **Download and install**, on the same page, updates a copy installed with the Windows setup. The game downloads the
+  new version and checks that it is the project's signed release. **Close the game and install** then closes the game,
+  installs the update and starts the game again. Progress since your last save is lost, so save first.
 - **Check when the game starts**, on the same page, turns the check at start off. The button still works.
-- The check sends GitHub only its request, which names the port's version. It never downloads or installs anything.
+- The check sends GitHub only its request, which names the port's version. Nothing is downloaded or installed unless you
+  choose to.
 - A copy built from source (`setup.ps1`) does not check by itself: update it with `git pull` and `setup.ps1`.
+- RecompLauncher updates the copies it installs.
 
 ## Discord status
 

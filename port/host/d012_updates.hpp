@@ -3,8 +3,9 @@
 // Checking for a newer version: GitHub's latest release against this
 // program's version (d012_version.hpp), on the menu's System page and, unless
 // the player turns it off, once when the game starts, with a notice over the
-// title screen. It only says so and opens the release's page; the player
-// downloads and runs the setup as for any version. See d012_updates.cpp.
+// title screen. It says so and opens the release's page; a copy the Windows
+// setup installed can also install the release from the System page
+// (d012_update_install.hpp). See d012_updates.cpp.
 // MIT licence; see port/README.md.
 
 #include <string>
