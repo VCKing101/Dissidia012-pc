@@ -165,9 +165,20 @@ Online, 21 November:
 - V: PortableKit's `portablekit_disc_patch_tests` (a made-up mod from a patch and from an image, read back, its
   identity; the tag of a modded copy) and its other framework tests pass (MSVC; the ad hoc ones not run);
   `d012_tests` pass.
+- V: three copies on this PC (main of 21 November) on PortableKit's ad hoc server on 127.0.0.1 alone
+  (`--adhoc-server 27412 --loopback`; each copy with `D012_ADHOC_LOOPBACK=1` and the battle link on
+  `D012_NET_BATTLE=127.0.0.1:27430`, so every socket stayed on the loopback address and Windows asked nothing): two
+  playing Emendatus with copies of its starter save, one the release with the port's versus test save. The server
+  logged the release copy's tag as `<port's tag>` and the modded copies' as `<port's tag>-m58fe9ae52cb0`. In the
+  Online Lobby's lobby 1, the two modded copies listed each other's Friend Card as Online; the release copy, in the
+  same lobby on the same server, listed only its own and heard no hello.
+- V: the two modded copies, challenge to fighter select to an online 1-on-1 (Crystal World): the battle link joined
+  them as players 0 and 1 of one battle, 2 frames of input delay, the must-match list (the disc's identity
+  included) agreed. Random input on both for about 2,700 frames: in step at every check, the same Brave, HP and
+  clock on both screens.
 
 Not verified: a whole story chapter, loading the mod's second save back, Linux, the Steam Deck,
 Android (the picker is desktop only), the European disc, another mod or a patch made by another tool than xdelta3.
-Online with two copies: a modded and a release copy kept apart, two modded copies meeting and fighting (it needs
-someone at the PC for the firewall's questions). A layer names the image it was prepared from by path: moving that
-image means preparing the mod again.
+Online across the internet or between two computers, through the game's public server, or with a Deck or phone. A
+battle refused for different mods: copies of different mods never meet in a lobby to reach one. A layer names the
+image it was prepared from by path: moving that image means preparing the mod again.
