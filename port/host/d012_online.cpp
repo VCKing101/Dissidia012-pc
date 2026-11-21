@@ -13,6 +13,7 @@
 #include "d012_online_rules.hpp"
 #include "d012_updates.hpp"
 
+#include "adhoc/session.hpp"
 #include "install/user_data.hpp"
 #include "profile.hpp"
 #include "settings/settings.hpp"
@@ -210,8 +211,9 @@ int ask(const std::string &server, const std::string &version) {
 }
 
 void count_loop() {
-    const std::string version =
-        portablekit::game().adhoc_version != nullptr ? portablekit::game().adhoc_version() : std::string();
+    // The tag this copy logs in with, a mod's disc included: the count is of
+    // the players it can meet.
+    const std::string version = portablekit::adhoc_version_tag();
     for (;;) {
         State &s = state();
         bool shown;

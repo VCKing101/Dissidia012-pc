@@ -1,0 +1,867 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Sat, 21 Nov 2026 18:00:00 +1030
+Subject: [PATCH] Patched editions: online, copies meet only copies of the same
+ mod
+
+A copy playing a mod's disc and a copy of the release met online as if
+they were the same game: the same lobbies, and battles between them,
+though the mod changes the game's code and data. A mod's disc now has an
+identity, and online play keeps copies apart by it.
+
+- disc_patch::Layer::identity(): the SHA-256 of the patched image's size
+  and of each sector the layer lists (its number and contents), in
+  order. The same for every copy of the same mod over the same release,
+  however it was prepared and whatever the file is called.
+- disc_patch::prepare_image(): a disc image a mod already patched,
+  compared with the release sector by sector into the same layer as the
+  mod's patch gives, so both ways to hand out a mod give one identity
+  and the image is no longer needed. A patch or image that changes
+  nothing is refused.
+- patched::Edition::identity and patched::identity(): the layer's, or
+  for a disc image played as it is, a SHA-256 of its size, executable
+  and PARAM.SFO (which matches no prepared mod).
+- adhoc_version_tag(): the tag a copy logs in with,
+  GameProfile::adhoc_version's with "-m" and 12 digits of the identity
+  after it (adhoc::ctl::version_tag_with_edition, which shortens the
+  port's tag to leave room). Servers that know of tags already keep
+  different tags apart, so a modded copy meets only copies of the same
+  mod; a copy of the release sends its tag as before.
+- Play online's count and the chooser's Play Online say "with this mod".
+- psprecomp::Sha256: SHA-256 given a piece at a time.
+- portablekit_disc_patch_tests: a made-up mod prepared from a VCDIFF
+  patch and from its patched image, both layers read back as the image
+  and their identities equal, another mod's different; the version tag
+  of a modded copy; the streaming SHA-256.
+
+Verified on Windows: the framework builds (MSVC) and its tests pass,
+the new ones included; the ad hoc tests were not run. With Dissidia 012
+(ULUS10566) and the Emendatus mod (clang build): its patch and its
+patched image prepare into layers of one identity, which a separate
+computation from the patched image agrees with; a modded start reports
+the tag "<port's tag>-m58fe9ae52cb0"; the release starts as before. Not
+verified: a login or a battle with two copies, another game, Linux,
+Android.
+---
+ CMakeLists.txt               |  16 +++
+ host/adhoc/protocol.hpp      |  12 +++
+ host/adhoc/session.hpp       |   6 ++
+ host/disc_patch.cpp          | 148 ++++++++++++++++++++--------
+ host/disc_patch.hpp          |  13 +++
+ host/hle/hle_adhoc.cpp       |   8 +-
+ host/kernel/iso_image.hpp    |   2 +
+ host/patched_edition.cpp     |  23 ++++-
+ host/patched_edition.hpp     |  10 ++
+ host/ui/adhoc_chooser.cpp    |  11 ++-
+ host/ui/menu.cpp             |  10 +-
+ include/psprecomp/sha256.hpp |  16 +++
+ src/sha256.cpp               |  26 +++++
+ tests/disc_patch_tests.cpp   | 226 +++++++++++++++++++++++++++++++++++++++++++
+ 14 files changed, 481 insertions(+), 46 deletions(-)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index d809952..171f3cc 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -361,6 +361,22 @@ if(PSPRECOMP_BUILD_TESTS)
+     add_test(NAME portablekit_profile_tests COMMAND portablekit_profile_tests)
+ endif()
+ 
++# Disc patches: a made-up mod prepared from its patch and from its patched
++# image into layers, read back, and their identity; the version tag of a
++# modded copy. No game data.
++if(PSPRECOMP_BUILD_TESTS)
++    add_executable(portablekit_disc_patch_tests
++        "${PORTABLEKIT_ROOT}/tests/disc_patch_tests.cpp"
++        "${PORTABLEKIT_ROOT}/tests/test_profile.cpp"
++        "${PORTABLEKIT_ROOT}/host/profile.cpp"
++        "${PORTABLEKIT_ROOT}/host/disc_patch.cpp"
++        "${PORTABLEKIT_ROOT}/host/install/user_data.cpp")
++    target_include_directories(portablekit_disc_patch_tests PRIVATE "${PORTABLEKIT_ROOT}/host")
++    target_link_libraries(portablekit_disc_patch_tests PRIVATE psprecomp_core)
++    set_target_properties(portablekit_disc_patch_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
++    add_test(NAME portablekit_disc_patch_tests COMMAND portablekit_disc_patch_tests)
++endif()
++
+ # Tilt controls: the device's roll from its motion sensors as a game's tilt
+ # buttons, with synthetic sensor readings.
+ if(PSPRECOMP_BUILD_TESTS)
+diff --git a/host/adhoc/protocol.hpp b/host/adhoc/protocol.hpp
+index 5aa34bc..2c254f2 100644
+--- a/host/adhoc/protocol.hpp
++++ b/host/adhoc/protocol.hpp
+@@ -113,6 +113,18 @@ inline constexpr std::string_view kVersionMark = "v=";
+     return true;
+ }
+ 
++// The tag of a copy playing a patched edition of the game (a mod's disc,
++// patched_edition.hpp): the port's own tag, "-m" and the first 12 digits of
++// the edition's identity, the port's tag shortened to leave room. A copy of
++// the release (no identity) keeps the port's tag as it is; a port without a
++// tag gets "m" and the digits.
++[[nodiscard]] inline std::string version_tag_with_edition(std::string_view tag, std::string_view identity) {
++    if (identity.empty()) return std::string(tag);
++    const std::string mark = "m" + std::string(identity.substr(0, 12));
++    if (tag.empty()) return mark;
++    return std::string(tag.substr(0, kVersionTagLength - mark.size() - 1u)) + "-" + mark;
++}
++
+ // Client to server. Ping, Disconnect and Scan are the opcode alone. A
+ // version tag that is not version_tag_ok() is left out.
+ inline std::string login(const Mac &mac, std::string_view nickname, std::string_view product,
+diff --git a/host/adhoc/session.hpp b/host/adhoc/session.hpp
+index b1796f5..b4a7e98 100644
+--- a/host/adhoc/session.hpp
++++ b/host/adhoc/session.hpp
+@@ -22,6 +22,12 @@ void adhoc_apply_settings(bool switch_now = false);
+ // The name other players see: the nickname setting, or the player name.
+ [[nodiscard]] std::string adhoc_player_name();
+ 
++// The version tag this copy logs in with: GameProfile::adhoc_version's, and
++// after it the identity of a mod's disc this run plays
++// (adhoc::ctl::version_tag_with_edition), so that a modded copy meets only
++// copies playing the same mod. Empty for none.
++[[nodiscard]] std::string adhoc_version_tag();
++
+ // The server the game goes online with: this instance's own while it hosts,
+ // otherwise the Server setting. Empty for none. With a public server
+ // (GameProfile::public_server): this instance's own while it hosts, else the
+diff --git a/host/disc_patch.cpp b/host/disc_patch.cpp
+index 83281df..97d4910 100644
+--- a/host/disc_patch.cpp
++++ b/host/disc_patch.cpp
+@@ -28,6 +28,7 @@
+ 
+ #include "install/user_data.hpp"
+ #include "psprecomp/common.hpp"
++#include "psprecomp/sha256.hpp"
+ 
+ #include <algorithm>
+ #include <array>
+@@ -533,6 +534,51 @@ private:
+     std::uint32_t next_ = 0u;
+ };
+ 
++// Writes the layer file: header, path, note, table, data (through a file
++// beside it, renamed when complete).
++void write_layer(const std::filesystem::path &out, const std::filesystem::path &base, const std::string &note,
++                 std::uint64_t patched_size, std::uint64_t base_size, const Sectors &sectors) {
++    const std::string base_text = install::path_to_utf8(std::filesystem::absolute(base));
++    std::vector<std::uint8_t> header(kMagic, kMagic + 8);
++    put32(header, 1u);
++    put32(header, kSector);
++    put64(header, patched_size);
++    put64(header, base_size);
++    put64(header, sectors.sectors.size());
++    const std::uint64_t table_offset = (64u + base_text.size() + note.size() + 15u) & ~std::uint64_t{15};
++    const std::uint64_t data_offset =
++        (table_offset + sectors.sectors.size() * 8u + kSector - 1u) & ~std::uint64_t{kSector - 1u};
++    put64(header, table_offset);
++    put64(header, data_offset);
++    put32(header, static_cast<std::uint32_t>(base_text.size()));
++    put32(header, static_cast<std::uint32_t>(note.size()));
++    header.insert(header.end(), base_text.begin(), base_text.end());
++    header.insert(header.end(), note.begin(), note.end());
++    header.resize(static_cast<std::size_t>(table_offset), 0u);
++    for (std::size_t i = 0; i < sectors.sectors.size(); ++i) {
++        put32(header, sectors.sectors[i]);
++        put32(header, sectors.slots[i]);
++    }
++    header.resize(static_cast<std::size_t>(data_offset), 0u);
++
++    std::error_code ec;
++    std::filesystem::create_directories(out.parent_path(), ec);
++    std::filesystem::path partial = out;
++    partial += ".partial";
++    {
++        std::ofstream file(partial, std::ios::binary | std::ios::trunc);
++        file.write(reinterpret_cast<const char *>(header.data()), static_cast<std::streamsize>(header.size()));
++        file.write(reinterpret_cast<const char *>(sectors.data.data()),
++                   static_cast<std::streamsize>(sectors.data.size()));
++        if (!file) throw Failure{"the prepared disc cannot be written: is the disk full?"};
++    }
++    std::filesystem::rename(partial, out, ec);
++    if (ec) {
++        std::filesystem::remove(partial, ec);
++        throw Failure{"the prepared disc cannot be put in place"};
++    }
++}
++
+ void apply(const std::vector<std::uint8_t> &patch, Source &source, Sectors &sectors, Progress &progress,
+            Result &result) {
+     static const std::array<Code, 256> table = default_code_table();
+@@ -714,46 +760,44 @@ Result prepare(const std::filesystem::path &patch_path, const std::filesystem::p
+                              " parts did not come out as it expected: it was made from a slightly different copy of "
+                              "the disc. They were applied anyway.";
+ 
+-        // The file: header, path, note, table, data.
+-        const std::string base_text = install::path_to_utf8(std::filesystem::absolute(base));
+-        const std::string note = install::path_to_utf8(patch_path.filename());
+-        std::vector<std::uint8_t> header(kMagic, kMagic + 8);
+-        put32(header, 1u);
+-        put32(header, kSector);
+-        put64(header, progress.total.load());
+-        put64(header, source.size());
+-        put64(header, sectors.sectors.size());
+-        const std::uint64_t table_offset = (64u + base_text.size() + note.size() + 15u) & ~std::uint64_t{15};
+-        const std::uint64_t data_offset = (table_offset + sectors.sectors.size() * 8u + kSector - 1u) & ~std::uint64_t{kSector - 1u};
+-        put64(header, table_offset);
+-        put64(header, data_offset);
+-        put32(header, static_cast<std::uint32_t>(base_text.size()));
+-        put32(header, static_cast<std::uint32_t>(note.size()));
+-        header.insert(header.end(), base_text.begin(), base_text.end());
+-        header.insert(header.end(), note.begin(), note.end());
+-        header.resize(static_cast<std::size_t>(table_offset), 0u);
+-        for (std::size_t i = 0; i < sectors.sectors.size(); ++i) {
+-            put32(header, sectors.sectors[i]);
+-            put32(header, sectors.slots[i]);
+-        }
+-        header.resize(static_cast<std::size_t>(data_offset), 0u);
+-
+-        std::error_code ec;
+-        std::filesystem::create_directories(out.parent_path(), ec);
+-        std::filesystem::path partial = out;
+-        partial += ".partial";
+-        {
+-            std::ofstream file(partial, std::ios::binary | std::ios::trunc);
+-            file.write(reinterpret_cast<const char *>(header.data()), static_cast<std::streamsize>(header.size()));
+-            file.write(reinterpret_cast<const char *>(sectors.data.data()),
+-                       static_cast<std::streamsize>(sectors.data.size()));
+-            if (!file) throw Failure{"the prepared disc cannot be written: is the disk full?"};
+-        }
+-        std::filesystem::rename(partial, out, ec);
+-        if (ec) {
+-            std::filesystem::remove(partial, ec);
+-            throw Failure{"the prepared disc cannot be put in place"};
++        if (sectors.sectors.empty()) throw Failure{"the patch changes nothing on this disc"};
++        write_layer(out, base, install::path_to_utf8(patch_path.filename()), progress.total.load(), source.size(),
++                    sectors);
++        result.ok = true;
++    } catch (const Failure &failure) {
++        result.message = failure.what;
++    } catch (const std::exception &e) {
++        result.message = e.what();
++    }
++    return result;
++}
++
++Result prepare_image(const std::filesystem::path &image, const std::filesystem::path &base,
++                     const std::filesystem::path &out, Progress &progress) {
++    Result result;
++    try {
++        std::ifstream in(image, std::ios::binary);
++        if (!in) throw Failure{"the disc image cannot be read"};
++        const std::uint64_t size = std::filesystem::file_size(image);
++        progress.total = size;
++        Source source(base);
++        Sectors sectors(source);
++        std::vector<std::uint8_t> chunk(4u << 20u);
++        std::uint64_t made = 0u;
++        while (made < size) {
++            if (progress.cancel) throw Failure{"Cancelled"};
++            const std::size_t n = static_cast<std::size_t>(std::min<std::uint64_t>(chunk.size(), size - made));
++            in.read(reinterpret_cast<char *>(chunk.data()), static_cast<std::streamsize>(n));
++            if (static_cast<std::size_t>(in.gcount()) != n) throw Failure{"the disc image cannot be read"};
++            sectors.add(chunk.data(), n);
++            made += n;
++            progress.done = made;
+         }
++        sectors.finish();
++        result.changed_sectors = sectors.sectors.size();
++        result.zero_sectors = sectors.zeros;
++        if (sectors.sectors.empty()) throw Failure{"it is the game's own disc: nothing on it differs"};
++        write_layer(out, base, install::path_to_utf8(image.filename()), size, source.size(), sectors);
+         result.ok = true;
+     } catch (const Failure &failure) {
+         result.message = failure.what;
+@@ -804,6 +848,32 @@ std::unique_ptr<Layer> Layer::open(const std::filesystem::path &path) {
+ 
+ Layer::~Layer() = default;
+ 
++std::string Layer::identity() {
++    if (!identity_.empty()) return identity_;
++    psprecomp::Sha256 hash;
++    std::vector<std::uint8_t> bytes;
++    put64(bytes, size_);
++    hash.update(bytes);
++    std::vector<std::uint8_t> sector(kSector);
++    for (std::size_t i = 0; i < sectors_.size(); ++i) {
++        bytes.clear();
++        put32(bytes, sectors_[i]);
++        if (slots_[i] == kZero) {
++            std::fill(sector.begin(), sector.end(), std::uint8_t{0});
++        } else {
++            file_.clear();
++            file_.seekg(static_cast<std::streamoff>(data_offset_ + std::uint64_t{slots_[i]} * kSector));
++            file_.read(reinterpret_cast<char *>(sector.data()), kSector);
++            if (file_.gcount() != static_cast<std::streamsize>(kSector))
++                throw psprecomp::Error("A damaged prepared disc: its changes cannot be read");
++        }
++        hash.update(bytes);
++        hash.update(sector);
++    }
++    identity_ = hash.finish();
++    return identity_;
++}
++
+ std::size_t Layer::read(std::ifstream &base, std::uint64_t offset, std::span<std::uint8_t> output) {
+     if (offset >= size_) return 0u;
+     const std::size_t count = static_cast<std::size_t>(std::min<std::uint64_t>(output.size(), size_ - offset));
+diff --git a/host/disc_patch.hpp b/host/disc_patch.hpp
+index b7818cb..659abc2 100644
+--- a/host/disc_patch.hpp
++++ b/host/disc_patch.hpp
+@@ -41,6 +41,11 @@ struct Result {
+ Result prepare(const std::filesystem::path &patch, const std::filesystem::path &base,
+                const std::filesystem::path &out, Progress &progress);
+ 
++// Compares `image`, a disc image a mod already patched, with `base` sector by
++// sector and writes the layer the mod's patch would give (`out`).
++Result prepare_image(const std::filesystem::path &image, const std::filesystem::path &base,
++                     const std::filesystem::path &out, Progress &progress);
++
+ // A layer file opened for reading (IsoImage's).
+ class Layer {
+ public:
+@@ -56,6 +61,13 @@ public:
+     // Reads the patched image at `offset`, its unchanged sectors from `base`
+     // (the release's image, opened by the caller).
+     std::size_t read(std::ifstream &base, std::uint64_t offset, std::span<std::uint8_t> output);
++    // What the mod changes, as the lower-case hex SHA-256 of the patched
++    // image's size (u64) and each changed sector in order (u32 number, then
++    // its 2048 bytes; little-endian). The same for every copy of the same mod
++    // over the same release, whether it was prepared from the patch or from a
++    // patched image, and whatever the file is called. Reads the layer's data
++    // once; throws when it cannot.
++    [[nodiscard]] std::string identity();
+ 
+ private:
+     Layer() = default;
+@@ -64,6 +76,7 @@ private:
+     std::vector<std::uint32_t> sectors_;  // sorted
+     std::vector<std::uint32_t> slots_;    // kZero, or the sector's index in the data
+     std::ifstream file_;
++    std::string identity_;
+ };
+ 
+ } // namespace portablekit::disc_patch
+diff --git a/host/hle/hle_adhoc.cpp b/host/hle/hle_adhoc.cpp
+index f5bae52..dd51074 100644
+--- a/host/hle/hle_adhoc.cpp
++++ b/host/hle/hle_adhoc.cpp
+@@ -23,6 +23,7 @@
+ #include "adhoc/client.hpp"
+ #include "adhoc/matching.hpp"
+ #include "adhoc/session.hpp"
++#include "patched_edition.hpp"
+ #include "settings/settings.hpp"
+ #include "utility_dialog.hpp"
+ 
+@@ -259,7 +260,7 @@ void start_client() {
+     identity.nickname = nickname();
+     identity.mac = own_mac();
+     identity.product = state().product;
+-    if (portablekit::game().adhoc_version != nullptr) identity.version = portablekit::game().adhoc_version();
++    identity.version = adhoc_version_tag();
+     Client::get().start(identity);
+ }
+ 
+@@ -1349,6 +1350,11 @@ void adhoc_apply_settings(bool switch_now) {
+ 
+ std::string adhoc_player_name() { return nickname(); }
+ 
++std::string adhoc_version_tag() {
++    const std::string tag = game().adhoc_version != nullptr ? game().adhoc_version() : std::string();
++    return adhoc::ctl::version_tag_with_edition(tag, patched::identity());
++}
++
+ bool adhoc_networking_on() { return state().ctl_initialized || state().adhoc_initialized; }
+ 
+ bool adhoc_session_active() {
+diff --git a/host/kernel/iso_image.hpp b/host/kernel/iso_image.hpp
+index d5b1254..5bb9aca 100644
+--- a/host/kernel/iso_image.hpp
++++ b/host/kernel/iso_image.hpp
+@@ -46,6 +46,8 @@ public:
+     // Reads up to output.size() bytes at an absolute image offset.
+     std::size_t read(std::uint64_t offset, std::span<std::uint8_t> output);
+     [[nodiscard]] std::vector<std::string> list(std::string directory) const;
++    // The layer a prepared mod's disc is read through (disc_patch.hpp); null for an image.
++    [[nodiscard]] disc_patch::Layer *layer() noexcept { return layer_.get(); }
+ 
+     // Reads the whole image once on a thread of its own, at the system's
+     // background I/O priority where there is one (Windows), and throws the
+diff --git a/host/patched_edition.cpp b/host/patched_edition.cpp
+index fa20df4..757aaf6 100644
+--- a/host/patched_edition.cpp
++++ b/host/patched_edition.cpp
+@@ -1,10 +1,12 @@
+ #include "patched_edition.hpp"
+ 
++#include "disc_patch.hpp"
+ #include "kernel/iso_image.hpp"
+ #include "overlay_module.hpp"
+ #include "profile.hpp"
+ 
+ #include "psprecomp/common.hpp"
++#include "psprecomp/sha256.hpp"
+ 
+ #include <algorithm>
+ #include <cstring>
+@@ -28,6 +30,7 @@ struct Baseline {
+ 
+ struct State {
+     bool active = false;
++    std::string identity;
+     std::uint32_t code_start = 0u;
+     std::vector<std::uint8_t> code;  // the release's image from code_start on
+     std::set<std::uint32_t> changed;  // words already seen to differ
+@@ -218,6 +221,21 @@ std::optional<Edition> open(const std::filesystem::path &path, std::string &why)
+     }
+     Edition edition;
+     edition.disc = path;
++    try {
++        if (disc_patch::Layer *layer = disc.layer()) {
++            edition.identity = layer->identity();
++        } else {
++            psprecomp::Sha256 hash;
++            const std::string kind = "image " + std::to_string(disc.size_bytes()) + "\n";
++            hash.update(std::span(reinterpret_cast<const std::uint8_t *>(kind.data()), kind.size()));
++            hash.update(*executable);
++            hash.update(*sfo);
++            edition.identity = hash.finish();
++        }
++    } catch (const std::exception &e) {
++        why = e.what();
++        return std::nullopt;
++    }
+     edition.executable = std::move(*executable);
+     edition.ram_bytes = game().guest_ram_bytes;
+     if (sfo_integer(*sfo, "MEMSIZE").value_or(0u) != 0u) edition.ram_bytes = std::max(edition.ram_bytes, kLargeMemory);
+@@ -235,13 +253,16 @@ void begin(psprecomp::Runtime &runtime, const Edition &edition, std::uint32_t lo
+ 
+     const psprecomp::Elf32Image elf = psprecomp::Elf32Image::from_bytes(edition.executable, "patched executable");
+     (void)elf.load_and_relocate(runtime.memory(), load_base);
++    s.identity = edition.identity;
+     std::cout << "[patched] playing " << edition.disc.filename().string() << ", " << (edition.ram_bytes >> 20u)
+-              << " MiB of memory" << std::endl;
++              << " MiB of memory, identity " << edition.identity << std::endl;
+     compare_code(runtime, load_base, code_end);
+ }
+ 
+ bool active() noexcept { return state().active; }
+ 
++std::string identity() { return state().identity; }
++
+ void code_flushed(psprecomp::Runtime &runtime) {
+     State &s = state();
+     if (s.active) compare_code(runtime, s.code_start, s.code_start + static_cast<std::uint32_t>(s.code.size()));
+diff --git a/host/patched_edition.hpp b/host/patched_edition.hpp
+index 52074fc..df126ad 100644
+--- a/host/patched_edition.hpp
++++ b/host/patched_edition.hpp
+@@ -26,6 +26,12 @@ struct Edition {
+     std::vector<std::uint8_t> executable;
+     // 64 MiB when the disc's PARAM.SFO asks for the larger memory (MEMSIZE).
+     std::uint32_t ram_bytes{};
++    // What the mod changed, as lower-case hex SHA-256: copies with the same
++    // identity play the same disc. A prepared mod's is its layer's
++    // (disc_patch::Layer::identity()). A disc image played as it is
++    // (<prefix>_PATCHED_DISC) is known only by its size, executable and
++    // PARAM.SFO, so it matches no prepared mod.
++    std::string identity;
+ };
+ 
+ // The patched disc this start was asked for; empty for the release.
+@@ -49,6 +55,10 @@ void begin(psprecomp::Runtime &runtime, const Edition &edition, std::uint32_t lo
+ // True for the whole run once begin() was called.
+ [[nodiscard]] bool active() noexcept;
+ 
++// The identity of the edition this run plays (Edition::identity); empty for
++// the release. Online play keeps copies apart by it (adhoc_version_tag()).
++[[nodiscard]] std::string identity();
++
+ // The guest flushed a cache: code it wrote over the executable's stops running
+ // recompiled from here on.
+ void code_flushed(psprecomp::Runtime &runtime);
+diff --git a/host/ui/adhoc_chooser.cpp b/host/ui/adhoc_chooser.cpp
+index 711d8c8..8b83eb3 100644
+--- a/host/ui/adhoc_chooser.cpp
++++ b/host/ui/adhoc_chooser.cpp
+@@ -11,6 +11,7 @@
+ #include "adhoc/port_mapping.hpp"
+ #include "adhoc/protocol.hpp"
+ #include "adhoc/session.hpp"
++#include "patched_edition.hpp"
+ #include "profile.hpp"
+ #include "settings/settings.hpp"
+ 
+@@ -27,7 +28,9 @@ std::string players_line() {
+     const auto players = portablekit::game().public_server_players;
+     const int count = players != nullptr ? players() : -1;
+     if (count < 0) return {};
+-    return count == 1 ? "1 player is on now.\n" : std::to_string(count) + " players are on now.\n";
++    // A modded copy is counted with, and meets, players with the same mod only.
++    const std::string with = patched::active() ? " with this mod" : "";
++    return (count == 1 ? std::string("1 player is") : std::to_string(count) + " players are") + " on now" + with + ".\n";
+ }
+ 
+ bool address_character(char32_t c) {
+@@ -148,8 +151,10 @@ bool run_adhoc_chooser() {
+                     {"Play Online",
+                      address.empty() ? note
+                                      : players_line() +
+-                                           "Play with everyone on the game's server. Nothing to set up and no address "
+-                                           "to send.",
++                                           (patched::active() ? "Play with everyone on the game's server who plays "
++                                                                "this mod. Nothing to set up and no address to send."
++                                                              : "Play with everyone on the game's server. Nothing to "
++                                                                "set up and no address to send."),
+                      !address.empty()},
+                     {"Host a Session",
+                      "Play with friends: this PC runs the session and they join it. You send them your address; the "
+diff --git a/host/ui/menu.cpp b/host/ui/menu.cpp
+index 7bbe5e5..bec2935 100644
+--- a/host/ui/menu.cpp
++++ b/host/ui/menu.cpp
+@@ -19,6 +19,7 @@
+ #include "adhoc/client.hpp"
+ #include "adhoc/discovery.hpp"
+ #include "adhoc/session.hpp"
++#include "patched_edition.hpp"
+ #include "audio/audio_sink.hpp"
+ #include "cheats/cheats.hpp"
+ #include "gpu/frame_pacing.hpp"
+@@ -1439,7 +1440,9 @@ std::string public_players_text() {
+     const auto players = portablekit::game().public_server_players;
+     const int count = players != nullptr ? players() : -1;
+     if (count < 0) return {};
+-    return count == 1 ? "1 player on" : std::to_string(count) + " players on";
++    // A modded copy is counted with, and meets, players with the same mod only.
++    return (count == 1 ? std::string("1 player on") : std::to_string(count) + " players on") +
++           (patched::active() ? " with this mod" : "");
+ }
+ 
+ // Play online, with a port's public server (GameProfile::public_server).
+@@ -1452,7 +1455,10 @@ void play_online() {
+     const std::string players = public_players_text();
+     if (adhoc_online()) {
+         info_row("Playing online", (players.empty() ? std::string() : players + ". ") +
+-                                       "Go online in the game: everyone on the server is in its lobbies.");
++                                       (patched::active()
++                                            ? "Go online in the game: everyone on the server who plays this mod is in "
++                                              "its lobbies."
++                                            : "Go online in the game: everyone on the server is in its lobbies."));
+         if (button_row("Stop playing online###choice",
+                        {false, {},
+                         "Leaves the server at once, as a lost connection does. Nothing is chosen then: the game asks "
+diff --git a/include/psprecomp/sha256.hpp b/include/psprecomp/sha256.hpp
+index 2527106..70549e1 100644
+--- a/include/psprecomp/sha256.hpp
++++ b/include/psprecomp/sha256.hpp
+@@ -1,5 +1,6 @@
+ #pragma once
+ 
++#include <array>
+ #include <cstdint>
+ #include <filesystem>
+ #include <span>
+@@ -10,4 +11,19 @@ namespace psprecomp {
+ [[nodiscard]] std::string sha256_bytes(std::span<const std::uint8_t> bytes);
+ [[nodiscard]] std::string sha256_file(const std::filesystem::path &path);
+ 
++// SHA-256 of data given a piece at a time; finish() gives the lower-case hex
++// digest, as sha256_bytes() does for the pieces joined.
++class Sha256 {
++public:
++    void update(std::span<const std::uint8_t> bytes);
++    [[nodiscard]] std::string finish();
++
++private:
++    std::array<std::uint32_t, 8> h_{0x6a09e667u, 0xbb67ae85u, 0x3c6ef372u, 0xa54ff53au,
++                                    0x510e527fu, 0x9b05688cu, 0x1f83d9abu, 0x5be0cd19u};
++    std::array<std::uint8_t, 64> block_{};
++    std::size_t used_ = 0u;
++    std::uint64_t length_ = 0u;
++};
++
+ } // namespace psprecomp
+diff --git a/src/sha256.cpp b/src/sha256.cpp
+index 74fad87..afe2a99 100644
+--- a/src/sha256.cpp
++++ b/src/sha256.cpp
+@@ -1,6 +1,7 @@
+ #include "psprecomp/sha256.hpp"
+ #include "psprecomp/common.hpp"
+ 
++#include <algorithm>
+ #include <array>
+ #include <cstdint>
+ #include <fstream>
+@@ -37,6 +38,31 @@ std::string sha256_bytes(std::span<const std::uint8_t> bytes) {
+     for(std::size_t i=0;i<data.size();i+=64u) transform(h,data.data()+i);
+     std::ostringstream out; out<<std::hex<<std::setfill('0'); for(auto v:h) out<<std::setw(8)<<v; return out.str();
+ }
++void Sha256::update(std::span<const std::uint8_t> bytes) {
++    length_ += bytes.size();
++    std::size_t at = 0u;
++    if (used_ != 0u) {
++        const std::size_t n = std::min(bytes.size(), block_.size() - used_);
++        std::copy_n(bytes.data(), n, block_.data() + used_);
++        used_ += n;
++        at = n;
++        if (used_ < block_.size()) return;
++        transform(h_, block_.data());
++        used_ = 0u;
++    }
++    for (; at + 64u <= bytes.size(); at += 64u) transform(h_, bytes.data() + at);
++    std::copy(bytes.begin() + static_cast<std::ptrdiff_t>(at), bytes.end(), block_.begin());
++    used_ = bytes.size() - at;
++}
++std::string Sha256::finish() {
++    const std::uint64_t bits = length_ * 8u;
++    std::array<std::uint8_t, 72> tail{};
++    tail[0] = 0x80u;
++    const std::size_t pad = (used_ < 56u ? 56u : 120u) - used_;
++    for (int i = 0; i < 8; ++i) tail[pad + static_cast<std::size_t>(i)] = static_cast<std::uint8_t>(bits >> ((7 - i) * 8));
++    update(std::span<const std::uint8_t>(tail.data(), pad + 8u));
++    std::ostringstream out; out<<std::hex<<std::setfill('0'); for(auto v:h_) out<<std::setw(8)<<v; return out.str();
++}
+ std::string sha256_file(const std::filesystem::path &path) {
+     std::ifstream in(path, std::ios::binary); if(!in) throw Error("Cannot open file for SHA-256: "+path.string());
+     const std::vector<std::uint8_t> data((std::istreambuf_iterator<char>(in)), {});
+diff --git a/tests/disc_patch_tests.cpp b/tests/disc_patch_tests.cpp
+new file mode 100644
+index 0000000..9e25f03
+--- /dev/null
++++ b/tests/disc_patch_tests.cpp
+@@ -0,0 +1,226 @@
++// Disc patches (host/disc_patch.hpp) on a made-up disc of a few sectors: a
++// VCDIFF patch and an already patched image prepared into layers, the layer
++// read back as the patched image, and the identity online play keeps modded
++// copies apart by. Also the streaming SHA-256 and the version tag of a modded
++// copy. No game data.
++
++#include "adhoc/protocol.hpp"
++#include "disc_patch.hpp"
++
++#include "psprecomp/sha256.hpp"
++
++#include <cstdio>
++#include <filesystem>
++#include <fstream>
++#include <random>
++#include <string>
++#include <vector>
++
++namespace {
++
++int g_failures = 0;
++
++void check(bool condition, const char *what) {
++    std::printf("%s %s\n", condition ? "ok  " : "FAIL", what);
++    if (!condition) ++g_failures;
++}
++
++constexpr std::size_t kSector = 2048u;
++
++using Bytes = std::vector<std::uint8_t>;
++
++void write_file(const std::filesystem::path &path, const Bytes &bytes) {
++    std::ofstream out(path, std::ios::binary | std::ios::trunc);
++    out.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
++}
++
++void fill_sector(Bytes &image, std::size_t sector, std::uint8_t value) {
++    std::fill(image.begin() + static_cast<std::ptrdiff_t>(sector * kSector),
++              image.begin() + static_cast<std::ptrdiff_t>((sector + 1u) * kSector), value);
++}
++
++// VCDIFF's variable-length integer: base 128, most significant group first.
++void vint(Bytes &out, std::uint64_t value) {
++    std::uint8_t groups[10];
++    int n = 0;
++    do {
++        groups[n++] = static_cast<std::uint8_t>(value & 0x7Fu);
++        value >>= 7u;
++    } while (value != 0u);
++    while (n-- > 0) out.push_back(static_cast<std::uint8_t>(groups[n] | (n != 0 ? 0x80u : 0u)));
++}
++
++std::uint32_t adler32(const Bytes &data) {
++    std::uint32_t a = 1u, b = 0u;
++    for (const std::uint8_t byte : data) {
++        a = (a + byte) % 65521u;
++        b = (b + a) % 65521u;
++    }
++    return (b << 16u) | a;
++}
++
++Bytes read_layer(const std::filesystem::path &layer_path, const std::filesystem::path &release) {
++    auto layer = portablekit::disc_patch::Layer::open(layer_path);
++    if (!layer) return {};
++    std::ifstream base(release, std::ios::binary);
++    Bytes image(static_cast<std::size_t>(layer->size()));
++    image.resize(layer->read(base, 0u, image));
++    return image;
++}
++
++} // namespace
++
++int main() {
++    namespace disc_patch = portablekit::disc_patch;
++
++    // The streaming SHA-256 gives what the one-call form gives.
++    {
++        const std::string abc = "abc";
++        psprecomp::Sha256 hash;
++        hash.update(std::span(reinterpret_cast<const std::uint8_t *>(abc.data()), abc.size()));
++        check(hash.finish() == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
++              "SHA-256 of \"abc\" is the standard's");
++        Bytes data(10'000u);
++        std::mt19937 random(7u);
++        for (std::uint8_t &byte : data) byte = static_cast<std::uint8_t>(random());
++        bool same = true;
++        for (const std::size_t piece : {1u, 55u, 56u, 63u, 64u, 65u, 1000u}) {
++            psprecomp::Sha256 pieces;
++            for (std::size_t at = 0; at < data.size(); at += piece)
++                pieces.update(std::span(data.data() + at, std::min(piece, data.size() - at)));
++            same = same && pieces.finish() == psprecomp::sha256_bytes(data);
++        }
++        check(same, "SHA-256 in pieces of 1 to 1000 bytes is SHA-256 of the whole");
++    }
++
++    const std::filesystem::path dir =
++        std::filesystem::temp_directory_path() / ("portablekit_disc_patch_tests_" + std::to_string(std::random_device{}()));
++    std::filesystem::create_directories(dir);
++
++    // A release of 16 sectors, and a mod's disc: sector 3 changed, sector 9
++    // emptied, a 17th sector added.
++    Bytes release(16u * kSector);
++    for (std::size_t i = 0; i < release.size(); ++i) release[i] = static_cast<std::uint8_t>(i * 7u / kSector + i + 1u);
++    Bytes modded = release;
++    modded.resize(17u * kSector);
++    fill_sector(modded, 3u, 0xABu);
++    fill_sector(modded, 9u, 0x00u);
++    fill_sector(modded, 16u, 0xCDu);
++    write_file(dir / "release.iso", release);
++    write_file(dir / "modded.iso", modded);
++
++    // The same disc as a patch: one window over the whole release, with a
++    // checksum, in the default code table (19: COPY with its size, mode 0;
++    // 0: RUN with its size; 1: ADD with its size).
++    {
++        Bytes data{0xABu, 0x00u}, inst, addr;
++        data.insert(data.end(), kSector, 0xCDu);
++        const auto copy = [&](std::uint64_t from, std::uint64_t size) {
++            inst.push_back(19u);
++            vint(inst, size);
++            vint(addr, from);
++        };
++        const auto run = [&](std::uint64_t size) {
++            inst.push_back(0u);
++            vint(inst, size);
++        };
++        copy(0u, 3u * kSector);
++        run(kSector);
++        copy(4u * kSector, 5u * kSector);
++        run(kSector);
++        copy(10u * kSector, 6u * kSector);
++        inst.push_back(1u);
++        vint(inst, kSector);
++
++        Bytes delta;
++        vint(delta, modded.size());
++        delta.push_back(0u);  // no section compressed
++        vint(delta, data.size());
++        vint(delta, inst.size());
++        vint(delta, addr.size());
++        const std::uint32_t sum = adler32(modded);
++        for (int shift = 24; shift >= 0; shift -= 8) delta.push_back(static_cast<std::uint8_t>(sum >> shift));
++        delta.insert(delta.end(), data.begin(), data.end());
++        delta.insert(delta.end(), inst.begin(), inst.end());
++        delta.insert(delta.end(), addr.begin(), addr.end());
++
++        Bytes patch{0xD6u, 0xC3u, 0xC4u, 0x00u, 0x00u};
++        patch.push_back(0x05u);  // a source segment, and a checksum
++        vint(patch, release.size());
++        vint(patch, 0u);
++        vint(patch, delta.size());
++        patch.insert(patch.end(), delta.begin(), delta.end());
++        write_file(dir / "mod.xdelta", patch);
++    }
++    check(disc_patch::is_patch_file(dir / "mod.xdelta") && !disc_patch::is_patch_file(dir / "modded.iso"),
++          "a patch is told from a disc image");
++
++    disc_patch::Progress progress;
++    const disc_patch::Result from_patch =
++        disc_patch::prepare(dir / "mod.xdelta", dir / "release.iso", dir / "from-patch.pkdisc", progress);
++    check(from_patch.ok && from_patch.windows == 1u && from_patch.mismatched == 0u && from_patch.changed_sectors == 3u &&
++              from_patch.zero_sectors == 1u,
++          "the patch prepares into a layer of its 3 changed sectors, 1 of them emptied");
++    disc_patch::Progress image_progress;
++    const disc_patch::Result from_image =
++        disc_patch::prepare_image(dir / "modded.iso", dir / "release.iso", dir / "from-image.pkdisc", image_progress);
++    check(from_image.ok && from_image.changed_sectors == 3u && from_image.zero_sectors == 1u &&
++              image_progress.done == modded.size(),
++          "the patched image prepares into a layer of the same sectors");
++
++    check(read_layer(dir / "from-patch.pkdisc", dir / "release.iso") == modded,
++          "the patch's layer reads as the patched image");
++    check(read_layer(dir / "from-image.pkdisc", dir / "release.iso") == modded,
++          "the image's layer reads as the patched image");
++
++    std::string patch_identity, image_identity;
++    if (auto layer = disc_patch::Layer::open(dir / "from-patch.pkdisc")) patch_identity = layer->identity();
++    if (auto layer = disc_patch::Layer::open(dir / "from-image.pkdisc")) image_identity = layer->identity();
++    check(patch_identity.size() == 64u && patch_identity == image_identity,
++          "both layers have the same identity, though their notes name different files");
++
++    std::filesystem::copy_file(dir / "from-patch.pkdisc", dir / "renamed.pkdisc");
++    if (auto layer = disc_patch::Layer::open(dir / "renamed.pkdisc"))
++        check(layer->identity() == patch_identity, "a renamed layer keeps its identity");
++
++    Bytes other = modded;
++    other[3u * kSector + 100u] = 0xACu;
++    write_file(dir / "other.iso", other);
++    disc_patch::Progress other_progress;
++    (void)disc_patch::prepare_image(dir / "other.iso", dir / "release.iso", dir / "other.pkdisc", other_progress);
++    std::string other_identity;
++    if (auto layer = disc_patch::Layer::open(dir / "other.pkdisc")) other_identity = layer->identity();
++    check(other_identity.size() == 64u && other_identity != patch_identity,
++          "a mod that differs by one byte has another identity");
++
++    disc_patch::Progress same_progress;
++    const disc_patch::Result same =
++        disc_patch::prepare_image(dir / "release.iso", dir / "release.iso", dir / "same.pkdisc", same_progress);
++    check(!same.ok && !std::filesystem::exists(dir / "same.pkdisc"), "the release itself prepares nothing");
++
++    disc_patch::Progress cancelled;
++    cancelled.cancel = true;
++    const disc_patch::Result stopped =
++        disc_patch::prepare_image(dir / "modded.iso", dir / "release.iso", dir / "stopped.pkdisc", cancelled);
++    check(!stopped.ok && stopped.message == "Cancelled" && !std::filesystem::exists(dir / "stopped.pkdisc"),
++          "a cancelled preparation keeps nothing");
++
++    // The version tag of a modded copy.
++    namespace ctl = portablekit::adhoc::ctl;
++    const std::string identity(64, 'a');
++    check(ctl::version_tag_with_edition("0123456789abcdef-std", "") == "0123456789abcdef-std",
++          "the release keeps the port's tag");
++    check(ctl::version_tag_with_edition("0123456789abcdef-std", identity) == "0123456789abcdef-std-maaaaaaaaaaaa",
++          "a mod's identity follows the port's tag");
++    check(ctl::version_tag_with_edition("", identity) == "maaaaaaaaaaaa", "a port without a tag gets the mod's");
++    const std::string longest(ctl::kVersionTagLength, 'x');
++    const std::string joined = ctl::version_tag_with_edition(longest, identity);
++    check(joined.size() == ctl::kVersionTagLength && ctl::version_tag_ok(joined) &&
++              joined.ends_with("-maaaaaaaaaaaa"),
++          "a long tag is shortened to leave the mod's room");
++
++    std::error_code ec;
++    std::filesystem::remove_all(dir, ec);
++    std::printf("%s\n", g_failures == 0 ? "all passed" : "FAILED");
++    return g_failures == 0 ? 0 : 1;
++}
+-- 
+2.53.0.windows.1
+

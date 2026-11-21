@@ -15,6 +15,7 @@
 #include "psprecomp/common.hpp"
 #include "psprecomp/corpus_abi.hpp"
 #include "psprecomp/elf32.hpp"
+#include "psprecomp/interpreter.hpp"
 #include "psprecomp/runtime.hpp"
 
 #include <algorithm>
@@ -168,6 +169,8 @@ const Library *resident_overlay(const psprecomp::GuestMemory &memory) {
         const std::size_t length = portablekit::kOverlayHeaderBytes + library.code_size;
         const std::uint8_t *image = memory.raw_pointer(library.base, length);
         if (image != nullptr && fnv1a64(image, length) == library.hash) return &library;
+        // A patched edition's overlay, which runs on this library's code.
+        if (portablekit::patched_overlay_hash(memory, library.base) == library.hash) return &library;
     }
     return nullptr;
 }
@@ -227,7 +230,11 @@ bool run_nested(Runtime &rt, AllegrexContext &c, bool live, std::uint64_t budget
             if (error) *error = "no return after " + std::to_string(budget) + " dispatches, at " + hex(c.pc);
             return false;
         }
-        if (!rt.invoke_isolated_aot(c.pc, c)) {
+        // Code a patched edition changed runs interpreted (PortableKit's
+        // patched_edition.hpp): one instruction at a time, so that the return
+        // to kReturnMagic is seen before the interpreter could run into it.
+        if (!rt.invoke_isolated_aot(c.pc, c) &&
+            psprecomp::interpret_allegrex(rt, c, 1u) == psprecomp::InterpreterExit::Unreachable) {
             if (error) *error = "no function at " + hex(c.pc);
             return false;
         }
@@ -600,7 +607,10 @@ bool code_miss(Runtime &rt, AllegrexContext &, std::uint32_t pc) {
                   << "originals (" << replaced << " of them port replacements)"
                   << (h.verify ? "; differential test on" : "") << std::endl;
     }
-    if (pc >= kWindowBase && pc < kWindowEnd) h.rearm_pending = true;
+    // In a patched edition's overlay a miss is mostly code that runs interpreted,
+    // with nothing being installed.
+    if (pc >= kWindowBase && pc < kWindowEnd && portablekit::patched_overlay_hash(rt.memory(), kWindowBase) == 0u)
+        h.rearm_pending = true;
     return false;  // PortableKit installs the overlay as before
 }
 

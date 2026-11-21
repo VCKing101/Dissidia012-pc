@@ -46,6 +46,7 @@
 #include "adhoc/session.hpp"
 #include "hle/hle_common.hpp"
 #include "install/user_data.hpp"
+#include "patched_edition.hpp"
 #include "portablekit/hle_extension.hpp"
 #include "snapshot.hpp"
 #if defined(PORTABLEKIT_HAS_RENDERER)
@@ -756,9 +757,9 @@ void install(portablekit::HleRegistrar &hle) {
     portablekit::adhoc_host_forward_also({true, net::battle::port()});
     net::battle::serve();
     // What both fighters' copies must share, or their battles part: the
-    // program, mods that change the game (none yet: the mods folder holds music
-    // only, which may differ; a kind of mod that changes the game sets this
-    // item), and the test switches that change how a fighter or a camera
+    // program, mods that change the game (a mod's disc, from the System page's
+    // Disc mod, by its identity; the mods folder holds music only, which may
+    // differ), and the test switches that change how a fighter or a camera
     // moves. The right-stick camera's own settings may differ: each copy sends
     // its player's (d012_camera.cpp). The compiler counts too, but only where
     // it changes the game's maths: clang and GCC builds (Windows, and Linux's
@@ -775,7 +776,11 @@ void install(portablekit::HleRegistrar &hle) {
 #else
     net::battle::must_match("the compiler the port was built with", "clang or GCC, with the port's own maths");
 #endif
-    net::battle::must_match("mods that change the game", "");
+    // Empty for the game's own disc, as copies before disc mods send. The
+    // edition began before the game's modules were installed (main.cpp).
+    const std::string mod = portablekit::patched::identity();
+    net::battle::must_match("mods that change the game", mod.empty() ? std::string() : "disc " + mod);
+    if (!mod.empty()) std::cout << "[comm battle] battles only with copies playing this mod's disc" << std::endl;
     net::battle::must_match("the right-stick camera (D012_NO_RIGHT_STICK_CAMERA)", camera::enabled() ? "on" : "off");
     net::battle::must_match("the smooth stick (D012_NO_SMOOTH_STICK)", decomp::smooth_stick_on() ? "on" : "off");
     net::battle::must_match("analog walking in battle (D012_SMOOTH_STICK_BATTLE)", env("D012_SMOOTH_STICK_BATTLE"));

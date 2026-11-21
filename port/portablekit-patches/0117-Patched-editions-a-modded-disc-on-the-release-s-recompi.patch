@@ -1,0 +1,1887 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Thu, 19 Nov 2026 15:00:00 +1030
+Subject: [PATCH] Patched editions: a modded disc on the release's recompiled
+ code
+
+A mod that patches a game's disc changes a little of its code: a few
+hundred words of the executable and of its overlays, and code it loads
+and writes into the executable while it runs. Recompiling the whole
+game for every version of such a mod is what made mods impractical.
+
+A patched edition keeps the release's recompiled code instead. The
+disc's own executable (a plain ELF; an encrypted one cannot be patched)
+is loaded over the release's, and every generated unit holding a word
+that differs from the release is taken out of dispatch, so that the
+interpreter runs it from guest memory. A whole unit, because calls
+inside a unit are direct jumps the runtime never sees; chains into it
+already fall back to the exact per-address lookup, which finds nothing
+and returns to dispatch. An overlay no corpus matches is compared with
+the release's overlays, read from the release's disc and matched by the
+corpus's own hash, and runs on the closest corpus the same way. Code the
+game writes later is found when it flushes a cache: the executable is
+compared again on an instruction cache flush, and on a data cache flush
+of a range of it.
+
+- Runtime::retire_recompiled_unit(): takes a unit out of dispatch,
+  keeping host replacements; registered_function() still answers for
+  what it took, so a replacement can still call the function it stands
+  in for.
+- host/patched_edition: reading a patched disc (its executable, and its
+  PARAM.SFO's MEMSIZE for 64 MiB of memory), the comparisons, and the
+  release's overlays.
+- GameProfile::patched_disc: the port says which disc to play;
+  <prefix>_PATCHED_DISC=<image> for a run, <prefix>_NO_PATCHED_DISC=1
+  to ignore both. Its saves and downloads stay apart, in <ms0>-patched,
+  unless <prefix>_MEMORY_STICK_DIR names a memory stick.
+- patched_overlay_hash(): for a port that tells its overlays apart by
+  their corpus's hash.
+- ui::request_menu_close(): for a port's row that opens a panel over the
+  game, which only shows once the menu is closed; the menu then leaves
+  the input to that panel instead of handing it back to the game.
+- host/disc_patch: a mod's patch to the disc (VCDIFF, as xdelta3 writes
+  it, with its LZMA secondary compression; the LZMA2 and xz decoding
+  written from the public format descriptions) applied once to the
+  release's image, keeping only the sectors it changes in a layer file.
+  IsoImage opens a layer file as the patched image, its other sectors
+  read from the release's, so nothing that reads the disc needs to know.
+
+Verified with Dissidia 012 (ULUS10566) and the Emendatus mod on Windows,
+clang build: the executable's 203 changed words take 7 of 119 units,
+the menu overlay's 190 words 12 units, the battle overlay's 768 words 15
+units, and 23 more units are taken when the mod writes code at run time
+(16 sites). The title demo's battle runs at 1.2 ms of guest time a frame
+(1.1 ms on the release); Story Mode's prologue scene plays; the mod's
+saves load. The release starts as before, with no unit taken. The Emendatus
+patch (11 MB) prepares in about 3 seconds into a 26 MB layer, whose
+image is byte for byte the image xdelta3's format gives; the game plays
+from it as from the patched image. Not
+verified: a player-controlled battle, the framework's own build and
+tests, Linux, Android, another game or mod.
+---
+ cmake/PortableKit.cmake       |   2 +
+ host/disc_patch.cpp           | 849 ++++++++++++++++++++++++++++++++++++++++++
+ host/disc_patch.hpp           |  69 ++++
+ host/hle/hle_system.cpp       |  12 +-
+ host/kernel/iso_image.cpp     |  13 +-
+ host/kernel/iso_image.hpp     |  11 +-
+ host/main.cpp                 |  27 +-
+ host/overlays.cpp             |  74 ++++
+ host/overlays.hpp             |   5 +
+ host/patched_edition.cpp      | 279 ++++++++++++++
+ host/patched_edition.hpp      |  63 ++++
+ host/profile.hpp              |   4 +
+ host/ui/menu.cpp              |  23 +-
+ host/ui/ui.hpp                |   4 +
+ include/psprecomp/runtime.hpp |   9 +
+ src/runtime.cpp               |  64 +++-
+ 16 files changed, 1495 insertions(+), 13 deletions(-)
+
+diff --git a/cmake/PortableKit.cmake b/cmake/PortableKit.cmake
+index f82bb2c..7a57fec 100644
+--- a/cmake/PortableKit.cmake
++++ b/cmake/PortableKit.cmake
+@@ -52,6 +52,8 @@ set(PORTABLEKIT_HOST_SOURCES
+     host/cheats/cheats.cpp
+     host/cheats/cwcheat.cpp
+     host/overlays.cpp
++    host/patched_edition.cpp
++    host/disc_patch.cpp
+     host/snapshot.cpp
+     host/system.cpp
+     host/kernel/kernel.cpp
+diff --git a/host/disc_patch.cpp b/host/disc_patch.cpp
+new file mode 100644
+index 0000000..83281df
+--- /dev/null
++++ b/host/disc_patch.cpp
+@@ -0,0 +1,849 @@
++// Disc patches (disc_patch.hpp).
++//
++// VCDIFF is RFC 3284. xdelta3 adds an Adler-32 of each target window (window
++// indicator bit 2) and secondary compression of the three sections of a
++// window (header indicator bit 0, then a compressor id; delta indicator bits
++// 0-2 say which sections are compressed). Its LZMA compressor (id 2) keeps
++// one xz stream per kind of section for the whole file: the first compressed
++// section of a kind starts with the stream and block headers, and every one
++// ends at a sync flush, so each holds whole LZMA2 chunks that continue the
++// stream before it. A compressed section is the size it decompresses to (a
++// VCDIFF integer), then those chunks.
++//
++// The LZMA and LZMA2 decoding below follows the public LZMA specification
++// (the range coder, the literal, length and distance coders, the state
++// machine) and the xz file format's description of its stream and block
++// headers; the code is this file's own.
++//
++// The layer file, little-endian:
++//   0  "PKDISC1\0"
++//   8  u32 version (1), 12 u32 sector size (2048)
++//   16 u64 size of the patched image, 24 u64 size of the release's image
++//   32 u64 changed sectors N, 40 u64 offset of the sector table, 48 u64 offset of the data
++//   56 u32 length of the release image's path, 60 u32 length of a note
++//   64 the path (UTF-8), the note
++//   the table: N times {u32 sector, u32 slot}, sorted by sector; slot 0xFFFFFFFF: zeros
++//   the data: one 2048-byte sector per slot
++#include "disc_patch.hpp"
++
++#include "install/user_data.hpp"
++#include "psprecomp/common.hpp"
++
++#include <algorithm>
++#include <array>
++#include <cstring>
++#include <list>
++#include <map>
++#include <optional>
++
++namespace portablekit::disc_patch {
++namespace {
++
++constexpr char kMagic[8] = {'P', 'K', 'D', 'I', 'S', 'C', '1', '\0'};
++constexpr std::uint32_t kSector = 2048u;
++constexpr std::uint32_t kZero = 0xFFFFFFFFu;
++
++std::uint32_t le32(const std::uint8_t *p) {
++    return static_cast<std::uint32_t>(p[0]) | static_cast<std::uint32_t>(p[1]) << 8u |
++           static_cast<std::uint32_t>(p[2]) << 16u | static_cast<std::uint32_t>(p[3]) << 24u;
++}
++std::uint64_t le64(const std::uint8_t *p) { return le32(p) | static_cast<std::uint64_t>(le32(p + 4)) << 32u; }
++void put32(std::vector<std::uint8_t> &out, std::uint32_t v) {
++    for (int i = 0; i < 4; ++i) out.push_back(static_cast<std::uint8_t>(v >> (8 * i)));
++}
++void put64(std::vector<std::uint8_t> &out, std::uint64_t v) {
++    put32(out, static_cast<std::uint32_t>(v));
++    put32(out, static_cast<std::uint32_t>(v >> 32u));
++}
++
++struct Failure {
++    std::string what;
++};
++
++// ---- LZMA2 in an xz stream ------------------------------------------------
++
++class RangeDecoder {
++public:
++    RangeDecoder(const std::uint8_t *data, std::size_t size) : p_(data), end_(data + size) {
++        if (size < 5u || p_[0] != 0u) throw Failure{"an LZMA chunk does not start as one"};
++        ++p_;
++        for (int i = 0; i < 4; ++i) code_ = (code_ << 8u) | *p_++;
++        if (code_ == range_) throw Failure{"an LZMA chunk is damaged"};
++    }
++    std::uint32_t bit(std::uint16_t &probability) {
++        const std::uint32_t bound = (range_ >> 11u) * probability;
++        std::uint32_t result;
++        if (code_ < bound) {
++            range_ = bound;
++            probability = static_cast<std::uint16_t>(probability + ((2048u - probability) >> 5u));
++            result = 0u;
++        } else {
++            range_ -= bound;
++            code_ -= bound;
++            probability = static_cast<std::uint16_t>(probability - (probability >> 5u));
++            result = 1u;
++        }
++        normalize();
++        return result;
++    }
++    std::uint32_t direct(unsigned count) {
++        std::uint32_t result = 0u;
++        while (count-- != 0u) {
++            range_ >>= 1u;
++            code_ -= range_;
++            const std::uint32_t t = 0u - (code_ >> 31u);
++            code_ += range_ & t;
++            normalize();
++            result = (result << 1u) + (t + 1u);
++        }
++        return result;
++    }
++
++private:
++    void normalize() {
++        if (range_ >= (1u << 24u)) return;
++        if (p_ >= end_) throw Failure{"an LZMA chunk ends early"};
++        range_ <<= 8u;
++        code_ = (code_ << 8u) | *p_++;
++    }
++    const std::uint8_t *p_;
++    const std::uint8_t *end_;
++    std::uint32_t range_ = 0xFFFFFFFFu;
++    std::uint32_t code_ = 0u;
++};
++
++std::uint32_t tree(RangeDecoder &rc, std::uint16_t *probs, unsigned bits) {
++    std::uint32_t m = 1u;
++    for (unsigned i = 0; i < bits; ++i) m = (m << 1u) | rc.bit(probs[m]);
++    return m - (1u << bits);
++}
++
++std::uint32_t reverse_tree(RangeDecoder &rc, std::uint16_t *probs, unsigned bits) {
++    std::uint32_t m = 1u, symbol = 0u;
++    for (unsigned i = 0; i < bits; ++i) {
++        const std::uint32_t b = rc.bit(probs[m]);
++        m = (m << 1u) | b;
++        symbol |= b << i;
++    }
++    return symbol;
++}
++
++struct LengthCoder {
++    std::uint16_t choice, choice2;
++    std::uint16_t low[16][8], mid[16][8], high[256];
++    void reset() {
++        choice = choice2 = 1024u;
++        std::fill(&low[0][0], &low[0][0] + 16 * 8, std::uint16_t{1024});
++        std::fill(&mid[0][0], &mid[0][0] + 16 * 8, std::uint16_t{1024});
++        std::fill(std::begin(high), std::end(high), std::uint16_t{1024});
++    }
++    std::uint32_t decode(RangeDecoder &rc, std::uint32_t pos_state) {
++        if (rc.bit(choice) == 0u) return tree(rc, low[pos_state], 3u);
++        if (rc.bit(choice2) == 0u) return 8u + tree(rc, mid[pos_state], 3u);
++        return 16u + tree(rc, high, 8u);
++    }
++};
++
++class XzLzma2 {
++public:
++    // Decodes one section: whole LZMA2 chunks continuing the stream, the
++    // first preceded by the stream and block headers. Appends to `out`.
++    void decode(const std::uint8_t *in, std::size_t size, std::vector<std::uint8_t> &out) {
++        std::size_t at = 0u;
++        if (!stream_started_) {
++            static constexpr std::uint8_t magic[6] = {0xFD, '7', 'z', 'X', 'Z', 0x00};
++            if (size < 12u || std::memcmp(in, magic, 6u) != 0) throw Failure{"a compressed section is not xz"};
++            at = 12u;
++            stream_started_ = true;
++        }
++        if (!block_started_) {
++            if (at >= size) throw Failure{"an xz stream has no block"};
++            const std::size_t length = (static_cast<std::size_t>(in[at]) + 1u) * 4u;
++            if (in[at] == 0u || at + length > size) throw Failure{"an xz block header is damaged"};
++            parse_block_header(in + at, length);
++            at += length;
++            block_started_ = true;
++        }
++        while (at < size && !finished_) {
++            const std::uint8_t control = in[at];
++            if (control == 0x00u) {
++                finished_ = true;  // the stream's end: its index and footer follow
++                break;
++            }
++            if (control == 0x01u || control == 0x02u) {
++                if (at + 3u > size) throw Failure{"an LZMA2 chunk is cut off"};
++                const std::size_t length = ((std::size_t{in[at + 1]} << 8u) | in[at + 2]) + 1u;
++                if (at + 3u + length > size) throw Failure{"an LZMA2 chunk is cut off"};
++                if (control == 0x01u) reset_dictionary();
++                for (std::size_t i = 0; i < length; ++i) put(in[at + 3u + i], out);
++                at += 3u + length;
++                continue;
++            }
++            if (control < 0x80u) throw Failure{"an LZMA2 chunk has an unknown kind"};
++            const unsigned reset = (control >> 5u) & 3u;
++            const std::size_t header = reset >= 2u ? 6u : 5u;
++            if (at + header > size) throw Failure{"an LZMA2 chunk is cut off"};
++            const std::size_t unpacked =
++                ((std::size_t{control & 0x1Fu} << 16u) | (std::size_t{in[at + 1]} << 8u) | in[at + 2]) + 1u;
++            const std::size_t packed = ((std::size_t{in[at + 3]} << 8u) | in[at + 4]) + 1u;
++            if (at + header + packed > size) throw Failure{"an LZMA2 chunk is cut off"};
++            if (reset == 3u) reset_dictionary();
++            if (reset >= 2u) set_properties(in[at + 5]);
++            if (!have_properties_) throw Failure{"an LZMA2 chunk comes before its properties"};
++            if (reset >= 1u) reset_state();
++            RangeDecoder rc(in + at + header, packed);
++            decode_chunk(rc, unpacked, out);
++            at += header + packed;
++        }
++    }
++
++private:
++    static std::uint64_t varint(const std::uint8_t *p, std::size_t size, std::size_t &at) {
++        std::uint64_t value = 0u;
++        for (unsigned shift = 0; shift < 63u; shift += 7u) {
++            if (at >= size) throw Failure{"an xz block header is damaged"};
++            const std::uint8_t b = p[at++];
++            value |= static_cast<std::uint64_t>(b & 0x7Fu) << shift;
++            if ((b & 0x80u) == 0u) return value;
++        }
++        throw Failure{"an xz block header is damaged"};
++    }
++
++    void parse_block_header(const std::uint8_t *p, std::size_t length) {
++        std::size_t at = 1u;
++        const std::uint8_t flags = p[at++];
++        const unsigned filters = (flags & 3u) + 1u;
++        if ((flags & 0x40u) != 0u) (void)varint(p, length - 4u, at);
++        if ((flags & 0x80u) != 0u) (void)varint(p, length - 4u, at);
++        for (unsigned i = 0; i < filters; ++i) {
++            const std::uint64_t id = varint(p, length - 4u, at);
++            const std::uint64_t properties = varint(p, length - 4u, at);
++            if (id != 0x21u || properties != 1u || filters != 1u)
++                throw Failure{"an xz stream uses a filter other than LZMA2"};
++            const std::uint8_t d = p[at++];
++            if (d > 40u) throw Failure{"an xz stream's dictionary size is invalid"};
++            const std::uint64_t bytes =
++                d == 40u ? 0xFFFFFFFFull : (static_cast<std::uint64_t>(2u | (d & 1u)) << (d / 2u + 11u));
++            // A patch's sections are small; a dictionary larger than this would
++            // only cost memory.
++            dictionary_.assign(static_cast<std::size_t>(std::min<std::uint64_t>(bytes, 256ull << 20u)), 0u);
++        }
++        reset_dictionary();
++    }
++
++    void reset_dictionary() {
++        position_ = 0u;
++        filled_ = 0u;
++        total_ = 0u;
++    }
++
++    void set_properties(std::uint8_t d) {
++        if (d >= 9u * 5u * 5u) throw Failure{"an LZMA2 chunk's properties are invalid"};
++        lc_ = d % 9u;
++        d = static_cast<std::uint8_t>(d / 9u);
++        lp_ = d % 5u;
++        pb_ = d / 5u;
++        if (lc_ + lp_ > 4u) throw Failure{"an LZMA2 chunk's properties are invalid"};
++        literals_.assign(std::size_t{0x300} << (lc_ + lp_), 1024u);
++        have_properties_ = true;
++    }
++
++    void reset_state() {
++        std::fill(literals_.begin(), literals_.end(), std::uint16_t{1024});
++        std::fill(std::begin(is_match_), std::end(is_match_), std::uint16_t{1024});
++        std::fill(std::begin(is_rep_), std::end(is_rep_), std::uint16_t{1024});
++        std::fill(std::begin(is_rep_g0_), std::end(is_rep_g0_), std::uint16_t{1024});
++        std::fill(std::begin(is_rep_g1_), std::end(is_rep_g1_), std::uint16_t{1024});
++        std::fill(std::begin(is_rep_g2_), std::end(is_rep_g2_), std::uint16_t{1024});
++        std::fill(std::begin(is_rep0_long_), std::end(is_rep0_long_), std::uint16_t{1024});
++        std::fill(&slot_[0][0], &slot_[0][0] + 4 * 64, std::uint16_t{1024});
++        std::fill(std::begin(special_), std::end(special_), std::uint16_t{1024});
++        std::fill(std::begin(align_), std::end(align_), std::uint16_t{1024});
++        length_.reset();
++        rep_length_.reset();
++        state_ = 0u;
++        rep_ = {0u, 0u, 0u, 0u};
++    }
++
++    void put(std::uint8_t b, std::vector<std::uint8_t> &out) {
++        if (dictionary_.empty()) throw Failure{"an LZMA2 stream has no dictionary"};
++        dictionary_[position_] = b;
++        if (++position_ == dictionary_.size()) position_ = 0u;
++        if (filled_ < dictionary_.size()) ++filled_;
++        ++total_;
++        out.push_back(b);
++    }
++
++    // The byte `distance` + 1 back.
++    [[nodiscard]] std::uint8_t back(std::uint32_t distance) const {
++        std::size_t at = position_ + dictionary_.size() - 1u - distance;
++        if (at >= dictionary_.size()) at -= dictionary_.size();
++        return dictionary_[at];
++    }
++
++    void decode_chunk(RangeDecoder &rc, std::size_t unpacked, std::vector<std::uint8_t> &out) {
++        const std::uint32_t pb_mask = (1u << pb_) - 1u;
++        const std::uint32_t lp_mask = (1u << lp_) - 1u;
++        std::size_t produced = 0u;
++        while (produced < unpacked) {
++            const std::uint32_t pos_state = static_cast<std::uint32_t>(total_) & pb_mask;
++            if (rc.bit(is_match_[(state_ << 4u) + pos_state]) == 0u) {
++                const std::uint32_t previous = filled_ != 0u ? back(0u) : 0u;
++                std::uint16_t *probs =
++                    literals_.data() +
++                    0x300u * (((static_cast<std::uint32_t>(total_) & lp_mask) << lc_) + (previous >> (8u - lc_)));
++                std::uint32_t symbol = 1u;
++                if (state_ >= 7u) {
++                    if (rep_[0] >= filled_) throw Failure{"an LZMA chunk is damaged"};
++                    std::uint32_t match = back(rep_[0]);
++                    do {
++                        const std::uint32_t match_bit = (match >> 7u) & 1u;
++                        match <<= 1u;
++                        const std::uint32_t b = rc.bit(probs[((1u + match_bit) << 8u) + symbol]);
++                        symbol = (symbol << 1u) | b;
++                        if (match_bit != b) break;
++                    } while (symbol < 0x100u);
++                }
++                while (symbol < 0x100u) symbol = (symbol << 1u) | rc.bit(probs[symbol]);
++                put(static_cast<std::uint8_t>(symbol), out);
++                ++produced;
++                state_ = state_ < 4u ? 0u : state_ < 10u ? state_ - 3u : state_ - 6u;
++                continue;
++            }
++            std::uint32_t length;
++            if (rc.bit(is_rep_[state_]) != 0u) {
++                if (filled_ == 0u) throw Failure{"an LZMA chunk is damaged"};
++                if (rc.bit(is_rep_g0_[state_]) == 0u) {
++                    if (rc.bit(is_rep0_long_[(state_ << 4u) + pos_state]) == 0u) {
++                        state_ = state_ < 7u ? 9u : 11u;
++                        put(back(rep_[0]), out);
++                        ++produced;
++                        continue;
++                    }
++                } else {
++                    std::uint32_t distance;
++                    if (rc.bit(is_rep_g1_[state_]) == 0u) {
++                        distance = rep_[1];
++                    } else {
++                        if (rc.bit(is_rep_g2_[state_]) == 0u) {
++                            distance = rep_[2];
++                        } else {
++                            distance = rep_[3];
++                            rep_[3] = rep_[2];
++                        }
++                        rep_[2] = rep_[1];
++                    }
++                    rep_[1] = rep_[0];
++                    rep_[0] = distance;
++                }
++                length = rep_length_.decode(rc, pos_state);
++                state_ = state_ < 7u ? 8u : 11u;
++            } else {
++                rep_[3] = rep_[2];
++                rep_[2] = rep_[1];
++                rep_[1] = rep_[0];
++                length = length_.decode(rc, pos_state);
++                state_ = state_ < 7u ? 7u : 10u;
++                const std::uint32_t slot = tree(rc, slot_[std::min<std::uint32_t>(length, 3u)], 6u);
++                std::uint32_t distance;
++                if (slot < 4u) {
++                    distance = slot;
++                } else {
++                    const unsigned direct_bits = (slot >> 1u) - 1u;
++                    distance = (2u | (slot & 1u)) << direct_bits;
++                    if (slot < 14u) {
++                        distance += reverse_tree(rc, special_ + distance - slot, direct_bits);
++                    } else {
++                        distance += rc.direct(direct_bits - 4u) << 4u;
++                        distance += reverse_tree(rc, align_, 4u);
++                    }
++                }
++                if (distance == 0xFFFFFFFFu) throw Failure{"an LZMA2 chunk has an end marker"};
++                rep_[0] = distance;
++            }
++            length += 2u;
++            if (rep_[0] >= filled_) throw Failure{"an LZMA chunk is damaged"};
++            if (produced + length > unpacked) throw Failure{"an LZMA chunk is damaged"};
++            for (std::uint32_t i = 0; i < length; ++i) put(back(rep_[0]), out);
++            produced += length;
++        }
++    }
++
++    bool stream_started_ = false, block_started_ = false, finished_ = false, have_properties_ = false;
++    std::vector<std::uint8_t> dictionary_;
++    std::size_t position_ = 0u, filled_ = 0u;
++    std::uint64_t total_ = 0u;
++    unsigned lc_ = 0u, lp_ = 0u, pb_ = 0u;
++    std::vector<std::uint16_t> literals_;
++    std::uint16_t is_match_[12 << 4], is_rep_[12], is_rep_g0_[12], is_rep_g1_[12], is_rep_g2_[12],
++        is_rep0_long_[12 << 4];
++    std::uint16_t slot_[4][64];
++    std::uint16_t special_[1 + 128 - 14];
++    std::uint16_t align_[16];
++    LengthCoder length_, rep_length_;
++    std::uint32_t state_ = 0u;
++    std::array<std::uint32_t, 4> rep_{};
++};
++
++// ---- VCDIFF ----------------------------------------------------------------
++
++enum Kind : std::uint8_t { kNoop = 0, kAdd = 1, kRun = 2, kCopy = 3 };
++struct Code {
++    std::uint8_t type1, size1, mode1, type2, size2, mode2;
++};
++
++std::array<Code, 256> default_code_table() {
++    std::array<Code, 256> t{};
++    std::size_t i = 0;
++    t[i++] = {kRun, 0, 0, kNoop, 0, 0};
++    for (std::uint8_t s = 0; s < 18; ++s) t[i++] = {kAdd, s, 0, kNoop, 0, 0};
++    for (std::uint8_t m = 0; m < 9; ++m) {
++        t[i++] = {kCopy, 0, m, kNoop, 0, 0};
++        for (std::uint8_t s = 4; s < 19; ++s) t[i++] = {kCopy, s, m, kNoop, 0, 0};
++    }
++    for (std::uint8_t m = 0; m < 6; ++m)
++        for (std::uint8_t a = 1; a < 5; ++a)
++            for (std::uint8_t c = 4; c < 7; ++c) t[i++] = {kAdd, a, 0, kCopy, c, m};
++    for (std::uint8_t m = 6; m < 9; ++m)
++        for (std::uint8_t a = 1; a < 5; ++a) t[i++] = {kAdd, a, 0, kCopy, 4, m};
++    for (std::uint8_t m = 0; m < 9; ++m) t[i++] = {kCopy, 4, m, kAdd, 1, 0};
++    return t;
++}
++
++std::uint64_t vint(const std::uint8_t *p, std::size_t size, std::size_t &at) {
++    std::uint64_t value = 0u;
++    for (int i = 0; i < 10; ++i) {
++        if (at >= size) throw Failure{"the patch ends early"};
++        const std::uint8_t b = p[at++];
++        value = (value << 7u) | (b & 0x7Fu);
++        if ((b & 0x80u) == 0u) return value;
++    }
++    throw Failure{"the patch is damaged"};
++}
++
++std::uint32_t adler32(const std::uint8_t *data, std::size_t size) {
++    std::uint32_t a = 1u, b = 0u;
++    while (size != 0u) {
++        const std::size_t n = std::min<std::size_t>(size, 5552u);
++        for (std::size_t i = 0; i < n; ++i) {
++            a += data[i];
++            b += a;
++        }
++        a %= 65521u;
++        b %= 65521u;
++        data += n;
++        size -= n;
++    }
++    return (b << 16u) | a;
++}
++
++// The release's image read in 4 MiB blocks, the last few kept: a patch's
++// copies mostly walk the image in order.
++class Source {
++public:
++    explicit Source(const std::filesystem::path &path) : file_(path, std::ios::binary) {
++        if (!file_) throw Failure{"the game's disc image cannot be read"};
++        size_ = std::filesystem::file_size(path);
++    }
++    [[nodiscard]] std::uint64_t size() const noexcept { return size_; }
++    void read(std::uint64_t offset, std::uint8_t *out, std::size_t length) {
++        while (length != 0u) {
++            const std::uint64_t index = offset / kBlock;
++            const std::size_t within = static_cast<std::size_t>(offset % kBlock);
++            const std::vector<std::uint8_t> &data = block(index);
++            const std::size_t n = std::min(length, kBlock - within);
++            for (std::size_t i = 0; i < n; ++i) out[i] = within + i < data.size() ? data[within + i] : 0u;
++            out += n;
++            offset += n;
++            length -= n;
++        }
++    }
++
++private:
++    static constexpr std::size_t kBlock = 4u << 20u;
++    static constexpr std::size_t kKept = 24u;
++    const std::vector<std::uint8_t> &block(std::uint64_t index) {
++        for (auto it = blocks_.begin(); it != blocks_.end(); ++it)
++            if (it->first == index) {
++                blocks_.splice(blocks_.begin(), blocks_, it);
++                return blocks_.front().second;
++            }
++        std::vector<std::uint8_t> data;
++        if (index * kBlock < size_) {
++            data.resize(static_cast<std::size_t>(std::min<std::uint64_t>(kBlock, size_ - index * kBlock)));
++            file_.clear();
++            file_.seekg(static_cast<std::streamoff>(index * kBlock));
++            file_.read(reinterpret_cast<char *>(data.data()), static_cast<std::streamsize>(data.size()));
++            if (static_cast<std::size_t>(file_.gcount()) != data.size()) throw Failure{"the game's disc image cannot be read"};
++        }
++        blocks_.emplace_front(index, std::move(data));
++        if (blocks_.size() > kKept) blocks_.pop_back();
++        return blocks_.front().second;
++    }
++    std::ifstream file_;
++    std::uint64_t size_ = 0u;
++    std::list<std::pair<std::uint64_t, std::vector<std::uint8_t>>> blocks_;
++};
++
++// Collects the sectors of the patched image that differ from the release's.
++class Sectors {
++public:
++    explicit Sectors(Source &source) : source_(source) {}
++    void add(const std::uint8_t *data, std::size_t size) {
++        while (size != 0u) {
++            const std::size_t n = std::min(size, kSector - pending_.size());
++            pending_.insert(pending_.end(), data, data + n);
++            data += n;
++            size -= n;
++            if (pending_.size() == kSector) flush();
++        }
++    }
++    void finish() {
++        if (!pending_.empty()) {
++            pending_.resize(kSector, 0u);
++            flush();
++        }
++    }
++    std::vector<std::uint32_t> sectors, slots;
++    std::vector<std::uint8_t> data;
++    std::uint64_t zeros = 0u;
++
++private:
++    void flush() {
++        std::array<std::uint8_t, kSector> release{};
++        const std::uint64_t offset = std::uint64_t{next_} * kSector;
++        if (offset < source_.size())
++            source_.read(offset, release.data(),
++                         static_cast<std::size_t>(std::min<std::uint64_t>(kSector, source_.size() - offset)));
++        if (offset >= source_.size() || std::memcmp(release.data(), pending_.data(), kSector) != 0) {
++            sectors.push_back(next_);
++            if (std::all_of(pending_.begin(), pending_.end(), [](std::uint8_t b) { return b == 0u; })) {
++                slots.push_back(kZero);
++                ++zeros;
++            } else {
++                slots.push_back(static_cast<std::uint32_t>(data.size() / kSector));
++                data.insert(data.end(), pending_.begin(), pending_.end());
++            }
++        }
++        ++next_;
++        pending_.clear();
++    }
++    Source &source_;
++    std::vector<std::uint8_t> pending_;
++    std::uint32_t next_ = 0u;
++};
++
++void apply(const std::vector<std::uint8_t> &patch, Source &source, Sectors &sectors, Progress &progress,
++           Result &result) {
++    static const std::array<Code, 256> table = default_code_table();
++    const std::uint8_t *p = patch.data();
++    const std::size_t size = patch.size();
++    if (size < 5u || p[0] != 0xD6u || p[1] != 0xC3u || p[2] != 0xC4u) throw Failure{"this is not a VCDIFF patch"};
++    if (p[3] != 0u) throw Failure{"the patch's VCDIFF version is not supported"};
++    const std::uint8_t indicator = p[4];
++    std::size_t at = 5u;
++    int secondary = -1;
++    if ((indicator & 1u) != 0u) secondary = p[at++];
++    if ((indicator & 2u) != 0u) throw Failure{"the patch uses a code table of its own, which is not supported"};
++    if ((indicator & 4u) != 0u) {
++        const std::uint64_t application_header = vint(p, size, at);
++        at += static_cast<std::size_t>(application_header);
++    }
++    if (secondary != -1 && secondary != 2)
++        throw Failure{"the patch uses secondary compression " + std::to_string(secondary) +
++                      ", which is not supported (xdelta3's LZMA, 2, is)"};
++
++    // The patched image's size: the sum of the windows' target lengths.
++    {
++        std::uint64_t total = 0u;
++        std::size_t scan = at;
++        while (scan < size) {
++            const std::uint8_t window = p[scan++];
++            if ((window & 3u) != 0u) {
++                (void)vint(p, size, scan);
++                (void)vint(p, size, scan);
++            }
++            const std::uint64_t length = vint(p, size, scan);
++            const std::size_t start = scan;
++            total += vint(p, size, scan);
++            scan = start + static_cast<std::size_t>(length);
++        }
++        progress.total = total;
++    }
++
++    XzLzma2 streams[3];
++    std::vector<std::uint8_t> sections[3];
++    std::vector<std::uint8_t> target;
++    std::uint64_t made = 0u;
++    while (at < size) {
++        if (progress.cancel) throw Failure{"Cancelled"};
++        const std::uint8_t window = p[at++];
++        if ((window & 2u) != 0u) throw Failure{"the patch copies from its own output, which is not supported"};
++        std::uint64_t segment_length = 0u, segment_position = 0u;
++        if ((window & 1u) != 0u) {
++            segment_length = vint(p, size, at);
++            segment_position = vint(p, size, at);
++            if (segment_position + segment_length > source.size())
++                throw Failure{"the patch reads past the end of the game's disc image: it was made for another disc"};
++        }
++        const std::uint64_t delta_length = vint(p, size, at);
++        const std::size_t delta_start = at;
++        const std::uint64_t target_length = vint(p, size, at);
++        if (at >= size) throw Failure{"the patch ends early"};
++        const std::uint8_t delta_indicator = p[at++];
++        const std::uint64_t lengths[3] = {vint(p, size, at), vint(p, size, at), vint(p, size, at)};
++        std::optional<std::uint32_t> checksum;
++        if ((window & 4u) != 0u) {
++            if (at + 4u > size) throw Failure{"the patch ends early"};
++            checksum = (std::uint32_t{p[at]} << 24u) | (std::uint32_t{p[at + 1]} << 16u) |
++                       (std::uint32_t{p[at + 2]} << 8u) | p[at + 3];
++            at += 4u;
++        }
++        for (int s = 0; s < 3; ++s) {
++            if (at + lengths[s] > size) throw Failure{"the patch ends early"};
++            const std::uint8_t *section = p + at;
++            const std::size_t length = static_cast<std::size_t>(lengths[s]);
++            sections[s].clear();
++            if ((delta_indicator & (1u << s)) != 0u) {
++                if (secondary != 2) throw Failure{"the patch is damaged"};
++                std::size_t read = 0u;
++                const std::uint64_t expected = vint(section, length, read);
++                streams[s].decode(section + read, length - read, sections[s]);
++                if (sections[s].size() != expected) throw Failure{"a compressed section of the patch is damaged"};
++            } else {
++                sections[s].assign(section, section + length);
++            }
++            at += length;
++        }
++        if (at != delta_start + delta_length) throw Failure{"the patch is damaged"};
++
++        target.assign(static_cast<std::size_t>(target_length), 0u);
++        const std::vector<std::uint8_t> &data = sections[0], &inst = sections[1], &addr = sections[2];
++        std::size_t dp = 0u, ip = 0u, ap = 0u, tp = 0u;
++        std::uint64_t near[4] = {0u, 0u, 0u, 0u};
++        std::size_t next_near = 0u;
++        std::vector<std::uint64_t> same(768u, 0u);
++        const auto execute = [&](std::uint8_t type, std::uint64_t n, std::uint8_t mode) {
++            if (type == kNoop) return;
++            if (tp + n > target.size()) throw Failure{"the patch is damaged"};
++            if (type == kAdd) {
++                if (dp + n > data.size()) throw Failure{"the patch is damaged"};
++                std::memcpy(target.data() + tp, data.data() + dp, static_cast<std::size_t>(n));
++                dp += static_cast<std::size_t>(n);
++                tp += static_cast<std::size_t>(n);
++                return;
++            }
++            if (type == kRun) {
++                if (dp >= data.size()) throw Failure{"the patch is damaged"};
++                std::memset(target.data() + tp, data[dp++], static_cast<std::size_t>(n));
++                tp += static_cast<std::size_t>(n);
++                return;
++            }
++            const std::uint64_t here = segment_length + tp;
++            std::uint64_t a;
++            if (mode == 0u) {
++                a = vint(addr.data(), addr.size(), ap);
++            } else if (mode == 1u) {
++                a = here - vint(addr.data(), addr.size(), ap);
++            } else if (mode < 6u) {
++                a = near[mode - 2u] + vint(addr.data(), addr.size(), ap);
++            } else {
++                if (ap >= addr.size()) throw Failure{"the patch is damaged"};
++                a = same[(mode - 6u) * 256u + addr[ap++]];
++            }
++            near[next_near] = a;
++            next_near = (next_near + 1u) % 4u;
++            same[a % 768u] = a;
++            if (a >= here) throw Failure{"the patch is damaged"};
++            std::uint64_t remaining = n;
++            if (a < segment_length) {
++                const std::uint64_t from_source = std::min(remaining, segment_length - a);
++                source.read(segment_position + a, target.data() + tp, static_cast<std::size_t>(from_source));
++                tp += static_cast<std::size_t>(from_source);
++                a += from_source;
++                remaining -= from_source;
++            }
++            // From this window's own output, byte by byte where it overlaps.
++            for (std::uint64_t i = 0; i < remaining; ++i) target[tp + i] = target[a - segment_length + i];
++            tp += static_cast<std::size_t>(remaining);
++        };
++        while (ip < inst.size()) {
++            const Code &code = table[inst[ip++]];
++            std::uint64_t size1 = code.size1, size2 = code.size2;
++            if (code.type1 != kNoop && size1 == 0u) size1 = vint(inst.data(), inst.size(), ip);
++            if (code.type2 != kNoop && size2 == 0u) size2 = vint(inst.data(), inst.size(), ip);
++            execute(code.type1, size1, code.mode1);
++            execute(code.type2, size2, code.mode2);
++        }
++        if (tp != target.size()) throw Failure{"the patch is damaged"};
++        if (checksum && adler32(target.data(), target.size()) != *checksum) ++result.mismatched;
++        ++result.windows;
++        sectors.add(target.data(), target.size());
++        made += target.size();
++        progress.done = made;
++    }
++    sectors.finish();
++}
++
++} // namespace
++
++bool is_patch_file(const std::filesystem::path &path) {
++    std::ifstream in(path, std::ios::binary);
++    std::uint8_t magic[4]{};
++    in.read(reinterpret_cast<char *>(magic), 4);
++    return in.gcount() == 4 && magic[0] == 0xD6u && magic[1] == 0xC3u && magic[2] == 0xC4u && magic[3] == 0u;
++}
++
++Result prepare(const std::filesystem::path &patch_path, const std::filesystem::path &base,
++               const std::filesystem::path &out, Progress &progress) {
++    Result result;
++    try {
++        std::ifstream in(patch_path, std::ios::binary);
++        if (!in) throw Failure{"the patch cannot be read"};
++        std::vector<std::uint8_t> patch(static_cast<std::size_t>(std::filesystem::file_size(patch_path)));
++        in.read(reinterpret_cast<char *>(patch.data()), static_cast<std::streamsize>(patch.size()));
++        if (static_cast<std::size_t>(in.gcount()) != patch.size()) throw Failure{"the patch cannot be read"};
++
++        Source source(base);
++        Sectors sectors(source);
++        apply(patch, source, sectors, progress, result);
++        result.changed_sectors = sectors.sectors.size();
++        result.zero_sectors = sectors.zeros;
++        if (result.mismatched != 0u)
++            result.message = std::to_string(result.mismatched) + " of the patch's " + std::to_string(result.windows) +
++                             " parts did not come out as it expected: it was made from a slightly different copy of "
++                             "the disc. They were applied anyway.";
++
++        // The file: header, path, note, table, data.
++        const std::string base_text = install::path_to_utf8(std::filesystem::absolute(base));
++        const std::string note = install::path_to_utf8(patch_path.filename());
++        std::vector<std::uint8_t> header(kMagic, kMagic + 8);
++        put32(header, 1u);
++        put32(header, kSector);
++        put64(header, progress.total.load());
++        put64(header, source.size());
++        put64(header, sectors.sectors.size());
++        const std::uint64_t table_offset = (64u + base_text.size() + note.size() + 15u) & ~std::uint64_t{15};
++        const std::uint64_t data_offset = (table_offset + sectors.sectors.size() * 8u + kSector - 1u) & ~std::uint64_t{kSector - 1u};
++        put64(header, table_offset);
++        put64(header, data_offset);
++        put32(header, static_cast<std::uint32_t>(base_text.size()));
++        put32(header, static_cast<std::uint32_t>(note.size()));
++        header.insert(header.end(), base_text.begin(), base_text.end());
++        header.insert(header.end(), note.begin(), note.end());
++        header.resize(static_cast<std::size_t>(table_offset), 0u);
++        for (std::size_t i = 0; i < sectors.sectors.size(); ++i) {
++            put32(header, sectors.sectors[i]);
++            put32(header, sectors.slots[i]);
++        }
++        header.resize(static_cast<std::size_t>(data_offset), 0u);
++
++        std::error_code ec;
++        std::filesystem::create_directories(out.parent_path(), ec);
++        std::filesystem::path partial = out;
++        partial += ".partial";
++        {
++            std::ofstream file(partial, std::ios::binary | std::ios::trunc);
++            file.write(reinterpret_cast<const char *>(header.data()), static_cast<std::streamsize>(header.size()));
++            file.write(reinterpret_cast<const char *>(sectors.data.data()),
++                       static_cast<std::streamsize>(sectors.data.size()));
++            if (!file) throw Failure{"the prepared disc cannot be written: is the disk full?"};
++        }
++        std::filesystem::rename(partial, out, ec);
++        if (ec) {
++            std::filesystem::remove(partial, ec);
++            throw Failure{"the prepared disc cannot be put in place"};
++        }
++        result.ok = true;
++    } catch (const Failure &failure) {
++        result.message = failure.what;
++    } catch (const std::exception &e) {
++        result.message = e.what();
++    }
++    return result;
++}
++
++std::unique_ptr<Layer> Layer::open(const std::filesystem::path &path) {
++    std::ifstream in(path, std::ios::binary);
++    std::array<std::uint8_t, 64> head{};
++    in.read(reinterpret_cast<char *>(head.data()), 64);
++    if (in.gcount() < 8 || std::memcmp(head.data(), kMagic, 8u) != 0) return nullptr;
++    if (in.gcount() != 64 || le32(head.data() + 8) != 1u || le32(head.data() + 12) != kSector)
++        throw psprecomp::Error("A prepared disc of another version: " + path.string());
++    std::unique_ptr<Layer> layer(new Layer());
++    layer->size_ = le64(head.data() + 16);
++    layer->base_size_ = le64(head.data() + 24);
++    const std::uint64_t count = le64(head.data() + 32);
++    const std::uint64_t table = le64(head.data() + 40);
++    layer->data_offset_ = le64(head.data() + 48);
++    std::string base(le32(head.data() + 56), '\0');
++    in.read(base.data(), static_cast<std::streamsize>(base.size()));
++    layer->base_ = install::path_from_utf8(base);
++    if (count > (1u << 26u)) throw psprecomp::Error("A damaged prepared disc: " + path.string());
++    std::vector<std::uint8_t> entries(static_cast<std::size_t>(count * 8u));
++    in.seekg(static_cast<std::streamoff>(table));
++    in.read(reinterpret_cast<char *>(entries.data()), static_cast<std::streamsize>(entries.size()));
++    if (static_cast<std::size_t>(in.gcount()) != entries.size())
++        throw psprecomp::Error("A damaged prepared disc: " + path.string());
++    layer->sectors_.resize(static_cast<std::size_t>(count));
++    layer->slots_.resize(static_cast<std::size_t>(count));
++    for (std::size_t i = 0; i < count; ++i) {
++        layer->sectors_[i] = le32(entries.data() + i * 8u);
++        layer->slots_[i] = le32(entries.data() + i * 8u + 4u);
++    }
++    layer->file_.open(path, std::ios::binary);
++    std::error_code ec;
++    if (!std::filesystem::is_regular_file(layer->base_, ec))
++        throw psprecomp::Error("The disc image this mod was prepared from is no longer at " + base +
++                               "; prepare the mod again");
++    if (std::filesystem::file_size(layer->base_, ec) != layer->base_size_)
++        throw psprecomp::Error("The disc image at " + base + " is not the one this mod was prepared from; prepare the "
++                               "mod again");
++    return layer;
++}
++
++Layer::~Layer() = default;
++
++std::size_t Layer::read(std::ifstream &base, std::uint64_t offset, std::span<std::uint8_t> output) {
++    if (offset >= size_) return 0u;
++    const std::size_t count = static_cast<std::size_t>(std::min<std::uint64_t>(output.size(), size_ - offset));
++    std::size_t done = 0u;
++    while (done < count) {
++        const std::uint64_t at = offset + done;
++        const std::uint32_t sector = static_cast<std::uint32_t>(at / kSector);
++        const std::size_t within = static_cast<std::size_t>(at % kSector);
++        const auto found = std::lower_bound(sectors_.begin(), sectors_.end(), sector);
++        if (found != sectors_.end() && *found == sector) {
++            const std::size_t n = std::min<std::size_t>(count - done, kSector - within);
++            const std::uint32_t slot = slots_[static_cast<std::size_t>(found - sectors_.begin())];
++            if (slot == kZero) {
++                std::memset(output.data() + done, 0, n);
++            } else {
++                file_.clear();
++                file_.seekg(static_cast<std::streamoff>(data_offset_ + std::uint64_t{slot} * kSector + within));
++                file_.read(reinterpret_cast<char *>(output.data() + done), static_cast<std::streamsize>(n));
++                if (static_cast<std::size_t>(file_.gcount()) != n) return done;
++            }
++            done += n;
++            continue;
++        }
++        // Up to the next changed sector, from the release's image.
++        const std::uint64_t stop =
++            found == sectors_.end() ? offset + count
++                                    : std::min<std::uint64_t>(offset + count, std::uint64_t{*found} * kSector);
++        const std::size_t n = static_cast<std::size_t>(stop - at);
++        const std::size_t from_base =
++            at < base_size_ ? static_cast<std::size_t>(std::min<std::uint64_t>(n, base_size_ - at)) : 0u;
++        if (from_base != 0u) {
++            base.clear();
++            base.seekg(static_cast<std::streamoff>(at));
++            base.read(reinterpret_cast<char *>(output.data() + done), static_cast<std::streamsize>(from_base));
++            if (static_cast<std::size_t>(base.gcount()) != from_base) return done;
++        }
++        std::memset(output.data() + done + from_base, 0, n - from_base);
++        done += n;
++    }
++    return done;
++}
++
++} // namespace portablekit::disc_patch
+diff --git a/host/disc_patch.hpp b/host/disc_patch.hpp
+new file mode 100644
+index 0000000..b7818cb
+--- /dev/null
++++ b/host/disc_patch.hpp
+@@ -0,0 +1,69 @@
++#pragma once
++
++#include <atomic>
++#include <cstdint>
++#include <filesystem>
++#include <fstream>
++#include <memory>
++#include <span>
++#include <string>
++#include <vector>
++
++// A disc patch: a mod's patch to the game's disc image (VCDIFF, as xdelta3
++// writes it, with or without its LZMA secondary compression), turned once
++// into a layer over the release's image. The layer keeps only the sectors
++// the patch changes; IsoImage reads a layer file as the patched disc, taking
++// every other sector from the release's image. A player then needs neither a
++// patching tool nor a second full image, and the layer stays the size of what
++// the mod changed.
++namespace portablekit::disc_patch {
++
++// True when the file starts as a VCDIFF patch does.
++[[nodiscard]] bool is_patch_file(const std::filesystem::path &path);
++
++struct Progress {
++    std::atomic<std::uint64_t> done{0};   // bytes of the patched image made so far
++    std::atomic<std::uint64_t> total{0};  // its size, once the patch is read
++    std::atomic<bool> cancel{false};
++};
++
++struct Result {
++    bool ok = false;
++    std::string message;              // what went wrong, or a note on what was made
++    std::uint32_t windows = 0;        // the patch's windows
++    std::uint32_t mismatched = 0;     // windows whose checksum did not match what this disc gave
++    std::uint64_t changed_sectors = 0;
++    std::uint64_t zero_sectors = 0;   // of those, sectors the patch empties
++};
++
++// Applies `patch` to `base` and writes the layer to `out` (through a file
++// beside it, renamed when complete). Runs on the caller's thread.
++Result prepare(const std::filesystem::path &patch, const std::filesystem::path &base,
++               const std::filesystem::path &out, Progress &progress);
++
++// A layer file opened for reading (IsoImage's).
++class Layer {
++public:
++    // Null when `path` is not a layer file; throws when it is one but broken.
++    static std::unique_ptr<Layer> open(const std::filesystem::path &path);
++    ~Layer();
++    Layer(const Layer &) = delete;
++    Layer &operator=(const Layer &) = delete;
++
++    [[nodiscard]] const std::filesystem::path &base() const noexcept { return base_; }
++    [[nodiscard]] std::uint64_t size() const noexcept { return size_; }
++    [[nodiscard]] std::uint64_t base_size() const noexcept { return base_size_; }
++    // Reads the patched image at `offset`, its unchanged sectors from `base`
++    // (the release's image, opened by the caller).
++    std::size_t read(std::ifstream &base, std::uint64_t offset, std::span<std::uint8_t> output);
++
++private:
++    Layer() = default;
++    std::filesystem::path base_;
++    std::uint64_t size_ = 0, base_size_ = 0, data_offset_ = 0;
++    std::vector<std::uint32_t> sectors_;  // sorted
++    std::vector<std::uint32_t> slots_;    // kZero, or the sector's index in the data
++    std::ifstream file_;
++};
++
++} // namespace portablekit::disc_patch
+diff --git a/host/hle/hle_system.cpp b/host/hle/hle_system.cpp
+index cf09b75..c71496e 100644
+--- a/host/hle/hle_system.cpp
++++ b/host/hle/hle_system.cpp
+@@ -6,6 +6,7 @@
+ 
+ #include "kernel/rtc_time.hpp"
+ #include "overlays.hpp"
++#include "patched_edition.hpp"
+ #include "system.hpp"
+ 
+ #include "psprecomp/common.hpp"
+@@ -45,12 +46,19 @@ void register_utils(HleRegistrar &hle) {
+     // The host has no data cache to keep coherent. Phantasy Star Portable 2
+     // Infinity (NPJH50332) uses WritebackInvalidateRange.
+     for (const char *name : {"sceKernelDcacheWritebackAll", "sceKernelDcacheWritebackInvalidateAll",
+-                             "sceKernelDcacheInvalidateRange", "sceKernelDcacheWritebackRange",
+-                             "sceKernelDcacheWritebackInvalidateRange", "sceKernelSetGPO"})
++                             "sceKernelDcacheInvalidateRange", "sceKernelSetGPO"})
+         hle.add("UtilsForUser", name, success);
++    // A patched edition may be writing code: patched_edition.hpp looks.
++    const auto flush_dcache_range = [](Runtime &rt, AllegrexContext &ctx) {
++        patched::data_flushed(rt, arg(ctx, 0), arg(ctx, 1));
++        kernel().finish(ctx, 0u);
++    };
++    hle.add("UtilsForUser", "sceKernelDcacheWritebackRange", flush_dcache_range);
++    hle.add("UtilsForUser", "sceKernelDcacheWritebackInvalidateRange", flush_dcache_range);
+     // The guest flushes the instruction cache after copying code into an overlay
+     // slot, which is the profile's cue to re-check which overlay is loaded.
+     const auto flush_icache = [](Runtime &rt, AllegrexContext &ctx) {
++        patched::code_flushed(rt);
+         forget_unmatched_overlays();
+         revalidate_overlays(rt);
+         kernel().finish(ctx, 0u);
+diff --git a/host/kernel/iso_image.cpp b/host/kernel/iso_image.cpp
+index 12d24f4..d461cc6 100644
+--- a/host/kernel/iso_image.cpp
++++ b/host/kernel/iso_image.cpp
+@@ -1,5 +1,6 @@
+ #include "iso_image.hpp"
+ 
++#include "disc_patch.hpp"
+ #include "psprecomp/common.hpp"
+ 
+ #include <algorithm>
+@@ -42,9 +43,12 @@ std::uint32_t read_le32(const std::vector<std::uint8_t> &data, std::size_t offse
+ 
+ } // namespace
+ 
+-IsoImage::IsoImage(const std::filesystem::path &path) : path_(path), file_(path, std::ios::binary) {
+-    if (!file_) throw psprecomp::Error("Cannot open disc image: " + path.string());
+-    size_bytes_ = std::filesystem::file_size(path);
++IsoImage::IsoImage(const std::filesystem::path &path)
++    : path_(path), read_path_(path), layer_(disc_patch::Layer::open(path)) {
++    if (layer_) read_path_ = layer_->base();
++    file_.open(read_path_, std::ios::binary);
++    if (!file_) throw psprecomp::Error("Cannot open disc image: " + read_path_.string());
++    size_bytes_ = layer_ ? layer_->size() : std::filesystem::file_size(path);
+     std::vector<std::uint8_t> primary(kSectorSize);
+     if (read(16u * kSectorSize, primary) != primary.size() || primary[1] != 'C' || primary[2] != 'D' ||
+         primary[3] != '0' || primary[4] != '0' || primary[5] != '1')
+@@ -77,7 +81,7 @@ void IsoImage::read_through_in_background() {
+         SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN);
+ #endif
+         const auto started = std::chrono::steady_clock::now();
+-        std::ifstream in(path_, std::ios::binary);
++        std::ifstream in(read_path_, std::ios::binary);
+         std::vector<char> chunk(1u << 20u);
+         std::uint64_t done = 0u;
+         while (in && !stop_ && done < size_bytes_) {
+@@ -137,6 +141,7 @@ std::optional<IsoImage::Entry> IsoImage::find(std::string path) const {
+ 
+ std::size_t IsoImage::read(std::uint64_t offset, std::span<std::uint8_t> output) {
+     if (offset >= size_bytes_) return 0u;
++    if (layer_) return layer_->read(file_, offset, output);
+     const std::size_t count = static_cast<std::size_t>(std::min<std::uint64_t>(output.size(), size_bytes_ - offset));
+     file_.clear();
+     file_.seekg(static_cast<std::streamoff>(offset));
+diff --git a/host/kernel/iso_image.hpp b/host/kernel/iso_image.hpp
+index 442a68f..d5b1254 100644
+--- a/host/kernel/iso_image.hpp
++++ b/host/kernel/iso_image.hpp
+@@ -5,6 +5,7 @@
+ #include <filesystem>
+ #include <fstream>
+ #include <map>
++#include <memory>
+ #include <optional>
+ #include <span>
+ #include <string>
+@@ -13,7 +14,13 @@
+ 
+ namespace portablekit {
+ 
+-// Read-only ISO9660 view of a PSP UMD image. Paths are case-insensitive and
++namespace disc_patch {
++class Layer;
++}
++
++// Read-only ISO9660 view of a PSP UMD image. A prepared disc patch
++// (disc_patch.hpp) opens as the patched image: its sectors over the image it
++// was prepared from. Paths are case-insensitive and
+ // use '/' separators relative to the image root (e.g. "PSP_GAME/USRDIR/DATA.BIN").
+ // Listings keep each name as the disc spells it: a game may hash the names
+ // it reads from a directory (God of War does) and look them up by its own
+@@ -56,6 +63,8 @@ private:
+     [[nodiscard]] static std::string normalize(std::string path);
+ 
+     std::filesystem::path path_;
++    std::filesystem::path read_path_;  // the file read: path_, or a layer's image
++    std::unique_ptr<disc_patch::Layer> layer_;
+     std::ifstream file_;
+     std::uint64_t size_bytes_{};
+     std::map<std::string, Entry> entries_;
+diff --git a/host/main.cpp b/host/main.cpp
+index c77018f..8cc9f8b 100644
+--- a/host/main.cpp
++++ b/host/main.cpp
+@@ -3,6 +3,7 @@
+ 
+ #include "app_paths.hpp"
+ #include "corpus_library.hpp"
++#include "patched_edition.hpp"
+ 
+ #include "adhoc/client.hpp"
+ #include "adhoc/discovery.hpp"
+@@ -388,6 +389,25 @@ int main(int argc, char **argv) {
+             std::filesystem::create_directories(paths.memory_stick / "PSP" / "SAVEDATA", ec);
+             std::cout << "Memory stick: " << paths.memory_stick.string() << "\n";
+         }
++        // A patched edition plays from its own disc on the release's code.
++        portablekit::patched::set_release_disc(files->disc_image);
++        std::optional<portablekit::patched::Edition> edition;
++        if (const std::filesystem::path disc = portablekit::patched::requested_disc(); !disc.empty()) {
++            std::string why;
++            edition = portablekit::patched::open(disc, why);
++            if (edition) paths.disc_image = edition->disc;
++            else std::cerr << "[patched] cannot play " << disc.string() << ": " << why << "; starting the release\n";
++            // Its saves and downloads stay apart from the release's: a patch
++            // may write what the release's code cannot read.
++            const char *ms0 = portablekit::env("MEMORY_STICK_DIR");
++            if (edition && (ms0 == nullptr || *ms0 == '\0')) {
++                paths.memory_stick = paths.memory_stick.parent_path() /
++                                     (paths.memory_stick.filename().string() + "-patched");
++                std::error_code ec;
++                std::filesystem::create_directories(paths.memory_stick / "PSP" / "SAVEDATA", ec);
++                std::cout << "Memory stick: " << paths.memory_stick.string() << " (the patched disc's own)\n";
++            }
++        }
+         if (!std::filesystem::is_regular_file(executable))
+             throw psprecomp::Error("Missing " + executable.string() + " (run scripts/prepare_game.sh)");
+         if (portablekit::game().prepare_game != nullptr &&
+@@ -418,7 +438,7 @@ int main(int argc, char **argv) {
+ 
+         const psprecomp::Elf32Image elf = psprecomp::Elf32Image::from_file(executable);
+         const std::uint32_t load_base = portablekit::game().load_base;
+-        const std::uint32_t ram_bytes = portablekit::game().guest_ram_bytes;
++        const std::uint32_t ram_bytes = edition ? edition->ram_bytes : portablekit::game().guest_ram_bytes;
+         if (elf.required_ram_size(load_base) > ram_bytes)
+             throw psprecomp::Error("The executable needs more than the " + std::to_string(ram_bytes >> 20) +
+                                    " MiB of guest memory this profile declares");
+@@ -440,6 +460,11 @@ int main(int argc, char **argv) {
+             else
+                 std::cerr << "warning: cannot use " << library.string() << ": " << error << "\n";
+         }
++        if (edition) {
++            const auto slots = portablekit::game().overlay_slots;
++            const std::uint32_t code_end = slots.empty() ? load_base + elf.required_ram_size(load_base) : slots.front();
++            portablekit::patched::begin(runtime, *edition, load_base, code_end, files->disc_image);
++        }
+         portablekit::install_system(runtime, elf, paths);
+ 
+         std::cout << portablekit::game().app_name << " PSP bootstrap\n"
+diff --git a/host/overlays.cpp b/host/overlays.cpp
+index 5ad59e9..6836c35 100644
+--- a/host/overlays.cpp
++++ b/host/overlays.cpp
+@@ -10,13 +10,17 @@
+ #include "app_paths.hpp"
+ #include "hle/hle_common.hpp"
+ #include "overlay_module.hpp"
++#include "patched_edition.hpp"
+ #include "psprecomp/common.hpp"
+ 
+ #include <algorithm>
+ #include <chrono>
++#include <cstdint>
+ #include <cstdlib>
++#include <cstring>
+ #include <fstream>
+ #include <iostream>
++#include <map>
+ #include <optional>
+ #include <string>
+ #include <vector>
+@@ -302,9 +306,72 @@ bool overlay_parking() {
+     return on;
+ }
+ 
++// Slots holding a patched overlay running on the release's corpus: the image's
++// header hash, and the corpus's hash.
++struct PatchedSlot {
++    std::uint64_t header{};
++    std::uint64_t corpus{};
++};
++std::map<std::uint32_t, PatchedSlot> &patched_slots() {
++    static std::map<std::uint32_t, PatchedSlot> slots;
++    return slots;
++}
++
++// An image no corpus matches, in a patched edition: the release's overlay it
++// was patched from keeps its corpus, and the units holding a changed word run
++// interpreted.
++bool install_patched_overlay(Runtime &runtime, std::uint32_t slot_start) {
++    const OverlayCorpus *best = nullptr;
++    const std::vector<std::uint8_t> *best_image = nullptr;
++    std::size_t best_changed = SIZE_MAX, best_words = 0u;
++    for (const OverlayCorpus &corpus : overlay_corpora()) {
++        if (corpus.base != slot_start) continue;
++        const std::vector<std::uint8_t> *image = patched::overlay_baseline(corpus.base, corpus.code_size, corpus.hash);
++        if (image == nullptr) continue;
++        const std::size_t words = std::min<std::size_t>(image->size(), corpus.size) / 4u;
++        const std::uint8_t *loaded = runtime.memory().raw_pointer(slot_start, static_cast<std::uint32_t>(words * 4u));
++        if (loaded == nullptr) continue;
++        std::size_t changed = 0u;
++        for (std::size_t i = 0; i < words; ++i)
++            if (std::memcmp(loaded + i * 4u, image->data() + i * 4u, 4u) != 0) ++changed;
++        if (changed < best_changed) {
++            best = &corpus;
++            best_image = image;
++            best_changed = changed;
++            best_words = words;
++        }
++    }
++    // A patch changes a little of an overlay; anything else is another image.
++    if (best == nullptr || best_changed * 8u > best_words) return false;
++
++    runtime.unregister_functions(slot_start, slot_start + best->size);
++    if (!(overlay_parking() && runtime.restore_functions(best->hash))) {
++        runtime.reserve_functions(best->size / 4u);
++        best->install(runtime);
++    }
++    const std::uint8_t *loaded = runtime.memory().raw_pointer(slot_start, static_cast<std::uint32_t>(best_words * 4u));
++    std::size_t units = 0u;
++    for (std::size_t i = 0; i < best_words; ++i) {
++        if (std::memcmp(loaded + i * 4u, best_image->data() + i * 4u, 4u) == 0) continue;
++        if (runtime.retire_recompiled_unit(slot_start + static_cast<std::uint32_t>(i * 4u)) != 0u) ++units;
++    }
++    const std::uint64_t header = header_hash(runtime.memory(), slot_start);
++    installed_overlays()[slot_start] = best->hash;
++    installed_headers()[slot_start] = header;
++    patched_slots()[slot_start] = PatchedSlot{header, best->hash};
++    std::cout << "[patched] overlay " << best->name << ": " << best_changed << " changed words, " << units
++              << " recompiled units interpreted" << std::endl;
++    return true;
++}
++
+ bool install_overlay_for(Runtime &runtime, std::uint32_t pc) {
+     const auto [slot_start, slot_end] = code_range_of(pc);
+     if (slot_start == 0u) return false;
++    // Its corpus is in place: this address is in a unit the patch changed.
++    if (const auto patched_slot = patched_slots().find(slot_start);
++        patched_slot != patched_slots().end() &&
++        patched_slot->second.header == header_hash(runtime.memory(), slot_start))
++        return false;
+     if (const auto unmatched = unmatched_slots().find(slot_start);
+         unmatched != unmatched_slots().end() && unmatched->second == header_hash(runtime.memory(), slot_start))
+         return false;
+@@ -333,6 +400,8 @@ bool install_overlay_for(Runtime &runtime, std::uint32_t pc) {
+         return true;
+     }
+ 
++    if (patched::active() && install_patched_overlay(runtime, slot_start)) return true;
++
+     const std::optional<OverlayHeader> header = read_overlay_header(runtime.memory(), slot_start);
+     log_once("overlay-miss:" + psprecomp::hex32(slot_start),
+              "[overlay] no recompiled corpus for " + (header.has_value() ? header->name : std::string("the overlay")) +
+@@ -404,6 +473,11 @@ void revalidate_overlays(Runtime &runtime) {
+ 
+ void forget_unmatched_overlays() { unmatched_slots().clear(); }
+ 
++std::uint64_t patched_overlay_hash(const psprecomp::GuestMemory &memory, std::uint32_t base) {
++    const auto slot = patched_slots().find(base);
++    return slot != patched_slots().end() && slot->second.header == header_hash(memory, base) ? slot->second.corpus : 0u;
++}
++
+ bool overlay_code_overlaps(const psprecomp::GuestMemory &memory, std::uint32_t address, std::uint32_t size) {
+     const std::uint64_t start = address, end = static_cast<std::uint64_t>(address) + size;
+     const auto overlaps = [&](std::uint64_t from, std::uint64_t to) { return start < to && from < end; };
+diff --git a/host/overlays.hpp b/host/overlays.hpp
+index 4407067..5bfb3a3 100644
+--- a/host/overlays.hpp
++++ b/host/overlays.hpp
+@@ -22,6 +22,11 @@ void revalidate_overlays(psprecomp::Runtime &runtime);
+ // again at the next call into it.
+ void forget_unmatched_overlays();
+ 
++// The hash of the corpus a patched overlay in the slot at `base` runs on
++// (patched_edition.hpp), 0 when the slot holds no such image. A port that tells
++// its overlays apart by their corpus's hash asks this for a patched one.
++[[nodiscard]] std::uint64_t patched_overlay_hash(const psprecomp::GuestMemory &memory, std::uint32_t base);
++
+ // True when [address, address + size) overlaps an overlay's header or code
+ // that a recompiled corpus runs or will run: the header and code of the image
+ // in a slot, unless that image matched no corpus (it runs interpreted, so a
+diff --git a/host/patched_edition.cpp b/host/patched_edition.cpp
+new file mode 100644
+index 0000000..fa20df4
+--- /dev/null
++++ b/host/patched_edition.cpp
+@@ -0,0 +1,279 @@
++#include "patched_edition.hpp"
++
++#include "kernel/iso_image.hpp"
++#include "overlay_module.hpp"
++#include "profile.hpp"
++
++#include "psprecomp/common.hpp"
++
++#include <algorithm>
++#include <cstring>
++#include <iostream>
++#include <map>
++#include <set>
++#include <span>
++
++namespace portablekit::patched {
++namespace {
++
++constexpr std::uint32_t kLargeMemory = 64u * 1024u * 1024u;
++constexpr std::uint32_t kCompareChunk = 4096u;
++
++struct Baseline {
++    std::uint32_t base{};
++    std::uint32_t code_size{};
++    std::uint64_t hash{};
++    std::vector<std::uint8_t> image;
++};
++
++struct State {
++    bool active = false;
++    std::uint32_t code_start = 0u;
++    std::vector<std::uint8_t> code;  // the release's image from code_start on
++    std::set<std::uint32_t> changed;  // words already seen to differ
++    std::filesystem::path release_disc;
++    bool overlays_read = false;
++    std::vector<std::vector<std::uint8_t>> overlay_files;
++    std::map<std::uint64_t, std::vector<std::uint8_t>> baselines;
++};
++
++State &state() {
++    static State s;
++    return s;
++}
++
++std::uint32_t le32(const std::uint8_t *p) {
++    return static_cast<std::uint32_t>(p[0]) | static_cast<std::uint32_t>(p[1]) << 8u |
++           static_cast<std::uint32_t>(p[2]) << 16u | static_cast<std::uint32_t>(p[3]) << 24u;
++}
++
++std::uint32_t le16(const std::uint8_t *p) {
++    return static_cast<std::uint32_t>(p[0]) | static_cast<std::uint32_t>(p[1]) << 8u;
++}
++
++std::uint64_t fnv1a64(const std::uint8_t *data, std::size_t size) {
++    std::uint64_t hash = 0xCBF29CE484222325ull;
++    for (std::size_t i = 0; i < size; ++i) {
++        hash ^= data[i];
++        hash *= 0x100000001B3ull;
++    }
++    return hash;
++}
++
++std::optional<std::vector<std::uint8_t>> read_file(IsoImage &disc, const std::string &path) {
++    const auto entry = disc.find(path);
++    if (!entry || entry->directory) return std::nullopt;
++    std::vector<std::uint8_t> bytes(entry->size);
++    if (disc.read(std::uint64_t(entry->lba) * IsoImage::kSectorSize, bytes) != bytes.size()) return std::nullopt;
++    return bytes;
++}
++
++// A key's row of a PARAM.SFO: where its value is, how long, and its format.
++struct SfoValue {
++    std::uint32_t at{}, length{}, format{};
++};
++std::optional<SfoValue> sfo_find(const std::vector<std::uint8_t> &sfo, std::string_view key) {
++    if (sfo.size() < 20u || std::memcmp(sfo.data(), "\0PSF", 4u) != 0) return std::nullopt;
++    const std::uint32_t keys = le32(sfo.data() + 8u), values = le32(sfo.data() + 12u), count = le32(sfo.data() + 16u);
++    for (std::uint32_t i = 0; i < count && 20u + (i + 1u) * 16u <= sfo.size(); ++i) {
++        const std::uint8_t *row = sfo.data() + 20u + i * 16u;
++        const std::uint32_t name = keys + le16(row);
++        if (name >= sfo.size()) continue;
++        const auto *text = reinterpret_cast<const char *>(sfo.data() + name);
++        if (std::string_view(text, strnlen(text, sfo.size() - name)) != key) continue;
++        const SfoValue value{values + le32(row + 12u), le32(row + 4u), le16(row + 2u)};
++        if (value.at + std::uint64_t{value.length} > sfo.size()) return std::nullopt;
++        return value;
++    }
++    return std::nullopt;
++}
++
++std::optional<std::uint32_t> sfo_integer(const std::vector<std::uint8_t> &sfo, std::string_view key) {
++    const auto value = sfo_find(sfo, key);
++    if (!value || value->format != 0x0404u || value->length < 4u) return std::nullopt;
++    return le32(sfo.data() + value->at);
++}
++
++std::optional<std::string> sfo_string(const std::vector<std::uint8_t> &sfo, std::string_view key) {
++    const auto value = sfo_find(sfo, key);
++    if (!value || value->format == 0x0404u) return std::nullopt;
++    const auto *text = reinterpret_cast<const char *>(sfo.data() + value->at);
++    return std::string(text, strnlen(text, value->length));
++}
++
++void compare_code(psprecomp::Runtime &runtime, std::uint32_t from, std::uint32_t to) {
++    State &s = state();
++    const std::uint32_t end = s.code_start + static_cast<std::uint32_t>(s.code.size());
++    from = std::max(from, s.code_start) & ~3u;
++    to = std::min(to, end);
++    if (from >= to) return;
++    const std::uint8_t *memory = runtime.memory().raw_pointer(from, to - from);
++    if (memory == nullptr) return;
++    const std::uint8_t *release = s.code.data() + (from - s.code_start);
++    const std::uint32_t size = to - from;
++    std::uint32_t units = 0u, words = 0u;
++    for (std::uint32_t offset = 0u; offset < size;) {
++        const std::uint32_t length = std::min(kCompareChunk, size - offset);
++        if (std::memcmp(memory + offset, release + offset, length) != 0) {
++            for (std::uint32_t at = offset; at + 4u <= offset + length; at += 4u) {
++                if (std::memcmp(memory + at, release + at, 4u) == 0) continue;
++                const std::uint32_t address = from + at;
++                if (!s.changed.insert(address).second) continue;
++                ++words;
++                const std::uint32_t taken = runtime.retire_recompiled_unit(address);
++                if (taken != 0u) ++units;
++                // <prefix>_TRACE_PATCHED=1: each word that took a unit with it.
++                static const bool trace = portablekit::env("TRACE_PATCHED") != nullptr;
++                if (trace && taken != 0u)
++                    std::cout << "[patched] " << psprecomp::hex32(address) << ": " << psprecomp::hex32(le32(release + at))
++                              << " -> " << psprecomp::hex32(le32(memory + at)) << ", " << taken << " addresses interpreted"
++                              << std::endl;
++            }
++        }
++        offset += length;
++    }
++    // Words of the executable's data change as the game runs: only code is news.
++    if (units != 0u)
++        std::cout << "[patched] the executable: " << words << " changed word" << (words == 1u ? "" : "s") << ", "
++                  << units << " more recompiled unit" << (units == 1u ? "" : "s") << " interpreted" << std::endl;
++}
++
++void read_release_overlays() {
++    State &s = state();
++    if (s.overlays_read) return;
++    s.overlays_read = true;
++    if (s.release_disc.empty()) return;
++    IsoImage disc(s.release_disc);
++    // Every executable image the disc holds beside the main one.
++    std::vector<std::string> pending{"PSP_GAME/USRDIR"};
++    while (!pending.empty()) {
++        const std::string directory = pending.back();
++        pending.pop_back();
++        for (const std::string &name : disc.list(directory)) {
++            const std::string path = directory + "/" + name;
++            const auto entry = disc.find(path);
++            if (!entry) continue;
++            if (entry->directory) {
++                pending.push_back(path);
++                continue;
++            }
++            if (entry->size < 0x54u || entry->size > 32u * 1024u * 1024u) continue;
++            std::uint8_t magic[4]{};
++            if (disc.read(std::uint64_t(entry->lba) * IsoImage::kSectorSize, magic) != 4u ||
++                std::memcmp(magic, "\x7F" "ELF", 4u) != 0)
++                continue;
++            if (auto bytes = read_file(disc, path)) s.overlay_files.push_back(std::move(*bytes));
++        }
++    }
++}
++
++} // namespace
++
++std::filesystem::path requested_disc() {
++    if (portablekit::env("NO_PATCHED_DISC") != nullptr) return {};
++    if (const char *path = portablekit::env("PATCHED_DISC"); path != nullptr && *path != '\0') return path;
++    if (game().patched_disc != nullptr) return game().patched_disc();
++    return {};
++}
++
++namespace {
++std::filesystem::path &release_disc_path() {
++    static std::filesystem::path path;
++    return path;
++}
++} // namespace
++
++void set_release_disc(const std::filesystem::path &disc) { release_disc_path() = disc; }
++std::filesystem::path release_disc() { return release_disc_path(); }
++
++std::optional<Edition> open(const std::filesystem::path &path, std::string &why) {
++    std::error_code ec;
++    if (!std::filesystem::is_regular_file(path, ec)) {
++        why = "the file is not there";
++        return std::nullopt;
++    }
++    std::optional<IsoImage> opened;
++    try {
++        opened.emplace(path);
++    } catch (const std::exception &e) {
++        why = e.what();
++        return std::nullopt;
++    }
++    IsoImage &disc = *opened;
++    auto executable = read_file(disc, game().executable_path_on_disc);
++    if (!executable) {
++        why = "it has no executable";
++        return std::nullopt;
++    }
++    if (executable->size() < 4u || std::memcmp(executable->data(), "\x7F" "ELF", 4u) != 0) {
++        why = "its executable is encrypted, so no patch to it can be read";
++        return std::nullopt;
++    }
++    const auto sfo = read_file(disc, game().param_sfo_path_on_disc);
++    const std::optional<std::string> disc_id = sfo ? sfo_string(*sfo, "DISC_ID") : std::nullopt;
++    const bool ours = disc_id && (*disc_id == game().disc_id || find_region_release(*disc_id) != nullptr);
++    if (!ours) {
++        why = "it is not " + std::string(game().game_title) + " (disc " + disc_id.value_or("unknown") + ")";
++        return std::nullopt;
++    }
++    Edition edition;
++    edition.disc = path;
++    edition.executable = std::move(*executable);
++    edition.ram_bytes = game().guest_ram_bytes;
++    if (sfo_integer(*sfo, "MEMSIZE").value_or(0u) != 0u) edition.ram_bytes = std::max(edition.ram_bytes, kLargeMemory);
++    return edition;
++}
++
++void begin(psprecomp::Runtime &runtime, const Edition &edition, std::uint32_t load_base, std::uint32_t code_end,
++           const std::filesystem::path &release_disc) {
++    State &s = state();
++    s.active = true;
++    s.release_disc = release_disc;
++    s.code_start = load_base;
++    s.code.resize(code_end - load_base);
++    for (std::uint32_t i = 0; i < s.code.size(); ++i) s.code[i] = runtime.memory().load8(load_base + i);
++
++    const psprecomp::Elf32Image elf = psprecomp::Elf32Image::from_bytes(edition.executable, "patched executable");
++    (void)elf.load_and_relocate(runtime.memory(), load_base);
++    std::cout << "[patched] playing " << edition.disc.filename().string() << ", " << (edition.ram_bytes >> 20u)
++              << " MiB of memory" << std::endl;
++    compare_code(runtime, load_base, code_end);
++}
++
++bool active() noexcept { return state().active; }
++
++void code_flushed(psprecomp::Runtime &runtime) {
++    State &s = state();
++    if (s.active) compare_code(runtime, s.code_start, s.code_start + static_cast<std::uint32_t>(s.code.size()));
++}
++
++void data_flushed(psprecomp::Runtime &runtime, std::uint32_t address, std::uint32_t size) {
++    if (!state().active) return;
++    const std::uint32_t canonical = address & 0x1FFFFFFFu;
++    compare_code(runtime, canonical, canonical + size);
++}
++
++const std::vector<std::uint8_t> *overlay_baseline(std::uint32_t base, std::uint32_t code_size, std::uint64_t hash) {
++    State &s = state();
++    if (const auto found = s.baselines.find(hash); found != s.baselines.end()) return &found->second;
++    read_release_overlays();
++    const std::size_t window = kOverlayHeaderBytes + std::size_t{code_size};
++    for (const std::vector<std::uint8_t> &file : s.overlay_files) {
++        if (file.size() < 0x34u) continue;
++        const std::uint32_t table = le32(file.data() + 28u);
++        const std::uint32_t count = le16(file.data() + 44u), entry = le16(file.data() + 42u);
++        for (std::uint32_t i = 0; i < count && table + (i + 1u) * entry <= file.size(); ++i) {
++            const std::uint8_t *row = file.data() + table + i * entry;
++            if (le32(row) != 1u || le32(row + 8u) != base) continue;
++            const std::uint32_t offset = le32(row + 4u), size = le32(row + 16u);
++            if (offset + std::uint64_t{size} > file.size() || size < window) continue;
++            if (fnv1a64(file.data() + offset, window) != hash) continue;
++            auto &image = s.baselines[hash];
++            image.assign(file.begin() + offset, file.begin() + offset + size);
++            return &image;
++        }
++    }
++    return nullptr;
++}
++
++} // namespace portablekit::patched
+diff --git a/host/patched_edition.hpp b/host/patched_edition.hpp
+new file mode 100644
+index 0000000..52074fc
+--- /dev/null
++++ b/host/patched_edition.hpp
+@@ -0,0 +1,63 @@
++#pragma once
++
++#include "psprecomp/elf32.hpp"
++#include "psprecomp/runtime.hpp"
++
++#include <cstdint>
++#include <filesystem>
++#include <optional>
++#include <string>
++#include <vector>
++
++// A patched edition of the game: a disc made from the release by a mod, whose
++// executable is the release's with some of its code changed. Nothing is
++// recompiled for it. The release's recompiled code stays, and each generated
++// unit holding a word the patch changed is taken out of dispatch, so that the
++// interpreter runs that unit from guest memory. The comparison is made with
++// the release's own files, so a new version of a patch needs nothing here.
++//
++// <prefix>_PATCHED_DISC=<image> or GameProfile::patched_disc asks for one;
++// <prefix>_NO_PATCHED_DISC=1 ignores both and starts the release.
++namespace portablekit::patched {
++
++struct Edition {
++    std::filesystem::path disc;
++    // The disc's PSP_GAME/SYSDIR/EBOOT.BIN, a plain executable.
++    std::vector<std::uint8_t> executable;
++    // 64 MiB when the disc's PARAM.SFO asks for the larger memory (MEMSIZE).
++    std::uint32_t ram_bytes{};
++};
++
++// The patched disc this start was asked for; empty for the release.
++[[nodiscard]] std::filesystem::path requested_disc();
++
++// The release's disc image this start found, whichever disc it plays: what a
++// disc patch is applied to (disc_patch.hpp).
++void set_release_disc(const std::filesystem::path &disc);
++[[nodiscard]] std::filesystem::path release_disc();
++
++// Reads a patched disc. Empty, with `why` said, when it cannot be played as one.
++[[nodiscard]] std::optional<Edition> open(const std::filesystem::path &disc, std::string &why);
++
++// Puts the edition's executable over the release's, already loaded and
++// registered, and takes the units it changed out of dispatch. `code_end` is
++// where the release's own image stops being comparable (its first overlay
++// slot). `release_disc` is read for the release's overlays.
++void begin(psprecomp::Runtime &runtime, const Edition &edition, std::uint32_t load_base, std::uint32_t code_end,
++           const std::filesystem::path &release_disc);
++
++// True for the whole run once begin() was called.
++[[nodiscard]] bool active() noexcept;
++
++// The guest flushed a cache: code it wrote over the executable's stops running
++// recompiled from here on.
++void code_flushed(psprecomp::Runtime &runtime);
++void data_flushed(psprecomp::Runtime &runtime, std::uint32_t address, std::uint32_t size);
++
++// The release's image of the overlay a corpus was generated from: what is
++// loaded at `base`, found on the release's disc by the corpus's own hash over
++// its header and first `code_size` bytes. Null when the disc has none.
++[[nodiscard]] const std::vector<std::uint8_t> *overlay_baseline(std::uint32_t base, std::uint32_t code_size,
++                                                                std::uint64_t hash);
++
++} // namespace portablekit::patched
+diff --git a/host/profile.hpp b/host/profile.hpp
+index b331b38..130c50e 100644
+--- a/host/profile.hpp
++++ b/host/profile.hpp
+@@ -388,6 +388,10 @@ struct GameProfile {
+     // start. Null: nothing to prepare.
+     bool (*prepare_game)(install::InstallerUi *ui, const std::filesystem::path &executable,
+                          const std::filesystem::path &disc_image) = nullptr;
++    // The disc of a patched edition to play this start (patched_edition.hpp),
++    // asked once before the game's code is registered. Empty or null: the
++    // release.
++    std::filesystem::path (*patched_disc)() = nullptr;
+ 
+     // --- The game's camera and view ----------------------------------------
+     // Drives the game's own camera from what the player asks of it
+diff --git a/host/ui/menu.cpp b/host/ui/menu.cpp
+index 19ab15e..7bbe5e5 100644
+--- a/host/ui/menu.cpp
++++ b/host/ui/menu.cpp
+@@ -191,6 +191,12 @@ std::string file_url(const std::string &path) {
+ 
+ float gain(const settings::Settings &s) { return s.mute ? 0.0f : static_cast<float>(s.volume) / 100.0f; }
+ 
++// request_menu_close(): the menu closes at its next frame, as Resume closes it.
++std::atomic<bool> &menu_close_requested() {
++    static std::atomic<bool> requested{false};
++    return requested;
++}
++
+ class Menu {
+ public:
+     explicit Menu(bool paused) : paused_(paused) {}
+@@ -282,6 +288,7 @@ bool Menu::frame() {
+     } else if (!font_list_was_open && (((back || pad_back) && !was_editing_) || start)) {
+         close_ = true;
+     }
++    if (menu_close_requested().exchange(false)) close_ = true;
+     if (close_ && !quit_ && texture_pack_import_busy()) close_ = false;
+     if (!confirm_dialog()) return false;
+     was_editing_ = ImGui::IsAnyItemActive();
+@@ -2244,8 +2251,11 @@ void draw_over_game() {
+     if (menu && !menu->frame()) {
+         const bool quit = menu->quit() || layer.window_closed();
+         menu.reset();
+-        layer.set_interactive(false);
+-        layer.renderer().set_game_input(true);
++        // A panel opened from one of the menu's rows keeps the input until it closes.
++        if (g_panel_over_game == nullptr) {
++            layer.set_interactive(false);
++            layer.renderer().set_game_input(true);
++        }
+         note_menu_closed(quit);
+         if (quit) quit_requested() = true;
+     }
+@@ -2273,6 +2283,8 @@ bool take_quit_request() { return quit_requested().exchange(false); }
+ 
+ void request_quit() { quit_requested() = true; }
+ 
++void request_menu_close() { menu_close_requested() = true; }
++
+ bool menu_requested() {
+     Layer &layer = Layer::get();
+     if (!layer.attached() || text_input_open() || game_message_open() || game_save_list_open() ||
+@@ -2292,8 +2304,11 @@ bool run_menu() {
+     // request_quit() from one of the menu's own rows closes the menu; the
+     // game's next flip then quits.
+     const bool window_open = layer.run([&] { return !quit_requested().load() && menu.frame(); }, true);
+-    layer.set_interactive(false);
+-    layer.renderer().set_game_input(true);
++    // A panel opened from one of the menu's rows keeps the input until it closes.
++    if (g_panel_over_game == nullptr) {
++        layer.set_interactive(false);
++        layer.renderer().set_game_input(true);
++    }
+     note_menu_closed(menu.quit());
+     return window_open && !menu.quit();
+ }
+diff --git a/host/ui/ui.hpp b/host/ui/ui.hpp
+index b6eae4b..3932ace 100644
+--- a/host/ui/ui.hpp
++++ b/host/ui/ui.hpp
+@@ -47,6 +47,10 @@ void add_game_overlay(bool (*visible)(), void (*draw)());
+ // close. Opening one while another is open does nothing.
+ void open_panel_over_game(bool (*frame)());
+ [[nodiscard]] bool panel_over_game();
++// Closes the menu at its next frame, as its Resume does: for a row of the
++// port's own that opens a panel over the game, which shows once the menu is
++// closed.
++void request_menu_close();
+ // Settings of the port's own, at the end of the menu's Video page, after
+ // PortableKit's: `rows` is called each frame the page is shown and draws its
+ // rows with widgets.hpp (a section(), then choice_row, toggle_row,
+diff --git a/include/psprecomp/runtime.hpp b/include/psprecomp/runtime.hpp
+index 0090100..970d511 100644
+--- a/include/psprecomp/runtime.hpp
++++ b/include/psprecomp/runtime.hpp
+@@ -122,6 +122,13 @@ public:
+     // Removes every registration in [start, end). A profile calls this before
+     // installing a different overlay into the same guest address window.
+     void unregister_functions(std::uint32_t start, std::uint32_t end);
++    // Takes the recompiled unit holding `address` out of dispatch, because the
++    // guest code it was generated from has changed: the interpreter runs that
++    // unit from then on. A whole unit, since calls inside one are direct jumps
++    // the runtime never sees. Host replacements inside it stay, and
++    // registered_function() still answers for what was taken. Returns how many
++    // addresses were taken: 0 when `address` holds no recompiled code.
++    std::uint32_t retire_recompiled_unit(std::uint32_t address);
+     // The same, keeping the registrations under `key` (an overlay's identity)
+     // instead of dropping them, so that restore_functions(key) can put them
+     // back when that overlay is loaded into the window again. Moving them out
+@@ -231,6 +238,8 @@ private:
+     std::size_t unaligned_functions_{};
+     // park_functions(): the registrations taken out, by key.
+     std::unordered_map<std::uint64_t, std::vector<decltype(functions_)::node_type>> parked_functions_;
++    // retire_recompiled_unit(): what was registered at each address it took.
++    std::unordered_map<std::uint32_t, RecompiledFunction> retired_functions_;
+     // Takes the registrations in [start, end) out of the table and the direct
+     // tables; `keep` receives them, or they are dropped.
+     void take_functions(std::uint32_t start, std::uint32_t end,
+diff --git a/src/runtime.cpp b/src/runtime.cpp
+index 3531431..0ccb98b 100644
+--- a/src/runtime.cpp
++++ b/src/runtime.cpp
+@@ -597,7 +597,9 @@ bool Runtime::register_import_stub(std::uint32_t address, std::string library, s
+ bool Runtime::has_function(std::uint32_t address) const { return lookup_function(address) != nullptr; }
+ 
+ Runtime::RecompiledFunction Runtime::registered_function(std::uint32_t address) const noexcept {
+-    return lookup_function(address);
++    if (const RecompiledFunction function = lookup_function(address); function != nullptr) return function;
++    const auto retired = retired_functions_.find(address);
++    return retired != retired_functions_.end() ? retired->second : nullptr;
+ }
+ std::size_t Runtime::function_count() const noexcept { return functions_.size(); }
+ 
+@@ -1249,8 +1251,68 @@ void Runtime::arithmetic_overflow(std::uint32_t pc, std::uint32_t instruction) {
+ 
+ void Runtime::unregister_functions(std::uint32_t start, std::uint32_t end) { take_functions(start, end, nullptr); }
+ 
++std::uint32_t Runtime::retire_recompiled_unit(std::uint32_t address) {
++    address &= ~3u;
++    const auto unit_at = [this](std::uint32_t at) -> RecompiledFunction {
++        const auto found = functions_.find(at);
++        return found != functions_.end() && found->second.name.starts_with("recomp_unit_") ? found->second.function
++                                                                                           : nullptr;
++    };
++    if (!functions_.contains(address)) return 0u;
++    // A host replacement may stand on the word itself: its neighbours say which
++    // unit it stands in.
++    RecompiledFunction unit = unit_at(address);
++    for (std::uint32_t step = 4u; unit == nullptr && step <= 256u; step += 4u) {
++        unit = unit_at(address + step);
++        if (unit == nullptr) unit = unit_at(address - step);
++    }
++    if (unit == nullptr) return 0u;
++
++    // Every address of a unit is registered with the unit's one function.
++    const auto belongs = [&](std::uint32_t at) {
++        const auto found = functions_.find(at);
++        if (found == functions_.end()) return false;
++        return !found->second.name.starts_with("recomp_unit_") || found->second.function == unit;
++    };
++    std::uint32_t first = address, last = address;
++    while (belongs(first - 4u)) first -= 4u;
++    while (belongs(last + 4u)) last += 4u;
++
++    std::uint32_t taken = 0u;
++    for (std::uint32_t at = first; at <= last; at += 4u) {
++        if (unit_at(at) != unit) continue;
++        retired_functions_[at] = unit;
++        functions_.erase(at);
++        const std::uint32_t c = memory_.canonical(at);
++        if (c >= direct_base_) {
++            const std::size_t index = static_cast<std::size_t>(c - direct_base_) / 4u;
++            if (index < direct_functions_.size()) {
++                direct_functions_[index] = nullptr;
++                direct_chainable_[index] = nullptr;
++            }
++        }
++        ++taken;
++    }
++    // The dense table and the direct chains into this unit go through the exact
++    // per-address path from now on, which finds nothing and returns to dispatch.
++    if (generated_unit_layout_valid_ && generated_unit_span_ != 0u) {
++        const std::uint32_t c = memory_.canonical(address);
++        if (c >= generated_unit_base_) {
++            const std::size_t index = (c - generated_unit_base_) / generated_unit_span_;
++            if (index < kGeneratedUnitFastCapacity && generated_units_[index] != nullptr) {
++                generated_units_[index] = nullptr;
++                generated_unit_disabled_[index] = 1u;
++            }
++        }
++    }
++    return taken;
++}
++
+ void Runtime::take_functions(std::uint32_t start, std::uint32_t end,
+                              std::vector<decltype(functions_)::node_type> *keep) {
++    // Another image comes to these addresses: what was retired there is gone.
++    if (!retired_functions_.empty() && end > start)
++        std::erase_if(retired_functions_, [&](const auto &entry) { return entry.first >= start && entry.first < end; });
+     const auto clear_direct = [this](std::uint32_t address) {
+         const std::uint32_t c = memory_.canonical(address);
+         if (c >= direct_base_) {
+-- 
+2.53.0.windows.1
+

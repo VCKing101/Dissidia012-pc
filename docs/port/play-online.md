@@ -13,6 +13,7 @@ There are three ways to go online:
 
 Both players need the same release of the port, the same mods that change the game (music mods may differ) and the
 same test settings. The game checks as a battle starts and says what differs. Saves and official DLC may differ.
+A copy playing a mod's disc (System, Disc mod) meets only players of the same mod.
 
 To find someone to play, ask on the [Discord server](https://discord.gg/9GrbdQwPbS). Send an address by direct
 message, not in a public channel. The pictures use example addresses; yours are your own.

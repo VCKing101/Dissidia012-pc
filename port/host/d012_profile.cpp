@@ -15,6 +15,7 @@
 
 #include "d012_button_prompts.hpp"
 #include "d012_cheats.hpp"
+#include "d012_disc_mod.hpp"
 #include "d012_hle.hpp"
 #include "d012_no_window.hpp"
 #include "d012_online.hpp"
@@ -242,6 +243,8 @@ const GameProfile &game() {
         // No window (no working Vulkan driver, issue 24): the setup's build
         // says why and ends (d012_no_window.cpp).
         .renderer_unavailable = &d012::renderer_unavailable,
+        // A modded disc, switched on on the System page (d012_disc_mod.cpp).
+        .patched_disc = &d012::disc_mod::disc_for_this_start,
 #if defined(PORTABLEKIT_ANDROID_APP) && defined(D012_INSTALLER_BUILD)
         // The player's app makes the game's code on the phone from the disc
         // (d012_device_compile.cpp).
