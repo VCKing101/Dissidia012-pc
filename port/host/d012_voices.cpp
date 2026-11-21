@@ -611,6 +611,13 @@ void build(const std::vector<std::uint8_t> &own_bytes) {
     for (const Record &r : s.own)
         own_end =
             std::max<std::uint64_t>(own_end, std::uint64_t(r.sector & kSectorMask) * kSector + (r.size & kSizeMask));
+    // The file as the disc lists it: a patched disc keeps files of its own past
+    // what the index names, and reads them by their offset.
+    if (const std::filesystem::path &image = portablekit::disc_image_path(); !image.empty()) {
+        const IsoImage disc(image);
+        if (const auto package = disc.find("PSP_GAME/USRDIR/DATA/PACKAGE.BIN"))
+            own_end = std::max<std::uint64_t>(own_end, package->size);
+    }
     s.own_end = whole_sectors(own_end);
 
     // The Options text, read through the game's own PACKAGE.BIN.

@@ -118,6 +118,7 @@ portablekit_add_game(D012Native ${d012_corpus}
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_update_install.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_updates.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_curl.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_disc_mod.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_discord_rules.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_discord.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_dialogs.cpp"
