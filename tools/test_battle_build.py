@@ -75,10 +75,11 @@ class BattleBuildChecks(unittest.TestCase):
 
     def test_raw_and_opaque_bytes_receive_no_c_credit(self):
         report = verify(CANDIDATE)
-        self.assertEqual(report["raw_instruction_fallback_bytes"], 24)
+        # 16: two raw VFPU words now build from C with inline assembly (the battle VFPU units).
+        self.assertEqual(report["raw_instruction_fallback_bytes"], 16)
         # Jump tables linked from C objects are data: they leave the opaque bytes but earn no C credit.
         self.assertEqual(report["opaque_original_bytes"] + report["c_rodata_bytes"], 87180)
-        self.assertEqual(sum(report[k] for k in ("recovered_c_bytes", "c_rodata_bytes", "assembly_instruction_bytes", "raw_instruction_fallback_bytes", "opaque_original_bytes")), 1596080)
+        self.assertEqual(sum(report[k] for k in ("recovered_c_bytes", "inline_asm_bytes", "c_rodata_bytes", "assembly_instruction_bytes", "raw_instruction_fallback_bytes", "opaque_original_bytes")), 1596080)
 
     def test_progress_counts_both_modules_and_retains_unknown_headlines(self):
         report = collect()

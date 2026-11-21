@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import io
 import json
+import re
 from pathlib import Path
 from elftools.elf.elffile import ELFFile
 
@@ -11,9 +12,11 @@ from main_build_provenance import layout_digest
 import c_rodata
 from mips_relocations import configured_addresses, resolve_function
 from probe_compilers import functions_from_object
+from match_config import inline_asm_kind
 from compiler_inline_sections import verify_inline_units, validate_inline_manifest
 from inspect_imports import inspect as inspect_imports
 
+INLINE_ASM = re.compile(rb"\b(?:__asm__|__asm|asm)\b\s*(?:volatile|__volatile__)?\s*\(|#\s*include\s*[<\"]vfpu\.h[>\"]")
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -70,7 +73,10 @@ def verify(candidate):
     import_stubs = [(int(f["address"], 16), int(f["address"], 16)+8)
                     for library in inspect_imports(ROOT / spec["path"])["libraries"] for f in library["functions"]]
     functions, ranges, names, rodata_ranges = [], [], set(), []
+    inline_asm_functions = []
     for unit in matches["units"]:
+        if bool(inline_asm_kind(unit)) != bool(INLINE_ASM.search((ROOT / unit["source"]).read_bytes())):
+            raise ValueError(f"Main unit inline-assembly declaration differs from its source: {unit['name']}")
         raw_path = ROOT / f"build/ULUS10566/main_{unit['name']}.raw.o"
         raw = functions_from_object(raw_path)
         local, data = c_rodata.check_unit(raw_path, unit, addresses, lambda a, n: reference_at(reference, segments, a, n))
@@ -92,7 +98,7 @@ def verify(candidate):
                 raise ValueError(f"Main raw C object does not match: {f['name']}")
             if linked[f["name"]]["address"] != a or linked[f["name"]]["bytes"] != expected:
                 raise ValueError(f"Main linked C address/bytes do not match: {f['name']}")
-            functions.append(f)
+            (inline_asm_functions if inline_asm_kind(unit) else functions).append(f)
     ordered = sorted(ranges + [(a, z) for a, z, _ in rodata_ranges])
     if any(z > a for (_, z), (a, _) in zip(ordered, ordered[1:])):
         raise ValueError("Main C ranges overlap")
@@ -100,7 +106,7 @@ def verify(candidate):
     rodata_bytes = sum(z-a for a, z, _ in rodata_ranges)
     if prepared["matching_c_rodata_bytes"] != rodata_bytes:
         raise ValueError("Main preparation C read-only data accounting differs")
-    if prepared["matching_c_bytes"] != c_bytes or prepared["reconstructed_load_bytes"] != loaded_bytes or prepared["inventory_instruction_bytes"] != instruction_bytes:
+    if prepared["matching_c_bytes"] != c_bytes+sum(f["size"] for f in inline_asm_functions) or prepared["reconstructed_load_bytes"] != loaded_bytes or prepared["inventory_instruction_bytes"] != instruction_bytes:
         raise ValueError("Main preparation source/load accounting differs")
     if prepared["opaque_original_bytes"] != loaded_bytes-instruction_bytes-rodata_bytes or sum(prepared[k] for k in ("matching_c_bytes", "matching_c_rodata_bytes", "assembly_instruction_bytes", "raw_instruction_fallback_bytes", "opaque_original_bytes")) != loaded_bytes:
         raise ValueError("Main preparation does not account for initialized load bytes")
@@ -152,6 +158,8 @@ def verify(candidate):
             "memory_only_bytes": sum(s["memory_bytes"]-s["file_bytes"] for s in segments), "load_segments": segments,
             "discarded_inline_definitions": discarded_inline,
             "recovered_c_functions": len(functions), "recovered_c_bytes": c_bytes, "c_functions": functions,
+            "inline_asm_functions": len(inline_asm_functions), "inline_asm_bytes": sum(f["size"] for f in inline_asm_functions),
+            "inline_asm_c_functions": inline_asm_functions,
             "c_rodata_bytes": rodata_bytes,
             "c_rodata": [{"unit": u, "address": f"0x{a:08X}", "size": z-a} for a, z, u in sorted(rodata_ranges)],
             **{k: prepared[k] for k in ("assembly_instruction_bytes", "raw_instruction_fallback_bytes", "opaque_original_bytes", "input_layout_sha256")},

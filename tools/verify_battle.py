@@ -3,14 +3,17 @@
 import argparse
 import hashlib
 import json
+import re
 from pathlib import Path
 
 import c_rodata
 from mips_relocations import configured_addresses, resolve_function
 from probe_compilers import functions_from_object
+from match_config import inline_asm_kind
 from compiler_inline_sections import verify_inline_units, validate_inline_manifest
 from battle_build_provenance import layout_digest
 
+INLINE_ASM = re.compile(rb"\b(?:__asm__|__asm|asm)\b\s*(?:volatile|__volatile__)?\s*\(|#\s*include\s*[<\"]vfpu\.h[>\"]")
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -34,7 +37,10 @@ def verify(candidate):
         if not base <= address < address+length <= base+size:
             raise ValueError("Battle C read-only data is outside the payload")
         return reference[offset+address-base:offset+address-base+length]
+    inline_asm_functions = []
     for unit in matches["units"]:
+        if bool(inline_asm_kind(unit)) != bool(INLINE_ASM.search((ROOT / unit["source"]).read_bytes())):
+            raise ValueError(f"Battle unit inline-assembly declaration differs from its source: {unit['name']}")
         raw_path = ROOT / f"build/ULUS10566/battle_{unit['name']}.raw.o"
         raw = functions_from_object(raw_path)
         local, data = c_rodata.check_unit(raw_path, unit, addresses, reference_range)
@@ -55,7 +61,7 @@ def verify(candidate):
                 raise ValueError(f"Battle raw C object does not match: {function['name']}")
             if linked_symbol["address"] != address or linked_symbol["bytes"] != expected:
                 raise ValueError(f"Battle linked C address/bytes do not match: {function['name']}")
-            functions.append(function)
+            (inline_asm_functions if inline_asm_kind(unit) else functions).append(function)
     ordered = sorted(ranges + [(a, z) for a, z, _ in rodata_ranges])
     if any(z > a for (_, z), (a, _) in zip(ordered, ordered[1:])):
         raise ValueError("Battle C functions or read-only data overlap")
@@ -73,7 +79,7 @@ def verify(candidate):
         raise ValueError("Battle preparation C read-only data accounting differs")
     if prepared["inventory_instruction_bytes"] != instruction_bytes or prepared["opaque_original_bytes"] != size-instruction_bytes-rodata_bytes:
         raise ValueError("Battle preparation code/opaque accounting differs from its input layout")
-    if prepared["matching_c_bytes"] != c_bytes or prepared["payload_bytes"] != size:
+    if prepared["matching_c_bytes"] != c_bytes+sum(f["size"] for f in inline_asm_functions) or prepared["payload_bytes"] != size:
         raise ValueError("Battle preparation C/payload accounting differs")
     accounted = sum(prepared[k] for k in ("matching_c_bytes", "matching_c_rodata_bytes", "assembly_instruction_bytes", "raw_instruction_fallback_bytes", "opaque_original_bytes"))
     if accounted != size or prepared["raw_instruction_fallback_bytes"] != 4*len(prepared["raw_instruction_fallbacks"]):
@@ -120,6 +126,8 @@ def verify(candidate):
             "reconstructed_payload_bytes": size, "preserved_header_and_metadata_bytes": len(reference)-size,
             "discarded_inline_definitions": discarded_inline,
             "recovered_c_functions": len(functions), "recovered_c_bytes": c_bytes, "c_functions": functions,
+            "inline_asm_functions": len(inline_asm_functions), "inline_asm_bytes": sum(f["size"] for f in inline_asm_functions),
+            "inline_asm_c_functions": inline_asm_functions,
             "c_rodata_bytes": rodata_bytes,
             "c_rodata": [{"unit": u, "address": f"0x{a:08X}", "size": z-a} for a, z, u in sorted(rodata_ranges)],
             "assembly_instruction_bytes": prepared["assembly_instruction_bytes"],

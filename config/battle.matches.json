@@ -18204,6 +18204,18 @@
       ]
     },
     {
+      "name": "vec_normalized_08a2ad00",
+      "source": "src/battle/vec_normalized_08a2ad00.cpp",
+      "functions": [
+        {
+          "name": "func_08A2AD00",
+          "address": "0x08A2AD00",
+          "size": 156
+        }
+      ],
+      "inline_asm": "vfpu"
+    },
+    {
       "name": "virtual_forward_08a2ad9c",
       "source": "src/battle/virtual_forward_08a2ad9c.cpp",
       "functions": [
@@ -18284,6 +18296,17 @@
           "name": "func_08A2C8DC",
           "address": "0x08A2C8DC",
           "size": 132
+        }
+      ]
+    },
+    {
+      "name": "actor_fall_08a2d8d8",
+      "source": "src/battle/actor_fall_08a2d8d8.c",
+      "functions": [
+        {
+          "name": "func_08A2D8D8",
+          "address": "0x08A2D8D8",
+          "size": 172
         }
       ]
     },
@@ -18561,6 +18584,20 @@
       ]
     },
     {
+      "name": "dice_spin_tick_08a36114",
+      "source": "src/battle/dice_spin_tick_08a36114.cpp",
+      "functions": [
+        {
+          "name": "func_08A36114",
+          "address": "0x08A36114",
+          "size": 304
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fISpinRandEnextvT"
+      ]
+    },
+    {
       "name": "finish_guard_cue_08a3624c",
       "source": "src/battle/finish_guard_cue_08a3624c.cpp",
       "functions": [
@@ -18586,6 +18623,20 @@
       ]
     },
     {
+      "name": "effect_fade_cap_08a3652c",
+      "source": "src/battle/effect_fade_cap_08a3652c.cpp",
+      "functions": [
+        {
+          "name": "func_08A3652C",
+          "address": "0x08A3652C",
+          "size": 268
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0oHCapRgbactUi"
+      ]
+    },
+    {
       "name": "effect_sprites_load_08a37350",
       "source": "src/battle/effect_sprites_load_08a37350.cpp",
       "functions": [
@@ -18606,6 +18657,21 @@
           "size": 8
         }
       ]
+    },
+    {
+      "name": "burst_gauge_cue_08a37418",
+      "source": "src/battle/burst_gauge_cue_08a37418.c",
+      "functions": [
+        {
+          "name": "func_08A37418",
+          "address": "0x08A37418",
+          "size": 240
+        }
+      ],
+      "rodata": {
+        "address": "0x08A38490",
+        "size": 8
+      }
     },
     {
       "name": "effect_timers_cue_08a37710",
@@ -18666,6 +18732,21 @@
       ]
     },
     {
+      "name": "spin_rate_roll_08a399d0",
+      "source": "src/battle/spin_rate_roll_08a399d0.cpp",
+      "functions": [
+        {
+          "name": "func_08A399D0",
+          "address": "0x08A399D0",
+          "size": 376
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fMSpinRateRandEnextvT",
+        "__0fMSpinRateRandHbetweeniTBT"
+      ]
+    },
+    {
       "name": "counter_step_08a39b48",
       "source": "src/battle/counter_step_08a39b48.c",
       "functions": [
@@ -18673,6 +18754,17 @@
           "name": "func_08A39B48",
           "address": "0x08A39B48",
           "size": 136
+        }
+      ]
+    },
+    {
+      "name": "dice_effect_start_08a39bd8",
+      "source": "src/battle/dice_effect_start_08a39bd8.cpp",
+      "functions": [
+        {
+          "name": "func_08A39BD8",
+          "address": "0x08A39BD8",
+          "size": 288
         }
       ]
     },
@@ -18760,6 +18852,20 @@
       ]
     },
     {
+      "name": "pulse_effect_start_08a3ce14",
+      "source": "src/battle/pulse_effect_start_08a3ce14.cpp",
+      "functions": [
+        {
+          "name": "func_08A3CE14",
+          "address": "0x08A3CE14",
+          "size": 348
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fKPulseStageFmutedP6KPulseStageT"
+      ]
+    },
+    {
       "name": "battle_08a3cf70",
       "source": "src/battle/auto/battle_08a3cf70.c",
       "functions": [
@@ -18834,6 +18940,20 @@
           "address": "0x08A3DCA8",
           "size": 44
         }
+      ]
+    },
+    {
+      "name": "mark_sprites_place_08a3dfd0",
+      "source": "src/battle/mark_sprites_place_08a3dfd0.cpp",
+      "functions": [
+        {
+          "name": "func_08A3DFD0",
+          "address": "0x08A3DFD0",
+          "size": 380
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0oIMarkRgbactUi"
       ]
     },
     {
@@ -19001,6 +19121,17 @@
       ]
     },
     {
+      "name": "status_panel_open_08a409b8",
+      "source": "src/battle/status_panel_open_08a409b8.c",
+      "functions": [
+        {
+          "name": "func_08A409B8",
+          "address": "0x08A409B8",
+          "size": 308
+        }
+      ]
+    },
+    {
       "name": "effect_switch_08a40aec",
       "source": "src/battle/effect_switch_08a40aec.cpp",
       "functions": [
@@ -19012,6 +19143,21 @@
       ],
       "unused_inline_symbols": [
         "__0fHEffectsIhandleOfP6JEffectSetT"
+      ]
+    },
+    {
+      "name": "outcome_roll_08a40b9c",
+      "source": "src/battle/outcome_roll_08a40b9c.cpp",
+      "functions": [
+        {
+          "name": "func_08A40B9C",
+          "address": "0x08A40B9C",
+          "size": 336
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fLOutcomeRandEnextvT",
+        "__0fLOutcomeRandHbetweenfTBT"
       ]
     },
     {
@@ -19034,6 +19180,20 @@
           "address": "0x08A40DC4",
           "size": 156
         }
+      ]
+    },
+    {
+      "name": "effect_fade_cap_08a40e60",
+      "source": "src/battle/effect_fade_cap_08a40e60.cpp",
+      "functions": [
+        {
+          "name": "func_08A40E60",
+          "address": "0x08A40E60",
+          "size": 304
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0oIFadeRgbactUi"
       ]
     },
     {
@@ -19073,6 +19233,17 @@
       ]
     },
     {
+      "name": "effect_lights_release_08a423dc",
+      "source": "src/battle/effect_lights_release_08a423dc.c",
+      "functions": [
+        {
+          "name": "func_08A423DC",
+          "address": "0x08A423DC",
+          "size": 240
+        }
+      ]
+    },
+    {
       "name": "pick_other_slot_08a43b50",
       "source": "src/battle/pick_other_slot_08a43b50.cpp",
       "functions": [
@@ -19087,6 +19258,17 @@
       ]
     },
     {
+      "name": "panel_state_set_08a43bd8",
+      "source": "src/battle/panel_state_set_08a43bd8.c",
+      "functions": [
+        {
+          "name": "func_08A43BD8",
+          "address": "0x08A43BD8",
+          "size": 216
+        }
+      ]
+    },
+    {
       "name": "sound_restart_08a43cb0",
       "source": "src/battle/sound_restart_08a43cb0.c",
       "functions": [
@@ -19094,6 +19276,17 @@
           "name": "func_08A43CB0",
           "address": "0x08A43CB0",
           "size": 160
+        }
+      ]
+    },
+    {
+      "name": "dice_settle_tick_08a44140",
+      "source": "src/battle/dice_settle_tick_08a44140.cpp",
+      "functions": [
+        {
+          "name": "func_08A44140",
+          "address": "0x08A44140",
+          "size": 184
         }
       ]
     },
@@ -19170,6 +19363,17 @@
       ]
     },
     {
+      "name": "glow_effect_release_08a45830",
+      "source": "src/battle/glow_effect_release_08a45830.c",
+      "functions": [
+        {
+          "name": "func_08A45830",
+          "address": "0x08A45830",
+          "size": 260
+        }
+      ]
+    },
+    {
       "name": "effect_fade_cap_08a45934",
       "source": "src/battle/effect_fade_cap_08a45934.cpp",
       "functions": [
@@ -19181,6 +19385,21 @@
       ],
       "unused_inline_symbols": [
         "__0fJCapSpriteJget_colorP6JCapSpriteP6HCapRgbaT"
+      ]
+    },
+    {
+      "name": "glow_range_roll_08a45a5c",
+      "source": "src/battle/glow_range_roll_08a45a5c.cpp",
+      "functions": [
+        {
+          "name": "func_08A45A5C",
+          "address": "0x08A45A5C",
+          "size": 256
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fIGlowRandEnextvT",
+        "__0fIGlowRandHbetweenfTBT"
       ]
     },
     {
@@ -19231,6 +19450,20 @@
       ]
     },
     {
+      "name": "trail_effect_release_08a47770",
+      "source": "src/battle/trail_effect_release_08a47770.cpp",
+      "functions": [
+        {
+          "name": "func_08A47770",
+          "address": "0x08A47770",
+          "size": 280
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0oJTrailKept7Pv_ct9BA"
+      ]
+    },
+    {
       "name": "effect_fade_cap_08a47888",
       "source": "src/battle/effect_fade_cap_08a47888.cpp",
       "functions": [
@@ -19242,6 +19475,20 @@
       ],
       "unused_inline_symbols": [
         "__0fJCapSpriteJget_colorP6JCapSpriteP6HCapRgbaT"
+      ]
+    },
+    {
+      "name": "strength_roll_08a4799c",
+      "source": "src/battle/strength_roll_08a4799c.cpp",
+      "functions": [
+        {
+          "name": "func_08A4799C",
+          "address": "0x08A4799C",
+          "size": 320
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fMStrengthRandEnextvT"
       ]
     },
     {
@@ -19263,6 +19510,17 @@
           "name": "func_08A48908",
           "address": "0x08A48908",
           "size": 44
+        }
+      ]
+    },
+    {
+      "name": "trail_effect_open_08a48934",
+      "source": "src/battle/trail_effect_open_08a48934.cpp",
+      "functions": [
+        {
+          "name": "func_08A48934",
+          "address": "0x08A48934",
+          "size": 384
         }
       ]
     },
@@ -19415,6 +19673,17 @@
       ]
     },
     {
+      "name": "spark_effect_release_08a4c934",
+      "source": "src/battle/spark_effect_release_08a4c934.cpp",
+      "functions": [
+        {
+          "name": "func_08A4C934",
+          "address": "0x08A4C934",
+          "size": 204
+        }
+      ]
+    },
+    {
       "name": "effect_fade_cap_08a4ca00",
       "source": "src/battle/effect_fade_cap_08a4ca00.cpp",
       "functions": [
@@ -19456,6 +19725,17 @@
       ]
     },
     {
+      "name": "burst_effect_setup_08a4dac8",
+      "source": "src/battle/burst_effect_setup_08a4dac8.cpp",
+      "functions": [
+        {
+          "name": "func_08A4DAC8",
+          "address": "0x08A4DAC8",
+          "size": 200
+        }
+      ]
+    },
+    {
       "name": "finish_guard_cue_08a4db90",
       "source": "src/battle/finish_guard_cue_08a4db90.cpp",
       "functions": [
@@ -19481,6 +19761,22 @@
       ],
       "unused_inline_symbols": [
         "__0fLBurstMotionEplayP6JA31VActoriT"
+      ]
+    },
+    {
+      "name": "burst_effect_finish_08a4dd5c",
+      "source": "src/battle/burst_effect_finish_08a4dd5c.cpp",
+      "functions": [
+        {
+          "name": "func_08A4DD5C",
+          "address": "0x08A4DD5C",
+          "size": 400
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fKBurstSpawnDaimP6PBurstBoneEffectiP6LBurstTargetTCT",
+        "__0fKBurstSpawnGat_hitP6KBurstActorPviT",
+        "__0fKBurstVoiceHbone_ofP6KBurstVoiceT"
       ]
     },
     {
@@ -19521,6 +19817,17 @@
           "name": "func_08A4F23C",
           "address": "0x08A4F23C",
           "size": 48
+        }
+      ]
+    },
+    {
+      "name": "burst_hit_stage_08a4f26c",
+      "source": "src/battle/burst_hit_stage_08a4f26c.cpp",
+      "functions": [
+        {
+          "name": "func_08A4F26C",
+          "address": "0x08A4F26C",
+          "size": 280
         }
       ]
     },
@@ -19701,6 +20008,47 @@
       ]
     },
     {
+      "name": "knock_land_state_08a507fc",
+      "source": "src/battle/knock_land_state_08a507fc.cpp",
+      "functions": [
+        {
+          "name": "func_08A507FC",
+          "address": "0x08A507FC",
+          "size": 300
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fLKnockHolderLknock_speedP6LKnockHolderT"
+      ]
+    },
+    {
+      "name": "knock_flight_state_08a50928",
+      "source": "src/battle/knock_flight_state_08a50928.c",
+      "functions": [
+        {
+          "name": "func_08A50928",
+          "address": "0x08A50928",
+          "size": 196
+        }
+      ]
+    },
+    {
+      "name": "knock_start_state_08a509ec",
+      "source": "src/battle/knock_start_state_08a509ec.cpp",
+      "functions": [
+        {
+          "name": "func_08A509EC",
+          "address": "0x08A509EC",
+          "size": 264
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fLStartStatusIairborneP6LStartStatusT",
+        "__0fMStartFighterHknockedP6MStartFighterT",
+        "__0fMStartFighterIairborneP6MStartFighterT"
+      ]
+    },
+    {
       "name": "battle_08a5153c",
       "source": "src/battle/auto/battle_08a5153c.c",
       "functions": [
@@ -19764,6 +20112,75 @@
           "address": "0x08A52B8C",
           "size": 72
         }
+      ]
+    },
+    {
+      "name": "knock_land_state_08a52bd4",
+      "source": "src/battle/knock_land_state_08a52bd4.cpp",
+      "functions": [
+        {
+          "name": "func_08A52BD4",
+          "address": "0x08A52BD4",
+          "size": 308
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fLKnockHolderLknock_speedP6LKnockHolderT"
+      ]
+    },
+    {
+      "name": "knock_flight_state_08a52d08",
+      "source": "src/battle/knock_flight_state_08a52d08.c",
+      "functions": [
+        {
+          "name": "func_08A52D08",
+          "address": "0x08A52D08",
+          "size": 200
+        }
+      ]
+    },
+    {
+      "name": "knock_start_state_08a52dd0",
+      "source": "src/battle/knock_start_state_08a52dd0.cpp",
+      "functions": [
+        {
+          "name": "func_08A52DD0",
+          "address": "0x08A52DD0",
+          "size": 264
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fLStartStatusIairborneP6LStartStatusT",
+        "__0fMStartFighterHknockedP6MStartFighterT",
+        "__0fMStartFighterIairborneP6MStartFighterT"
+      ]
+    },
+    {
+      "name": "guard_break_state_08a53290",
+      "source": "src/battle/guard_break_state_08a53290.cpp",
+      "functions": [
+        {
+          "name": "func_08A53290",
+          "address": "0x08A53290",
+          "size": 288
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fMBreakFighterJhas_skillP6MBreakFighteriT"
+      ]
+    },
+    {
+      "name": "launch_state_08a54934",
+      "source": "src/battle/launch_state_08a54934.cpp",
+      "functions": [
+        {
+          "name": "func_08A54934",
+          "address": "0x08A54934",
+          "size": 312
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fNLaunchFighterEflagiTBT"
       ]
     },
     {
@@ -19836,6 +20253,17 @@
       ]
     },
     {
+      "name": "knock_hit_state_08a551ac",
+      "source": "src/battle/knock_hit_state_08a551ac.cpp",
+      "functions": [
+        {
+          "name": "func_08A551AC",
+          "address": "0x08A551AC",
+          "size": 240
+        }
+      ]
+    },
+    {
       "name": "fighter_motion_08a5529c",
       "source": "src/battle/fighter_motion_08a5529c.c",
       "functions": [
@@ -19847,6 +20275,22 @@
       ]
     },
     {
+      "name": "knock_start_state_08a55314",
+      "source": "src/battle/knock_start_state_08a55314.cpp",
+      "functions": [
+        {
+          "name": "func_08A55314",
+          "address": "0x08A55314",
+          "size": 264
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fLStartStatusIairborneP6LStartStatusT",
+        "__0fMStartFighterHknockedP6MStartFighterT",
+        "__0fMStartFighterIairborneP6MStartFighterT"
+      ]
+    },
+    {
       "name": "fighter_resume_08a55e88",
       "source": "src/battle/fighter_resume_08a55e88.c",
       "functions": [
@@ -19854,6 +20298,17 @@
           "name": "func_08A55E88",
           "address": "0x08A55E88",
           "size": 88
+        }
+      ]
+    },
+    {
+      "name": "actor_land_motion_08a5679c",
+      "source": "src/battle/actor_land_motion_08a5679c.c",
+      "functions": [
+        {
+          "name": "func_08A5679C",
+          "address": "0x08A5679C",
+          "size": 112
         }
       ]
     },
@@ -19891,6 +20346,28 @@
       ],
       "unused_inline_symbols": [
         "__0fMFighter56B94JhasFlag10P6MFighter56B94T"
+      ]
+    },
+    {
+      "name": "hold_velocity_08a56e10",
+      "source": "src/battle/hold_velocity_08a56e10.cpp",
+      "functions": [
+        {
+          "name": "func_08A56E10",
+          "address": "0x08A56E10",
+          "size": 392
+        }
+      ]
+    },
+    {
+      "name": "knock_back_start_08a56f98",
+      "source": "src/battle/knock_back_start_08a56f98.c",
+      "functions": [
+        {
+          "name": "func_08A56F98",
+          "address": "0x08A56F98",
+          "size": 296
+        }
       ]
     },
     {
@@ -19974,6 +20451,17 @@
       ]
     },
     {
+      "name": "slide_stop_state_08a5860c",
+      "source": "src/battle/slide_stop_state_08a5860c.cpp",
+      "functions": [
+        {
+          "name": "func_08A5860C",
+          "address": "0x08A5860C",
+          "size": 268
+        }
+      ]
+    },
+    {
       "name": "battle_08a58718",
       "source": "src/battle/auto/battle_08a58718.c",
       "functions": [
@@ -20051,6 +20539,28 @@
       ]
     },
     {
+      "name": "actor_slide_08a58f54",
+      "source": "src/battle/actor_slide_08a58f54.c",
+      "functions": [
+        {
+          "name": "func_08A58F54",
+          "address": "0x08A58F54",
+          "size": 228
+        }
+      ]
+    },
+    {
+      "name": "dash_velocity_08a59038",
+      "source": "src/battle/dash_velocity_08a59038.cpp",
+      "functions": [
+        {
+          "name": "func_08A59038",
+          "address": "0x08A59038",
+          "size": 252
+        }
+      ]
+    },
+    {
       "name": "fighter_mark_08a59134",
       "source": "src/battle/fighter_mark_08a59134.c",
       "functions": [
@@ -20071,6 +20581,24 @@
           "size": 8
         }
       ]
+    },
+    {
+      "name": "dash_run_state_08a59154",
+      "source": "src/battle/dash_run_state_08a59154.cpp",
+      "functions": [
+        {
+          "name": "func_08A59154",
+          "address": "0x08A59154",
+          "size": 240
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fODashRunFighterEheldP6ODashRunFighterT"
+      ],
+      "rodata": {
+        "address": "0x08A59358",
+        "size": 8
+      }
     },
     {
       "name": "fighter_low_check_08a59294",
@@ -20131,6 +20659,20 @@
       ]
     },
     {
+      "name": "dash_end_state_08a59624",
+      "source": "src/battle/dash_end_state_08a59624.cpp",
+      "functions": [
+        {
+          "name": "func_08A59624",
+          "address": "0x08A59624",
+          "size": 188
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0oLDashEndKept7P6LDashEndMove_ct9BA"
+      ]
+    },
+    {
       "name": "battle_08a5b00c",
       "source": "src/battle/auto/battle_08a5b00c.c",
       "functions": [
@@ -20138,6 +20680,17 @@
           "name": "func_08A5B00C",
           "address": "0x08A5B00C",
           "size": 84
+        }
+      ]
+    },
+    {
+      "name": "actor_turn_motion_08a5b2b4",
+      "source": "src/battle/actor_turn_motion_08a5b2b4.c",
+      "functions": [
+        {
+          "name": "func_08A5B2B4",
+          "address": "0x08A5B2B4",
+          "size": 188
         }
       ]
     },
@@ -20153,6 +20706,17 @@
       ]
     },
     {
+      "name": "slide_velocity_08a5b59c",
+      "source": "src/battle/slide_velocity_08a5b59c.cpp",
+      "functions": [
+        {
+          "name": "func_08A5B59C",
+          "address": "0x08A5B59C",
+          "size": 244
+        }
+      ]
+    },
+    {
       "name": "fighter_flag_08a5be58",
       "source": "src/battle/fighter_flag_08a5be58.cpp",
       "functions": [
@@ -20164,6 +20728,17 @@
       ],
       "unused_inline_symbols": [
         "__0fMFighter5BE58Mhas_flag_400P6MFighter5BE58T"
+      ]
+    },
+    {
+      "name": "slide_start_08a5be70",
+      "source": "src/battle/slide_start_08a5be70.c",
+      "functions": [
+        {
+          "name": "func_08A5BE70",
+          "address": "0x08A5BE70",
+          "size": 276
+        }
       ]
     },
     {
@@ -20278,6 +20853,28 @@
       ]
     },
     {
+      "name": "climb_jump_state_08a5e248",
+      "source": "src/battle/climb_jump_state_08a5e248.cpp",
+      "functions": [
+        {
+          "name": "func_08A5E248",
+          "address": "0x08A5E248",
+          "size": 180
+        }
+      ]
+    },
+    {
+      "name": "climb_start_state_08a5e2fc",
+      "source": "src/battle/climb_start_state_08a5e2fc.c",
+      "functions": [
+        {
+          "name": "func_08A5E2FC",
+          "address": "0x08A5E2FC",
+          "size": 204
+        }
+      ]
+    },
+    {
       "name": "model_place_08a60730",
       "source": "src/battle/model_place_08a60730.cpp",
       "functions": [
@@ -20338,6 +20935,17 @@
       ],
       "unused_inline_symbols": [
         "__0fOPlacement60E4CJset_flagsP6OPlacement60E4CUiT"
+      ]
+    },
+    {
+      "name": "knock_slide_start_08a6158c",
+      "source": "src/battle/knock_slide_start_08a6158c.c",
+      "functions": [
+        {
+          "name": "func_08A6158C",
+          "address": "0x08A6158C",
+          "size": 388
+        }
       ]
     },
     {
@@ -20557,6 +21165,61 @@
           "name": "func_08A62340",
           "address": "0x08A62340",
           "size": 80
+        }
+      ]
+    },
+    {
+      "name": "shake_request_08a62660",
+      "source": "src/battle/shake_request_08a62660.c",
+      "functions": [
+        {
+          "name": "func_08A62660",
+          "address": "0x08A62660",
+          "size": 396
+        }
+      ]
+    },
+    {
+      "name": "shake_request_08a627ec",
+      "source": "src/battle/shake_request_08a627ec.c",
+      "functions": [
+        {
+          "name": "func_08A627EC",
+          "address": "0x08A627EC",
+          "size": 396
+        }
+      ]
+    },
+    {
+      "name": "shake_request_08a62978",
+      "source": "src/battle/shake_request_08a62978.c",
+      "functions": [
+        {
+          "name": "func_08A62978",
+          "address": "0x08A62978",
+          "size": 396
+        }
+      ]
+    },
+    {
+      "name": "shake_request_08a62b04",
+      "source": "src/battle/shake_request_08a62b04.c",
+      "functions": [
+        {
+          "name": "func_08A62B04",
+          "address": "0x08A62B04",
+          "size": 340
+        }
+      ]
+    },
+    {
+      "name": "shake_request_08a62c58",
+      "source": "src/battle/shake_request_08a62c58.cpp",
+      "functions": [
+        {
+          "name": "func_08A62C58",
+          "address": "0x08A62C58",
+          "size": 384
         }
       ]
     },
@@ -21282,6 +21945,45 @@
       ]
     },
     {
+      "name": "event_view_move_08a66444",
+      "source": "src/battle/event_view_move_08a66444.c",
+      "functions": [
+        {
+          "name": "func_08A66444",
+          "address": "0x08A66444",
+          "size": 296
+        }
+      ]
+    },
+    {
+      "name": "event_scene_view_08a6656c",
+      "source": "src/battle/event_scene_view_08a6656c.cpp",
+      "functions": [
+        {
+          "name": "func_08A6656C",
+          "address": "0x08A6656C",
+          "size": 256
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0oJSceneKept7P6LSceneTarget_ct9BA"
+      ]
+    },
+    {
+      "name": "event_order_request_08a6666c",
+      "source": "src/battle/event_order_request_08a6666c.cpp",
+      "functions": [
+        {
+          "name": "func_08A6666C",
+          "address": "0x08A6666C",
+          "size": 216
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0oMOrderRequestctv"
+      ]
+    },
+    {
       "name": "unit_value_08a66744",
       "source": "src/battle/unit_value_08a66744.c",
       "functions": [
@@ -21314,6 +22016,17 @@
       ]
     },
     {
+      "name": "event_slot_check_08a668a0",
+      "source": "src/battle/event_slot_check_08a668a0.c",
+      "functions": [
+        {
+          "name": "func_08A668A0",
+          "address": "0x08A668A0",
+          "size": 264
+        }
+      ]
+    },
+    {
       "name": "side_select_08a669a8",
       "source": "src/battle/side_select_08a669a8.c",
       "functions": [
@@ -21321,6 +22034,17 @@
           "name": "func_08A669A8",
           "address": "0x08A669A8",
           "size": 96
+        }
+      ]
+    },
+    {
+      "name": "event_speed_block_08a66a08",
+      "source": "src/battle/event_speed_block_08a66a08.c",
+      "functions": [
+        {
+          "name": "func_08A66A08",
+          "address": "0x08A66A08",
+          "size": 196
         }
       ]
     },
@@ -21377,6 +22101,20 @@
       ]
     },
     {
+      "name": "event_turn_request_08a677f8",
+      "source": "src/battle/event_turn_request_08a677f8.cpp",
+      "functions": [
+        {
+          "name": "func_08A677F8",
+          "address": "0x08A677F8",
+          "size": 400
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0oLTurnRequestctv"
+      ]
+    },
+    {
       "name": "command_build_08a67988",
       "source": "src/battle/command_build_08a67988.c",
       "functions": [
@@ -21424,6 +22162,17 @@
       ]
     },
     {
+      "name": "script_fill_random_08a67cbc",
+      "source": "src/battle/script_fill_random_08a67cbc.c",
+      "functions": [
+        {
+          "name": "func_08A67CBC",
+          "address": "0x08A67CBC",
+          "size": 196
+        }
+      ]
+    },
+    {
       "name": "script_queue_fill_08a67d80",
       "source": "src/battle/script_queue_fill_08a67d80.c",
       "functions": [
@@ -21431,6 +22180,17 @@
           "name": "func_08A67D80",
           "address": "0x08A67D80",
           "size": 256
+        }
+      ]
+    },
+    {
+      "name": "script_guard_crush_08a67e80",
+      "source": "src/battle/script_guard_crush_08a67e80.c",
+      "functions": [
+        {
+          "name": "func_08A67E80",
+          "address": "0x08A67E80",
+          "size": 268
         }
       ]
     },
@@ -21453,6 +22213,50 @@
           "name": "func_08A6808C",
           "address": "0x08A6808C",
           "size": 256
+        }
+      ]
+    },
+    {
+      "name": "script_break_08a685c4",
+      "source": "src/battle/script_break_08a685c4.c",
+      "functions": [
+        {
+          "name": "func_08A685C4",
+          "address": "0x08A685C4",
+          "size": 308
+        }
+      ]
+    },
+    {
+      "name": "script_guard_break_08a686f8",
+      "source": "src/battle/script_guard_break_08a686f8.c",
+      "functions": [
+        {
+          "name": "func_08A686F8",
+          "address": "0x08A686F8",
+          "size": 304
+        }
+      ]
+    },
+    {
+      "name": "script_stagger_08a68828",
+      "source": "src/battle/script_stagger_08a68828.c",
+      "functions": [
+        {
+          "name": "func_08A68828",
+          "address": "0x08A68828",
+          "size": 296
+        }
+      ]
+    },
+    {
+      "name": "script_throw_escape_08a68950",
+      "source": "src/battle/script_throw_escape_08a68950.c",
+      "functions": [
+        {
+          "name": "func_08A68950",
+          "address": "0x08A68950",
+          "size": 280
         }
       ]
     },
@@ -21490,6 +22294,17 @@
       ]
     },
     {
+      "name": "script_recovery_08a68c54",
+      "source": "src/battle/script_recovery_08a68c54.c",
+      "functions": [
+        {
+          "name": "func_08A68C54",
+          "address": "0x08A68C54",
+          "size": 320
+        }
+      ]
+    },
+    {
       "name": "command_build_08a68d94",
       "source": "src/battle/command_build_08a68d94.c",
       "functions": [
@@ -21507,6 +22322,17 @@
         {
           "name": "func_08A6905C",
           "address": "0x08A6905C",
+          "size": 252
+        }
+      ]
+    },
+    {
+      "name": "script_slow_down_08a69158",
+      "source": "src/battle/script_slow_down_08a69158.c",
+      "functions": [
+        {
+          "name": "func_08A69158",
+          "address": "0x08A69158",
           "size": 252
         }
       ]
@@ -21677,6 +22503,17 @@
       ]
     },
     {
+      "name": "script_lunge_08a6a190",
+      "source": "src/battle/script_lunge_08a6a190.c",
+      "functions": [
+        {
+          "name": "func_08A6A190",
+          "address": "0x08A6A190",
+          "size": 356
+        }
+      ]
+    },
+    {
       "name": "command_build_08a6a2f4",
       "source": "src/battle/command_build_08a6a2f4.c",
       "functions": [
@@ -21757,6 +22594,20 @@
       ]
     },
     {
+      "name": "event_counter_order_08a6aac0",
+      "source": "src/battle/event_counter_order_08a6aac0.cpp",
+      "functions": [
+        {
+          "name": "func_08A6AAC0",
+          "address": "0x08A6AAC0",
+          "size": 300
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0oLTurnRequestctv"
+      ]
+    },
+    {
       "name": "command_build_08a6abec",
       "source": "src/battle/command_build_08a6abec.c",
       "functions": [
@@ -21775,6 +22626,17 @@
           "name": "func_08A6AC44",
           "address": "0x08A6AC44",
           "size": 88
+        }
+      ]
+    },
+    {
+      "name": "script_burst_start_08a6ac9c",
+      "source": "src/battle/script_burst_start_08a6ac9c.c",
+      "functions": [
+        {
+          "name": "func_08A6AC9C",
+          "address": "0x08A6AC9C",
+          "size": 280
         }
       ]
     },
@@ -21834,6 +22696,17 @@
       ]
     },
     {
+      "name": "attack_reach_check_08a6b180",
+      "source": "src/battle/attack_reach_check_08a6b180.cpp",
+      "functions": [
+        {
+          "name": "func_08A6B180",
+          "address": "0x08A6B180",
+          "size": 188
+        }
+      ]
+    },
+    {
       "name": "unit_aim_08a6b23c",
       "source": "src/battle/unit_aim_08a6b23c.c",
       "functions": [
@@ -21885,6 +22758,17 @@
           "name": "func_08A6B3F8",
           "address": "0x08A6B3F8",
           "size": 236
+        }
+      ]
+    },
+    {
+      "name": "event_key_cue_08a6b65c",
+      "source": "src/battle/event_key_cue_08a6b65c.c",
+      "functions": [
+        {
+          "name": "func_08A6B65C",
+          "address": "0x08A6B65C",
+          "size": 260
         }
       ]
     },
@@ -21989,6 +22873,28 @@
       ]
     },
     {
+      "name": "ai_move_toward_08a6d134",
+      "source": "src/battle/ai_move_toward_08a6d134.c",
+      "functions": [
+        {
+          "name": "func_08A6D134",
+          "address": "0x08A6D134",
+          "size": 280
+        }
+      ]
+    },
+    {
+      "name": "ai_move_away_08a6d24c",
+      "source": "src/battle/ai_move_away_08a6d24c.c",
+      "functions": [
+        {
+          "name": "func_08A6D24C",
+          "address": "0x08A6D24C",
+          "size": 280
+        }
+      ]
+    },
+    {
       "name": "target_bind_08a6d664",
       "source": "src/battle/target_bind_08a6d664.c",
       "functions": [
@@ -21996,6 +22902,28 @@
           "name": "func_08A6D664",
           "address": "0x08A6D664",
           "size": 132
+        }
+      ]
+    },
+    {
+      "name": "ai_cond_time_08a6e6a0",
+      "source": "src/battle/ai_cond_time_08a6e6a0.c",
+      "functions": [
+        {
+          "name": "func_08A6E6A0",
+          "address": "0x08A6E6A0",
+          "size": 276
+        }
+      ]
+    },
+    {
+      "name": "ai_cond_time_08a6e7b4",
+      "source": "src/battle/ai_cond_time_08a6e7b4.c",
+      "functions": [
+        {
+          "name": "func_08A6E7B4",
+          "address": "0x08A6E7B4",
+          "size": 276
         }
       ]
     },
@@ -22084,6 +23012,17 @@
           "name": "func_08A6F96C",
           "address": "0x08A6F96C",
           "size": 172
+        }
+      ]
+    },
+    {
+      "name": "ai_cond_countdown_08a6fbfc",
+      "source": "src/battle/ai_cond_countdown_08a6fbfc.c",
+      "functions": [
+        {
+          "name": "func_08A6FBFC",
+          "address": "0x08A6FBFC",
+          "size": 380
         }
       ]
     },
@@ -22316,6 +23255,22 @@
       ]
     },
     {
+      "name": "ai_cond_downed_08a70cb4",
+      "source": "src/battle/ai_cond_downed_08a70cb4.cpp",
+      "functions": [
+        {
+          "name": "func_08A70CB4",
+          "address": "0x08A70CB4",
+          "size": 200
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fKDownStatusGdownedP6KDownStatusT",
+        "__0fLDownFighterDhasUiTBT",
+        "__0fLDownFighterGdownedP6LDownFighterT"
+      ]
+    },
+    {
       "name": "event_target_free_08a70d7c",
       "source": "src/battle/event_target_free_08a70d7c.c",
       "functions": [
@@ -22334,6 +23289,28 @@
           "name": "func_08A70DF8",
           "address": "0x08A70DF8",
           "size": 172
+        }
+      ]
+    },
+    {
+      "name": "ai_cond_held_level_08a711d8",
+      "source": "src/battle/ai_cond_held_level_08a711d8.c",
+      "functions": [
+        {
+          "name": "func_08A711D8",
+          "address": "0x08A711D8",
+          "size": 264
+        }
+      ]
+    },
+    {
+      "name": "ai_cond_approach_08a71694",
+      "source": "src/battle/ai_cond_approach_08a71694.c",
+      "functions": [
+        {
+          "name": "func_08A71694",
+          "address": "0x08A71694",
+          "size": 372
         }
       ]
     },
@@ -22437,6 +23414,17 @@
       ]
     },
     {
+      "name": "ai_cond_taunt_08a71ffc",
+      "source": "src/battle/ai_cond_taunt_08a71ffc.c",
+      "functions": [
+        {
+          "name": "func_08A71FFC",
+          "address": "0x08A71FFC",
+          "size": 384
+        }
+      ]
+    },
+    {
       "name": "event_throw_check_08a72754",
       "source": "src/battle/event_throw_check_08a72754.c",
       "functions": [
@@ -22444,6 +23432,17 @@
           "name": "func_08A72754",
           "address": "0x08A72754",
           "size": 236
+        }
+      ]
+    },
+    {
+      "name": "ai_cond_rise_08a72a28",
+      "source": "src/battle/ai_cond_rise_08a72a28.cpp",
+      "functions": [
+        {
+          "name": "func_08A72A28",
+          "address": "0x08A72A28",
+          "size": 320
         }
       ]
     },
@@ -22503,6 +23502,20 @@
       ]
     },
     {
+      "name": "charge_hold_track_08a7b33c",
+      "source": "src/battle/charge_hold_track_08a7b33c.cpp",
+      "functions": [
+        {
+          "name": "func_08A7B33C",
+          "address": "0x08A7B33C",
+          "size": 268
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fNChargeFighterIchargingP6NChargeFighterT"
+      ]
+    },
+    {
       "name": "battle_08a7b448",
       "source": "src/battle/auto/battle_08a7b448.c",
       "functions": [
@@ -22554,6 +23567,17 @@
           "name": "func_08A7B900",
           "address": "0x08A7B900",
           "size": 144
+        }
+      ]
+    },
+    {
+      "name": "motion_list_match_08a7b990",
+      "source": "src/battle/motion_list_match_08a7b990.cpp",
+      "functions": [
+        {
+          "name": "func_08A7B990",
+          "address": "0x08A7B990",
+          "size": 260
         }
       ]
     },
@@ -22745,6 +23769,17 @@
       ]
     },
     {
+      "name": "mode_table_open_08a7ea90",
+      "source": "src/battle/mode_table_open_08a7ea90.cpp",
+      "functions": [
+        {
+          "name": "func_08A7EA90",
+          "address": "0x08A7EA90",
+          "size": 264
+        }
+      ]
+    },
+    {
       "name": "slot_table_08a7eb98",
       "source": "src/battle/slot_table_08a7eb98.c",
       "functions": [
@@ -22767,6 +23802,17 @@
           "name": "func_08A7EC38",
           "address": "0x08A7EC38",
           "size": 32
+        }
+      ]
+    },
+    {
+      "name": "mode_value_pick_08a7ec58",
+      "source": "src/battle/mode_value_pick_08a7ec58.cpp",
+      "functions": [
+        {
+          "name": "func_08A7EC58",
+          "address": "0x08A7EC58",
+          "size": 272
         }
       ]
     },
@@ -22807,6 +23853,17 @@
       ],
       "unused_inline_symbols": [
         "__0fJModeSlotsCatP6JModeSlotsiT"
+      ]
+    },
+    {
+      "name": "slot_differs_08a7ee74",
+      "source": "src/battle/slot_differs_08a7ee74.cpp",
+      "functions": [
+        {
+          "name": "func_08A7EE74",
+          "address": "0x08A7EE74",
+          "size": 128
+        }
       ]
     },
     {
@@ -22861,6 +23918,17 @@
           "name": "func_08A7F4BC",
           "address": "0x08A7F4BC",
           "size": 168
+        }
+      ]
+    },
+    {
+      "name": "advance_timer_08a7fab4",
+      "source": "src/battle/advance_timer_08a7fab4.c",
+      "functions": [
+        {
+          "name": "func_08A7FAB4",
+          "address": "0x08A7FAB4",
+          "size": 96
         }
       ]
     },
@@ -22982,6 +24050,17 @@
           "name": "func_08A80220",
           "address": "0x08A80220",
           "size": 164
+        }
+      ]
+    },
+    {
+      "name": "stream_read_pair_08a802c8",
+      "source": "src/battle/stream_read_pair_08a802c8.c",
+      "functions": [
+        {
+          "name": "func_08A802C8",
+          "address": "0x08A802C8",
+          "size": 116
         }
       ]
     },
@@ -23226,6 +24305,17 @@
       ]
     },
     {
+      "name": "dispatch_by_phase_08a810c0",
+      "source": "src/battle/dispatch_by_phase_08a810c0.c",
+      "functions": [
+        {
+          "name": "func_08A810C0",
+          "address": "0x08A810C0",
+          "size": 164
+        }
+      ]
+    },
+    {
       "name": "camera_follow_08a8124c",
       "source": "src/battle/camera_follow_08a8124c.cpp",
       "functions": [
@@ -23255,6 +24345,28 @@
           "name": "func_08A81420",
           "address": "0x08A81420",
           "size": 144
+        }
+      ]
+    },
+    {
+      "name": "check_flag_a_08a814b0",
+      "source": "src/battle/check_flag_a_08a814b0.c",
+      "functions": [
+        {
+          "name": "func_08A814B0",
+          "address": "0x08A814B0",
+          "size": 52
+        }
+      ]
+    },
+    {
+      "name": "check_flag_b_08a814e4",
+      "source": "src/battle/check_flag_b_08a814e4.c",
+      "functions": [
+        {
+          "name": "func_08A814E4",
+          "address": "0x08A814E4",
+          "size": 52
         }
       ]
     },
@@ -23354,6 +24466,17 @@
           "name": "func_08A81EC8",
           "address": "0x08A81EC8",
           "size": 20
+        }
+      ]
+    },
+    {
+      "name": "buffer_init_copy_08a81f20",
+      "source": "src/battle/buffer_init_copy_08a81f20.c",
+      "functions": [
+        {
+          "name": "func_08A81F20",
+          "address": "0x08A81F20",
+          "size": 168
         }
       ]
     },
@@ -23659,6 +24782,17 @@
       ]
     },
     {
+      "name": "classify_unit_08a83cf4",
+      "source": "src/battle/classify_unit_08a83cf4.cpp",
+      "functions": [
+        {
+          "name": "func_08A83CF4",
+          "address": "0x08A83CF4",
+          "size": 236
+        }
+      ]
+    },
+    {
       "name": "body_clear_08a83eb8",
       "source": "src/battle/body_clear_08a83eb8.cpp",
       "functions": [
@@ -23789,6 +24923,17 @@
       ]
     },
     {
+      "name": "pick_result_08a8435c",
+      "source": "src/battle/pick_result_08a8435c.cpp",
+      "functions": [
+        {
+          "name": "func_08A8435C",
+          "address": "0x08A8435C",
+          "size": 248
+        }
+      ]
+    },
+    {
       "name": "unit_status_check_08a85150",
       "source": "src/battle/unit_status_check_08a85150.c",
       "functions": [
@@ -23807,6 +24952,17 @@
           "name": "func_08A8535C",
           "address": "0x08A8535C",
           "size": 112
+        }
+      ]
+    },
+    {
+      "name": "unit_has_flags_08a853cc",
+      "source": "src/battle/unit_has_flags_08a853cc.cpp",
+      "functions": [
+        {
+          "name": "func_08A853CC",
+          "address": "0x08A853CC",
+          "size": 200
         }
       ]
     },
@@ -24181,6 +25337,17 @@
           "name": "func_08A87328",
           "address": "0x08A87328",
           "size": 184
+        }
+      ]
+    },
+    {
+      "name": "init_slots_08a873e0",
+      "source": "src/battle/init_slots_08a873e0.c",
+      "functions": [
+        {
+          "name": "func_08A873E0",
+          "address": "0x08A873E0",
+          "size": 208
         }
       ]
     },
@@ -24711,6 +25878,17 @@
       ],
       "unused_inline_symbols": [
         "__0fKCyclePartyGnextOfP6KCyclePartyP6JCycleUnitT"
+      ]
+    },
+    {
+      "name": "pick_vec_08a8b538",
+      "source": "src/battle/pick_vec_08a8b538.cpp",
+      "functions": [
+        {
+          "name": "func_08A8B538",
+          "address": "0x08A8B538",
+          "size": 176
+        }
       ]
     },
     {
@@ -25557,6 +26735,28 @@
       ]
     },
     {
+      "name": "validate_index_08a9452c",
+      "source": "src/battle/validate_index_08a9452c.c",
+      "functions": [
+        {
+          "name": "func_08A9452C",
+          "address": "0x08A9452C",
+          "size": 168
+        }
+      ]
+    },
+    {
+      "name": "reset_slot_08a945d4",
+      "source": "src/battle/reset_slot_08a945d4.c",
+      "functions": [
+        {
+          "name": "func_08A945D4",
+          "address": "0x08A945D4",
+          "size": 116
+        }
+      ]
+    },
+    {
       "name": "level_reached_08a94648",
       "source": "src/battle/level_reached_08a94648.c",
       "functions": [
@@ -25733,6 +26933,17 @@
       ]
     },
     {
+      "name": "reset_entry_08a95c10",
+      "source": "src/battle/reset_entry_08a95c10.c",
+      "functions": [
+        {
+          "name": "func_08A95C10",
+          "address": "0x08A95C10",
+          "size": 140
+        }
+      ]
+    },
+    {
       "name": "battle_08a95c9c",
       "source": "src/battle/auto/battle_08a95c9c.c",
       "functions": [
@@ -25784,6 +26995,17 @@
           "name": "func_08A9649C",
           "address": "0x08A9649C",
           "size": 48
+        }
+      ]
+    },
+    {
+      "name": "init_random_entry_08a964cc",
+      "source": "src/battle/init_random_entry_08a964cc.c",
+      "functions": [
+        {
+          "name": "func_08A964CC",
+          "address": "0x08A964CC",
+          "size": 176
         }
       ]
     },
@@ -26242,6 +27464,17 @@
       ]
     },
     {
+      "name": "copy_params_08a97878",
+      "source": "src/battle/copy_params_08a97878.c",
+      "functions": [
+        {
+          "name": "func_08A97878",
+          "address": "0x08A97878",
+          "size": 116
+        }
+      ]
+    },
+    {
       "name": "battle_08a978ec",
       "source": "src/battle/auto/battle_08a978ec.c",
       "functions": [
@@ -26330,6 +27563,17 @@
       ]
     },
     {
+      "name": "pick_code_08a97f38",
+      "source": "src/battle/pick_code_08a97f38.c",
+      "functions": [
+        {
+          "name": "func_08A97F38",
+          "address": "0x08A97F38",
+          "size": 284
+        }
+      ]
+    },
+    {
       "name": "battle_08a98078",
       "source": "src/battle/auto/battle_08a98078.c",
       "functions": [
@@ -26381,6 +27625,17 @@
           "name": "func_08A98210",
           "address": "0x08A98210",
           "size": 152
+        }
+      ]
+    },
+    {
+      "name": "phase_step_08a982a8",
+      "source": "src/battle/phase_step_08a982a8.c",
+      "functions": [
+        {
+          "name": "func_08A982A8",
+          "address": "0x08A982A8",
+          "size": 344
         }
       ]
     },
@@ -26751,6 +28006,17 @@
       ]
     },
     {
+      "name": "maybe_react_08a9b0ac",
+      "source": "src/battle/maybe_react_08a9b0ac.c",
+      "functions": [
+        {
+          "name": "func_08A9B0AC",
+          "address": "0x08A9B0AC",
+          "size": 292
+        }
+      ]
+    },
+    {
       "name": "item_area_08a9b3d4",
       "source": "src/battle/item_area_08a9b3d4.cpp",
       "functions": [
@@ -26882,6 +28148,20 @@
       }
     },
     {
+      "name": "pick_mode_08a9c444",
+      "source": "src/battle/pick_mode_08a9c444.cpp",
+      "functions": [
+        {
+          "name": "func_08A9C444",
+          "address": "0x08A9C444",
+          "size": 364
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fFSub38EHas2P6FSub38T"
+      ]
+    },
+    {
       "name": "charge_step_08a9c5b0",
       "source": "src/battle/charge_step_08a9c5b0.c",
       "functions": [
@@ -26889,6 +28169,17 @@
           "name": "func_08A9C5B0",
           "address": "0x08A9C5B0",
           "size": 192
+        }
+      ]
+    },
+    {
+      "name": "roll_choice_08a9c780",
+      "source": "src/battle/roll_choice_08a9c780.c",
+      "functions": [
+        {
+          "name": "func_08A9C780",
+          "address": "0x08A9C780",
+          "size": 160
         }
       ]
     },
@@ -26968,6 +28259,28 @@
       ]
     },
     {
+      "name": "state_choose_08a9f00c",
+      "source": "src/battle/state_choose_08a9f00c.c",
+      "functions": [
+        {
+          "name": "func_08A9F00C",
+          "address": "0x08A9F00C",
+          "size": 252
+        }
+      ]
+    },
+    {
+      "name": "state_enter_08a9f454",
+      "source": "src/battle/state_enter_08a9f454.c",
+      "functions": [
+        {
+          "name": "func_08A9F454",
+          "address": "0x08A9F454",
+          "size": 236
+        }
+      ]
+    },
+    {
       "name": "sound_ctrl_08a9f540",
       "source": "src/battle/sound_ctrl_08a9f540.c",
       "functions": [
@@ -26975,6 +28288,17 @@
           "name": "func_08A9F540",
           "address": "0x08A9F540",
           "size": 164
+        }
+      ]
+    },
+    {
+      "name": "flush_pending_08a9f5e4",
+      "source": "src/battle/flush_pending_08a9f5e4.c",
+      "functions": [
+        {
+          "name": "func_08A9F5E4",
+          "address": "0x08A9F5E4",
+          "size": 144
         }
       ]
     },
@@ -27001,6 +28325,39 @@
       ]
     },
     {
+      "name": "state_idle_08a9f8a0",
+      "source": "src/battle/state_idle_08a9f8a0.c",
+      "functions": [
+        {
+          "name": "func_08A9F8A0",
+          "address": "0x08A9F8A0",
+          "size": 324
+        }
+      ]
+    },
+    {
+      "name": "state_tick_08a9f9e4",
+      "source": "src/battle/state_tick_08a9f9e4.c",
+      "functions": [
+        {
+          "name": "func_08A9F9E4",
+          "address": "0x08A9F9E4",
+          "size": 292
+        }
+      ]
+    },
+    {
+      "name": "state_exit_08a9fb08",
+      "source": "src/battle/state_exit_08a9fb08.c",
+      "functions": [
+        {
+          "name": "func_08A9FB08",
+          "address": "0x08A9FB08",
+          "size": 220
+        }
+      ]
+    },
+    {
       "name": "sound_ctrl_08a9fbe4",
       "source": "src/battle/sound_ctrl_08a9fbe4.c",
       "functions": [
@@ -27008,6 +28365,17 @@
           "name": "func_08A9FBE4",
           "address": "0x08A9FBE4",
           "size": 164
+        }
+      ]
+    },
+    {
+      "name": "state_update_08a9fc88",
+      "source": "src/battle/state_update_08a9fc88.c",
+      "functions": [
+        {
+          "name": "func_08A9FC88",
+          "address": "0x08A9FC88",
+          "size": 212
         }
       ]
     },
@@ -27290,6 +28658,20 @@
       ]
     },
     {
+      "name": "ready_flag_08aa4528",
+      "source": "src/battle/ready_flag_08aa4528.cpp",
+      "functions": [
+        {
+          "name": "func_08AA4528",
+          "address": "0x08AA4528",
+          "size": 72
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fHState38HPendingP6HState38T"
+      ]
+    },
+    {
       "name": "grid_clear_marks_08aa4b78",
       "source": "src/battle/grid_clear_marks_08aa4b78.c",
       "functions": [
@@ -27400,6 +28782,34 @@
       ]
     },
     {
+      "name": "notify_choose_08aa4e00",
+      "source": "src/battle/notify_choose_08aa4e00.cpp",
+      "functions": [
+        {
+          "name": "func_08AA4E00",
+          "address": "0x08AA4E00",
+          "size": 128
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fEUi38FCheckiT"
+      ]
+    },
+    {
+      "name": "notify_unit_changed_08aa4e80",
+      "source": "src/battle/notify_unit_changed_08aa4e80.cpp",
+      "functions": [
+        {
+          "name": "func_08AA4E80",
+          "address": "0x08AA4E80",
+          "size": 80
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fEUi38GNotifyiTBT"
+      ]
+    },
+    {
       "name": "cost_check_08aa4ed0",
       "source": "src/battle/cost_check_08aa4ed0.cpp",
       "functions": [
@@ -27476,6 +28886,17 @@
           "name": "func_08AA56C8",
           "address": "0x08AA56C8",
           "size": 28
+        }
+      ]
+    },
+    {
+      "name": "random_start_08aa56e4",
+      "source": "src/battle/random_start_08aa56e4.c",
+      "functions": [
+        {
+          "name": "func_08AA56E4",
+          "address": "0x08AA56E4",
+          "size": 100
         }
       ]
     },
@@ -27943,6 +29364,39 @@
           "name": "func_08AA7C80",
           "address": "0x08AA7C80",
           "size": 188
+        }
+      ]
+    },
+    {
+      "name": "check_entry_08aa80c0",
+      "source": "src/battle/check_entry_08aa80c0.cpp",
+      "functions": [
+        {
+          "name": "func_08AA80C0",
+          "address": "0x08AA80C0",
+          "size": 196
+        }
+      ]
+    },
+    {
+      "name": "check_entry_08aa8184",
+      "source": "src/battle/check_entry_08aa8184.cpp",
+      "functions": [
+        {
+          "name": "func_08AA8184",
+          "address": "0x08AA8184",
+          "size": 196
+        }
+      ]
+    },
+    {
+      "name": "check_entry_08aa8248",
+      "source": "src/battle/check_entry_08aa8248.cpp",
+      "functions": [
+        {
+          "name": "func_08AA8248",
+          "address": "0x08AA8248",
+          "size": 232
         }
       ]
     },
@@ -29630,6 +31084,17 @@
       ]
     },
     {
+      "name": "lookup_flag_08ab2830",
+      "source": "src/battle/lookup_flag_08ab2830.c",
+      "functions": [
+        {
+          "name": "func_08AB2830",
+          "address": "0x08AB2830",
+          "size": 208
+        }
+      ]
+    },
+    {
       "name": "action_param_08ab2900",
       "source": "src/battle/action_param_08ab2900.c",
       "functions": [
@@ -29714,6 +31179,17 @@
           "name": "func_08AB3014",
           "address": "0x08AB3014",
           "size": 96
+        }
+      ]
+    },
+    {
+      "name": "init_all_08ab3074",
+      "source": "src/battle/init_all_08ab3074.c",
+      "functions": [
+        {
+          "name": "func_08AB3074",
+          "address": "0x08AB3074",
+          "size": 380
         }
       ]
     },
@@ -30926,6 +32402,17 @@
       ]
     },
     {
+      "name": "stream_read_block_08ab9fc0",
+      "source": "src/battle/stream_read_block_08ab9fc0.c",
+      "functions": [
+        {
+          "name": "func_08AB9FC0",
+          "address": "0x08AB9FC0",
+          "size": 72
+        }
+      ]
+    },
+    {
       "name": "battle_08aba008",
       "source": "src/battle/auto/battle_08aba008.c",
       "functions": [
@@ -30988,6 +32475,17 @@
           "name": "func_08ABA120",
           "address": "0x08ABA120",
           "size": 48
+        }
+      ]
+    },
+    {
+      "name": "progress_timer_08aba150",
+      "source": "src/battle/progress_timer_08aba150.c",
+      "functions": [
+        {
+          "name": "func_08ABA150",
+          "address": "0x08ABA150",
+          "size": 132
         }
       ]
     },
@@ -31465,6 +32963,17 @@
       ]
     },
     {
+      "name": "frame_update_08abb8e0",
+      "source": "src/battle/frame_update_08abb8e0.c",
+      "functions": [
+        {
+          "name": "func_08ABB8E0",
+          "address": "0x08ABB8E0",
+          "size": 176
+        }
+      ]
+    },
+    {
       "name": "ready_owner_check_08abbb78",
       "source": "src/battle/ready_owner_check_08abbb78.c",
       "functions": [
@@ -31630,6 +33139,28 @@
       ]
     },
     {
+      "name": "curve_point_08abc364",
+      "source": "src/battle/curve_point_08abc364.c",
+      "functions": [
+        {
+          "name": "func_08ABC364",
+          "address": "0x08ABC364",
+          "size": 88
+        }
+      ]
+    },
+    {
+      "name": "curve_angle_08abc3bc",
+      "source": "src/battle/curve_angle_08abc3bc.c",
+      "functions": [
+        {
+          "name": "func_08ABC3BC",
+          "address": "0x08ABC3BC",
+          "size": 100
+        }
+      ]
+    },
+    {
       "name": "entry_at_08abc420",
       "source": "src/battle/entry_at_08abc420.c",
       "functions": [
@@ -31736,6 +33267,17 @@
           "name": "func_08ABD194",
           "address": "0x08ABD194",
           "size": 40
+        }
+      ]
+    },
+    {
+      "name": "timer_consume_08abd298",
+      "source": "src/battle/timer_consume_08abd298.c",
+      "functions": [
+        {
+          "name": "func_08ABD298",
+          "address": "0x08ABD298",
+          "size": 80
         }
       ]
     },
@@ -31995,6 +33537,28 @@
           "name": "func_08AC068C",
           "address": "0x08AC068C",
           "size": 40
+        }
+      ]
+    },
+    {
+      "name": "start_effect_08ac06b4",
+      "source": "src/battle/start_effect_08ac06b4.c",
+      "functions": [
+        {
+          "name": "func_08AC06B4",
+          "address": "0x08AC06B4",
+          "size": 156
+        }
+      ]
+    },
+    {
+      "name": "start_effect_once_08ac0750",
+      "source": "src/battle/start_effect_once_08ac0750.c",
+      "functions": [
+        {
+          "name": "func_08AC0750",
+          "address": "0x08AC0750",
+          "size": 156
         }
       ]
     },
@@ -32272,6 +33836,28 @@
       ]
     },
     {
+      "name": "release_unit_08ac1610",
+      "source": "src/battle/release_unit_08ac1610.c",
+      "functions": [
+        {
+          "name": "func_08AC1610",
+          "address": "0x08AC1610",
+          "size": 176
+        }
+      ]
+    },
+    {
+      "name": "release_handles_08ac16c0",
+      "source": "src/battle/release_handles_08ac16c0.c",
+      "functions": [
+        {
+          "name": "func_08AC16C0",
+          "address": "0x08AC16C0",
+          "size": 128
+        }
+      ]
+    },
+    {
       "name": "fade_track_step_08ac1740",
       "source": "src/battle/fade_track_step_08ac1740.c",
       "functions": [
@@ -32433,6 +34019,17 @@
           "name": "func_08AC29E8",
           "address": "0x08AC29E8",
           "size": 140
+        }
+      ]
+    },
+    {
+      "name": "find_matching_entry_08ac2a74",
+      "source": "src/battle/find_matching_entry_08ac2a74.cpp",
+      "functions": [
+        {
+          "name": "func_08AC2A74",
+          "address": "0x08AC2A74",
+          "size": 116
         }
       ]
     },
@@ -32605,6 +34202,17 @@
       ]
     },
     {
+      "name": "warp_marker_08ac4324",
+      "source": "src/battle/warp_marker_08ac4324.c",
+      "functions": [
+        {
+          "name": "func_08AC4324",
+          "address": "0x08AC4324",
+          "size": 180
+        }
+      ]
+    },
+    {
       "name": "blend_init_08ac4828",
       "source": "src/battle/blend_init_08ac4828.c",
       "functions": [
@@ -32656,6 +34264,17 @@
           "name": "func_08AC5578",
           "address": "0x08AC5578",
           "size": 16
+        }
+      ]
+    },
+    {
+      "name": "phase_wrap_08ac5588",
+      "source": "src/battle/phase_wrap_08ac5588.c",
+      "functions": [
+        {
+          "name": "func_08AC5588",
+          "address": "0x08AC5588",
+          "size": 64
         }
       ]
     },
@@ -32733,6 +34352,17 @@
           "name": "func_08AC60BC",
           "address": "0x08AC60BC",
           "size": 104
+        }
+      ]
+    },
+    {
+      "name": "copy_and_init_08ac6124",
+      "source": "src/battle/copy_and_init_08ac6124.c",
+      "functions": [
+        {
+          "name": "func_08AC6124",
+          "address": "0x08AC6124",
+          "size": 136
         }
       ]
     },
@@ -32958,6 +34588,18 @@
           "size": 60
         }
       ]
+    },
+    {
+      "name": "vec_normalized_08acbbd0",
+      "source": "src/battle/vec_normalized_08acbbd0.cpp",
+      "functions": [
+        {
+          "name": "func_08ACBBD0",
+          "address": "0x08ACBBD0",
+          "size": 156
+        }
+      ],
+      "inline_asm": "vfpu"
     },
     {
       "name": "cue_state_init_08acbc6c",
@@ -40805,6 +42447,18 @@
       ]
     },
     {
+      "name": "vec_blend_08b3b950",
+      "source": "src/battle/vec_blend_08b3b950.c",
+      "functions": [
+        {
+          "name": "func_08B3B950",
+          "address": "0x08B3B950",
+          "size": 76
+        }
+      ],
+      "inline_asm": "vfpu"
+    },
+    {
       "name": "battle_08b3bbfc",
       "source": "src/battle/auto/battle_08b3bbfc.c",
       "functions": [
@@ -45191,7 +46845,110 @@
     "func_08A50244": "0x08A50244",
     "func_08A4AF8C": "0x08A4AF8C",
     "func_08A2836C": "0x08A2836C",
-    "func_08A12E94": "0x08A12E94"
+    "func_08A12E94": "0x08A12E94",
+    "D_08A7AC2C": "0x08A7AC2C",
+    "D_08A7AC28": "0x08A7AC28",
+    "func_08B3A5BC": "0x08B3A5BC",
+    "func_089A3BC8": "0x089A3BC8",
+    "D_08A7ABFC": "0x08A7ABFC",
+    "func_08A8435C": "0x08A8435C",
+    "D_08A4F068": "0x08A4F068",
+    "func_088A6A38": "0x088A6A38",
+    "func_08858AD8": "0x08858AD8",
+    "func_0884EF7C": "0x0884EF7C",
+    "D_08A38488": "0x08A38488",
+    "func_08835BDC": "0x08835BDC",
+    "D_08A59348": "0x08A59348",
+    "D_089C7C30": "0x089C7C30",
+    "D_08A59344": "0x08A59344",
+    "func_089A3A44": "0x089A3A44",
+    "func_08835C24": "0x08835C24",
+    "func_08A59244": "0x08A59244",
+    "func_08A399D0": "0x08A399D0",
+    "func_08A41CE0": "0x08A41CE0",
+    "func_08A41558": "0x08A41558",
+    "func_08A41774": "0x08A41774",
+    "func_08A7C1DC": "0x08A7C1DC",
+    "func_08A96868": "0x08A96868",
+    "func_08A7B5E0": "0x08A7B5E0",
+    "func_08A6BFB4": "0x08A6BFB4",
+    "func_08A827AC": "0x08A827AC",
+    "func_08AD77E8": "0x08AD77E8",
+    "D_08A7ABE4": "0x08A7ABE4",
+    "func_08A72B68": "0x08A72B68",
+    "func_08A6DD08": "0x08A6DD08",
+    "func_08A6DFD4": "0x08A6DFD4",
+    "func_08AAEF94": "0x08AAEF94",
+    "func_08A73864": "0x08A73864",
+    "func_08858ACC": "0x08858ACC",
+    "D_08A472F8": "0x08A472F8",
+    "D_08A47330": "0x08A47330",
+    "D_08A548EC": "0x08A548EC",
+    "D_08A5712C": "0x08A5712C",
+    "D_08A57130": "0x08A57130",
+    "D_08A57134": "0x08A57134",
+    "func_08A5B59C": "0x08A5B59C",
+    "func_088A7284": "0x088A7284",
+    "func_08868128": "0x08868128",
+    "D_09AF8AB0": "0x09AF8AB0",
+    "func_088A72B4": "0x088A72B4",
+    "func_08A507FC": "0x08A507FC",
+    "func_08A52BD4": "0x08A52BD4",
+    "func_0882FAC4": "0x0882FAC4",
+    "D_08A54D8C": "0x08A54D8C",
+    "D_08A54D90": "0x08A54D90",
+    "func_08A7F338": "0x08A7F338",
+    "D_08A41FF0": "0x08A41FF0",
+    "D_08A42028": "0x08A42028",
+    "func_08A3CA80": "0x08A3CA80",
+    "D_08A7ACF8": "0x08A7ACF8",
+    "func_08A62FA0": "0x08A62FA0",
+    "D_089C7EA0": "0x089C7EA0",
+    "func_089A4500": "0x089A4500",
+    "func_08837E50": "0x08837E50",
+    "D_08A5C308": "0x08A5C308",
+    "D_08A5C304": "0x08A5C304",
+    "func_08A5BC58": "0x08A5BC58",
+    "D_08A3B1F8": "0x08A3B1F8",
+    "D_08A3B230": "0x08A3B230",
+    "func_08A4A2A0": "0x08A4A2A0",
+    "D_089D48E8": "0x089D48E8",
+    "D_089D48EC": "0x089D48EC",
+    "D_08A59340": "0x08A59340",
+    "func_08A36638": "0x08A36638",
+    "D_089D4958": "0x089D4958",
+    "func_0885C6CC": "0x0885C6CC",
+    "func_08AA9D30": "0x08AA9D30",
+    "func_08AC5570": "0x08AC5570",
+    "D_08ABC5F0": "0x08ABC5F0",
+    "func_08A81310": "0x08A81310",
+    "func_08AC2AE8": "0x08AC2AE8",
+    "func_08841F64": "0x08841F64",
+    "func_08ABA150": "0x08ABA150",
+    "func_08ABBC48": "0x08ABBC48",
+    "func_08A87BEC": "0x08A87BEC",
+    "func_08AAD228": "0x08AAD228",
+    "func_08A85668": "0x08A85668",
+    "func_08B337A0": "0x08B337A0",
+    "func_0883923C": "0x0883923C",
+    "func_08AAF6A0": "0x08AAF6A0",
+    "func_08AA4E80": "0x08AA4E80",
+    "func_08A98FC4": "0x08A98FC4",
+    "func_08A99558": "0x08A99558",
+    "func_08A99CF0": "0x08A99CF0",
+    "func_08A99290": "0x08A99290",
+    "func_08A8477C": "0x08A8477C",
+    "func_08A857A8": "0x08A857A8",
+    "func_08A849C8": "0x08A849C8",
+    "D_08A94DC8": "0x08A94DC8",
+    "func_08A9B95C": "0x08A9B95C",
+    "func_08A9BC74": "0x08A9BC74",
+    "func_08A9BDAC": "0x08A9BDAC",
+    "func_08A9BEAC": "0x08A9BEAC",
+    "func_08A853CC": "0x08A853CC",
+    "func_08A6A3F4": "0x08A6A3F4",
+    "func_08A9C298": "0x08A9C298",
+    "func_08934924": "0x08934924"
   },
   "status": "112 matching C/C++ functions / 8380 bytes; connected curve controls, resource cleanup and second activation/cleanup group added. Broader combat ownership remains provisional."
 }

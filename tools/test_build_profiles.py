@@ -122,11 +122,18 @@ class MainConfiguration(unittest.TestCase):
         self.assertEqual(profiles["sdk_gcc"], {**profiles["sdk_gcc"], "compiler": GCC, "flags": ["-O2", "-G0"]})
         self.assertEqual(profiles["sdk_gcc_o3"], {**profiles["sdk_gcc_o3"], "compiler": GCC, "flags": ["-O3", "-G0"]})
 
-    def test_the_graphics_span_takes_the_o3_profile(self):
-        self.assertEqual(dc.range_profile("main", 0x0899F3F8), "sdk_gcc")
+    def test_the_sha1_and_graphics_span_takes_the_o3_profile(self):
+        self.assertEqual(dc.range_profile("main", 0x0899F02C), "sdk_gcc")
+        self.assertEqual(dc.range_profile("main", 0x0899F030), "sdk_gcc_o3")
         self.assertEqual(dc.range_profile("main", 0x0899F3FC), "sdk_gcc_o3")
         self.assertEqual(dc.range_profile("main", 0x089A2C20), "sdk_gcc_o3")
         self.assertEqual(dc.range_profile("main", 0x089A2C24), "sdk_gcc")
+
+    def test_the_string_library_takes_the_o3_profile(self):
+        self.assertEqual(dc.range_profile("main", 0x089AB034), "sdk_gcc")
+        self.assertEqual(dc.range_profile("main", 0x089AB038), "sdk_gcc_o3")
+        self.assertEqual(dc.range_profile("main", 0x089AB384), "sdk_gcc_o3")
+        self.assertEqual(dc.range_profile("main", 0x089AB388), "sdk_gcc")
 
 
 if __name__ == "__main__":

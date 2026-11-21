@@ -1,4 +1,5 @@
 # How the game loads textures
+Superseded for the load path by [texture-pipeline.md](texture-pipeline.md) (21 November 2026), the newer, corrected map of how textures get from files to the GE; this page keeps the pack-key and pop-in measurements.
 
 Research for prefetching texture pack images (1 November 2026). PortableKit decodes a pack's PNG on a loader thread
 the first time a texture is drawn and draws the game's own texture until the image is on the GPU, so a replaced

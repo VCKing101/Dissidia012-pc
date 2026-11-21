@@ -74,11 +74,11 @@ Added 14 November 2026. Main `0x089985B0`–`0x089C2730` (805 functions) is Sony
 
 **Configuration.** `config/main.matches.json` has two profiles with the same compiler, `tools/compilers/psp-gcc-1.3.1/bin/psp-gcc`:
 - `sdk_gcc`: `-O2 -G0`, the default for the whole range;
-- `sdk_gcc_o3`: `-O3 -G0`, for the SHA-1 and graphics (sceGu-like) libraries at `0x0899F3FC`–`0x089A2C24`.
+- `sdk_gcc_o3`: `-O3 -G0`, for the SHA-1 and graphics (sceGu-like) libraries at `0x0899F030`–`0x089A2C24` and the string library at `0x089AB038`–`0x089AB388`.
 
 A unit built either way carries `"profile": "<name>"`; units without one use the module's pinned SNC compiler. Progress counts these units under the feature `sdk_libraries` (SDK support libraries).
 
-The `-O3` span: 37 graphics and SHA-1 sources that differ under `-O2` match byte for byte under `-O3`, and none of the graphics functions matches under `-O2`. Register renaming at `-O3` gives their `t`-register-heavy leaf code. The two small units already integrated in the span match under both settings. The span ends where the double-precision maths functions start (`0x089A2C24`); the last `-O3` evidence is at `0x089A20CC`.
+The `-O3` span: 37 graphics and SHA-1 sources that differ under `-O2` match byte for byte under `-O3`, and none of the graphics functions matches under `-O2`. Register renaming at `-O3` gives their `t`-register-heavy leaf code. The two small units already integrated in the span match under both settings. The span ends where the double-precision maths functions start (`0x089A2C24`); the last `-O3` evidence is at `0x089A20CC`. On 22 November 2026 the span was widened to start at `0x0899F030`, where SHA-1 really starts (its update function matches only under `-O3`), and a second span was added for the string library `0x089AB038`–`0x089AB388`: six of its functions differ under `-O2` (register renaming) and match under `-O3`, and the seventh, a 32-byte memory fill, matches under both.
 
 Other flag findings (not configured yet): libgcc's 64-bit divide and modulo functions (`__divdi3`, `__udivdi3`, `__umoddi3`, 4.3 KB) come within a register swap with `-fexceptions -fnon-call-exceptions`, as GCC's libgcc makefile builds them. GCC's Allegrex builtins (`__builtin_allegrex_clz`, `_ctz`, `_bitrev`, `_min`, …) are compiler intrinsics, not inline asm, and three matched image-library sources use them. Two SNC functions sit inside the GCC range: `0x0899B654` and `0x0899B698`.
 
@@ -95,7 +95,7 @@ Other flag findings (not configured yet): libgcc's 64-bit divide and modulo func
 
 The agent that matched 0x089AC568–0x089C26E4 also found GCC 3.4-style block reordering in many functions without either marker: duplicated epilogues, loop bodies after the epilogue, and rotated loop tests. It also found constant multiplies done as shift and add. psp-gcc 1.7.1 does none of this either, and homebrew pspdev (GCC 15.2) is far too new. These libraries were evidently built with a later Sony psp-gcc (3.4 or 4.x based). decomp.me's compiler archive has only 1.3.1 and 1.7.1. Until a matching compiler turns up, those functions can't be matched; markers by 16 KB block are listed in `build/scratch/gcc/markers.json`.
 
-**Limits.** Float constants that GCC places in `.rodata.cst4`, string literals, and calls to libgcc helpers by name (`__extendsfdf2`, …) are not linkable yet; declare retail constants as `extern const float D_XXXXXXXX;` instead. The 92 VFPU functions in the range are inline asm and wait on the inline-asm credit decision. Main `0x0889D934`–`0x0889E2FC` (11 functions) is hand-written assembly and stays assembly.
+**Limits.** Float constants that GCC places in `.rodata.cst4`, string literals, and calls to libgcc helpers by name (`__extendsfdf2`, …) are not linkable yet; declare retail constants as `extern const float D_XXXXXXXX;` instead. The 92 VFPU functions in the range are inline asm; 14 of them (the vector library at `0x089A38A8`–`0x089A47CC`, `src/main/sdk/libvfpu_*.c`) are integrated and counted separately (section 6). Main `0x0889D934`–`0x0889E2FC` (11 functions) is hand-written assembly and stays assembly.
 
 **SNC units in the range.** 20 tiny functions there were matched under SNC before the profile existed. 15 give the same bytes under GCC and moved to `sdk_gcc` unchanged. Three more (`func_0899C348`, `func_089B4908`, `func_089B493C`) had their stores in an odd order that SNC needed; with the stores in natural field order GCC gives retail, so they were rewritten that way and moved too. Two 12-byte getters (`func_0899B648`, `func_089A04E8`: `lui $a0; jr ra; lw $v0`) still match only under SNC: every C shape tried makes GCC use `$v1` for the high half, and they are the only two such getters in the range. They stay SNC units until a GCC form is found.
 
@@ -144,7 +144,7 @@ One more 5-hour window of agents, then integration. Verified totals went from 9,
 - Matching: five agents added 828 functions from near-miss lists (two were cut off by the usage cap part way; their remaining addresses are still in `build/dc-claims/`).
 - Readability: the menu overlay is now readable throughout (all 1,907 generated files), main has 856 of about 2,020. Main region 3 (400 rewrites in `build/readability/main/`) is not installed: its agent was cut off while writing `include/main/auto_region3.h`, which fails one of its own layout assertions.
 - **Pointer-to-member dispatch** (`build/dc-results/pmf-dispatch.md`): SNC's PMF is 8 bytes `{short delta; short index; fn or vtable offset}`. Real C++ PMF syntax gives a different load order from retail, so 21 menu dispatchers are matched with the call lowered by hand in C (load delta, index and target in retail's order, adjust `this`, follow the vtable when the index is non-zero, call through a function-pointer variable). The in-place `this` adjust variant and one null-test delay slot are still open.
-- **VFPU** (`build/dc-results/vfpu.md`): SNC has no vector arithmetic or intrinsics but compiles GCC-style inline asm with VFPU instructions and schedules C around it; game code used small helpers with fixed-register asm (one normalise block appears 193 times). 16 functions match this way. They are **not integrated**: crediting inline-asm functions as C is a project decision.
+- **VFPU** (`build/dc-results/vfpu.md`): SNC has no vector arithmetic or intrinsics but compiles GCC-style inline asm with VFPU instructions and schedules C around it; game code used small helpers with fixed-register asm (one normalise block appears 193 times). 16 functions match this way. The 12 in game code are integrated and counted separately (section 6); the 4 SDK ones stay out because that range is GCC-built: the GCC versions cover three, and `0x089A37DC` still needs a GCC match.
 - **Sony GCC region**: main `0x089985B0`–`0x089C2730` (805 functions, SDK libraries) was built with Sony psp-gcc, not SNC; it reproduced 14 of 14 SDK functions tried, 11 of them only under GCC. The per-unit build profiles that followed are in section 5. Main `0x0889D934`–`0x0889E2FC` (11 functions) is hand-written assembly and should stay assembly.
 
 ## Overnight run, 14–15 November 2026
@@ -164,6 +164,25 @@ Seven agents over two 5-hour windows, then integration. Verified totals went fro
 - GCC profiles: two agents on main's SDK region added 76 GCC matches (`build/dc-results/gcc1.md`, `gcc2.md`); main now has 189 functions / 14,448 bytes built by psp-gcc 1.3.1 (151 under `sdk_gcc`, 38 under `sdk_gcc_o3`). Much of the rest of the region is later Sony GCC output (sibling calls through `j`, Allegrex `ins`/`ext`, block reordering) that neither 1.3.1, 1.7.1 nor a modern GCC reproduces; a later Sony psp-gcc build would be needed.
 - The reviewed menu controller gained handler 12 (`0x089DDF24`): 15/20 handlers, 2,916 of 8,188 bytes.
 - Tooling gaps the agents hit: `__ashldi3` calls (64-bit shifts) are not resolved to main's libgcc copy at `0x089985B0`, and SNC's per-object 64-bit literal pools (`$Lcnst`) cannot be placed, so a few otherwise exact functions stay near misses.
+
+## Overnight run, 21–22 November 2026
+
+The night started with a map of the texture path (`docs/port/texture-pipeline.md`, `docs/port/texture_types.h`); the matching agents then took the texture-path functions first and the queued lists after. Five Opus agents over two 5-hour windows and a Sonnet agent at the end, then integration. Verified C/C++ totals went from 11,665 functions / 972,932 bytes to **12,065 functions / 1,059,036 bytes (22.45% of inventoried function bytes)**; the separate VFPU count went from 26 / 1,888 to 35 / 2,460. All four modules rebuild byte-identically and all 225 tests pass (7 skipped).
+
+| Module | Functions | Bytes |
+| --- | ---: | ---: |
+| Main executable | 4,492 | 329,120 |
+| Menu overlay | 3,548 | 326,392 |
+| Battle overlay | 4,001 | 401,408 |
+| Extra overlay | 24 | 2,116 |
+
+- agent33, the 110 game-side functions on the texture path (main, SNC): 42 matches / 9,232 bytes, 40 near misses, 28 skips. agent37 took the 40 near misses again (9 more matches) and then 225 untried main functions (88 matches): 97 / 14,484 bytes in all.
+- agent34, Sony's image, graphics and GMO libraries (main, psp-gcc 1.3.1): 27 units, 9 of them VFPU inline assembly (572 bytes, separate count). Seven are exact only under `-O3`, which widened the `sdk_gcc_o3` profile (section 5). Most of the GMO library is later Sony GCC output.
+- agent35, the rest of battle list 1 (116): 81 matches / 23,168 bytes; 80 integrated. agent36, the rest of menu list 1 (154): 106 / 27,020 bytes.
+- Five of agent31's battle near misses matched once agent35's motion-call prototype and colour constructor (below) were applied to them.
+- Not integrated: `0x08A3788C` matches alone but shares its 8-byte `$Lcnst` pool entry (`0x08A38490`) with `0x08A37418`, which is already integrated; two units cannot place the same bytes, and reading the entry through an `extern` moves one store. Functions that came from one retail object and share a pool entry need to go into one unit together.
+- agent38 (Sonnet), battle list 2 (250, `0x08A7EE74`–`0x08ACA77C`) from 06:55: 52 matches / 9,036 bytes, 25 near misses, 8 skips; it reached about 85 functions and stopped at 07:35. Its patterns: 0/1 functions as a C++ `bool` with `return true`, small range tests compiled to `slti` chains are a `switch`, `self->h = h = call();` keeps the result in `v0`, and a local name sweep settles float compare order.
+- Usage: one Opus agent used about 18% of a 5-hour window per hour, two about 35%. The first window ran out at about 02:40 and both agents running then were resumed after the reset.
 
 ## SNC patterns learned while matching
 
@@ -224,9 +243,36 @@ Collected from both agent rounds (544 hand matches). Each was confirmed by a byt
 - An LCG update must be chained (`x = (D = D * a + b) >> 16 & m`) to schedule like retail; `int r = cond ? 1 : 0;` in an `unsigned char` function gives `beql` plus the final `andi`.
 - Each switch-dispatch function with a jump table must sit alone in its file for the table data to be placed.
 
+**Learned overnight (21–22 November)**
+- The motion calls `func_0882FA10` / `func_0882FAC4` / `func_0882FB90` take `(void *motion, int id, float x, float y, int arg)`. Declared that way, SNC sets up the arguments in retail's order; the older `(float, float, motion, id, arg)` prototypes in many battle files only matched with extra locals. Values both calls use (the motion pointer, `0.0f`) are set before the branch when retail hoists them.
+- Odd argument shuffles at a call are often 64-bit (`long long`) parameters; an `unsigned long long` declared parameter fixed five main functions.
+- Colour words unpacked through a constructor (`struct Rgba { Rgba(unsigned v) { r = v & 0xFF; g = v >> 8 & 0xFF; ... } }; Rgba value(*word); color = value;`) give retail's shift-before-mask order.
+- Local arrays initialised from a table: write the copy as an explicit call (`func_08935524(local, D_<table>, sizeof local)`) from an `extern const` table at the retail address; the initialiser form puts the table in `.data`, which cannot be placed.
+- Operand order in additions follows the names (alphabetical) and the types (`unsigned` operands with `i + base`); renaming locals fixed two functions.
+- A constant 1 reused across calls is kept apart from a later `return 1` by an `unsigned char` callee parameter or a block-scope local; a literal `-1` keeps compare operand order.
+- `&&` against nested ifs, `if (!x) { call; return; }` before the rest, and `int i;` at the top against `for (int i...)` each decided several layouts (one function went from 88 differing words to a match); index forms (`slots[i * 3]`) beat pointer walks.
+- Loops that keep their arguments live reverse the parameter registers at entry (`move a3, a2; move a2, a0; ...`); this is SNC's allocation, not a different signature.
+- Framebuffer arguments typed `void *` stop SNC merging an int constant with an equal pointer constant; a value OR-ed from four shifts needs separate `c |= ...` statements.
+- Declaring `T **link;` before a list-unlink `if` fixes its delay slot.
+
 **Not solved yet**
 - s-register permutations in otherwise identical code, constants that SNC keeps in a saved register where retail rematerialises them (often a `lui`), and single load or `$ra` scheduling slots remain the commonest causes of the 181 near misses left overnight.
 - A spilled parameter that is also copied into another argument register for the call: SNC swaps the parameter registers and retail does not.
 - Pointer-to-member-function dispatch through state tables ending in `jalr; nop` (about 40 menu functions); an investigation was cut off by the usage limit before reporting.
 - Loop rotation in a few search loops, `sw $ra` scheduled before dependent loads, and bit sets kept as `and ~m; or m`.
 - Readable rewrites of the generated files are installed in battle and most of menu; the per-region headers (`include/<module>/auto_region*.h`) overlap and still need merging into real class headers.
+
+## 6. VFPU inline assembly is counted separately (15 November 2026)
+
+The project owner decided that functions built from C with VFPU inline assembly count separately from C/C++. Other matching projects do the same: assembly is kept where the compiler cannot emit an instruction at all (PS2 VU0 macro mode, a DS `clz`), and it is reported apart from decompiled C; assembly that only forces a match is not accepted.
+
+- A unit declares `"inline_asm": "vfpu"` in its match configuration. `tools/match_config.py` keeps it out of `configured_totals` and reports it through `configured_inline_asm_totals`.
+- The verifiers build and byte-check these units like any other, but report them as `inline_asm_functions` / `inline_asm_bytes`, not in `recovered_c_*`. They refuse a unit whose source contains inline assembly (or includes `vfpu.h`) without the declaration, and a declaration whose source has none.
+- `tools/progress.py` prints the separate count under the C/C++ headline. Tests: `tools/test_inline_asm_units.py`.
+- Integrated: the 12 SNC game-code matches from `build/dc-results/vfpu.md` (main 9, battle 3; they use `include/vfpu.h`) and the 14 psp-gcc vector-library functions, split one per file into `src/main/sdk/libvfpu_*.c`.
+- Result: 26 functions / 1,888 bytes (main 23, battle 3) in the separate count; the C/C++ headline is unchanged at 11,665 / 972,932. Battle's raw instruction words fell from 24 to 16 bytes. All four modules rebuild byte-identically and all 224 tests pass (7 skipped).
+- Not integrated: the 4 SNC matches of SDK library functions (`sdk_vec3_length_*`, `sdk_vec4_dot_*`), because that range is GCC-built. The GCC versions cover `0x089A3AF0`, `0x089A3B10` and `0x089A3BF8`; `0x089A37DC` still needs a GCC match.
+
+### Later Sony GCC: none public
+
+A web search on 15 November found no Sony psp-gcc later than 1.7.1. The decomp community's compiler host (decompme/compilers, `platforms/psp`) carries psp-gcc 1.3.1 and 1.7.1 (both already here), SNC 1.2.7503.0 and eleven Metrowerks `mwccpsp` 3.0.1 builds (121 to 219). No public page says which GCC each Sony SDK release shipped, and no other PSP matching project documents one. Notes and links: `build/scratch/psp-gcc-search.md`. Nothing was downloaded.

@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 import c_rodata
 import dc
-from match_config import configured_totals
+from match_config import configured_inline_asm_totals, configured_totals
 from verify_battle import verify as verify_battle
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -130,7 +130,7 @@ class BuiltTables(unittest.TestCase):
         self.assertGreater(declared, 0)
         self.assertEqual(report["c_rodata_bytes"], declared)
         self.assertEqual((report["recovered_c_functions"], report["recovered_c_bytes"]), configured_totals("battle"))
-        self.assertEqual(sum(report[k] for k in ("recovered_c_bytes", "c_rodata_bytes", "assembly_instruction_bytes",
+        self.assertEqual(sum(report[k] for k in ("recovered_c_bytes", "inline_asm_bytes", "c_rodata_bytes", "assembly_instruction_bytes",
                                                  "raw_instruction_fallback_bytes", "opaque_original_bytes")),
                          report["reconstructed_payload_bytes"])
 
@@ -157,7 +157,8 @@ class BuiltTables(unittest.TestCase):
             self.assertTrue(declared, module)
             self.assertEqual(placed, declared, module)
             self.assertEqual(prepared["matching_c_rodata_bytes"], sum(size for _, size, _ in declared))
-            self.assertEqual(prepared["matching_c_bytes"], configured_totals(module)[1])
+            self.assertEqual(prepared["matching_c_bytes"],
+                             configured_totals(module)[1] + configured_inline_asm_totals(module)[1])
 
     def test_table_parts_cannot_be_relabelled(self):
         loader = json.loads

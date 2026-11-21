@@ -8,7 +8,8 @@
 `check` compiles with the module's pinned profile (SNC 1.2.7503.0 -O2 -g),
 or with a named build profile from the module's match configuration: main's
 SDK libraries (0x089985B0-0x089C2730) were built with Sony psp-gcc 1.3.1
--O2 -G0 (its SHA-1 and graphics libraries, 0x0899F3FC-0x089A2C24, with -O3),
+-O2 -G0 (its SHA-1 and graphics libraries, 0x0899F030-0x089A2C24, and its
+string library, 0x089AB038-0x089AB388, with -O3),
 so sources whose address (file name, else every func_ name in the file) lies
 there use the "sdk_gcc" or "sdk_gcc_o3" profile. --profile NAME overrides that;
 --profile default forces the module's pinned compiler. It resolves relocations against real addresses and compares whole functions with
@@ -53,7 +54,8 @@ EXCLUDED = {"main": [(0x089C5770, 0x089C60B0)]}
 # SNC's or, from the first function at 0x089985B0 to the last before 0x089C2730.
 # Inside them the SHA-1 and graphics libraries were built with -O3 (37 sources
 # that differ under -O2 match under -O3); the first entry that holds an address wins.
-PROFILE_RANGES = {"main": [(0x0899F3FC, 0x089A2C24, "sdk_gcc_o3"), (0x089985B0, 0x089C2730, "sdk_gcc")]}
+PROFILE_RANGES = {"main": [(0x0899F030, 0x089A2C24, "sdk_gcc_o3"), (0x089AB038, 0x089AB388, "sdk_gcc_o3"),
+                           (0x089985B0, 0x089C2730, "sdk_gcc")]}
 PROFILE_FEATURES = {"sdk_gcc": "sdk_libraries", "sdk_gcc_o3": "sdk_libraries"}
 FILE_ADDRESS = re.compile(r"_([0-9A-Fa-f]{8})$")
 FUNC_TOKEN = re.compile(r"\bfunc_([0-9A-Fa-f]{8})\b")
