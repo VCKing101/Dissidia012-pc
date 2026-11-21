@@ -517,8 +517,8 @@ said so.
   - the port's version: `d012::source_hash()`, a SHA-256 of the port's own source, the PortableKit patches and
     `port/CMakeLists.txt`, line endings aside (130 files), made at build time by `port/cmake/source_hash.cmake` into
     one generated file, so a change recompiles only that file;
-  - mods that change the game: empty for now, since the mods folder holds music only (which may differ); a kind of
-    mod that changes the game sets it;
+  - mods that change the game: `disc` and the identity of a mod's disc ([disc mods](disc-mods.md#online)), empty
+    for the game's own disc, as copies before disc mods send. The mods folder holds music only, which may differ;
   - the test switches that change how a fighter or a camera moves (`D012_NO_RIGHT_STICK_CAMERA`,
     `D012_NO_SMOOTH_STICK`, `D012_SMOOTH_STICK_BATTLE`, `D012_CAMERA_FOLLOW_DEADZONE`).
   Saves and official DLC may differ. The split-screen field of view does not count: it scales only the split view.

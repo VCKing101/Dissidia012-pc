@@ -385,7 +385,8 @@ graphics, sound or disc.
 **PortableKit changes** (patch 0107, branch `public-server`):
 - A login carries a version tag after the nickname's NUL (`protocol.hpp`, `kVersionMark`), so older servers read
   the nickname as before. `GameProfile::adhoc_version` gives it; the port's is the first 16 digits of the source hash
-  and the compiler's kind (`d012_profile.cpp`), what a battle's start checks.
+  and the compiler's kind (`d012_profile.cpp`), what a battle's start checks. A copy playing a mod's disc adds `-m`
+  and 12 digits of the mod's identity (PortableKit's `adhoc_version_tag()`, patch 0118; [disc mods](disc-mods.md#online)).
 - The server keeps players of different tags apart: groups, scans, broadcasts, chat.
 - `ServerConfig::public_server`: player ids are numbers, never addresses; a MAC stays with its first connection
   unless the new login comes from the same address or the old connection has been quiet 10 s; a relay connection

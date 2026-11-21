@@ -14,7 +14,7 @@ Menu (Esc, or L3 + R3), **System**, section **Disc mod**:
 - **Choose the mod…** opens a file browser over the game. Choose the mod's patch (`.xdelta`), as its makers hand it
   out: the port applies it to the game's disc it was set up with, in a few seconds, and keeps only the sectors it
   changes in `disc-mods/<name>.pkdisc` in the data folder (25 MB for Emendatus). A disc image already patched
-  (`.iso`) works too.
+  (`.iso`) works too: it is compared with the game's disc and kept the same way, so the image is no longer needed.
 - **Play the modded disc** turns it on or off from the next start; **Restart the game now** restarts at once.
 - **Playing** and **Mod** say which disc this start plays and which mod is chosen.
 
@@ -25,6 +25,9 @@ A modded disc keeps its saves and downloadable content apart from the game's own
 (the data folder's, or the game folder's in a copy built from source). A mod's starter saves go in
 `ms0-patched/PSP/SAVEDATA`.
 
+Online, a copy playing a mod meets and fights only players of the same mod, of the same version: on the game's
+server, in a hosted session, and in battles. Play online's count says "with this mod".
+
 ## How it works
 
 ### The patch
@@ -34,7 +37,10 @@ Adler-32 of each window and its LZMA secondary compression (one xz stream per ki
 each section whole LZMA2 chunks after a sync flush; the LZMA decoder is written from the public format
 descriptions, as the project has no LZMA library). It applies the patch window by window to the release's image and
 compares each 2 KiB sector with the release's at the same place; only the differing ones are kept, all-zero ones as
-a mark. The layer file names the image it was prepared from (path and size).
+a mark. The layer file names the image it was prepared from (path and size). A disc image already patched is read
+and compared the same way (`disc_patch::prepare_image`), and gives the same layer. A patch or image that changes
+nothing is refused; the System page also refuses an image made from another region's disc, which would differ in
+nearly every sector.
 
 `IsoImage` opens a layer file as the patched image: listed sectors from the layer, every other one from the
 release's image. Everything that reads the disc goes through `IsoImage`, so the game, the patched-edition code and
@@ -68,7 +74,33 @@ patched overlay as the one its corpus belongs to.
 
 Test switches: `D012_PATCHED_DISC=<image or .pkdisc>` plays that disc whatever the settings say;
 `D012_NO_PATCHED_DISC=1` plays the game's own; `D012_TRACE_PATCHED=1` logs each changed word that took a unit with
-it; `D012_TEST_DISC_PATCH=<patch>` prepares a patch into `disc-mods` as the game starts and logs the result.
+it; `D012_TEST_DISC_PATCH=<patch or image>` prepares a mod into `disc-mods` as the game starts and logs the result.
+
+### Online
+
+A mod's disc has an identity: the SHA-256 of the patched image's size and of each sector the layer lists (its number
+and its 2048 bytes), in order (`disc_patch::Layer::identity()`, PortableKit patch 0118). Every copy of the same
+version of a mod over the same release has the same identity, whether it was prepared from the patch or from a
+patched image and whatever the file is called; any other change gives another. A disc image played as it is
+(`D012_PATCHED_DISC=<image>`, a test) is known only by its size, executable and `PARAM.SFO`, so it matches no
+prepared mod.
+
+Online play keeps copies apart by it twice:
+
+- **Who meets.** The version tag a copy logs in with ([online matchmaking](online-matchmaking.md)) gets `-m` and the
+  identity's first 12 digits (PortableKit's `adhoc_version_tag()`). The game's server and a hosted session already
+  keep players with different tags apart (lobbies, groups, scans, chat), and Play online's count is of the players
+  with the same tag, so nothing changed on the server. A copy of the game's own disc sends its tag as before.
+- **Who fights.** The battle check's "mods that change the game" is `disc <identity>`
+  ([Communication Mode](communication-mode.md)): a battle between copies that differ does not start, and the notice
+  names that item. Watchers compare the same list. A copy of the game's own disc sends it empty, as older copies do.
+
+Play online's count and the chooser's Play Online say "with this mod". A start logs the tag
+(`[disc mod] online with the tag ...`) and the battle check (`[comm battle] battles only with copies playing this
+mod's disc`).
+
+An ad hoc server that does not know of tags (an older one, or another project's) puts modded and other copies in the
+same lobbies. Their battles still do not start, but Friend Cards and quests may pass between them.
 
 ## Emendatus
 
@@ -121,7 +153,21 @@ Windows, clang build, the USA disc, `Emendatus11.18.26.xdelta`:
 - V: in the owner's session the game saved under the mod, and the mod's own save was written beside it, in the same
   second (`ULUS10566GameData00` and `ULUS10566ExtGameData00/EMSX.BIN` in `ms0-patched`).
 
+Online, 21 November:
+
+- V: the patch and the patched image prepare into layers of the same 29,613 sectors and the same identity,
+  `58fe9ae52cb0…` (3.1 s from the patch, 1.9 s from an image on an SSD); a separate Python computation gives the same
+  identity from either layer, and from the patched image compared with the clean disc directly.
+- V: the System page with an image: the image dropped on the browser, "Comparing emendatus.iso with your copy of the
+  game's disc", the ready note, Esc back to the game.
+- V: a modded start logs its identity, the tag `<port's tag>-m58fe9ae52cb0` and the battle check; the release starts
+  as before, with neither.
+- V: PortableKit's `portablekit_disc_patch_tests` (a made-up mod from a patch and from an image, read back, its
+  identity; the tag of a modded copy) and its other framework tests pass (MSVC; the ad hoc ones not run);
+  `d012_tests` pass.
+
 Not verified: a whole story chapter, loading the mod's second save back, Linux, the Steam Deck,
-Android (the picker is desktop only), PortableKit's own build and tests, the European disc, another mod or a patch
-made by another tool than xdelta3. Online play does not yet keep a modded copy from meeting a release copy. A layer
-names the image it was prepared from by path: moving that image means preparing the mod again.
+Android (the picker is desktop only), the European disc, another mod or a patch made by another tool than xdelta3.
+Online with two copies: a modded and a release copy kept apart, two modded copies meeting and fighting (it needs
+someone at the PC for the firewall's questions). A layer names the image it was prepared from by path: moving that
+image means preparing the mod again.

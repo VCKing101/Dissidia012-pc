@@ -2,10 +2,16 @@
 //
 // The player chooses the mod as its makers hand it out: a patch to the disc
 // (.xdelta, VCDIFF) or a disc image already patched (.iso). A patch is applied
-// once to the game's own disc image, and only the sectors it changes are
-// kept, in data/disc-mods/<name>.pkdisc (PortableKit's disc_patch.hpp); the
-// game then reads that file as the modded disc, taking every other sector from
-// its own image. No second image and no patching tool.
+// once to the game's own disc image, and an image is compared with it; either
+// way only the sectors the mod changes are kept, in
+// data/disc-mods/<name>.pkdisc (PortableKit's disc_patch.hpp). The game then
+// reads that file as the modded disc, taking every other sector from its own
+// image. No second image and no patching tool.
+//
+// Online, a mod's disc is known by its identity (the sectors it changes,
+// whichever way it was prepared): its copies meet only copies playing the same
+// mod (PortableKit's adhoc_version_tag()), and fight only them
+// (d012_comm_battle.cpp).
 //
 // settings.ini keeps the mod (disc_mod.image: the .pkdisc or the .iso) and the
 // switch (disc_mod.enabled, "1" or "0"). Both are read once, when the game
@@ -23,6 +29,7 @@
 
 #include "d012_disc_mod.hpp"
 
+#include "adhoc/session.hpp"
 #include "disc_patch.hpp"
 #include "install/user_data.hpp"
 #include "patched_edition.hpp"
@@ -113,6 +120,7 @@ struct Preparation {
     std::atomic<bool> running{false};
     portablekit::disc_patch::Progress progress;
     std::string name;
+    bool image = false;  // a patched disc image, not a patch
     std::string error;   // for the player, once it failed
     std::string done;    // for the player, once it is ready
     ~Preparation() {
@@ -125,16 +133,20 @@ Preparation &preparation() {
     return p;
 }
 
-// Applies `patch` to the game's own disc (synchronously); empty on success,
-// else why not. `summary` says what was kept.
+// Applies `patch` to the game's own disc, or compares a patched disc image
+// with it (synchronously); empty on success, else why not. `summary` says what
+// was kept.
 std::optional<std::string> prepare_now(const std::filesystem::path &patch, portablekit::disc_patch::Progress &progress,
                                        std::filesystem::path &out, std::string &summary) {
     const std::filesystem::path release = portablekit::patched::release_disc();
     if (release.empty()) return std::string("The game's own disc image is not known.");
     out = data_directory() / "disc-mods" / patch.stem();
     out += kLayerExtension;
+    const bool image = !portablekit::disc_patch::is_patch_file(patch);
     const auto started = std::chrono::steady_clock::now();
-    const portablekit::disc_patch::Result result = portablekit::disc_patch::prepare(patch, release, out, progress);
+    const portablekit::disc_patch::Result result =
+        image ? portablekit::disc_patch::prepare_image(patch, release, out, progress)
+              : portablekit::disc_patch::prepare(patch, release, out, progress);
     const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
     std::cout << "[disc mod] " << portablekit::install::path_to_utf8(patch.filename()) << ": "
               << (result.ok ? "prepared" : "not prepared") << " in " << seconds << " s; " << result.windows
@@ -143,13 +155,16 @@ std::optional<std::string> prepare_now(const std::filesystem::path &patch, porta
               << (result.message.empty() ? "" : "; " + result.message) << std::endl;
     if (!result.ok) return result.message;
     std::string why;
-    if (!portablekit::patched::open(out, why)) {
+    const std::optional<portablekit::patched::Edition> edition = portablekit::patched::open(out, why);
+    if (!edition) {
         std::error_code ec;
         std::filesystem::remove(out, ec);
         return "The patched disc cannot be played: " + why + ".";
     }
+    std::cout << "[disc mod] identity " << edition->identity << std::endl;
     summary = megabytes((result.changed_sectors - result.zero_sectors) * 2048u) +
-              " of changes, kept beside your disc." + (result.message.empty() ? "" : " " + result.message);
+              " of changes, kept beside your disc." + (image ? " The disc image itself is no longer needed." : "") +
+              (result.message.empty() ? "" : " " + result.message);
     return std::nullopt;
 }
 
@@ -163,6 +178,7 @@ void start_preparation(const std::filesystem::path &patch) {
     {
         std::lock_guard guard(p.lock);
         p.name = portablekit::install::path_to_utf8(patch.filename());
+        p.image = !portablekit::disc_patch::is_patch_file(patch);
         p.error.clear();
         p.done.clear();
     }
@@ -209,9 +225,11 @@ ui::FileBrowser::Options browser_options() {
 bool preparation_frame(bool back) {
     Preparation &p = preparation();
     std::string name, error, done;
+    bool image = false;
     {
         std::lock_guard guard(p.lock);
         name = p.name;
+        image = p.image;
         error = p.error;
         done = p.done;
     }
@@ -219,8 +237,10 @@ bool preparation_frame(bool back) {
     ui::begin_content();
     if (p.running) {
         const std::uint64_t made = p.progress.done, total = p.progress.total;
-        ui::paragraph("Applying " + name + " to your copy of the game's disc. Only what it changes is kept; this "
-                      "takes a minute or less.");
+        ui::paragraph(image ? "Comparing " + name + " with your copy of the game's disc. Only what differs is kept; "
+                              "this takes a minute or less."
+                            : "Applying " + name + " to your copy of the game's disc. Only what it changes is kept; "
+                              "this takes a minute or less.");
         ui::progress_bar(total != 0u ? static_cast<float>(made) / static_cast<float>(total) : 0.0f,
                          total != 0u ? megabytes(made) + " of " + megabytes(total) : std::string("Reading the patch…"));
         if (back) p.progress.cancel = true;
@@ -267,20 +287,28 @@ bool picker_frame() {
     }
     const std::filesystem::path chosen = dropped ? *dropped : p.browser->chosen();
     p.browser.reset();
-    if (portablekit::disc_patch::is_patch_file(chosen)) {
-        p.error.clear();
-        p.preparing = true;
-        start_preparation(chosen);
-        return true;
-    }
+    // A disc image is checked first (the game's, a plain executable), then
+    // kept as a layer as a patch is.
     std::string why;
-    if (!portablekit::patched::open(chosen, why)) {
-        p.error = portablekit::install::path_to_utf8(chosen.filename()) + ": " + why + ".";
-        return true;
+    const std::string file = portablekit::install::path_to_utf8(chosen.filename());
+    if (!portablekit::disc_patch::is_patch_file(chosen)) {
+        if (!portablekit::patched::open(chosen, why)) {
+            p.error = file + ": " + why + ".";
+            return true;
+        }
+        // Another region's disc would differ in nearly every sector.
+        const auto mod_disc = portablekit::install::disc_id_of(chosen);
+        const auto own_disc = portablekit::install::disc_id_of(portablekit::patched::release_disc());
+        if (mod_disc && own_disc && *mod_disc != *own_disc) {
+            p.error = file + ": it is made from another release of the game (" + *mod_disc + "); yours is " +
+                      *own_disc + ".";
+            return true;
+        }
     }
     p.error.clear();
-    choose(chosen);
-    return false;
+    p.preparing = true;
+    start_preparation(chosen);
+    return true;
 }
 #endif
 
@@ -323,8 +351,8 @@ void system_rows() {
     }
 
     ui::RowOptions on;
-    on.description = "Plays the mod from the next start. Its saves and downloadable content are kept apart from the "
-                     "game's own, in the folder ms0-patched.";
+    on.description = "Plays the mod from the next start. Online, you meet only players of the same mod. Its saves "
+                     "and downloadable content are kept apart from the game's own, in the folder ms0-patched.";
     if (image.empty()) {
         on.disabled = true;
         on.note = "Choose the mod first";
@@ -380,6 +408,9 @@ void install(portablekit::HleRegistrar &) {
                                                                               portablekit::install::path_to_utf8(out))
                   << std::endl;
     }
+    if (portablekit::patched::active())
+        std::cout << "[disc mod] online with the tag " << portablekit::adhoc_version_tag()
+                  << ": only copies playing the same mod meet this one" << std::endl;
 #if defined(PORTABLEKIT_HAS_RENDERER)
     portablekit::ui::add_system_rows(&system_rows);
 #endif
