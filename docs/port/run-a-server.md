@@ -82,6 +82,7 @@ Play online then counts the players on it.
 | `--per-address N` | Players from one address at most (8) |
 | `--rate KB` | What one address may send, in KB a second (512) |
 | `--loopback` | Listen on 127.0.0.1 only, for copies on the same computer |
+| `--regions-apart` | Keep players of the European disc (ULES01505) apart from those of the North American one (ULUS10566), as before 21 November 2026. By default they meet: both discs hold the same program |
 
 Players reach a server on other ports by writing them in its address, `host:port` for the lobby. The battle port is
 the copy's own setting (`online.battle_port` in its `settings.ini`), so keep 27420 for a public server.
@@ -95,8 +96,9 @@ of a change, and drops whoever it names.
 ## The log
 
 `journalctl -u dissidia012-server` shows each login (nickname, MAC, release and address), every player turned away,
-and, once a minute when it changed, how many players are online on each release. It holds players' addresses: keep
-it briefly.
+and, once a minute when it changed, how many players are online on each release. A European disc's login shows the
+North American code it plays under and its own: `(…, ULUS10566/<release>, disc ULES01505)`. The log holds players'
+addresses: keep it briefly.
 
 Each battle has `[battle-relay]` lines. When it starts: whether the fighters may try a direct path. At its end: how
 long it lasted, how it ended (a fighter left, or nothing came for 20 s) and its path: `direct, the relay carried none

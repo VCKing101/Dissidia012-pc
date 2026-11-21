@@ -78,7 +78,29 @@ v0.5.1 test install, which is the same executable.
   profile and save-data tests pass.
 
 Not tried: EU DLC files, the menu's About row and the save transfer screens, BGM Maker's ISO export from the EU
-ISO, a full setup.exe install, the Steam Deck, and online play between a USA copy and an EU copy.
+ISO, a full setup.exe install and the Steam Deck.
+
+### Online: USA and EU copies together (21 November 2026)
+
+The game takes its ad hoc product code from its disc id as well, so an EU copy logs in to a server as ULES01505 and
+a USA copy as ULUS10566. PortableKit's server keeps each product code's groups apart, as a PSP does, so the two
+never saw each other: the official server's log for 18 to 21 November had no USA-vs-EU battle, and sixteen times a
+USA and an EU player sat in the same lobby name at the same moment without seeing each other. PPSSPP's own ad hoc
+server links ULES01505 to ULUS10566 for this game for the same reason.
+
+The server now groups a region release's product code with the profile's own (`adhoc_meeting_product()`,
+PortableKit's `profile.hpp`): an EU copy logs in as `ULUS10566/<release>, disc ULES01505`. Versions still keep
+copies apart. `dissidia012-server --regions-apart` (or `D012_ADHOC_REGIONS_APART=1` for a copy that hosts) keeps the
+old way. The game sends no disc id in its battles: the battle link's must-match list (version, compiler, disc mod,
+camera settings) has nothing per region.
+
+Checked on one PC, on loopback (no firewall prompt): the standalone server, a USA copy (`build/port/game`) and an EU
+copy (the EU ISO, the same `EBOOT.ELF`, the USA test save renamed to `ULES01505GameData00`, which loads), both the
+same build of main. Each copy listed the other Online in the Cornelia lobby; the USA copy challenged, the EU copy
+accepted, both picked fighters and the battle linked (player 0 USA, player 1 EU, one battle id) and stayed in step
+for 2,570 frames of mixed input on both sides, the two screens mirroring each other. With `--regions-apart` the
+same two copies sat in LOBBY0 each seeing only its own card, as players did. Not tried: two PCs or the internet, a
+copy that hosts (it needs a release with this change), Group Battle, EU DLC online, the Steam Deck or Android.
 
 ## Japan: a different build
 
