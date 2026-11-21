@@ -1,0 +1,284 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Sat, 21 Nov 2026 22:27:02 +1030
+Subject: [PATCH] Ad hoc server: a region release's players meet the profile's
+ own
+
+A game that reads its disc id from its data also announces it as its ad
+hoc product code. A copy on another region's disc of the same executable
+then logged in under that code, and the server kept each code's groups
+apart: on Dissidia 012's official server, European copies never saw North
+American ones, though both sat in the same lobby name.
+
+- adhoc_meeting_product() (profile.hpp): the profile's adhoc_product_code
+  for a region release's disc id, else the code itself.
+- The server groups each login by it. ServerPlayer::product keeps the code
+  the game gave, and the login's log line names both.
+- ServerConfig::regions_apart, and <PREFIX>_ADHOC_REGIONS_APART for a copy
+  that hosts or runs --adhoc-server: the old way, for comparison.
+- Tests: a profile check, and region_releases_meet() among the loopback ad
+  hoc tests, both ways.
+
+Tested on Windows (MSVC): the framework tests (24 of 24) and the loopback
+ad hoc tests. With Dissidia 012's standalone server on loopback, a North
+American and a European copy listed each other in the lobby, one
+challenged, and the battle stayed in step for 2,570 frames; with
+regions_apart each sat alone in its lobby. Not tested: two computers, a
+copy that hosts, Group Battle.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/adhoc/host.cpp     |  9 +++++++
+ host/adhoc/server.cpp   |  8 ++++--
+ host/adhoc/server.hpp   |  4 +++
+ host/adhoc/session.hpp  |  5 ++++
+ host/main.cpp           |  1 +
+ host/profile.cpp        |  6 +++++
+ host/profile.hpp        |  9 ++++++-
+ tests/adhoc_tests.cpp   | 56 +++++++++++++++++++++++++++++++++++++++++
+ tests/profile_tests.cpp |  3 +++
+ 9 files changed, 98 insertions(+), 3 deletions(-)
+
+diff --git a/host/adhoc/host.cpp b/host/adhoc/host.cpp
+index e197dec..5637fb4 100644
+--- a/host/adhoc/host.cpp
++++ b/host/adhoc/host.cpp
+@@ -77,6 +77,14 @@ bool adhoc_loopback_only() {
+     return on;
+ }
+ 
++bool adhoc_regions_apart() {
++    static const bool on = [] {
++        const char *text = portablekit::env("ADHOC_REGIONS_APART");
++        return text != nullptr && *text != '\0' && std::string(text) != "0";
++    }();
++    return on;
++}
++
+ std::string adhoc_server_address() {
+     if (adhoc_hosting()) {
+         const std::uint16_t port = host().port;
+@@ -185,6 +193,7 @@ bool adhoc_host_start() {
+         adhoc::ServerConfig config;
+         config.adhocctl_port = static_cast<std::uint16_t>(settings::current().adhoc_host_port);
+         config.loopback_only = adhoc_loopback_only();
++        config.regions_apart = adhoc_regions_apart();
+         if (!state.server.start(config)) {
+             state.error = state.server.status().error;
+             return false;
+diff --git a/host/adhoc/server.cpp b/host/adhoc/server.cpp
+index 98d9d1e..60b8e45 100644
+--- a/host/adhoc/server.cpp
++++ b/host/adhoc/server.cpp
+@@ -2,6 +2,7 @@
+ 
+ #include "adhoc/client.hpp"
+ #include "adhoc/sockets.hpp"
++#include "profile.hpp"
+ 
+ #include <algorithm>
+ #include <atomic>
+@@ -350,13 +351,16 @@ struct Server::Impl {
+         player.logged_in = true;
+         player.mac = mac;
+         player.nickname = nickname.empty() ? format_mac(mac) : nickname;
++        // Another region's disc of the same game meets the profile's own.
++        const std::string meets = config.regions_apart ? product : std::string(adhoc_meeting_product(product));
+         player.product = product;
+         player.version = version;
+-        player.game = version.empty() ? product : product + '/' + version;
++        player.game = version.empty() ? meets : meets + '/' + version;
+         player.id = make_player_id(player.link.peer);
+         player.login_time = Clock::now();
+         datagram_counts[mac] = DatagramCounts{};
+-        log_event(player.nickname + " (" + format_mac(mac) + ", " + player.game + ") logged in from " + from,
++        log_event(player.nickname + " (" + format_mac(mac) + ", " + player.game +
++                      (meets != product ? ", disc " + product : std::string()) + ") logged in from " + from,
+                   config.print_events);
+         return true;
+     }
+diff --git a/host/adhoc/server.hpp b/host/adhoc/server.hpp
+index fac600e..5a3d350 100644
+--- a/host/adhoc/server.hpp
++++ b/host/adhoc/server.hpp
+@@ -76,6 +76,10 @@ struct ServerConfig {
+     bool print_events{};
+     // A server strangers share (see the top of this file).
+     bool public_server{};
++    // Keeps the players of the profile's region releases apart from its own,
++    // by the product code each game announces, as on a PSP: the old way, for
++    // comparison. Off, they meet (adhoc_meeting_product() in profile.hpp).
++    bool regions_apart{};
+     // Matchmaking and relay connections the server takes at most, all told.
+     std::size_t max_logins{256u};
+     std::size_t max_relays{2048u};
+diff --git a/host/adhoc/session.hpp b/host/adhoc/session.hpp
+index b4a7e98..62d5986 100644
+--- a/host/adhoc/session.hpp
++++ b/host/adhoc/session.hpp
+@@ -75,6 +75,11 @@ bool adhoc_ask_for_choice();
+ // nothing a firewall asks about.
+ [[nodiscard]] bool adhoc_loopback_only();
+ 
++// <prefix>_ADHOC_REGIONS_APART: a server this copy runs (hosting, or
++// --adhoc-server) keeps the profile's region releases' players apart from its
++// own (adhoc::ServerConfig::regions_apart), as before they met.
++[[nodiscard]] bool adhoc_regions_apart();
++
+ // Starts the built-in server on the host port from the settings (27312 and
+ // the relay on 27313), announces it on the local network, turns ad hoc play
+ // on and points this instance's game at it. With the Open router ports
+diff --git a/host/main.cpp b/host/main.cpp
+index 8cc9f8b..b6b0239 100644
+--- a/host/main.cpp
++++ b/host/main.cpp
+@@ -273,6 +273,7 @@ int run_adhoc_server(int argc, char **argv) {
+     using namespace portablekit::adhoc;
+     ServerConfig config;
+     config.print_events = true;
++    config.regions_apart = portablekit::adhoc_regions_apart();
+     for (int i = 2; i < argc; ++i) {
+         if (std::string(argv[i]) == "--loopback") {
+             config.loopback_only = true;
+diff --git a/host/profile.cpp b/host/profile.cpp
+index 1e17c7a..b29606a 100644
+--- a/host/profile.cpp
++++ b/host/profile.cpp
+@@ -103,6 +103,12 @@ bool is_supported_disc_id(std::string_view disc_id) {
+     return disc_id == game().disc_id || find_region_release(disc_id) != nullptr;
+ }
+ 
++std::string_view adhoc_meeting_product(std::string_view product) {
++    const char *own = game().adhoc_product_code;
++    if (own != nullptr && *own != '\0' && find_region_release(product) != nullptr) return own;
++    return product;
++}
++
+ std::string supported_discs_display() {
+     std::string text = game().disc_id_display;
+     const auto releases = game().region_releases;
+diff --git a/host/profile.hpp b/host/profile.hpp
+index 130c50e..c7fbbf2 100644
+--- a/host/profile.hpp
++++ b/host/profile.hpp
+@@ -84,7 +84,9 @@ struct TiltControls {
+ // against its North American one). The installer takes it like the profile's
+ // own release and the same corpus runs it. A game that reads its own disc id
+ // from its data names its saves and downloads by this disc id, so they follow
+-// it; textures and the ad hoc product code stay the profile's.
++// it; textures stay the profile's. Such a game announces this disc id as its
++// ad hoc product code too; an ad hoc server groups it with the profile's
++// adhoc_product_code (adhoc_meeting_product()), so both discs' players meet.
+ struct RegionRelease {
+     const char *disc_id;                     // DISC_ID in its PARAM.SFO, e.g. "ULES01505"
+     const char *disc_id_display;             // the same, as it is printed
+@@ -499,6 +501,11 @@ using PatchImageHook = void (*)(psprecomp::Runtime &, const psprecomp::Elf32Imag
+ [[nodiscard]] const RegionRelease *find_region_release_by_encrypted(std::string_view eboot_sha256);
+ // True for the profile's own disc id and the region releases'.
+ [[nodiscard]] bool is_supported_disc_id(std::string_view disc_id);
++// The product code an ad hoc server groups a login with this one under: the
++// profile's adhoc_product_code for a region release's disc id (a game that
++// reads its disc id from its data announces that one), else the code itself.
++// The same executable runs on both discs, so their players meet.
++[[nodiscard]] std::string_view adhoc_meeting_product(std::string_view product);
+ // Every supported disc, for the player: "ULUS-10566 or ULES-01505".
+ [[nodiscard]] std::string supported_discs_display();
+ // The disc running now, chosen by host/main.cpp from the disc image's
+diff --git a/tests/adhoc_tests.cpp b/tests/adhoc_tests.cpp
+index 06fe1c9..c6a5e0b 100644
+--- a/tests/adhoc_tests.cpp
++++ b/tests/adhoc_tests.cpp
+@@ -837,6 +837,60 @@ void matching_request_waits() {
+     }
+ }
+ 
++// The test profile's region release (TEST00002) announces its own disc id: on a
++// server it meets the profile's own product code (TEST00001), and with
++// regions_apart it is kept apart as before. Loopback alone.
++void region_releases_meet() {
++    for (const bool apart : {false, true}) {
++        const std::string label = apart ? "regions apart: " : "regions meet: ";
++        Server server;
++        std::uint16_t port = 0;
++        for (std::uint16_t candidate = 39412; candidate < 39500 && port == 0u; candidate += 2) {
++            ServerConfig config;
++            config.adhocctl_port = candidate;
++            config.loopback_only = true;
++            config.public_server = true;
++            config.regions_apart = apart;
++            if (server.start(config)) port = candidate;
++        }
++        check(port != 0u, label + "a loopback server starts");
++        if (port == 0u) continue;
++        const std::size_t joined_size = ctl::server_packet_size(ctl::kConnectBssid);
++        const std::size_t peer_size = ctl::server_packet_size(ctl::kConnect);
++        Raw own(port);
++        own.send(ctl::login(kMacA, "HunterA", "TEST00001", "one"));
++        own.send(ctl::connect("LOBBY0"));
++        check(own.read(joined_size).has_value(), label + "the profile's disc joins LOBBY0");
++        Raw other(port);
++        other.send(ctl::login(kMacB, "HunterB", "TEST00002", "one"));
++        other.send(ctl::connect("LOBBY0"));
++        if (!apart) {
++            const auto told = other.read(peer_size);
++            check(told && static_cast<std::uint8_t>((*told)[0]) == ctl::kConnect &&
++                      wire::get_mac(told->data() + 1 + ctl::kNicknameLength) == kMacA,
++                  label + "the region release's player is told about the profile's");
++            const auto told_own = own.read(peer_size);
++            check(told_own && static_cast<std::uint8_t>((*told_own)[0]) == ctl::kConnect &&
++                      wire::get_mac(told_own->data() + 1 + ctl::kNicknameLength) == kMacB,
++                  label + "and the profile's player about the region release's");
++        } else {
++            check(other.read(joined_size).has_value() && !own.read(1u, 500).has_value(),
++                  label + "each disc's player has a LOBBY0 of its own");
++        }
++        bool products_kept = false;
++        wait_until([&] {
++            int own_disc = 0, region_disc = 0;
++            for (const ServerPlayer &p : server.status().players) {
++                own_disc += p.product == "TEST00001";
++                region_disc += p.product == "TEST00002";
++            }
++            return products_kept = own_disc == 1 && region_disc == 1;
++        });
++        check(products_kept, label + "the status keeps the product code each game announced");
++        server.stop();
++    }
++}
++
+ int main(int argc, char **argv) {
+     WinsockSession winsock;
+     if (argc > 1 && std::string(argv[1]) == "--exit-while-hosting") return exit_while_hosting(false);
+@@ -852,6 +906,7 @@ int main(int argc, char **argv) {
+         relay_report();
+         relay_out_of_reach();
+         public_server();
++        region_releases_meet();
+         router_messages();
+         matching_request_waits();
+         std::cout << (failures == 0 ? "all loopback ad hoc tests passed" : std::to_string(failures) + " failed")
+@@ -868,6 +923,7 @@ int main(int argc, char **argv) {
+     relay_report();
+     relay_out_of_reach();
+     public_server();
++    region_releases_meet();
+     discovery(37500);
+     router_messages();
+     matching_request_waits();
+diff --git a/tests/profile_tests.cpp b/tests/profile_tests.cpp
+index d4cdb7d..275f288 100644
+--- a/tests/profile_tests.cpp
++++ b/tests/profile_tests.cpp
+@@ -53,6 +53,9 @@ int main() {
+               find_region_release_by_encrypted(unknown) == nullptr,
+           "a region release is found by its EBOOT.BIN's hash");
+     check(supported_discs_display() == "TEST-00001 or TEST-00002", "the supported discs are listed for the player");
++    check(adhoc_meeting_product("TEST00002") == "TEST00001" && adhoc_meeting_product("TEST00001") == "TEST00001" &&
++              adhoc_meeting_product("TEST00003") == "TEST00003",
++          "a region release's players meet under the profile's product code, another game's keep theirs");
+     check(std::string(active_disc_id()) == "TEST00001" && std::string(active_save_game_name()) == "TEST00001" &&
+               active_save_folders().size() == 3u,
+           "before a disc is chosen, the profile's own disc id and saves apply");
+-- 
+2.53.0.windows.1
+

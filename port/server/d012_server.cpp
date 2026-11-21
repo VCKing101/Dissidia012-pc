@@ -12,7 +12,7 @@
 //
 //   dissidia012-server [--port N] [--battle-port N] [--ban-list FILE]
 //                      [--max-players N] [--per-address N] [--rate KB]
-//                      [--loopback]
+//                      [--loopback] [--regions-apart]
 //
 // MIT licence; see port/README.md.
 
@@ -55,11 +55,19 @@ namespace portablekit {
 #if defined(__GNUC__)
 #pragma GCC diagnostic ignored "-Wmissing-field-initializers"
 #endif
+// The European disc runs the North American executable and announces its own
+// disc id (port/host/d012_profile.cpp lists it in full): its players meet the
+// North American disc's (adhoc_meeting_product()) unless --regions-apart.
+constexpr RegionRelease kRegionReleases[] = {
+    {.disc_id = "ULES01505"},
+};
+
 const GameProfile &game() {
     static const GameProfile profile{
         .app_name = "dissidia012-server",
         .project_name = "Dissidia 012 server",
         .env_prefix = "D012",
+        .region_releases = kRegionReleases,
         .adhoc_product_code = "ULUS10566",
     };
     return profile;
@@ -231,7 +239,9 @@ void usage() {
                  "  --max-players N  players online at most (default 512)\n"
                  "  --per-address N  players from one address at most (default 8)\n"
                  "  --rate KB        what one address may send, in KB a second (default 512)\n"
-                 "  --loopback       listen on 127.0.0.1 alone, for copies on this computer\n";
+                 "  --loopback       listen on 127.0.0.1 alone, for copies on this computer\n"
+                 "  --regions-apart  keep European-disc players apart from North American ones, as\n"
+                 "                   before they met\n";
 }
 
 bool number(const char *text, long low, long high, long &out) {
@@ -251,6 +261,7 @@ int main(int argc, char **argv) {
     long per_address = 8;
     long rate_kb = 512;
     bool loopback = false;
+    bool regions_apart = false;
     std::filesystem::path ban_path;
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
@@ -260,6 +271,8 @@ int main(int argc, char **argv) {
             return 0;
         } else if (arg == "--loopback") {
             loopback = true;
+        } else if (arg == "--regions-apart") {
+            regions_apart = true;
         } else if (arg == "--port" && has_value && number(argv[++i], 1024, 65534, port)) {
         } else if (arg == "--battle-port" && has_value && number(argv[++i], 1024, 65535, battle_port)) {
         } else if (arg == "--max-players" && has_value && number(argv[++i], 1, 100000, max_players)) {
@@ -283,6 +296,7 @@ int main(int argc, char **argv) {
     config.loopback_only = loopback;
     config.print_events = true;
     config.public_server = true;
+    config.regions_apart = regions_apart;
     config.max_logins = static_cast<std::size_t>(max_players);
     // Each copy opens a relay connection per ad hoc socket of the game's: a
     // few, more during a Group Battle.
