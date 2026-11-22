@@ -167,8 +167,11 @@ std::optional<std::vector<File>> build_from_disc(const pix::Index &index) {
     return std::move(built.files);
 }
 
+// Who the abilities are given by (mod_abilities::Grant::mod_id).
+constexpr const char *kGrantOwner = "the port";
+
 // The files for the package, asked for when the game first opens it.
-std::vector<package_mods::LateFile> files_for_package(const std::function<bool(std::uint32_t)> &taken) {
+std::vector<package_mods::LateFile> build_for_package(const std::function<bool(std::uint32_t)> &taken) {
     State &s = state();
     std::vector<package_mods::LateFile> out;
     try {
@@ -216,6 +219,15 @@ std::vector<package_mods::LateFile> files_for_package(const std::function<bool(s
     return out;
 }
 
+// The same, and with the moves left out, their abilities are not given: the
+// game's ability table is the disc's, and a side file from a start that had
+// them must not put them back into a save.
+std::vector<package_mods::LateFile> files_for_package(const std::function<bool(std::uint32_t)> &taken) {
+    std::vector<package_mods::LateFile> out = build_for_package(taken);
+    if (!state().active) mod_abilities::withdraw(kGrantOwner);
+    return out;
+}
+
 } // namespace
 
 void install(std::vector<mod_abilities::Grant> &grants) {
@@ -255,7 +267,7 @@ void install(std::vector<mod_abilities::Grant> &grants) {
     try {
         // D012_TEST_ORIGINAL_MOVES=1: all eight from level 1, to try them on any save.
         const bool all_now = portablekit::env("TEST_ORIGINAL_MOVES") != nullptr;
-        for (const auto &[id, learn] : abilities(*s.recipe)) grants.push_back({id, all_now ? 1 : learn, "the port"});
+        for (const auto &[id, learn] : abilities(*s.recipe)) grants.push_back({id, all_now ? 1 : learn, kGrantOwner});
     } catch (const Error &failure) {
         left_out(failure.what());
         s.recipe.reset();

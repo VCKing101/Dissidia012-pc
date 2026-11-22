@@ -18,7 +18,9 @@
 #include "portablekit/hle_extension.hpp"
 #include "psprecomp/runtime.hpp"
 
+#include <algorithm>
 #include <cstdio>
+#include <iterator>
 #include <filesystem>
 #include <iostream>
 #include <string>
@@ -309,7 +311,10 @@ void put_back(psprecomp::GuestMemory &m, std::uint32_t params, std::uint32_t buf
         } else if (std::sscanf(line, "slot %u %u %X", &r, &offset, &key) == 3 && same && r < kRecordCount &&
                    offset >= kSets && offset < kSets + kSetSize * kSetCount) {
             const std::uint32_t at = buffer + kRecords + kRecordSize * r + offset;
-            if (m.load8(at) == 0xFFu) {
+            // Only an ability given this start: the set's owner and the key make its id.
+            const std::uint32_t set = buffer + kRecords + kRecordSize * r + kSets + (offset - kSets) / kSetSize * kSetSize;
+            const std::uint16_t id = static_cast<std::uint16_t>(m.load8(set + kSetCharacter) << 8u | (key & 0xFFu));
+            if (m.load8(at) == 0xFFu && granted(id)) {
                 m.store8(at, static_cast<std::uint8_t>(key));
                 ++slots;
             }
@@ -365,7 +370,13 @@ void finish(psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
     p.active = false;
     if (m.load32(p.params + kResult) != 0u) return;
     if (save_mode(p.mode)) {
-        if (const auto path = side_file(m, p.params); !path.empty()) write_side_file(path, p.taken, p.hash);
+        // With every ability taken back this start (withdraw), nothing could
+        // be taken out: the side file of a start that had them stays, so
+        // their AP and mastery come back when they do.
+        if (state().by_character.empty())
+            std::printf("[abilities] the save is written; no added abilities this start, the side file is kept\n");
+        else if (const auto path = side_file(m, p.params); !path.empty())
+            write_side_file(path, p.taken, p.hash);
     } else {
         put_back(m, p.params, m.load32(p.params + kDataBuf));
     }
@@ -379,6 +390,19 @@ void install(const std::vector<Grant> &grants) {
     if (!grants.empty())
         std::printf("[abilities] %zu added ability(ies), given by level%s\n", grants.size(),
                     enabled() ? "" : " (off: D012_NO_MOD_ABILITIES)");
+}
+
+void withdraw(const std::string &mod_id) {
+    State &s = state();
+    std::size_t taken = 0;
+    for (auto it = s.by_character.begin(); it != s.by_character.end();) {
+        auto &list = it->second;
+        const std::size_t before = list.size();
+        std::erase_if(list, [&](const Grant &g) { return g.mod_id == mod_id; });
+        taken += before - list.size();
+        it = list.empty() ? s.by_character.erase(it) : std::next(it);
+    }
+    if (taken != 0u) std::printf("[abilities] %zu ability(ies) of %s taken back\n", taken, mod_id.c_str());
 }
 
 void install_saves(portablekit::HleRegistrar &hle) {

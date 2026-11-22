@@ -32,6 +32,11 @@ struct Grant {
 
 // Called once, by mods::install, with the enabled mods' abilities.
 void install(const std::vector<Grant> &grants);
+// Takes back the abilities of `mod_id` given to install: when what adds them
+// to the game's ability table turns out not to be used after all (Bartz's
+// original moves left out at the package's first open). Before any save is
+// loaded; a side file's entries for them are then left alone.
+void withdraw(const std::string &mod_id);
 // Keeps the abilities out of the game's save file, in a side file of the
 // port's (see d012_mod_abilities.cpp). Called after install, once the save
 // utility is bound (d012_hle.cpp).
