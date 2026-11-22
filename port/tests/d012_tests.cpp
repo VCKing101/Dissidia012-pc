@@ -1,7 +1,8 @@
 // The port's own tests, run by tools/port/pk_ctest.cmd <build dir>: the game's
 // manifest rules (host/d012_mod_manifest.cpp) and the shared manifest cases
-// (manifest_cases.json), the JSON writer, and the Battle BGM Maker's model,
-// checks, names, saving and loop suggester. No game is needed. The expected
+// (manifest_cases.json), the package index plan (host/d012_package_index.cpp),
+// the JSON writer, and the Battle BGM Maker's model, checks, names, saving
+// and loop suggester. No game is needed. The expected
 // texts of the writer and the model are what the Python tool
 // (port/tools/bgm_maker) writes for the same documents. MIT licence; see
 // port/README.md.
@@ -17,6 +18,8 @@
 #include "d012_mod_manifest.hpp"
 #include "d012_no_window_rules.hpp"
 #include "d012_online_rules.hpp"
+#include "d012_original_moves.hpp"
+#include "d012_package_index.hpp"
 #include "d012_summon_slot_rules.hpp"
 #include "d012_update_rules.hpp"
 #include "d012_versus_rules.hpp"
@@ -56,6 +59,8 @@
 #include <iostream>
 #include <iterator>
 #include <map>
+#include <memory>
+#include <span>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -258,6 +263,21 @@ void test_manifest() {
         expect_text(describe(result.problems), "warning mod (line 1): the mod adds nothing this build knows (no \"music\")\n",
                     "a mod with no music");
         expect(result.manifest.loaded, "a mod with no music still loads");
+    }
+    {
+        std::filesystem::create_directories(folder.path / "package" / "obj");
+        const auto result = manifest::read_text(
+            "{\"id\": \"ok\", \"name\": \"N\", \"version\": \"1\", \"package\": \"package\"}", folder.path);
+        expect_text(describe(result.problems), "", "a mod with a package and no music");
+        expect(result.manifest.package == folder.path / "package", "the package folder is the mod's folder / \"package\"");
+        for (const char *bad : {"../package", "missing", "/package"}) {
+            const auto refused = manifest::read_text(
+                std::string("{\"id\": \"ok\", \"name\": \"N\", \"version\": \"1\", \"package\": \"") + bad + "\"}",
+                folder.path);
+            expect(refused.manifest.loaded && refused.manifest.package.empty() && !refused.problems.empty() &&
+                       refused.problems[0].level == Problem::Level::Error,
+                   std::string("a package folder \"") + bad + "\" is left out, the mod still loads");
+        }
     }
     {
         const std::string text = "{\n"
@@ -1695,6 +1715,81 @@ void test_frame_balance() {
     expect(play_balance(distant)[2999] < 6.0, "frame balance: level again at a 300 ms round trip");
 }
 
+// The package index and the plan for serving mod files in place of entries
+// (host/d012_package_index.cpp), on a made-up package of four sectors.
+void test_package_index() {
+    namespace pix = d012::package_index;
+    expect(pix::path_crc("obj/p_sev100.objx") == 0x4E88D7FFu, "path_crc: Cloud's moveset (from the USA disc's index)");
+    expect(pix::path_crc("OBJ\\P_SEV100.OBJX") == 0x4E88D7FFu, "path_crc: any case, either slash");
+    expect(pix::path_crc("general_archive/main/main.bin") == 0x93307C1Cu, "path_crc: main.bin");
+
+    // Entries A (sector 0, 2048 bytes), B (sectors 1-2, 3000 bytes, flags 1)
+    // and C (sector 3, 100 bytes); the package is 4 sectors.
+    pix::Index index;
+    index.magic = 0x20090218u;
+    index.entries = {{0x10u, 0u, 2048u, 0u}, {0x20u, 1u, 3000u, 1u}, {0x30u, 3u, 100u, 0u}};
+    const std::vector<std::uint8_t> written = pix::write(index);
+    expect(written.size() == pix::kHeaderBytes + 3u * pix::kEntryBytes, "write: header and three entries");
+    std::string error;
+    const auto parsed = pix::parse(written, error);
+    expect(parsed && pix::write(*parsed) == written, "parse: what write wrote reads back the same");
+    expect(parsed && parsed->entries[1].flags == 1u && parsed->entries[1].size == 3000u, "parse: flags and size apart");
+    expect(!pix::parse(std::span(written).first(written.size() - 1u), error), "parse: a short index is refused");
+    pix::Index unsorted = index;
+    std::swap(unsorted.entries[0], unsorted.entries[1]);
+    expect(!pix::parse(pix::write(unsorted), error), "parse: an index not sorted by CRC is refused");
+    expect(pix::end_sector(index) == 4u, "end_sector: the last entry's end");
+
+    std::vector<std::uint8_t> real(4u * pix::kSector);
+    for (std::size_t i = 0; i < real.size(); ++i) real[i] = static_cast<std::uint8_t>(i * 7u + 1u);
+    const auto bytes_of = [](std::size_t size, std::uint8_t fill) {
+        return std::make_shared<const std::vector<std::uint8_t>>(size, fill);
+    };
+    const std::vector<pix::Replacement> replacements = {
+        {0x20u, bytes_of(4000u, 0xB2u), "b"},  // fits in B's two sectors
+        {0x30u, bytes_of(5000u, 0xC3u), "c"},  // C has one sector: moved to sectors 4-6
+        {0x99u, bytes_of(10u, 0x99u), "x"},    // no such entry
+        {0x20u, bytes_of(1u, 0x00u), "b2"},    // B again: the first one wins
+    };
+    const pix::Plan plan = pix::plan(index, real.size(), replacements);
+    expect(plan.in_place == 1u && plan.relocated == 1u, "plan: one in place, one moved");
+    expect(plan.missing == std::vector<std::uint32_t>{0x99u}, "plan: the missing CRC is said");
+    expect(plan.package_size == 7u * pix::kSector && plan.relocated_bytes == 3u * pix::kSector,
+           "plan: the package grows by the moved file's sectors");
+    const auto new_index = pix::parse(plan.index, error);
+    expect(new_index && new_index->entries[0].sector == 0u && new_index->entries[0].size == 2048u,
+           "plan: an entry no mod replaces is as it was");
+    expect(new_index && new_index->entries[1].sector == 1u && new_index->entries[1].size == 4000u &&
+               new_index->entries[1].flags == 1u,
+           "plan: B keeps its place and flags, with the new size");
+    expect(new_index && new_index->entries[2].sector == 4u && new_index->entries[2].size == 5000u,
+           "plan: C moves past the end of the real package");
+
+    // Everything the game reads, in uneven pieces, against what it should be.
+    std::vector<std::uint8_t> want(plan.package_size, 0u);
+    std::copy(real.begin(), real.end(), want.begin());
+    std::fill(want.begin() + 2048, want.begin() + 2048 + 4000, 0xB2u);
+    std::fill(want.begin() + 2048 + 4000, want.begin() + 3 * 2048, 0u);
+    std::fill(want.begin() + 4 * 2048, want.begin() + 4 * 2048 + 5000, 0xC3u);
+    const pix::RealReader read_real = [&](std::uint64_t at, std::uint8_t *out, std::size_t n) -> std::size_t {
+        if (at >= real.size()) return 0u;
+        const std::size_t count = std::min<std::size_t>(n, real.size() - static_cast<std::size_t>(at));
+        std::copy_n(real.begin() + static_cast<std::ptrdiff_t>(at), count, out);
+        return count;
+    };
+    std::vector<std::uint8_t> got(plan.package_size + 100u, 0xEEu);
+    std::size_t at = 0u;
+    for (std::size_t step = 1u; at < got.size(); step = step * 3u % 1999u + 1u) {
+        const std::size_t n = pix::read(plan, at, got.data() + at, std::min(step, got.size() - at), read_real);
+        if (n == 0u) break;
+        at += n;
+    }
+    expect(at == plan.package_size, "read: stops at the end of the package as the game sees it");
+    got.resize(at);
+    expect(got == want, "read: the real file, the mods' files and their padding, each where it belongs");
+    expect(pix::plan(index, real.size(), {}).package_size == real.size(), "plan: no replacements, the same size");
+}
+
 } // namespace
 
 // DLC packs (host/d012_dlc_packs_plan.cpp): made-up packs, files in memory.
@@ -2053,6 +2148,59 @@ void test_battle_cheats() {
     expect(idle.written.empty(), "Defeat with Select writes nothing while Select is up");
 }
 
+// Bartz's original moves (host/d012_original_moves.cpp), as far as it goes
+// without the game's files: the recipe the port is built with is read whole,
+// its check block is as the builder expects, and a disc that lacks a file
+// stops the build with a reason. The build itself is checked against the
+// Python one with the disc's files (tests/check_original_moves.cpp).
+void test_original_moves() {
+    namespace om = d012::original_moves;
+    const std::string digits = "123456789";
+    expect(om::crc32(std::span(reinterpret_cast<const std::uint8_t *>(digits.data()), digits.size())) == 0xCBF43926u,
+           "CRC-32 as zlib's");
+    std::ifstream in(std::filesystem::path(D012_TESTS_DIR) / ".." / "features" / "bartz-original-moves.json", std::ios::binary);
+    const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    std::string error;
+    const auto recipe = d012::json::parse(text, error);
+    expect(recipe.has_value(), "the moves' recipe is JSON: " + error);
+    if (!recipe) return;
+    try {
+        const auto inputs = om::inputs(*recipe);
+        const auto outputs = om::outputs(*recipe);
+        const auto abilities = om::abilities(*recipe);
+        expect(!inputs.empty() && inputs[0].path == "obj/p_fiv100.objx" && inputs[0].size != 0u, "the recipe names the files a build reads");
+        expect(outputs.size() == 8u, "the recipe names the eight files a build comes to");
+        bool models = true;
+        for (const om::Mark &mark : outputs)
+            if (mark.path.starts_with("obj/")) models = models && mark.size <= 0x264000u;
+        expect(models, "every built model fits the game's model block");
+        expect(abilities.size() == 8u && abilities.front().first == 0x0920u && abilities.back().first == 0x0927u,
+               "the recipe's eight abilities are 0920 to 0927");
+        bool levels = true;
+        for (const auto &[id, level] : abilities) levels = levels && level >= 1 && level <= 100;
+        expect(levels, "every ability has a level to be learned at");
+        om::Built nothing;
+        std::string problem;
+        expect(!om::check(*recipe, nothing, problem) && !problem.empty(), "a build of no files is not the recipe's");
+    } catch (const om::Error &failure) {
+        expect(false, std::string("the recipe's check block: ") + failure.what());
+    }
+    bool stopped = false;
+    try {
+        (void)om::build(*recipe, [](std::string_view) { return std::optional<om::Bytes>(); });
+    } catch (const om::Error &failure) {
+        stopped = std::string(failure.what()).find("obj/p_fiv100.objx") != std::string::npos;
+    }
+    expect(stopped, "a disc without Bartz's moveset stops the build, saying which file");
+    bool refused = false;
+    try {
+        (void)om::build(*recipe, [](std::string_view) { return std::optional<om::Bytes>(om::Bytes(64u, std::uint8_t{0})); });
+    } catch (const om::Error &) {
+        refused = true;
+    }
+    expect(refused, "a file that is not the game's stops the build");
+}
+
 int main(int argc, char **argv) {
     if (argc == 2 && std::string(argv[1]) == "--print-cases") {
         test_shared_cases(true);
@@ -2081,6 +2229,8 @@ int main(int argc, char **argv) {
     test_frame_balance();
     test_summon_slots();
     test_battle_cheats();
+    test_package_index();
+    test_original_moves();
     if (g_failures == 0) std::cout << "all passed\n";
     return g_failures == 0 ? 0 : 1;
 }

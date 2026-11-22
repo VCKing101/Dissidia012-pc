@@ -13,6 +13,8 @@
 #include "d012_hle.hpp"
 #include "d012_input.hpp"
 #include "d012_math_check.hpp"
+#include "d012_model_memory.hpp"
+#include "d012_mod_abilities.hpp"
 #include "d012_mods.hpp"
 #include "d012_rollback.hpp"
 #include "d012_sync.hpp"
@@ -84,6 +86,9 @@ void wrap_vblank_waits(portablekit::HleRegistrar &hle) {
 } // namespace
 
 void register_extra_hle(portablekit::HleRegistrar &hle) {
+    // Before anything is allocated, so the game's blocks are where they are
+    // in 32 MiB (d012_model_memory.cpp).
+    model_memory::reserve();
     register_suppreacc(hle);
 
     // The development kit's GPI switches; a retail console reads 0. The game
@@ -127,6 +132,7 @@ void register_extra_hle(portablekit::HleRegistrar &hle) {
     voices::install_menu(hle);
     // Mods: music added to the game (d012_mods.cpp, docs/port/mod-folder.md).
     mods::install(hle);
+    model_memory::trace_heaps();
     // The loading screen's music choice by series (d012_bgm_playlist.cpp).
     playlist::install(hle);
     // The right-stick battle camera and R3 (d012_camera.cpp).
@@ -147,6 +153,9 @@ void register_extra_hle(portablekit::HleRegistrar &hle) {
     // The Discord status (d012_discord.cpp).
     discord::install(hle);
     dialogs::install(hle);
+    // A mod's abilities kept out of the save file (d012_mod_abilities.cpp):
+    // after the dialogs, so it wraps their save utility polls.
+    mod_abilities::install_saves(hle);
 }
 
 void patch_loaded_image(psprecomp::Runtime &runtime, const psprecomp::Elf32Image &elf) {

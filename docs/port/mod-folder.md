@@ -1,7 +1,9 @@
 # Mods: the folder and its manifest
 
-> Written 19 October 2026 for the native port (`port/`). A mod **adds** to the game and never replaces anything:
-> no game file is changed, overwritten or hidden. The first thing a mod can add is battle music: new series (a
+> Written 19 October 2026 for the native port (`port/`). A mod **adds** to the game: no file of the game's is ever
+> changed or overwritten. The one exception, added on 1 November 2026, is a mod's **package** (section 9): files that
+> the game reads in place of its own package entries, such as a retail character changed with dissidia-fan's
+> character tools; turning the mod off brings the game's own back. The first thing a mod can add is battle music: new series (a
 > source game, such as another Final Fantasy) and their tracks, which come after the game's own series in the
 > loading screen's BGM choice. The game-side choice (the 2D selector: L2/R2, then left/right for the series and
 > up/down for the track) is in [bgm-playlist-design.md](bgm-playlist-design.md), section 10; this page is the
@@ -87,7 +89,8 @@ UTF-8 JSON. The example in [`port/examples/mods/example-tones/mod.json`](../../p
 | `name` | yes | Shown to the player, 1 to 64 bytes |
 | `version` | yes | Any text, 1 to 32 bytes, such as `1.0.0` |
 | `author`, `description` | no | Text (64 and 1,024 bytes at most) |
-| `music` | no | What the mod adds to the music, below. A mod without it adds nothing yet (a warning) |
+| `music` | no | What the mod adds to the music, below. A mod with neither it nor `package` adds nothing (a warning) |
+| `package` | no | A folder of the mod (a path relative to it, inside it) of files the game reads in place of its package entries: section 9. A bad one is an error and is left out; the rest of the mod still loads |
 
 Members the port does not know are reported as warnings and ignored, so a newer manifest still loads.
 
@@ -438,3 +441,157 @@ end-to-end check `port_check.py` now runs on `BgmMaker.exe` and finds the same.
 
 Not verified: a real song in the suggester (only tone pieces were used), a file at another rate in the game,
 browsers other than Chromium, macOS and Linux.
+
+## 9. Package files: changing a character
+
+> Added 1 November 2026. The scope, and the check of dissidia-fan's tools against the USA disc:
+> [move-studio.md](move-studio.md).
+
+Almost everything the game loads, every character's moves (`obj/p_sev100.objx`) and models
+(`obj/p_sev100_1p.gmo`) among it, is an entry of one file on the disc, `PSP_GAME/USRDIR/DATA/PACKAGE.BIN`, found
+through its index, `PACKAGE_INFO.BIN`. A mod's `package` folder holds files the game reads in their place:
+
+```text
+mods/cloud-heavy/
+  mod.json                  {"format": 1, "id": "cloud-heavy", "name": "Heavier Cloud", "version": "1",
+                             "package": "package"}
+  package/obj/p_sev100.objx the entry at that game path
+  package/by_crc/4E88D7FF.bin  the same, by the CRC of the path (for entries whose path is not known)
+```
+
+- **A file at its game path** replaces the entry with that path, in any case, with `/` between folders. A path is
+  found by the CRC of its lower-case text (BZip2's CRC-32), as the game finds it.
+- **`by_crc/<8 hex digits>.bin`** replaces the entry with that CRC.
+- **dissidia-fan's `charmod.py build`** writes exactly this layout: give it the package folder as its output,
+  `charmod.py --mods <data dir>/mods/<id>/package --disc <disc0> build <name>`, and add the `mod.json` above. Its own
+  notes in that folder (`roster.txt`, `readme_charmod_*.json`) are not package files and are passed over. Their
+  Move Studio and tools are their own, with no licence yet, and are not part of this repository; see
+  [move-studio.md](move-studio.md).
+- **What changes:** the game is given an index with each replaced entry's new size. A file that fits in the sectors
+  the entry had stays there; a bigger one is given sectors past the end of `PACKAGE.BIN`. The game's reads inside a
+  replaced entry come from the mod's file (zeros after its end, to the end of the sector). Nothing on the disc or
+  in the ISO is written.
+- **Which wins:** a file of a mod that is off counts for nothing. When two mods replace the same entry, the one
+  whose id sorts first gives it, and the other's file is an error in the log (`[mods] error: ... replaces the same
+  package entry as ...`). The same bytes in both are no clash: `charmod.py` puts `main.bin`
+  (`by_crc/93307C1C.bin`) in every folder it builds, identical each time.
+- **Bigger models:** a model file (`obj/*.gmo`, `*.objx`) over the game's 2,506,752 bytes is given room (below), up to
+  about 9.7 MB. A bigger one is warned about and will not load.
+- **Not yet:** a file whose path is no entry of the package is left out with a warning: adding new entries (a new
+  character's files) needs the bigger index of tier 3 in [move-studio.md](move-studio.md).
+- **The log:** `[mods] package: N file(s) from M mod(s)` at start-up, and when the game first opens the package
+  `[mods] package: N entries replaced, A in place and B moved past the end`.
+
+Switches: `D012_NO_PACKAGE_MODS=1` turns package files off (the mods' music stays); `D012_NO_MODS=1` turns every
+mod off. `D012_TRACE_PACKAGE_MODS=<n>` logs the first n reads of `PACKAGE.BIN` that touch a mod's file
+(`[mods] package read at <offset>, <length> bytes: <mod id>/<file> from byte <n>`).
+
+The port itself replaces package files the same way for [Bartz's original moves](original-moves.md), which it
+builds from the disc when the game first opens its package (`package_mods::add_late_source`). A mod's file of the
+same entry wins, and the port then leaves all of its own out. `D012_NO_MODS=1` does not turn those off;
+`D012_NO_PACKAGE_MODS=1` does.
+
+The code: `port/host/d012_package_index.cpp` (the index, and which bytes the game reads where; checked by
+`port/tests/d012_tests.cpp` on a made-up package), `port/host/d012_package_mods.cpp` (the mods' folders, and
+PortableKit's file providers, which serve the game the index and the package), `port/host/d012_model_memory.cpp`
+(room for bigger models).
+
+### Abilities
+
+A package that adds abilities to a character (rows in `system.bin`'s ability table, as
+`tools/original_moves.py` writes for Bartz's original Dissidia moves) lists them in mod.json:
+
+```json
+"abilities": [{"id": "0920", "learn": 1}, {"id": "0921", "learn": 10}, {"id": "0927", "learn": 0}]
+```
+
+- **`id`** is the ability's id, four hex digits: the character's id times 256 plus its key.
+- **`learn`** is the level from which the port puts it in the character's learned list, whatever save is loaded.
+  Abilities are given only when the game's ability table has them (with package files off, none are). 0 leaves it
+  to the game, for an ability unlocked by mastering another.
+- **Saves stay the game's own.** Right before the game's save is written, the mod's abilities are taken out of the
+  learned lists and the equipped slots, and put back right after. The save file is one the game reads without the
+  mod (PPSSPP or a PSP).
+- **A side file of the port's** keeps their AP, mastery and slots: `ms0/PSP/MODS/abilities/<game><save>_<file>.txt`.
+  It is read again after a load. The slots come back only while the save is the one written with the file.
+- `D012_NO_MOD_ABILITIES=1` turns this off; the code is `port/host/d012_mod_abilities.cpp`.
+
+### Hitbox groups placed at battle start
+
+A moveset can name hitbox groups 0 to 63. A package with more (Bartz with both move sets) parks the rest:
+record byte 0 = 63, byte 1 = the group's number, and events naming 63 + 256 x number. When the battle works out a
+fighter's enabled commands, the port puts the parked groups those commands use on ids nothing else of the fighter
+can use. `D012_NO_SHAPE_IDS=1` turns it off; the code is `port/host/d012_shape_ids.cpp`.
+
+### Room for bigger models
+
+The game loads each model file into a staging block of a fixed 0x264000 (2,506,752) bytes, so a bigger file used to
+crash the battle load (an allocation came back null and the load read guest address 0). Traced in the USA build
+(1 November 2026; dissidia-fan's notes on the EU build gave the figures, and EU and USA code are the same):
+
+- V: model slots are registered by main `0x0884417C(manager, id, heap, 0x264000, 0)`, from battle `0x08B45310` (four
+  slots: ids 0x54E, 0x134, 0x408, 0x548) and main `0x08844C14`, `0x089121F4` and `0x08922B90`. Those are the only
+  uses of the constant. `0x0884417C` hands the slot to `0x08843014`, which takes the slot's whole size from the
+  heap (`0x0885C6CC`), loads the file into it and frees it.
+- V: that heap is the file heap, built by main `0x088907C4`: `0x0888204C(0x275800)` takes a block from the game's
+  main heap and `0x0885C40C(block, 0x275800, name, 0x10)` makes a heap of it, whose handle is the block's address.
+  `0x089110B4` returns it for the slots.
+- V: both fighters' models are built in the battle model pool, made the same way by main `0x088667DC` with 0x780000
+  bytes at game start.
+- V: guest memory is full in a battle. The game's image and heaps run to `0x09B71000`, its 4 MB effect allocator
+  follows, and thread stacks fill the top of the 32 MiB (`D012_TRACE_KERNEL=1`).
+
+So the profile now gives the game 64 MiB, a PSP-2000's. The port keeps everything above `0x0A000000` from the
+kernel as soon as the kernel is set up, so the game's own blocks are where they are in 32 MiB (the same addresses,
+checked with `D012_TRACE_KERNEL=1`). When a mod's model is bigger than the game's block, the port hooks four of the
+game's functions:
+
+- **`0x08843014`:** a slot of 0x264000 bytes taken from the grown file heap gets the model's size instead, rounded up
+  to 4 KiB.
+- **`0x0888204C`:** the file heap's and the pool's blocks come from the kept memory, grown by the slot's growth (the
+  file heap) and by twice that plus 512 KiB (the pool: two fighters).
+- **`0x0885C40C`:** the heaps are made at those sizes.
+- **`0x0888208C`:** a block given back is kept for the next time it is asked for.
+
+The pool's growth is an estimate. Padded models do not test it, since padding adds nothing to the built model.
+Each hooked function is in another generated unit than its callers, so every call reaches the hook. With no model
+bigger than the game's, nothing is hooked.
+
+The log: `[mods] model memory: model files up to N bytes ...; file heap ... at 0x0A000000, battle model pool ...`
+at start-up, and `[mods] model memory: a model slot of N bytes` at the first big slot. `D012_NO_MODEL_MEMORY=1`
+keeps the game's sizes. `D012_TRACE_MODEL_MEMORY=1` logs each use.
+
+### Verification (1 November 2026)
+
+Recompiled build in `tools/local/port/build-d012-package`, data folder `build/port/data-package-test` (a muted copy
+of `build/port/data`, the port's own New Game), the scripted Quick Battle route of the BGM Maker's `port_check.py`
+(Lightning against a CPU Lightning in her second costume, Old Chaos Shrine), screenshots in
+`build/port/package-test/`.
+
+- V: the game opens `DISC0:/PSP_GAME/USRDIR/DATA/PACKAGE.BIN` once, by path, then seeks and reads
+  (`D012_TRACE_IO`), so a file provider sees it. `PACKAGE_INFO.BIN` is opened first.
+- V: **in place.** Lightning's 1P model (`obj/p_gst130_1p.gmo`) with every palette magenta, the same size: one entry
+  replaced in place, the game read all 1,741,984 bytes from the mod, and the player's Lightning is magenta in battle
+  while the CPU's (her 2P model, from the disc) is not. The battle played on and the run ended normally.
+- V: **moved.** The same file 100,000 bytes longer: moved past the end (1,843,200 bytes), the game read it at
+  offset 1,034,358,784, the real file's end, and the player's Lightning is magenta.
+- V: **charmod.py's output as it is.** A retail Lightning folder (as the Move Studio's *Save as mod* writes it) with
+  all 70 of her hits at power 99, built with `charmod.py build` into the package folder: `main.bin` was read from
+  the mod at boot and `obj/p_gst130.objx` once for each Lightning. In battle single Brave hits did 146 where the
+  unmodded run's did 23 to 42, and player 1 was beaten within the route. (The CPU's choices differ between runs,
+  so the two battles are not the same frame for frame.)
+- V: two mods with the same files: no error; with one byte different: the error, and the mod whose id sorts first
+  is used. `D012_NO_PACKAGE_MODS=1`: `[mods] package mods off`, nothing replaced.
+- V: `port/tests/d012_tests.cpp` (the CRC against the USA index, the index written and read back, unsorted and short
+  indexes refused, in place, moved, a missing CRC, the first of two replacements, and every byte of a made-up
+  package read back in uneven pieces; the manifest's `package` member).
+
+- V: **bigger models.** Without room, the magenta model padded to 2,641,984 bytes crashed the battle load
+  ("Guest memory access outside PSP RAM/EDRAM at 0x0000A100"). With it: slots of 2,646,016 bytes for ids 596, 597
+  and 1140, the player's Lightning magenta in battle, and the battle played on. Padded to 5,741,984 bytes: the same.
+  `D012_NO_MODEL_MEMORY=1`: the warning, then the old crash. No mods: nothing hooked, the battle as before, and
+  every kernel block at its 32 MiB address.
+
+Not verified: a model whose built data is bigger (the pool's growth), a second battle in one run (a heap's block
+given back and asked for again), the Steam Deck and Linux, a mod's music and package together in one run, and the
+Move Studio's own *Save as mod* (the folder was made by a script that writes the same layout).

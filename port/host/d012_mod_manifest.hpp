@@ -70,6 +70,14 @@ struct Series {
     std::vector<Track> tracks;  // only those the game plays
 };
 
+// An ability the mod's package gives a character (system.bin `ablt`), and the
+// level at which the port puts it in the character's learned list
+// (d012_mod_abilities.hpp); 0 = only as the game itself gives it.
+struct Ability {
+    std::uint16_t id{};
+    int learn{};
+};
+
 struct Manifest {
     bool loaded{};  // the mod itself was valid; series and tracks may still be left out
     std::string id;
@@ -78,6 +86,12 @@ struct Manifest {
     std::string author;
     std::string description;
     std::vector<Series> series;  // only those the game shows
+    // "package": a folder of the mod holding files that take the place of
+    // entries of the game's PACKAGE.BIN, each at its game path
+    // (d012_package_mods.hpp). Empty when there is none.
+    std::filesystem::path package;
+    // "abilities": [{"id": "0920", "learn": 1}, ...], with a package.
+    std::vector<Ability> abilities;
 };
 
 struct Result {

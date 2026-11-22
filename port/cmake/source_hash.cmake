@@ -1,7 +1,7 @@
 # cmake -DROOT=<port/> -DOUT=<file.cpp> -P source_hash.cmake
 #
 # Writes OUT, which defines d012::source_hash(): a SHA-256 of the port's own
-# source (host/, decomp/, config/, the PortableKit patches and this folder's
+# source (host/, decomp/, config/, features/, the PortableKit patches and this folder's
 # CMakeLists.txt), line endings aside, so that a checkout and a downloaded
 # archive of the same version agree. Online play compares it to make sure both
 # players run the same program (host/d012_net.cpp). OUT is rewritten only when
@@ -11,7 +11,7 @@
 
 file(GLOB_RECURSE files RELATIVE "${ROOT}"
      "${ROOT}/host/*.cpp" "${ROOT}/host/*.hpp" "${ROOT}/decomp/*.c" "${ROOT}/decomp/*.h"
-     "${ROOT}/config/*" "${ROOT}/portablekit-patches/*.patch")
+     "${ROOT}/config/*" "${ROOT}/portablekit-patches/*.patch" "${ROOT}/features/*")
 list(APPEND files "CMakeLists.txt")
 list(SORT files)
 set(digests "")

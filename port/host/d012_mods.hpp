@@ -1,10 +1,11 @@
 #pragma once
 
-// Mods: content that the port adds to the game, never in place of the game's
-// own. A mod is a folder in <data dir>/mods/ with a mod.json manifest; the
-// format is docs/port/mod-folder.md. The first thing mods add is battle
-// music: series (a source game, such as another Final Fantasy) and their
-// tracks, which come after the game's own in the BGM choice.
+// Mods: content that the port adds to the game. A mod is a folder in
+// <data dir>/mods/ with a mod.json manifest; the format is
+// docs/port/mod-folder.md. The first thing mods add is battle music: series (a source game, such as another Final Fantasy) and their
+// tracks, which come after the game's own in the BGM choice. A mod may also
+// give files in place of entries of the game's package (a character's moves,
+// d012_package_mods.hpp); those are the only things a mod replaces.
 //
 // Every series and track has a stable id made from the mod's id and the key
 // the manifest gives it ("<mod id>:<key>"), never from the order mods load
@@ -36,6 +37,9 @@ struct Mod {
     std::string author;
     std::string description;
     std::filesystem::path folder;
+    std::filesystem::path package;  // its package folder (d012_package_mods.hpp); empty when none
+    // Abilities its package adds: (id, learn level) (d012_mod_abilities.hpp).
+    std::vector<std::pair<std::uint16_t, int>> abilities;
     bool enabled{};
     bool loaded{};  // its manifest was valid
 };
