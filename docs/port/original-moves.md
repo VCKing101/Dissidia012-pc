@@ -190,6 +190,23 @@ compares.
   32 copies of this build, and about 15,000 more steps of made-up and damaged packages, with both sides refusing
   the same ones.
 
+## Checked after the merge into main (22 November 2026, Windows, clang build, USA disc)
+
+- **A real save** (a copy of the owner's Steam Deck save, Bartz Lv 18; the clean copy is kept read-only): the
+  five abilities his level has reached are given (Ascendent Lance, Climbarrel, Storm Shot, Soul Eater, Wind Shear)
+  and the three above it are not. Soul Eater (OG) equipped and saved: the save file holds no (OG) entry, the side
+  file holds 5 learned and 1 equipped, a reload brings all of them back, and Soul Eater (OG) hits in a battle.
+- **The same save in a port without the moves** (`D012_NO_ORIGINAL_MOVES=1`, and the port as it was before the
+  merge): it loads, Bartz's slot that held Soul Eater (OG) is empty, and a battle runs.
+- **The moves left out by a mod** (a package replacing `obj/p_fiv100.objx`): the abilities are taken back, the side
+  file puts nothing back, and a save leaves the side file as it was; the next start with the moves brings the five
+  learned ones back (the equipped one not, as the save changed in between).
+- **Emendatus** (a disc mod): with the mod on, the port reserves no memory above 32 MiB (the mod takes its own
+  blocks there) and leaves the moves out; the mod boots, loads its starter save and fights with Bartz.
+- **The Japanese voices**: both serve package files; the moves' plan goes past the voices' 512 MiB room, and the
+  game reads the same Japanese files with the moves on as off.
+- **Every Quick Battle stage**, Bartz against Bartz: no sound or effect finds no room.
+
 ## Not done
 
 - Linux, Steam Deck and Android builds have not been run with it.
@@ -199,3 +216,8 @@ compares.
 - Bartz with his alternate costumes, and Bartz against the fighters with the biggest models, have not been played:
   his models are 280 KB bigger than the disc's and the game's model pool has little room to spare.
 - The moves' sounds have not been checked by ear; Flood's water sound is Terra's, as a stand-in.
+- **Rollback's cost of the larger memory.** The port's guest memory is 64 MiB for these moves' heaps (32 MiB before),
+  and online rollback saves all of it every frame: on the PC this was measured on, a save takes 4.3 ms instead of
+  2.0 ms, and the 11 saves rollback keeps through the public server take about 750 MB instead of about 400 MB. This
+  is so for every player online, whether or not anyone picks Bartz. Saving only the parts of the upper 32 MiB the
+  port hands out (about 9 MiB) would bring it near the old cost; that is a PortableKit change, not made.
