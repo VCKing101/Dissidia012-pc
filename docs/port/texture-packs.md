@@ -82,7 +82,8 @@ Not supported yet:
   the pack's `[filtering]` names a filter for that texture. Replacement images get mipmaps, so large images stay
   smooth when drawn small.
 - **What cannot be replaced usefully:** lines of text are drawn by the game into textures while it runs (512x32,
-  most of the distinct textures in a battle), so their keys change with the text. Render targets and screen copies
+  most of the distinct textures in a battle), so their keys change with the text; Sharp text draws them at the
+  internal resolution instead ([sharp-text.md](sharp-text.md)). Render targets and screen copies
   (glow, the EX Burst background) are never looked up.
 - **Same texture, different places:** the game often loads one texture at different addresses in different scenes.
   Packs with `ignoreAddress = true` (what the dump writes) match it everywhere.

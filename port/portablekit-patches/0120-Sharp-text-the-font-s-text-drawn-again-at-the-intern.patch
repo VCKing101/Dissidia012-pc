@@ -1,0 +1,931 @@
+From 934957297b111682ca483c3f6ada9543f538b1e0 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Sun, 22 Nov 2026 16:14:53 +1030
+Subject: [PATCH] Sharp text: the font's text drawn again at the internal
+ resolution
+
+sceFontGetCharGlyphImage gives the host a buffer and a position, and the
+host draws one glyph into it at the PSP's size. A game may then draw that
+buffer as a texture, as Dissidia 012 does with each block of text (4-bit,
+about 20-pixel glyphs, drawn at about 0.6 of their size): at 4x the
+glyphs were only enlarged, and looked soft.
+
+- fonts/sharp_text: each glyph drawn into a buffer is kept (character,
+  position, clip rectangle) with a copy of the buffer as it left it. A
+  buffer found clear starts a new text; one the game wrote itself, or one
+  drawn with another font, is never drawn sharp.
+- fonts::render_scaled(): a glyph drawn factor times as large, with the
+  same outline, position and emboldening as the 1x one.
+- The renderer: a 4- or 8-bit texture lying in such a buffer, which holds
+  exactly what its glyphs left, is drawn as large as the internal
+  resolution (up to 8 times, 4096 pixels a side), its glyphs coloured
+  through the game's palette and the rest the game's texels; the larger
+  picture keeps the texture coordinates, as a texture pack's image does.
+  Decided while recording, from guest memory as the draw reads it; the
+  game's memory is only read.
+- A GPU memory budget of its own (<PREFIX>_SHARP_TEXT_MEMORY=<MB>, 256):
+  sharp text not drawn in the last two frames goes first, else the new
+  text is drawn from the game's texture, so a screen with more text than
+  the budget does not draw it again every frame.
+- Settings: text.sharp (on), the Sharp text row in the Video page's Text
+  section, restored with the page's defaults; a change, or a new internal
+  resolution, draws the text again. <PREFIX>_NO_SHARP_TEXT=1 turns it off
+  for a comparison, <PREFIX>_TRACE_SHARP_TEXT=1 logs each lookup.
+- gpu::clut_color(): a palette entry as decode_texture() reads it.
+- docs/PROFILE_GUIDE.md: a profile needs nothing for it.
+
+Tested on Windows (clang, llvm-mingw) with Dissidia 012 (ULUS10566), test
+data only: the first-run Data Config screen, the menus to Quick Battle
+Player Select and its "Play as this character?" dialog, Battle Setup and
+a Quick Battle at 4x, with and without <PREFIX>_NO_SHARP_TEXT; at 2x; with
+Arial as the font; with text.sharp=0; with a 16 MB budget. Every text
+texture on those routes was drawn sharp (145 on the menus, 334 with the
+battle), none fell back; the battle ran at 60 fps with the same render
+time either way. The port's tests pass. Not tested: the menu row while
+playing, text drawn letter by letter, Japanese text, Linux, Android, the
+framework's own build and tests, another game.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ cmake/PortableKit.cmake      |   1 +
+ docs/PROFILE_GUIDE.md        |   2 +
+ host/fonts/game_font.cpp     |  47 +++++++
+ host/fonts/game_font.hpp     |   7 +
+ host/fonts/sharp_text.cpp    | 255 +++++++++++++++++++++++++++++++++++
+ host/fonts/sharp_text.hpp    |  78 +++++++++++
+ host/gpu/texture_decode.cpp  |   4 +
+ host/gpu/texture_decode.hpp  |   5 +
+ host/gpu/vulkan_renderer.cpp | 158 ++++++++++++++++++++--
+ host/gpu/vulkan_renderer.hpp |   3 +
+ host/hle/hle_font.cpp        |  14 ++
+ host/settings/settings.cpp   |   1 +
+ host/settings/settings.hpp   |   1 +
+ host/ui/font_menu.cpp        |  10 ++
+ host/ui/menu.cpp             |   2 +
+ 15 files changed, 575 insertions(+), 13 deletions(-)
+ create mode 100644 host/fonts/sharp_text.cpp
+ create mode 100644 host/fonts/sharp_text.hpp
+
+diff --git a/cmake/PortableKit.cmake b/cmake/PortableKit.cmake
+index 7a57fec..82ded68 100644
+--- a/cmake/PortableKit.cmake
++++ b/cmake/PortableKit.cmake
+@@ -77,6 +77,7 @@ set(PORTABLEKIT_HOST_SOURCES
+     host/hle/hle_psmf.cpp
+     host/hle/hle_net_offline.cpp
+     host/fonts/game_font.cpp
++    host/fonts/sharp_text.cpp
+     host/hle/hle_font.cpp
+     host/hle/hle_utility.cpp
+     host/hle/hle_savedata.cpp
+diff --git a/docs/PROFILE_GUIDE.md b/docs/PROFILE_GUIDE.md
+index fa15ed4..971b010 100644
+--- a/docs/PROFILE_GUIDE.md
++++ b/docs/PROFILE_GUIDE.md
+@@ -83,6 +83,8 @@ For a picture of the port's own beside one of the game's screens, such as a hint
+ 
+ `glyph_cache` is for changing the font while a game runs. A game that caches the glyphs it has drawn keeps them until its atlas needs the cell, so a new font shows only in text it has not drawn yet. Where the game keeps that atlas, read off its own text code, lets the framework make it draw them again. Null for any game nobody has traced.
+ 
++Sharp text needs nothing from the profile. A game that draws the buffer it hands `sceFontGetCharGlyphImage` as a texture, as Dissidia 012 does with each block of text, gets that text drawn again at the internal resolution (`host/fonts/sharp_text.hpp`): the framework keeps each glyph it draws into a buffer, and when the renderer loads a 4- or 8-bit texture lying in one that holds exactly what the glyphs left, it draws the same glyphs that many times larger. A buffer the game also wrote itself, or one drawn with another font, keeps the game's texture, and a game that copies its glyphs on into an atlas never draws the buffer, so it is drawn as before. The Video page's Text section has **Sharp text** (`text.sharp`, on); `<prefix>_NO_SHARP_TEXT=1` turns it off for a comparison, `<prefix>_SHARP_TEXT_MEMORY=<MB>` sets the GPU memory such text may use (256 MB; past it, text not drawn in the last two frames goes first, and new text is drawn from the game's texture when none can), and `<prefix>_TRACE_SHARP_TEXT=1` logs each texture looked up and why one is not drawn sharp.
++
+ `sharp_textures` lists pixel art to draw with nearest filtering whatever the Texture filter setting says, for a sprite that smoothing blurs at a higher resolution. Each is a `SharpTexture`: its key as **Dump textures** names the file (the address ignored, xxh64), and its width and height. Only a texture of a listed size is hashed, when it is uploaded, so the list costs nothing for the others. A key covers one texture with one palette, so a sprite sheet loaded with another palette, or as a different part of its picture, has a key of its own: dump each scene it appears in. `<prefix>_NO_SHARP_PIXEL_ART=1` draws them as the setting says, for a comparison. A texture pack's image for a listed texture keeps the pack's own filtering. Without any, the setting decides for every texture.
+ 
+ `second_player` says the port has a local second player (`hle_extension::want_second_pad`): the Controls page then offers **Player 1** and **Player 2**, each Automatic, Keyboard and mouse, or a gamepad by name (`input.player1`, `input.player2`; `<prefix>_PLAYER1`, `<prefix>_PLAYER2`). Without it the page offers one **Controller** row. A gamepad is named by its USB vendor and product ids, so it is the same over USB and Bluetooth, and two alike are one choice that each player can take. On Automatic, player 1 has the keyboard and mouse and the first gamepad free, player 2 the next. A chosen gamepad that is not connected leaves that player on Automatic until it is. The port says when player 2 is in the game (`second_player_playing`); otherwise a gamepad held for player 2 moves to player 1 when player 1's goes.
+diff --git a/host/fonts/game_font.cpp b/host/fonts/game_font.cpp
+index 94f9bea..6318dec 100644
+--- a/host/fonts/game_font.cpp
++++ b/host/fonts/game_font.cpp
+@@ -327,6 +327,9 @@ struct State {
+     int baseline{kBaseline};  // row of the cell the baselines are on
+     std::unordered_map<std::uint32_t, Layout> layouts;
+     std::unordered_map<std::uint64_t, GlyphBitmap> bitmaps;
++    // render_scaled()'s glyphs, by code, factor and subpixel shift; `x` and `y`
++    // relative to the whole pixel of the origin.
++    std::unordered_map<std::uint64_t, GlyphBitmap> scaled;
+     std::atomic<std::uint64_t> generation{};
+ };
+ 
+@@ -604,12 +607,56 @@ GlyphBitmap render(std::uint32_t code, float shift_x, float shift_y) {
+     return s.bitmaps.emplace(key, std::move(bitmap)).first->second;
+ }
+ 
++GlyphBitmap render_scaled(std::uint32_t code, std::int32_t x64, std::int32_t y64, int factor) {
++    State &s = loaded_state();
++    const Layout &layout = layout_for(s, code);
++    if (layout.face == nullptr || layout.metrics.width == 0 || factor < 1 || factor > 16) return {};
++    // The game places the 1x bitmap's natural box (unshifted) at (x64, y64),
++    // so the glyph's origin is that far from it; scaled, the outline keeps
++    // its place on the origin.
++    const std::int64_t origin_x = (static_cast<std::int64_t>(x64) - layout.natural_x0 * 64) * factor;
++    const std::int64_t origin_y = (static_cast<std::int64_t>(y64) - layout.natural_y0 * 64) * factor;
++    const auto whole = [](std::int64_t v) { return v >= 0 ? v / 64 : -((-v + 63) / 64); };
++    const std::int64_t whole_x = whole(origin_x), whole_y = whole(origin_y);
++    const int sx = static_cast<int>(origin_x - whole_x * 64);  // 0..63, exact: positions are in 1/64 pixels
++    const int sy = static_cast<int>(origin_y - whole_y * 64);
++    const std::uint64_t key = (static_cast<std::uint64_t>(code) << 20u) | (static_cast<std::uint64_t>(factor) << 12u) |
++                              (static_cast<std::uint64_t>(sx) << 6u) | static_cast<std::uint64_t>(sy);
++    auto found = s.scaled.find(key);
++    if (found == s.scaled.end()) {
++        // A few thousand large glyphs at most; text redrawn after a clear draws them again.
++        if (s.scaled.size() >= 2048u) s.scaled.clear();
++        const float fx = static_cast<float>(sx) / 64.0f;
++        const float fy = static_cast<float>(sy) / 64.0f;
++        const float scale_x = layout.scale_x * static_cast<float>(factor);
++        const float scale_y = layout.scale_y * static_cast<float>(factor);
++        GlyphBitmap bitmap;
++        int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
++        stbtt_GetGlyphBitmapBoxSubpixel(&layout.face->info, layout.glyph, scale_x, scale_y, fx, fy, &x0, &y0, &x1, &y1);
++        bitmap.width = std::max(x1 - x0, 0);
++        bitmap.height = std::max(y1 - y0, 0);
++        bitmap.x = x0;
++        bitmap.y = y0;
++        bitmap.pixels.assign(static_cast<std::size_t>(bitmap.width) * static_cast<std::size_t>(bitmap.height), 0u);
++        if (!bitmap.pixels.empty())
++            stbtt_MakeGlyphBitmapSubpixel(&layout.face->info, bitmap.pixels.data(), bitmap.width, bitmap.height,
++                                          bitmap.width, scale_x, scale_y, fx, fy, layout.glyph);
++        if (layout.bold > 0 && !bitmap.pixels.empty()) embolden(bitmap, layout.bold * factor);
++        found = s.scaled.emplace(key, std::move(bitmap)).first;
++    }
++    GlyphBitmap placed = found->second;
++    placed.x += static_cast<int>(whole_x);
++    placed.y += static_cast<int>(whole_y);
++    return placed;
++}
++
+ static void (*reload_hook)() = nullptr;
+ 
+ void reload() {
+     State &s = state();
+     s.layouts.clear();
+     s.bitmaps.clear();
++    s.scaled.clear();
+     load(s);
+     ++s.generation;
+     if (reload_hook != nullptr) reload_hook();
+diff --git a/host/fonts/game_font.hpp b/host/fonts/game_font.hpp
+index aeeafc9..0401522 100644
+--- a/host/fonts/game_font.hpp
++++ b/host/fonts/game_font.hpp
+@@ -83,6 +83,13 @@ bool ready();
+ [[nodiscard]] GlyphMetrics metrics(std::uint32_t code);
+ // Renders `code` shifted right by shift_x and down by shift_y, both in [0, 1).
+ [[nodiscard]] GlyphBitmap render(std::uint32_t code, float shift_x, float shift_y);
++// The glyph the game asked to be drawn at (x64, y64) in its buffer (26.6
++// fixed point, as sceFontGetCharGlyphImage gives the position), drawn
++// `factor` times as large for a buffer `factor` times the size: the same
++// outline, position and emboldening as the 1x glyph, so each pixel of that one
++// covers factor x factor pixels of this one. `x` and `y` are where its
++// top-left pixel goes in the larger buffer.
++[[nodiscard]] GlyphBitmap render_scaled(std::uint32_t code, std::int32_t x64, std::int32_t y64, int factor);
+ 
+ // Rereads the font settings and clears every cached glyph, so the next glyph
+ // the game asks for comes from the new font, then runs the hook.
+diff --git a/host/fonts/sharp_text.cpp b/host/fonts/sharp_text.cpp
+new file mode 100644
+index 0000000..4e99dcd
+--- /dev/null
++++ b/host/fonts/sharp_text.cpp
+@@ -0,0 +1,255 @@
++#include "fonts/sharp_text.hpp"
++
++#include "fonts/game_font.hpp"
++#include "profile.hpp"
++
++#include "psprecomp/guest_memory.hpp"
++
++#include <algorithm>
++#include <cstdarg>
++#include <cstdio>
++#include <cstring>
++#include <iostream>
++#include <map>
++#include <mutex>
++#include <string>
++
++namespace portablekit::fonts {
++namespace {
++
++constexpr std::uint32_t kFormat4 = 0u;  // SceFontGlyphImage pixel formats kept: 4-bit, low nibble first
++constexpr std::uint32_t kFormat8 = 2u;  // and 8-bit
++constexpr std::size_t kMaxBufferBytes = 1u << 20u;
++constexpr std::size_t kMaxBuffers = 512u;
++
++// <prefix>_TRACE_SHARP_TEXT=1: each texture looked up, and why one is not drawn sharp.
++bool tracing() {
++    static const bool enabled = portablekit::env("TRACE_SHARP_TEXT") != nullptr;
++    return enabled;
++}
++
++#if defined(__GNUC__)
++__attribute__((format(printf, 1, 2)))
++#endif
++void trace(const char *format, ...) {
++    if (!tracing()) return;
++    char line[256];
++    va_list args;
++    va_start(args, format);
++    std::vsnprintf(line, sizeof(line), format, args);
++    va_end(args);
++    std::cerr << "[sharp-text] " << line << "\n";
++}
++
++struct Stamp {
++    std::uint32_t code{};
++    std::int32_t x64{};
++    std::int32_t y64{};
++    GlyphClip clip;
++};
++
++// One glyph buffer: what the host drew into it and what it held afterwards.
++struct Buffer {
++    GlyphTarget target;
++    std::vector<std::uint8_t> expected;  // the buffer as the last glyph left it
++    std::vector<Stamp> stamps;           // the glyphs drawn since it was last clear
++    bool foreign{};                      // it held something else when glyphs were drawn: never sharp
++    std::uint64_t generation{};          // the font's, when its first glyph was drawn
++    std::uint64_t last_used{};
++};
++
++struct Registry {
++    std::mutex mutex;
++    std::map<std::uint32_t, Buffer> buffers;  // by address
++    std::uint64_t clock{};
++};
++
++Registry &registry() {
++    static Registry value;
++    return value;
++}
++
++std::size_t buffer_bytes(const GlyphTarget &t) {
++    return static_cast<std::size_t>(t.bytes_per_line) * t.height;
++}
++
++bool kept(const GlyphTarget &t) {
++    if (t.address == 0u || t.width == 0u || t.height == 0u) return false;
++    if (t.pixel_format == kFormat4) {
++        if (t.bytes_per_line * 2u < t.width) return false;
++    } else if (t.pixel_format == kFormat8) {
++        if (t.bytes_per_line < t.width) return false;
++    } else {
++        return false;
++    }
++    return buffer_bytes(t) <= kMaxBufferBytes;
++}
++
++bool same_shape(const GlyphTarget &a, const GlyphTarget &b) {
++    return a.width == b.width && a.height == b.height && a.bytes_per_line == b.bytes_per_line &&
++           a.pixel_format == b.pixel_format;
++}
++
++bool all_zero(const std::uint8_t *bytes, std::size_t size) {
++    for (std::size_t i = 0; i < size; ++i)
++        if (bytes[i] != 0u) return false;
++    return true;
++}
++
++// Forgets buffers that overlap [address, address + size) other than the one at `address`.
++void drop_overlapping(Registry &r, std::uint32_t address, std::size_t size) {
++    const std::uint64_t end = static_cast<std::uint64_t>(address) + size;
++    auto it = r.buffers.lower_bound(address);
++    if (it != r.buffers.begin()) {
++        auto before = std::prev(it);
++        if (static_cast<std::uint64_t>(before->first) + buffer_bytes(before->second.target) > address)
++            r.buffers.erase(before);
++    }
++    while (it != r.buffers.end() && it->first < end) {
++        if (it->first == address) {
++            ++it;
++            continue;
++        }
++        it = r.buffers.erase(it);
++    }
++}
++
++void evict(Registry &r) {
++    while (r.buffers.size() > kMaxBuffers) {
++        auto oldest = r.buffers.begin();
++        for (auto it = r.buffers.begin(); it != r.buffers.end(); ++it)
++            if (it->second.last_used < oldest->second.last_used) oldest = it;
++        r.buffers.erase(oldest);
++    }
++}
++
++} // namespace
++
++bool sharp_text_available() {
++    static const bool off = portablekit::env("NO_SHARP_TEXT") != nullptr;
++    return !off;
++}
++
++void before_glyph(const psprecomp::GuestMemory &memory, const GlyphTarget &target) {
++    if (!sharp_text_available() || !kept(target)) return;
++    const std::size_t size = buffer_bytes(target);
++    const std::uint8_t *bytes = memory.raw_pointer(target.address, size);
++    if (bytes == nullptr) return;
++    Registry &r = registry();
++    const std::lock_guard lock(r.mutex);
++    drop_overlapping(r, target.address, size);
++    auto [it, fresh] = r.buffers.try_emplace(target.address);
++    Buffer &b = it->second;
++    const std::uint64_t now = generation();
++    const bool unchanged = !fresh && same_shape(b.target, target) && b.generation == now && b.expected.size() == size &&
++                           std::memcmp(b.expected.data(), bytes, size) == 0;
++    if (!unchanged) {
++        // A clear buffer starts a new text. Anything else was written by the
++        // game itself (or drawn with another font), so the glyphs alone are not
++        // the whole picture: that text keeps the game's own texture.
++        b.target = target;
++        b.stamps.clear();
++        b.expected.clear();
++        b.foreign = !all_zero(bytes, size);
++        b.generation = now;
++    }
++    b.last_used = ++r.clock;
++    evict(r);
++}
++
++void after_glyph(const psprecomp::GuestMemory &memory, const GlyphTarget &target, std::uint32_t code,
++                 std::int32_t x64, std::int32_t y64, const GlyphClip &clip) {
++    if (!sharp_text_available() || !kept(target)) return;
++    const std::size_t size = buffer_bytes(target);
++    const std::uint8_t *bytes = memory.raw_pointer(target.address, size);
++    if (bytes == nullptr) return;
++    Registry &r = registry();
++    const std::lock_guard lock(r.mutex);
++    const auto it = r.buffers.find(target.address);
++    if (it == r.buffers.end() || !same_shape(it->second.target, target)) return;
++    Buffer &b = it->second;
++    if (!b.foreign) b.stamps.push_back({code, x64, y64, clip});
++    b.expected.assign(bytes, bytes + size);
++}
++
++bool sharp_text(const psprecomp::GuestMemory &memory, const SharpTextQuery &query, SharpText &out) {
++    if (!sharp_text_available() || query.factor < 2 || query.factor > 16) return false;
++    if (query.bits != 4u && query.bits != 8u) return false;
++    if (query.width == 0u || query.height == 0u) return false;
++    Registry &r = registry();
++    const std::lock_guard lock(r.mutex);
++    auto it = r.buffers.upper_bound(query.address);
++    if (it == r.buffers.begin()) return false;
++    --it;
++    const std::uint32_t base = it->first;
++    Buffer &b = it->second;
++    const GlyphTarget &t = b.target;
++    const std::size_t size = buffer_bytes(t);
++    if (static_cast<std::uint64_t>(query.address) >= static_cast<std::uint64_t>(base) + size) return false;
++    const std::uint32_t bits = t.pixel_format == kFormat4 ? 4u : 8u;
++    if (bits != query.bits || static_cast<std::uint64_t>(query.stride) * bits / 8u != t.bytes_per_line) {
++        trace("%08X: texture %ux%u stride %u at %u bits is not laid out like glyph buffer %08X (%u bytes a line)",
++              query.address, query.width, query.height, query.stride, query.bits, base, t.bytes_per_line);
++        return false;
++    }
++    if (b.foreign || b.stamps.empty()) {
++        trace("%08X: buffer %08X %s", query.address, base, b.foreign ? "holds more than glyphs" : "has no glyphs");
++        return false;
++    }
++    if (b.generation != generation()) {
++        trace("%08X: buffer %08X was drawn with another font", query.address, base);
++        return false;
++    }
++    const std::uint8_t *bytes = memory.raw_pointer(base, size);
++    if (bytes == nullptr || b.expected.size() != size || std::memcmp(bytes, b.expected.data(), size) != 0) {
++        trace("%08X: buffer %08X was changed after its glyphs were drawn", query.address, base);
++        return false;
++    }
++    const std::uint32_t offset = query.address - base;
++    const std::uint32_t row0 = offset / t.bytes_per_line;
++    const std::uint32_t column0 = (offset % t.bytes_per_line) * 8u / bits;
++    if (column0 >= t.width || row0 >= t.height) return false;
++    const std::uint32_t covered_width = std::min(query.width, t.width - column0);
++    const std::uint32_t covered_height = std::min(query.height, t.height - row0);
++    const auto f = static_cast<std::int64_t>(query.factor);
++    const std::int64_t out_width = covered_width * f;
++    const std::int64_t out_height = covered_height * f;
++    out.covered_width = covered_width;
++    out.covered_height = covered_height;
++    out.coverage.assign(static_cast<std::size_t>(out_width * out_height), 0u);
++    // The covered part, in pixels of the larger buffer.
++    const std::int64_t left = column0 * f;
++    const std::int64_t top = row0 * f;
++    std::size_t drawn = 0;
++    for (const Stamp &stamp : b.stamps) {
++        const GlyphBitmap glyph = render_scaled(stamp.code, stamp.x64, stamp.y64, query.factor);
++        if (glyph.pixels.empty()) continue;
++        // Inside the buffer, the clip rectangle and the covered part.
++        const std::int64_t clip_x0 = std::max<std::int64_t>({0, static_cast<std::int64_t>(stamp.clip.x) * f, left});
++        const std::int64_t clip_y0 = std::max<std::int64_t>({0, static_cast<std::int64_t>(stamp.clip.y) * f, top});
++        const std::int64_t clip_x1 = std::min<std::int64_t>(
++            {static_cast<std::int64_t>(t.width) * f,
++             (static_cast<std::int64_t>(stamp.clip.x) + stamp.clip.width) * f, left + out_width});
++        const std::int64_t clip_y1 = std::min<std::int64_t>(
++            {static_cast<std::int64_t>(t.height) * f,
++             (static_cast<std::int64_t>(stamp.clip.y) + stamp.clip.height) * f, top + out_height});
++        const std::int64_t x_begin = std::max<std::int64_t>(glyph.x, clip_x0);
++        const std::int64_t x_end = std::min<std::int64_t>(static_cast<std::int64_t>(glyph.x) + glyph.width, clip_x1);
++        const std::int64_t y_begin = std::max<std::int64_t>(glyph.y, clip_y0);
++        const std::int64_t y_end = std::min<std::int64_t>(static_cast<std::int64_t>(glyph.y) + glyph.height, clip_y1);
++        if (x_begin >= x_end || y_begin >= y_end) continue;
++        ++drawn;
++        const std::int64_t count = x_end - x_begin;
++        for (std::int64_t y = y_begin; y < y_end; ++y) {
++            const std::uint8_t *in = glyph.pixels.data() + (y - glyph.y) * glyph.width + (x_begin - glyph.x);
++            std::uint8_t *row = out.coverage.data() + (y - top) * out_width + (x_begin - left);
++            for (std::int64_t i = 0; i < count; ++i) row[i] = std::max(row[i], in[i]);
++        }
++    }
++    b.last_used = ++r.clock;
++    trace("%08X: %ux%u of buffer %08X (%ux%u) at %dx, %zu of %zu glyphs", query.address, covered_width,
++          covered_height, base, t.width, t.height, query.factor, drawn, b.stamps.size());
++    return true;
++}
++
++} // namespace portablekit::fonts
+diff --git a/host/fonts/sharp_text.hpp b/host/fonts/sharp_text.hpp
+new file mode 100644
+index 0000000..ab0a0a5
+--- /dev/null
++++ b/host/fonts/sharp_text.hpp
+@@ -0,0 +1,78 @@
++#pragma once
++
++#include <cstdint>
++#include <vector>
++
++namespace psprecomp {
++class GuestMemory;
++}
++
++// Sharp text: the game's text drawn again at the renderer's resolution.
++//
++// sceFontGetCharGlyphImage hands the host a buffer in guest memory and a
++// position, and the host draws one glyph into it at the PSP's size. A game may
++// then draw that buffer as a texture, as Dissidia 012 does with each block of
++// text: at a higher internal resolution the small glyphs are only enlarged.
++// So the host keeps every glyph it draws into a buffer (character and
++// position), and a copy of the buffer as its glyphs left it. When the renderer
++// loads a texture lying in such a buffer, and the buffer holds exactly what
++// the host drew, the same glyphs are drawn again at the renderer's scale; if
++// anything else wrote to the buffer, or the font changed since, the game's
++// own texture is drawn.
++//
++// Glyph buffers are recognised by use alone: a game that copies its glyphs on
++// into an atlas never draws the buffer, and is drawn as before.
++namespace portablekit::fonts {
++
++// The buffer of a SceFontGlyphImage.
++struct GlyphTarget {
++    std::uint32_t address{};
++    std::uint32_t width{};           // pixels
++    std::uint32_t height{};
++    std::uint32_t bytes_per_line{};
++    std::uint32_t pixel_format{};    // SceFontGlyphImage's: 0 4-bit, 2 8-bit; others are not kept
++};
++
++// A rectangle of the buffer the glyph may be drawn into (the _Clip call).
++struct GlyphClip {
++    std::int32_t x{};
++    std::int32_t y{};
++    std::int32_t width{0x7FFFFFFF};
++    std::int32_t height{0x7FFFFFFF};
++};
++
++// <prefix>_NO_SHARP_TEXT=1 turns it off whatever the setting says.
++[[nodiscard]] bool sharp_text_available();
++
++// Around each glyph the host draws: before, so a buffer the game cleared or
++// wrote itself is noticed, and after, with the glyph drawn.
++void before_glyph(const psprecomp::GuestMemory &memory, const GlyphTarget &target);
++void after_glyph(const psprecomp::GuestMemory &memory, const GlyphTarget &target, std::uint32_t code,
++                 std::int32_t x64, std::int32_t y64, const GlyphClip &clip);
++
++// A texture as the renderer samples it: where its texels start, its row
++// stride in texels, its size and bits per texel (4 or 8, CLUT indices).
++struct SharpTextQuery {
++    std::uint32_t address{};
++    std::uint32_t stride{};
++    std::uint32_t width{};
++    std::uint32_t height{};
++    std::uint32_t bits{};
++    int factor{};  // how many times larger to draw it, 2 to 16
++};
++
++// The part of the texture inside a glyph buffer, drawn `factor` times as
++// large: coverage 0..255 per pixel (for a 4-bit buffer the 1x texel is
++// coverage >> 4), covered_width * factor pixels per row. The texture's texels
++// outside that part (right of the buffer, below it) are not glyphs.
++struct SharpText {
++    std::vector<std::uint8_t> coverage;
++    std::uint32_t covered_width{};
++    std::uint32_t covered_height{};
++};
++
++// True and fills `out` when the texture lies in a glyph buffer that holds
++// only the glyphs the host drew into it.
++bool sharp_text(const psprecomp::GuestMemory &memory, const SharpTextQuery &query, SharpText &out);
++
++} // namespace portablekit::fonts
+diff --git a/host/gpu/texture_decode.cpp b/host/gpu/texture_decode.cpp
+index 6ad2486..c2b2660 100644
+--- a/host/gpu/texture_decode.cpp
++++ b/host/gpu/texture_decode.cpp
+@@ -345,6 +345,10 @@ void decode_texels(ReadClut read_entry, const TextureState &texture, std::uint32
+ 
+ } // namespace
+ 
++std::uint32_t clut_color(const GuestMemory &memory, const TextureState &texture, std::uint32_t index) {
++    return read_clut(memory, texture, index);
++}
++
+ bool decode_texture(const GuestMemory &memory, const TextureState &texture, std::vector<std::uint32_t> &out) {
+     const std::uint32_t width = texture.width;
+     const std::uint32_t height = texture.height;
+diff --git a/host/gpu/texture_decode.hpp b/host/gpu/texture_decode.hpp
+index 131a4db..716bd80 100644
+--- a/host/gpu/texture_decode.hpp
++++ b/host/gpu/texture_decode.hpp
+@@ -12,6 +12,11 @@ namespace portablekit::gpu {
+ // and the swizzled layout. Returns false when the texture cannot be read.
+ bool decode_texture(const GuestMemory &memory, const TextureState &texture, std::vector<std::uint32_t> &out);
+ 
++// The colour an indexed texture's texel value `index` is drawn with: its
++// palette entry through the CLUT's shift, mask and offset, as decode_texture()
++// reads it.
++std::uint32_t clut_color(const GuestMemory &memory, const TextureState &texture, std::uint32_t index);
++
+ // What decoding a texture reads from guest memory, copied, so that it can be
+ // decoded on another thread while the game goes on changing memory.
+ struct TextureSnapshot {
+diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
+index ad94586..83fd610 100644
+--- a/host/gpu/vulkan_renderer.cpp
++++ b/host/gpu/vulkan_renderer.cpp
+@@ -15,6 +15,7 @@
+ #include "texture_pack.hpp"
+ #include "texture_pack_import.hpp"
+ 
++#include "fonts/sharp_text.hpp"
+ #include "install/user_data.hpp"
+ 
+ #include "perf/frame_stats.hpp"
+@@ -985,6 +986,9 @@ struct VulkanRenderer::Impl {
+         // Pixel art the profile lists (GameProfile::sharp_textures): drawn
+         // with nearest filtering whatever the Texture filter setting says.
+         bool always_sharp{};
++        // Text drawn sharp (sharp_text_picture): its image's bytes, which
++        // count against the sharp text budget; 0 for any other texture.
++        std::uint64_t sharp_text_bytes{};
+     };
+ 
+     RendererConfig config;
+@@ -1177,6 +1181,17 @@ struct VulkanRenderer::Impl {
+     std::array<std::uint32_t, 2> display_addresses{};
+     bool sharp_screen{};
+     bool sharp_textures{};
++    // Sharp text (fonts/sharp_text.hpp): the game's text drawn again at the
++    // internal resolution, as drawn now and as the setting asks (applied as
++    // a frame begins), and the scale the cached text textures have, 0 while
++    // none is cached.
++    bool sharp_text{true};
++    bool sharp_text_wanted{true};
++    std::uint32_t sharp_text_cached_factor{};
++    std::uint64_t sharp_text_bytes{};  // of the cached textures drawn sharp
++    // texture_clock when the previous frame and this one began: sharp text
++    // drawn since the first is kept whatever the budget says.
++    std::array<std::uint64_t, 2> sharp_text_frame_clocks{};
+     std::string device_name;
+ 
+     // Dear ImGui draws in its own render pass over the finished swapchain
+@@ -2283,6 +2298,11 @@ struct VulkanRenderer::Impl {
+     // Every cached texture is dropped, so the next draws decode them again.
+     // The GPU must be idle.
+     void drop_cached_textures();
++    // Sharp text: how many times larger a text texture is drawn at this
++    // internal resolution, 0 for not at all, and the picture drawn.
++    [[nodiscard]] std::uint32_t sharp_text_factor(const TextureState &state) const;
++    bool sharp_text_picture(const GuestMemory &memory, const TextureState &state, std::vector<std::uint32_t> &pixels,
++                            std::vector<std::uint32_t> &out, std::uint32_t &out_width, std::uint32_t &out_height);
+     [[nodiscard]] VkDescriptorSet texture_descriptor(const GuestMemory &memory, const DrawCall &call);
+     std::uint64_t texture_clock{};
+     // texture_key results for the display list being walked, by the state that
+@@ -2973,6 +2993,7 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
+     impl.aspect = usable_aspect(player.aspect);
+     impl.sharp_screen = player.sharp_screen;
+     impl.sharp_textures = player.sharp_textures;
++    impl.sharp_text = impl.sharp_text_wanted = player.sharp_text;
+     impl.trace_interpolation = portablekit::env("TRACE_INTERPOLATION") != nullptr;
+     impl.capture_blended_only = portablekit::env("CAPTURE_BLENDED") != nullptr;
+     if (const interpolation::CutThresholds *thresholds = portablekit::game().interpolation_thresholds)
+@@ -5360,8 +5381,11 @@ VulkanRenderer::Impl::Texture &VulkanRenderer::Impl::texture_for(const GuestMemo
+     // A texture the profile draws again is decoded here and now, for it.
+     const std::optional<std::size_t> edit =
+         edit_context ? listed_edit(memory, state, max_seen_v, kDumpOptions) : std::nullopt;
++    // Text the host's font drew, drawn again at the internal resolution; it
++    // is decided now, while guest memory holds what the draw reads.
++    const bool sharp_candidate = !edit && sharp_text_factor(state) != 0u;
+     std::shared_ptr<DecodeJob> job;
+-    if (recording && async_uploads() && background_decode() && !dumper && !edit) {
++    if (recording && async_uploads() && background_decode() && !dumper && !edit && !sharp_candidate) {
+         job = std::make_shared<DecodeJob>();
+         if (!snapshot_texture(memory, state, job->snapshot)) job.reset();
+     }
+@@ -5394,6 +5418,54 @@ VulkanRenderer::Impl::Texture &VulkanRenderer::Impl::texture_for(const GuestMemo
+             edited.size() != std::size_t{edited_width} * edited_height)
+             edited.clear();
+     }
++    const auto evict = [&](decltype(textures)::iterator victim) {
++        destroyed_texture_clock = std::max(destroyed_texture_clock, victim->second.last_used);
++        if (async_uploads()) {
++            // The frame being recorded may have drawn it already.
++            slots[slot].retired_textures.push_back(victim->second);
++        } else {
++            const perf::Clock::time_point wait_start = perf::Clock::now();
++            queue_wait_idle();
++            perf::add_wait_time(perf::Clock::now() - wait_start, perf::Stall::Evict);
++            destroy_texture(victim->second);
++        }
++        sharp_text_bytes -= std::min(sharp_text_bytes, victim->second.sharp_text_bytes);
++        textures.erase(victim);
++        ++textures_erased;
++    };
++    // Text drawn sharp is many times larger than the game's texture, so it
++    // keeps within a budget of its own (<prefix>_SHARP_TEXT_MEMORY=<MB>, 256
++    // by default): sharp text not drawn in this frame or the one before goes,
++    // least recently drawn first. When that does not make room, this text is
++    // the game's own texture, so a screen with more text than the budget
++    // never draws its text again every frame (and a frame replayed by frame
++    // interpolation keeps its textures).
++    std::uint64_t sharp_bytes = 0u;
++    if (sharp_candidate && !job) {
++        static const std::uint64_t budget = [] {
++            const char *text = portablekit::env("SHARP_TEXT_MEMORY");
++            const std::uint64_t mb = text != nullptr ? std::strtoull(text, nullptr, 10) : 0u;
++            return (mb != 0u ? std::max<std::uint64_t>(mb, 16u) : 256u) << 20u;
++        }();
++        const std::uint64_t factor = sharp_text_factor(state);
++        const std::uint64_t wanted = std::uint64_t{state.width} * state.height * factor * factor * 4u;
++        while (sharp_text_bytes + wanted > budget) {
++            auto oldest = textures.end();
++            for (auto it = textures.begin(); it != textures.end(); ++it) {
++                if (it->second.sharp_text_bytes != 0u && it->second.last_used < sharp_text_frame_clocks[0] &&
++                    (oldest == textures.end() || it->second.last_used < oldest->second.last_used))
++                    oldest = it;
++            }
++            if (oldest == textures.end()) break;
++            evict(oldest);
++        }
++        if (sharp_text_bytes + wanted <= budget &&
++            sharp_text_picture(memory, state, pixels, edited, edited_width, edited_height))
++            sharp_bytes = std::uint64_t{edited_width} * edited_height * 4u;
++        else
++            edited.clear();
++    }
++    const bool sharp_drawn = sharp_bytes != 0u;
+ 
+     // <prefix>_TEXTURE_CACHE_LIMIT keeps fewer textures, to test eviction.
+     static const std::size_t cache_limit = [] {
+@@ -5406,24 +5478,17 @@ VulkanRenderer::Impl::Texture &VulkanRenderer::Impl::texture_for(const GuestMemo
+         for (auto it = textures.begin(); it != textures.end(); ++it) {
+             if (it->second.last_used < oldest->second.last_used) oldest = it;
+         }
+-        destroyed_texture_clock = std::max(destroyed_texture_clock, oldest->second.last_used);
+-        if (async_uploads()) {
+-            // The frame being recorded may have drawn it already.
+-            slots[slot].retired_textures.push_back(oldest->second);
+-        } else {
+-            const perf::Clock::time_point wait_start = perf::Clock::now();
+-            queue_wait_idle();
+-            perf::add_wait_time(perf::Clock::now() - wait_start, perf::Stall::Evict);
+-            destroy_texture(oldest->second);
+-        }
+-        textures.erase(oldest);
+-        ++textures_erased;
++        evict(oldest);
+     }
+     const bool decoded_now = !job;  // `job` is handed over below
+     Texture texture = job                ? create_texture_image(state.width, state.height)
+                       : !edited.empty() ? create_texture(edited_width, edited_height, edited.data())
+                                         : create_texture(state.width, state.height, pixels.data());
+     if (texture.descriptor == VK_NULL_HANDLE) return white_texture;
++    if (sharp_drawn) {
++        texture.sharp_text_bytes = sharp_bytes;
++        sharp_text_bytes += sharp_bytes;
++    }
+     if (listed_pixel_art(memory, state, max_seen_v, kDumpOptions)) {
+         texture.always_sharp = true;
+         write_texture_sampler(texture);
+@@ -5518,6 +5583,57 @@ void VulkanRenderer::Impl::drop_cached_textures() {
+     ++textures_erased;
+     list_texture_keys.clear();
+     last_texture = nullptr;
++    sharp_text_cached_factor = 0u;
++    sharp_text_bytes = 0u;
++}
++
++std::uint32_t VulkanRenderer::Impl::sharp_text_factor(const TextureState &state) const {
++    if (!sharp_text || !fonts::sharp_text_available()) return 0u;
++    // Glyph buffers are 4- or 8-bit, in rows.
++    if ((state.format != TextureFormat::Clut4 && state.format != TextureFormat::Clut8) || state.swizzled) return 0u;
++    if (state.width == 0u || state.height == 0u) return 0u;
++    // The internal resolution's lines per PSP line, kept within the image
++    // size every Vulkan device takes.
++    constexpr std::uint32_t kMaxSide = 4096u;
++    const std::uint32_t lines = (target_extent.height + kPspHeight / 2u) / kPspHeight;
++    const std::uint32_t factor = std::min({lines, 8u, kMaxSide / state.width, kMaxSide / state.height});
++    return factor >= 2u ? factor : 0u;
++}
++
++bool VulkanRenderer::Impl::sharp_text_picture(const GuestMemory &memory, const TextureState &state,
++                                              std::vector<std::uint32_t> &pixels, std::vector<std::uint32_t> &out,
++                                              std::uint32_t &out_width, std::uint32_t &out_height) {
++    const std::uint32_t factor = sharp_text_factor(state);
++    if (factor == 0u || pixels.size() != std::size_t{state.width} * state.height) return false;
++    const bool four_bit = state.format == TextureFormat::Clut4;
++    fonts::SharpText text;
++    const fonts::SharpTextQuery query{state.address, state.buffer_width != 0u ? state.buffer_width : state.width,
++                                      state.width,   state.height,
++                                      four_bit ? 4u : 8u, static_cast<int>(factor)};
++    if (!fonts::sharp_text(memory, query, text)) return false;
++    // A glyph pixel's value is its coverage, as the 1x glyph's was: the top
++    // four bits in a 4-bit buffer. The game's palette gives the colour.
++    std::array<std::uint32_t, 256> palette{};
++    for (std::uint32_t i = 0; i < (four_bit ? 16u : 256u); ++i) palette[i] = clut_color(memory, state, i);
++    const std::uint32_t shift = four_bit ? 4u : 0u;
++    out_width = state.width * factor;
++    out_height = state.height * factor;
++    out.resize(std::size_t{out_width} * out_height);
++    const std::uint32_t text_width = text.covered_width * factor;
++    const std::uint32_t text_height = text.covered_height * factor;
++    for (std::uint32_t y = 0; y < out_height; ++y) {
++        std::uint32_t *row = out.data() + std::size_t{y} * out_width;
++        const std::uint32_t *game = pixels.data() + std::size_t{y / factor} * state.width;
++        std::uint32_t x = 0;
++        if (y < text_height) {
++            const std::uint8_t *coverage = text.coverage.data() + std::size_t{y} * text_width;
++            for (; x < text_width; ++x) row[x] = palette[coverage[x] >> shift];
++        }
++        // Outside the glyph buffer: the game's texels, enlarged.
++        for (; x < out_width; ++x) row[x] = game[x / factor];
++    }
++    sharp_text_cached_factor = factor;
++    return true;
+ }
+ 
+ void VulkanRenderer::Impl::apply_texture_dump() {
+@@ -7679,6 +7795,9 @@ void VulkanRenderer::Impl::resize_targets(VkExtent2D extent) {
+     depth_pictures.clear();
+     const VkExtent2D old_extent = target_extent;
+     target_extent = extent;
++    // Text drawn sharp for the old size is drawn again for the new one (the
++    // device is idle).
++    if (sharp_text_cached_factor != 0u) drop_cached_textures();
+     std::vector<std::pair<Target *, const Target *>> copies;
+     for (const auto &[address, old_target] : old_targets) {
+         std::string error;
+@@ -7862,6 +7981,12 @@ std::string VulkanRenderer::texture_pack_folder() const {
+         texture_pack_location(textures_root(), portablekit::game().disc_id, in_place, memory_stick_path()).folder);
+ }
+ 
++void VulkanRenderer::set_sharp_text(bool sharp) {
++    Impl &impl = *impl_;
++    const Impl::Guard guard(impl);
++    impl.sharp_text_wanted = sharp;
++}
++
+ void VulkanRenderer::set_sharp_textures(bool sharp) {
+     Impl &impl = *impl_;
+     const Impl::Guard guard(impl);
+@@ -8099,6 +8224,13 @@ void VulkanRenderer::begin_frame() {
+     impl.apply_texture_pack();
+     impl.apply_texture_dump();
+     impl.apply_texture_edits();
++    if (impl.sharp_text != impl.sharp_text_wanted) {
++        // Text textures are drawn again, sharp or as the game's.
++        impl.sharp_text = impl.sharp_text_wanted;
++        impl.device_wait_idle();
++        impl.drop_cached_textures();
++    }
++    impl.sharp_text_frame_clocks = {impl.sharp_text_frame_clocks[1], impl.texture_clock};
+     impl.replacements.begin_frame(impl.frames);
+     if (texture_pack_trace() && impl.pack && impl.frames % 60u == 0u) {
+         std::cout << "[texpack] frame " << impl.frames << ": " << impl.replaced_draws << " draws replaced in 60 frames, "
+diff --git a/host/gpu/vulkan_renderer.hpp b/host/gpu/vulkan_renderer.hpp
+index 7d9f828..a60c300 100644
+--- a/host/gpu/vulkan_renderer.hpp
++++ b/host/gpu/vulkan_renderer.hpp
+@@ -253,6 +253,9 @@ public:
+     [[nodiscard]] static settings::Aspect usable_aspect(settings::Aspect aspect) noexcept;
+     void set_sharp_screen(bool sharp);
+     void set_sharp_textures(bool sharp);
++    // Draws the text the host's font drew into the game's buffers again at
++    // the internal resolution (fonts/sharp_text.hpp); off draws the game's.
++    void set_sharp_text(bool sharp);
+     // Draws an installed HD texture pack's images instead of the game's own
+     // textures (texture_pack.hpp). Takes effect from the next frame; off
+     // draws exactly what no pack would.
+diff --git a/host/hle/hle_font.cpp b/host/hle/hle_font.cpp
+index 4758110..de0c782 100644
+--- a/host/hle/hle_font.cpp
++++ b/host/hle/hle_font.cpp
+@@ -6,6 +6,7 @@
+ #include "hle_common.hpp"
+ 
+ #include "fonts/game_font.hpp"
++#include "fonts/sharp_text.hpp"
+ 
+ #include "psprecomp/common.hpp"
+ 
+@@ -204,6 +205,19 @@ void blit_glyph(psprecomp::GuestMemory &memory, std::uint32_t image_address, std
+     const std::uint32_t buffer = memory.load32(image_address + 20u);
+     if (buffer == 0u) return;
+ 
++    // Sharp text keeps each glyph drawn into the buffer, to draw it again
++    // larger if the game draws the buffer as a texture (fonts/sharp_text.hpp).
++    const fonts::GlyphTarget target{buffer, buffer_width, buffer_height, bytes_per_line, pixel_format};
++    fonts::before_glyph(memory, target);
++    struct After {
++        psprecomp::GuestMemory &memory;
++        const fonts::GlyphTarget &target;
++        std::uint32_t code;
++        std::int32_t x64, y64;
++        fonts::GlyphClip clip;
++        ~After() { fonts::after_glyph(memory, target, code, x64, y64, clip); }
++    } after{memory, target, code, x64, y64, {clip.x, clip.y, clip.width, clip.height}};
++
+     const std::int32_t x_whole = floor_div64(x64);
+     const std::int32_t y_whole = floor_div64(y64);
+     const fonts::GlyphBitmap glyph = fonts::render(code, static_cast<float>(x64 - x_whole * 64) / 64.0f,
+diff --git a/host/settings/settings.cpp b/host/settings/settings.cpp
+index 7d35904..2d090d9 100644
+--- a/host/settings/settings.cpp
++++ b/host/settings/settings.cpp
+@@ -242,6 +242,7 @@ const std::vector<Field> &fields() {
+         {"text.weight", nullptr,
+          [](Settings &s, const std::string &t) { return parse_uint(t, 0u, kMaxFontWeight, s.font_weight); },
+          [](const Settings &s) { return std::to_string(s.font_weight); }, nullptr},
++        BOOL_FIELD("text.sharp", sharp_text),
+         {"audio.volume", nullptr,
+          [](Settings &s, const std::string &t) { return parse_uint(t, 0u, 100u, s.volume); },
+          [](const Settings &s) { return std::to_string(s.volume); }, nullptr},
+diff --git a/host/settings/settings.hpp b/host/settings/settings.hpp
+index eb19492..1ae141e 100644
+--- a/host/settings/settings.hpp
++++ b/host/settings/settings.hpp
+@@ -64,6 +64,7 @@ struct Settings {
+     // Text
+     std::string font;                  // the game's text font: path, "#face" for a collection; empty: the default
+     std::uint32_t font_weight{1u};     // columns the game's glyphs are thickened by, 0 to kMaxFontWeight
++    bool sharp_text{true};             // the game's text drawn again at the internal resolution (fonts/sharp_text.hpp)
+ 
+     // Audio
+     std::uint32_t volume{100u};        // percent
+diff --git a/host/ui/font_menu.cpp b/host/ui/font_menu.cpp
+index 31110d1..19a04c2 100644
+--- a/host/ui/font_menu.cpp
++++ b/host/ui/font_menu.cpp
+@@ -4,6 +4,8 @@
+ #include "ui/widgets.hpp"
+ 
+ #include "fonts/game_font.hpp"
++#include "fonts/sharp_text.hpp"
++#include "gpu/vulkan_renderer.hpp"
+ #include "install/user_data.hpp"
+ #include "settings/settings.hpp"
+ 
+@@ -221,6 +223,14 @@ void font_rows() {
+             fonts::reload();
+         }
+     }
++    if (fonts::sharp_text_available() &&
++        choice_row("Sharp text", s.sharp_text ? "On" : "Off",
++                   options_for("text.sharp", "Draws the game's text at the internal resolution instead of enlarging "
++                                             "the PSP's small text."))) {
++        s.sharp_text = !s.sharp_text;
++        settings::save();
++        Layer::get().renderer().set_sharp_text(s.sharp_text);
++    }
+     draw_preview();
+     if (button_row("Open the fonts folder",
+                    {false, {}, "Fonts put in this folder (.ttf, .otf, .ttc) are listed first under Font: " +
+diff --git a/host/ui/menu.cpp b/host/ui/menu.cpp
+index bec2935..4907ad8 100644
+--- a/host/ui/menu.cpp
++++ b/host/ui/menu.cpp
+@@ -531,12 +531,14 @@ void Menu::video() {
+         restore("video.unthrottled", s.unthrottled, d.unthrottled);
+         restore("video.fast_loading", s.fast_loading, d.fast_loading);
+         restore("video.performance", s.perf, d.perf);
++        restore("text.sharp", s.sharp_text, d.sharp_text);
+         renderer().set_internal_scale(s.internal_scale);
+         renderer().set_fullscreen(s.fullscreen);
+         renderer().set_window_scale(s.window_scale);
+         renderer().set_aspect(s.aspect);
+         renderer().set_sharp_screen(s.sharp_screen);
+         renderer().set_sharp_textures(s.sharp_textures);
++        renderer().set_sharp_text(s.sharp_text);
+         renderer().set_texture_pack(s.texture_pack);
+         renderer().set_present_mode(s.present_mode);
+         renderer().set_frame_rate(s.frame_rate);
+-- 
+2.53.0.windows.1
+

@@ -203,6 +203,12 @@ disassembler and the new `tools/port/` scripts cover the analysis.
   keypad's keys with Num Lock off bind apart from the numbers, so 8 4 5 6 can move with Num Lock on and turn the
   camera with it off (patch 0112).
 
+## Sharp text (22 November 2026)
+
+- [Sharp text](sharp-text.md): the game's sentence text, which the port draws letter by letter into small buffers
+  the game then enlarges, drawn again at the internal resolution (patch 0120; Video, Text, Sharp text;
+  `D012_NO_SHARP_TEXT=1`). Titles and names in the game's serif style are pictures and stay as they were.
+
 ## Next steps
 
 1. ~~Read PortableKit's sources.~~ Done; see above.
