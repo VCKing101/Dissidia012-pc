@@ -1,0 +1,356 @@
+From b70489528fec654254b0bc439cfebdc8fe35d8d4 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Mon, 23 Nov 2026 07:09:44 +1030
+Subject: [PATCH] Patched editions: interpreter on, own memory stick, overlays
+ compared again
+
+Three gaps found playing a disc mod in a packaged copy, on Windows and on a
+Linux handheld, and switches to look for more.
+
+- begin() turns the interpreter on for the start. The units a patch changes
+  leave the recompiled code and run under it, so where a release build or a
+  packaged layout turns it off (PSPRECOMP_NO_INTERPRETER) the first call
+  into a changed unit stopped the game.
+- The patched disc's memory stick is <memory stick>-patched beside the one
+  in use, also when <PREFIX>_MEMORY_STICK_DIR named it. A packaged copy
+  names its own, so its mod saves went to the release's memory stick.
+- A patched overlay is compared with the release's image again on every
+  cache flush (recompare_patched_overlays), as the executable is. A patch
+  may write hooks into an overlay once it runs; the comparison at install
+  missed them and those words ran as the release's code.
+- <PREFIX>_TRACE_PATCHED=2 logs every changed word, with the nearest
+  function a port registered at or below it (a port's replacement of a
+  function the patch changes runs instead of the patch).
+- Diagnoses: <PREFIX>_PATCHED_INTERPRET_ALL (1, main or overlays) runs all
+  of that code under the interpreter, as an emulator would;
+  <PREFIX>_PATCHED_INTERPRET_RANGE=lo-hi narrows the executable's part;
+  <PREFIX>_PATCHED_COMPARE_VBLANK=1 compares the code at every vblank too.
+
+Checked with Dissidia 012 and a disc mod on Windows: a release build in a
+packaged layout starts the mod, saves in the -patched memory stick, and
+finds about 70 more changed words in the battle and menu overlays. The
+release disc plays as before. The overlay comparison was not run on Linux.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/main.cpp            | 12 +++---
+ host/overlays.cpp        | 60 +++++++++++++++++++++++++++-
+ host/overlays.hpp        |  7 ++++
+ host/patched_edition.cpp | 86 +++++++++++++++++++++++++++++++++++++++-
+ host/patched_edition.hpp | 15 +++++++
+ 5 files changed, 173 insertions(+), 7 deletions(-)
+
+diff --git a/host/main.cpp b/host/main.cpp
+index b6b0239..2f53121 100644
+--- a/host/main.cpp
++++ b/host/main.cpp
+@@ -399,11 +399,13 @@ int main(int argc, char **argv) {
+             if (edition) paths.disc_image = edition->disc;
+             else std::cerr << "[patched] cannot play " << disc.string() << ": " << why << "; starting the release\n";
+             // Its saves and downloads stay apart from the release's: a patch
+-            // may write what the release's code cannot read.
+-            const char *ms0 = portablekit::env("MEMORY_STICK_DIR");
+-            if (edition && (ms0 == nullptr || *ms0 == '\0')) {
+-                paths.memory_stick = paths.memory_stick.parent_path() /
+-                                     (paths.memory_stick.filename().string() + "-patched");
++            // may write what the release's code cannot read. Beside the memory
++            // stick in use, however it was named: a packaged copy names its
++            // own (<data>/ms0) through <PREFIX>_MEMORY_STICK_DIR.
++            if (edition) {
++                std::filesystem::path stick = paths.memory_stick;
++                if (!stick.has_filename()) stick = stick.parent_path();
++                paths.memory_stick = stick.parent_path() / (stick.filename().string() + "-patched");
+                 std::error_code ec;
+                 std::filesystem::create_directories(paths.memory_stick / "PSP" / "SAVEDATA", ec);
+                 std::cout << "Memory stick: " << paths.memory_stick.string() << " (the patched disc's own)\n";
+diff --git a/host/overlays.cpp b/host/overlays.cpp
+index 6836c35..c815ff3 100644
+--- a/host/overlays.cpp
++++ b/host/overlays.cpp
+@@ -21,6 +21,7 @@
+ #include <fstream>
+ #include <iostream>
+ #include <map>
++#include <set>
+ #include <optional>
+ #include <string>
+ #include <vector>
+@@ -311,6 +312,7 @@ bool overlay_parking() {
+ struct PatchedSlot {
+     std::uint64_t header{};
+     std::uint64_t corpus{};
++    std::set<std::uint32_t> changed;  // the words found changed so far
+ };
+ std::map<std::uint32_t, PatchedSlot> &patched_slots() {
+     static std::map<std::uint32_t, PatchedSlot> slots;
+@@ -351,14 +353,25 @@ bool install_patched_overlay(Runtime &runtime, std::uint32_t slot_start) {
+     }
+     const std::uint8_t *loaded = runtime.memory().raw_pointer(slot_start, static_cast<std::uint32_t>(best_words * 4u));
+     std::size_t units = 0u;
++    std::set<std::uint32_t> changed;
+     for (std::size_t i = 0; i < best_words; ++i) {
+         if (std::memcmp(loaded + i * 4u, best_image->data() + i * 4u, 4u) == 0) continue;
++        changed.insert(slot_start + static_cast<std::uint32_t>(i * 4u));
+         if (runtime.retire_recompiled_unit(slot_start + static_cast<std::uint32_t>(i * 4u)) != 0u) ++units;
++        if (patched::trace_every_word()) {
++            std::uint32_t was = 0u, now = 0u;
++            std::memcpy(&was, best_image->data() + i * 4u, 4u);
++            std::memcpy(&now, loaded + i * 4u, 4u);
++            patched::trace_word(runtime, slot_start + static_cast<std::uint32_t>(i * 4u), was, now);
++        }
+     }
++    if (patched::interpret_all_of("overlays"))
++        for (std::size_t i = 0; i < best_words; ++i)
++            if (runtime.retire_recompiled_unit(slot_start + static_cast<std::uint32_t>(i * 4u)) != 0u) ++units;
+     const std::uint64_t header = header_hash(runtime.memory(), slot_start);
+     installed_overlays()[slot_start] = best->hash;
+     installed_headers()[slot_start] = header;
+-    patched_slots()[slot_start] = PatchedSlot{header, best->hash};
++    patched_slots()[slot_start] = PatchedSlot{header, best->hash, std::move(changed)};
+     std::cout << "[patched] overlay " << best->name << ": " << best_changed << " changed words, " << units
+               << " recompiled units interpreted" << std::endl;
+     return true;
+@@ -473,6 +486,51 @@ void revalidate_overlays(Runtime &runtime) {
+ 
+ void forget_unmatched_overlays() { unmatched_slots().clear(); }
+ 
++void recompare_patched_overlays(Runtime &runtime, std::uint32_t from, std::uint32_t to) {
++    constexpr std::uint32_t kChunk = 256u;
++    for (auto &[slot_start, slot] : patched_slots()) {
++        // Swapped out: compared whole when it is installed again.
++        if (slot.header != header_hash(runtime.memory(), slot_start)) continue;
++        const OverlayCorpus *corpus = nullptr;
++        for (const OverlayCorpus &candidate : overlay_corpora())
++            if (candidate.base == slot_start && candidate.hash == slot.corpus) corpus = &candidate;
++        if (corpus == nullptr) continue;
++        const std::vector<std::uint8_t> *image = patched::overlay_baseline(corpus->base, corpus->code_size, corpus->hash);
++        if (image == nullptr) continue;
++        const std::uint32_t size = static_cast<std::uint32_t>(std::min<std::size_t>(image->size(), corpus->size)) & ~3u;
++        const std::uint32_t begin = std::max(from, slot_start) - slot_start;
++        const std::uint32_t end =
++            static_cast<std::uint32_t>(std::min<std::uint64_t>(to, std::uint64_t{slot_start} + size) - slot_start);
++        if (std::uint64_t{from} >= std::uint64_t{slot_start} + size || to <= slot_start || begin >= end) continue;
++        const std::uint8_t *loaded = runtime.memory().raw_pointer(slot_start, size);
++        if (loaded == nullptr) continue;
++        std::size_t words = 0u, units = 0u;
++        for (std::uint32_t offset = begin & ~3u; offset < end;) {
++            const std::uint32_t length = std::min(kChunk, end - offset);
++            if (std::memcmp(loaded + offset, image->data() + offset, length) != 0) {
++                for (std::uint32_t at = offset; at + 4u <= offset + length; at += 4u) {
++                    if (std::memcmp(loaded + at, image->data() + at, 4u) == 0) continue;
++                    const std::uint32_t address = slot_start + at;
++                    if (!slot.changed.insert(address).second) continue;
++                    ++words;
++                    if (runtime.retire_recompiled_unit(address) != 0u) ++units;
++                    if (patched::trace_every_word()) {
++                        std::uint32_t was = 0u, now = 0u;
++                        std::memcpy(&was, image->data() + at, 4u);
++                        std::memcpy(&now, loaded + at, 4u);
++                        patched::trace_word(runtime, address, was, now);
++                    }
++                }
++            }
++            offset += length;
++        }
++        // Words of its data change as the game runs: only code is news.
++        if (units != 0u)
++            std::cout << "[patched] overlay " << corpus->name << ": " << words << " more changed words, " << units
++                      << " more recompiled units interpreted" << std::endl;
++    }
++}
++
+ std::uint64_t patched_overlay_hash(const psprecomp::GuestMemory &memory, std::uint32_t base) {
+     const auto slot = patched_slots().find(base);
+     return slot != patched_slots().end() && slot->second.header == header_hash(memory, base) ? slot->second.corpus : 0u;
+diff --git a/host/overlays.hpp b/host/overlays.hpp
+index 5bfb3a3..e949841 100644
+--- a/host/overlays.hpp
++++ b/host/overlays.hpp
+@@ -22,6 +22,13 @@ void revalidate_overlays(psprecomp::Runtime &runtime);
+ // again at the next call into it.
+ void forget_unmatched_overlays();
+ 
++// A patched edition's overlay running on the release's corpus is compared with
++// the release's image again over [from, to) when the game flushes a cache: a
++// patch may write more of its code once the overlay runs (hooks into code of
++// its own), and a unit holding a newly changed word goes to the interpreter,
++// as when the overlay was installed (patched_edition.hpp).
++void recompare_patched_overlays(psprecomp::Runtime &runtime, std::uint32_t from, std::uint32_t to);
++
+ // The hash of the corpus a patched overlay in the slot at `base` runs on
+ // (patched_edition.hpp), 0 when the slot holds no such image. A port that tells
+ // its overlays apart by their corpus's hash asks this for a patched one.
+diff --git a/host/patched_edition.cpp b/host/patched_edition.cpp
+index 757aaf6..f0a6caf 100644
+--- a/host/patched_edition.cpp
++++ b/host/patched_edition.cpp
+@@ -3,12 +3,16 @@
+ #include "disc_patch.hpp"
+ #include "kernel/iso_image.hpp"
+ #include "overlay_module.hpp"
++#include "overlays.hpp"
++#include "kernel/kernel.hpp"
+ #include "profile.hpp"
+ 
+ #include "psprecomp/common.hpp"
++#include "psprecomp/interpreter.hpp"
+ #include "psprecomp/sha256.hpp"
+ 
+ #include <algorithm>
++#include <cstdlib>
+ #include <cstring>
+ #include <iostream>
+ #include <map>
+@@ -104,6 +108,48 @@ std::optional<std::string> sfo_string(const std::vector<std::uint8_t> &sfo, std:
+     return std::string(text, strnlen(text, value->length));
+ }
+ 
++// What found the words being compared, for the trace.
++const char *g_found_by = "a cache flush";
++
++} // namespace
++
++// <prefix>_PATCHED_INTERPRET_ALL: 1 both, "main" the executable only,
++// "overlays" the patched overlays only.
++bool interpret_all_of(std::string_view part) {
++    const char *value = portablekit::env("PATCHED_INTERPRET_ALL");
++    if (value == nullptr) return false;
++    const std::string_view v(value);
++    return v != "main" && v != "overlays" ? true : v == part;
++}
++
++bool trace_every_word() {
++    static const bool every = [] {
++        const char *trace = portablekit::env("TRACE_PATCHED");
++        return trace != nullptr && std::string_view(trace) == "2";
++    }();
++    return every;
++}
++
++void trace_word(psprecomp::Runtime &runtime, std::uint32_t address, std::uint32_t was, std::uint32_t now) {
++    // Inside a unit taken for the interpreter only a port's own functions are
++    // still registered; each has a function of its own, unlike the unit's
++    // addresses around it (registered_function() answers for those too).
++    std::uint32_t host = 0u;
++    for (std::uint32_t at = address & ~3u, n = 0u; n < 4096u && at >= 4u; at -= 4u, ++n) {
++        if (!runtime.has_function(at)) continue;
++        const auto function = runtime.registered_function(at);
++        if (function != runtime.registered_function(at - 4u) && function != runtime.registered_function(at + 4u))
++            host = at;
++        break;
++    }
++    std::cout << "[patched] word " << psprecomp::hex32(address) << ": " << psprecomp::hex32(was) << " -> "
++              << psprecomp::hex32(now);
++    if (host != 0u) std::cout << "; a port's function at " << psprecomp::hex32(host) << ", " << (address - host) << " bytes before";
++    std::cout << " (found at " << g_found_by << ")" << std::endl;
++}
++
++namespace {
++
+ void compare_code(psprecomp::Runtime &runtime, std::uint32_t from, std::uint32_t to) {
+     State &s = state();
+     const std::uint32_t end = s.code_start + static_cast<std::uint32_t>(s.code.size());
+@@ -125,6 +171,7 @@ void compare_code(psprecomp::Runtime &runtime, std::uint32_t from, std::uint32_t
+                 ++words;
+                 const std::uint32_t taken = runtime.retire_recompiled_unit(address);
+                 if (taken != 0u) ++units;
++                if (trace_every_word()) trace_word(runtime, address, le32(release + at), le32(memory + at));
+                 // <prefix>_TRACE_PATCHED=1: each word that took a unit with it.
+                 static const bool trace = portablekit::env("TRACE_PATCHED") != nullptr;
+                 if (trace && taken != 0u)
+@@ -256,7 +303,41 @@ void begin(psprecomp::Runtime &runtime, const Edition &edition, std::uint32_t lo
+     s.identity = edition.identity;
+     std::cout << "[patched] playing " << edition.disc.filename().string() << ", " << (edition.ram_bytes >> 20u)
+               << " MiB of memory, identity " << edition.identity << std::endl;
++    // The units the patch changes leave the recompiled code and run under the
++    // interpreter (compare_code), so it is on for this start, also where the
++    // build or its layout turns it off (PSPRECOMP_NO_INTERPRETER: a release, a
++    // packaged copy). Off, the first call into a changed unit stops the game.
++    if (!psprecomp::interpreter_fallback_enabled()) {
++        psprecomp::set_interpreter_fallback_enabled(true);
++        std::cout << "[patched] the interpreter is on for this start: it runs the code the patch changes" << std::endl;
++    }
+     compare_code(runtime, load_base, code_end);
++    // <prefix>_PATCHED_COMPARE_VBLANK=1, a diagnosis: the code is compared at
++    // every vblank too, so a patch that writes code with no cache flush shows.
++    if (portablekit::env("PATCHED_COMPARE_VBLANK") != nullptr) {
++        kernel().add_vblank_hook([&runtime] {
++            State &st = state();
++            g_found_by = "a vblank, with no flush";
++            compare_code(runtime, st.code_start, st.code_start + static_cast<std::uint32_t>(st.code.size()));
++            recompare_patched_overlays(runtime, 0u, 0xFFFFFFFFu);
++            g_found_by = "a cache flush";
++        });
++        std::cout << "[patched] the code is compared at every vblank too" << std::endl;
++    }
++    if (interpret_all_of("main")) {
++        // <prefix>_PATCHED_INTERPRET_RANGE=lo-hi (hex) narrows it to a range.
++        std::uint32_t lo = load_base, hi = code_end;
++        if (const char *range = portablekit::env("PATCHED_INTERPRET_RANGE"); range != nullptr && *range != '\0') {
++            char *end = nullptr;
++            lo = static_cast<std::uint32_t>(std::strtoul(range, &end, 16));
++            if (end != nullptr && *end == '-') hi = static_cast<std::uint32_t>(std::strtoul(end + 1, nullptr, 16));
++        }
++        std::uint32_t taken = 0u;
++        for (std::uint32_t at = std::max(lo, load_base) & ~3u; at < std::min(hi, code_end); at += 4u)
++            taken += runtime.retire_recompiled_unit(at);
++        std::cout << "[patched] the executable from " << psprecomp::hex32(lo) << " to " << psprecomp::hex32(hi)
++                  << " runs under the interpreter (" << taken << " addresses)" << std::endl;
++    }
+ }
+ 
+ bool active() noexcept { return state().active; }
+@@ -265,13 +346,16 @@ std::string identity() { return state().identity; }
+ 
+ void code_flushed(psprecomp::Runtime &runtime) {
+     State &s = state();
+-    if (s.active) compare_code(runtime, s.code_start, s.code_start + static_cast<std::uint32_t>(s.code.size()));
++    if (!s.active) return;
++    compare_code(runtime, s.code_start, s.code_start + static_cast<std::uint32_t>(s.code.size()));
++    recompare_patched_overlays(runtime, 0u, 0xFFFFFFFFu);
+ }
+ 
+ void data_flushed(psprecomp::Runtime &runtime, std::uint32_t address, std::uint32_t size) {
+     if (!state().active) return;
+     const std::uint32_t canonical = address & 0x1FFFFFFFu;
+     compare_code(runtime, canonical, canonical + size);
++    recompare_patched_overlays(runtime, canonical, canonical + size);
+ }
+ 
+ const std::vector<std::uint8_t> *overlay_baseline(std::uint32_t base, std::uint32_t code_size, std::uint64_t hash) {
+diff --git a/host/patched_edition.hpp b/host/patched_edition.hpp
+index df126ad..90569b4 100644
+--- a/host/patched_edition.hpp
++++ b/host/patched_edition.hpp
+@@ -7,6 +7,7 @@
+ #include <filesystem>
+ #include <optional>
+ #include <string>
++#include <string_view>
+ #include <vector>
+ 
+ // A patched edition of the game: a disc made from the release by a mod, whose
+@@ -64,6 +65,20 @@ void begin(psprecomp::Runtime &runtime, const Edition &edition, std::uint32_t lo
+ void code_flushed(psprecomp::Runtime &runtime);
+ void data_flushed(psprecomp::Runtime &runtime, std::uint32_t address, std::uint32_t size);
+ 
++// <prefix>_TRACE_PATCHED=2: logs a changed word of code, and the nearest
++// function at or below it that a port registered in place of the game's own
++// and that stays where the unit around it went to the interpreter: a port's
++// replacement of a function the patch changes runs instead of the patch.
++[[nodiscard]] bool trace_every_word();
++void trace_word(psprecomp::Runtime &runtime, std::uint32_t address, std::uint32_t was, std::uint32_t now);
++
++// <prefix>_PATCHED_INTERPRET_ALL, a diagnosis: every unit of `part`
++// ("main", the executable, or "overlays", the patched overlays) runs under the
++// interpreter, as an emulator runs the patched disc; 1 for both.
++// <prefix>_PATCHED_INTERPRET_RANGE=lo-hi (hex) narrows the executable's part.
++// <prefix>_PATCHED_COMPARE_VBLANK=1 compares the code at every vblank too.
++[[nodiscard]] bool interpret_all_of(std::string_view part);
++
+ // The release's image of the overlay a corpus was generated from: what is
+ // loaded at `base`, found on the release's disc by the corpus's own hash over
+ // its header and first `code_size` bytes. Null when the disc has none.
+-- 
+2.53.0.windows.1
+

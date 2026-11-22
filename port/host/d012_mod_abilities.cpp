@@ -247,15 +247,18 @@ Taken take_out(psprecomp::GuestMemory &m, std::uint32_t buffer) {
 }
 
 std::filesystem::path side_file(psprecomp::GuestMemory &m, std::uint32_t params) {
-    // The memory stick as d012_dlc.cpp finds it.
-    std::filesystem::path ms0;
-    if (const char *dir = portablekit::hle_extension::env("MEMORY_STICK_DIR"); dir != nullptr && *dir != '\0') {
-        ms0 = portablekit::install::path_from_utf8(dir);
-    } else {
-        try {
-            ms0 = portablekit::install::user_data_directory() / "ms0";
-        } catch (const std::exception &) {
-            return {};
+    // The memory stick as d012_dlc.cpp finds it: the folder PortableKit
+    // serves as ms0: (a disc mod's own while one plays).
+    std::filesystem::path ms0 = portablekit::memory_stick_path();
+    if (ms0.empty()) {
+        if (const char *dir = portablekit::hle_extension::env("MEMORY_STICK_DIR"); dir != nullptr && *dir != '\0') {
+            ms0 = portablekit::install::path_from_utf8(dir);
+        } else {
+            try {
+                ms0 = portablekit::install::user_data_directory() / "ms0";
+            } catch (const std::exception &) {
+                return {};
+            }
         }
     }
     const std::string name = cstring(m, params + kGameName, 13u) + cstring(m, params + kSaveName, 20u) + "_" +

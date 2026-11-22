@@ -25,6 +25,7 @@
 
 #include "d012_dlc.hpp"
 
+#include "hle/hle_common.hpp"
 #include "install/user_data.hpp"
 #include "profile.hpp"
 
@@ -46,6 +47,9 @@ std::string lower(std::string text) {
 }
 
 std::filesystem::path memory_stick() {
+    // The folder PortableKit serves as ms0: (a disc mod's own while one plays,
+    // ms0-patched); before its file system is set up, where it will be.
+    if (const std::filesystem::path &ms0 = portablekit::memory_stick_path(); !ms0.empty()) return ms0;
     if (const char *dir = portablekit::env("MEMORY_STICK_DIR"); dir != nullptr && *dir != '\0')
         return portablekit::install::path_from_utf8(dir);
     try {

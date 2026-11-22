@@ -3,7 +3,6 @@
 
 #include "d012_original_moves_feature.hpp"
 
-#include "d012_disc_mod.hpp"
 #include "d012_json.hpp"
 #include "d012_model_memory.hpp"
 #include "d012_net.hpp"
@@ -13,6 +12,7 @@
 
 #include "hle/hle_common.hpp"
 #include "install/user_data.hpp"
+#include "patched_edition.hpp"
 #include "profile.hpp"
 
 #include <algorithm>
@@ -246,8 +246,9 @@ void install(std::vector<mod_abilities::Grant> &grants) {
     }
     // A disc mod plays its own files (Emendatus changes Bartz's moveset), so
     // the moves would not match them; and the memory their heaps grow into is
-    // the mod's (d012_hle.cpp).
-    if (!disc_mod::disc_for_this_start().empty()) {
+    // the mod's (d012_hle.cpp). What plays, as PortableKit opened it: a mod
+    // that cannot be opened leaves the game's own disc, and the moves, in.
+    if (portablekit::patched::active()) {
         left_out("a disc mod is on");
         return;
     }

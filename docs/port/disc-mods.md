@@ -22,8 +22,8 @@ A patch must be for the player's disc: Emendatus's is for the USA disc. Choosing
 prepares it again.
 
 A modded disc keeps its saves and downloadable content apart from the game's own, in `ms0-patched` beside `ms0`
-(the data folder's, or the game folder's in a copy built from source). A mod's starter saves go in
-`ms0-patched/PSP/SAVEDATA`.
+(the data folder's, or the game folder's in a copy built from source), in every copy: the setup's, a portable folder
+(the Steam Deck's) and one built from source. A mod's starter saves go in `ms0-patched/PSP/SAVEDATA`.
 
 Online, a copy playing a mod meets and fights only players of the same mod, of the same version: on the game's
 server, in a hosted session, and in battles. Play online's count says "with this mod".
@@ -65,6 +65,17 @@ them, so the port keeps that code and lets PortableKit's interpreter run only wh
 4. Code the game writes later is found when it flushes a cache: the executable is compared again on every
    instruction-cache flush, and on a data-cache flush of a range of it.
 5. The disc's `PARAM.SFO` asking for the larger memory (`MEMSIZE`) gives the game 64 MiB.
+6. The interpreter is on for a modded start (PortableKit patch 0122). A release build and a packaged copy turn it
+   off (`PSPRECOMP_NO_INTERPRETER`, `d012_portable.cpp`): without it the first call into a changed unit stopped the
+   game ("No recompiled function registered at 0x08933398" with Emendatus).
+7. The memory stick is `<memory stick>-patched` beside the one in use, however that was named (patch 0122): a
+   packaged copy names its own `<data>/ms0` through `D012_MEMORY_STICK_DIR`, and before 0122 a modded start there
+   used the game's own saves. The port's DLC check and the added abilities' side files ask PortableKit for the
+   folder it serves as `ms0:` (`portablekit::memory_stick_path()`), so they follow it.
+8. A patched overlay is compared with the release's image again whenever the game flushes a cache, as the
+   executable is (patch 0122, `recompare_patched_overlays`). Emendatus writes hooks into its battle and menu overlays
+   once they run (calls into code of its own at `0x0BFExxxx`): about 70 words the comparison at install could not see,
+   which ran as the release's code until 0122.
 
 Port side (`port/host/d012_disc_mod.cpp`): the System page's rows, `settings.ini`'s `disc_mod.image` and
 `disc_mod.enabled`, and the profile's `patched_disc`. Also changed: `PACKAGE.BIN` is served up to its size on the
@@ -72,9 +83,17 @@ disc, not only up to what its index names (`d012_voices.cpp`), since a mod keeps
 the decompiled-code harness lets a guest call run interpreted code (`d012_decomp_harness.cpp`), and recognises a
 patched overlay as the one its corpus belongs to.
 
+Whether a mod plays is what PortableKit opened (`portablekit::patched::active()`), which the port's memory
+reserve and Bartz's original moves follow (`d012_hle.cpp`, `d012_original_moves_feature.cpp`): a chosen mod that
+cannot be opened leaves the game's own disc, with them.
+
 Test switches: `D012_PATCHED_DISC=<image or .pkdisc>` plays that disc whatever the settings say;
 `D012_NO_PATCHED_DISC=1` plays the game's own; `D012_TRACE_PATCHED=1` logs each changed word that took a unit with
-it; `D012_TEST_DISC_PATCH=<patch or image>` prepares a mod into `disc-mods` as the game starts and logs the result.
+it, `=2` every changed word, with the nearest function a port registered at or below it (a port's replacement of a
+function the patch changes runs instead of the patch's code: check it against the function's size); diagnoses:
+`D012_PATCHED_INTERPRET_ALL=1` (or `main`, `overlays`) runs all of that code under the interpreter, as an emulator
+would, `D012_PATCHED_INTERPRET_RANGE=lo-hi` narrows the executable's part, `D012_PATCHED_COMPARE_VBLANK=1` compares
+the code at every vblank too (code written with no cache flush); `D012_TEST_DISC_PATCH=<patch or image>` prepares a mod into `disc-mods` as the game starts and logs the result.
 
 ### Online
 
@@ -177,7 +196,38 @@ Online, 21 November:
   included) agreed. Random input on both for about 2,700 frames: in step at every check, the same Brave, HP and
   clock on both screens.
 
-Not verified: a whole story chapter, loading the mod's second save back, Linux, the Steam Deck,
+22 November, after the first try on the Steam Deck (main 6a4a11be, a portable Linux folder) stopped at once with
+"No recompiled function registered at 0x08933398": the merged tests had used developer builds, where the interpreter
+is on, and a memory stick nobody named. Both fixed in patch 0122.
+
+- V: on Windows (clang developer build) with `PSPRECOMP_NO_INTERPRETER=1` and the memory stick named, as a packaged
+  copy has them: before, the same stop at `0x08933398`; after, the modded disc (through `D012_PATCHED_DISC` and
+  through `settings.ini`) runs the title demo's loop for 90 s, the memory stick `ms0-patched`, the DLC looked for
+  there, Bartz's original moves left out and no memory reserved; the release as before (moves built, heaps grown,
+  `ms0`); `d012_tests` pass.
+- V: the Linux package in WSL, laid out as the Deck's folder (interpreter off, memory stick named): the patch
+  prepared there (25 MB), then a modded start through `settings.ini` runs 150 s through the demo loop (the modded
+  menu and battle overlays installed 15 times each), on `ms0-patched`; with the switch off the release as before.
+
+On the Steam Deck, 22 November (the test install, with the fixes above): Emendatus starts, plays a Quick Battle and
+saves in `ms0-patched` (`GameData00` and `ExtGameData00/EMSX.BIN`). Two problems the owner reported:
+
+- **A battle against Chaos stops the game as it loads** (a Chaos only Emendatus makes selectable): `strcpy` (main
+  `0x089359A4`) reads a name at `0x00000020`, called from battle `0x08AF2CBC`, which fills an object and copies a name
+  given by its caller. Reproduced on Windows (Quick Battle, Lightning against Chaos, the pack's starter save):
+  - not the port's replacements: none has a word the patch changes inside it but `0x088CB164` (the added abilities'
+    record accessor), and the stop comes with `D012_NO_MOD_ABILITIES=1` too;
+  - not code the comparison misses: with the overlays compared again (8 above) and at every vblank, every hook
+    Emendatus writes is found before the stop, and it stops all the same;
+  - not the recompiled code: with all of the executable and the overlays interpreted, one run reached the battle's
+    versus screen and another stopped at the same place. It depends on timing, not on how the code runs.
+  Left as the mod's (or the mod's reliance on an emulator's timing) unless a run in PPSSPP shows otherwise.
+- **Battles stutter on the Deck.** The units the patch changes run interpreted: in a Quick Battle on this PC the
+  game's own code takes 7.4 ms a frame against 2.7 ms on the release disc (median of about 225 s each, same route).
+  The Deck's slower processor makes that a larger share of its 33 ms frame. Compiling a mod's changed units ahead of
+  time would remove it; not built.
+
+Not verified: a whole story chapter, loading the mod's second save back,
 Android (the picker is desktop only), the European disc, another mod or a patch made by another tool than xdelta3.
 Online across the internet or between two computers, through the game's public server, or with a Deck or phone. A
 battle refused for different mods: copies of different mods never meet in a lobby to reach one. A layer names the
