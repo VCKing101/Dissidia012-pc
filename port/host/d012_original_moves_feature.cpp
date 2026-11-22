@@ -3,6 +3,7 @@
 
 #include "d012_original_moves_feature.hpp"
 
+#include "d012_disc_mod.hpp"
 #include "d012_json.hpp"
 #include "d012_model_memory.hpp"
 #include "d012_net.hpp"
@@ -229,6 +230,13 @@ void install(std::vector<mod_abilities::Grant> &grants) {
     }
     if (portablekit::env("NO_PACKAGE_MODS") != nullptr) {
         std::cout << "[original-moves] off (" << portablekit::env_name("NO_PACKAGE_MODS") << ")\n";
+        return;
+    }
+    // A disc mod plays its own files (Emendatus changes Bartz's moveset), so
+    // the moves would not match them; and the memory their heaps grow into is
+    // the mod's (d012_hle.cpp).
+    if (!disc_mod::disc_for_this_start().empty()) {
+        left_out("a disc mod is on");
         return;
     }
     const std::span<const std::uint8_t> bytes(kOriginalMovesRecipe, kOriginalMovesRecipeSize);

@@ -166,6 +166,10 @@ void on_make_heap(CorpusRuntime &rt, AllegrexContext &ctx) {
 
 void on_handle_heap_make(CorpusRuntime &rt, AllegrexContext &ctx) {
     State &s = state();
+    if (s.trace_heaps > 0 && (ctx.gpr[4] == kSoundHeap || ctx.gpr[4] == kEffectHeap))
+        std::cout << "[heaps] making the " << (ctx.gpr[4] == kSoundHeap ? "sound" : "effect") << " heap: the kernel has "
+                  << kernel().free_memory() << " bytes free below the reserved memory, at most "
+                  << kernel().largest_free_memory() << " in one block" << std::endl;
     if (s.sound.size != 0u && ctx.gpr[4] == kSoundHeap && ctx.gpr[5] == s.sound.address && ctx.gpr[6] == kRetailSoundHeap) {
         ctx.gpr[6] = s.sound.size;
     } else if (s.effects.size != 0u && ctx.gpr[4] == kEffectHeap && ctx.gpr[6] == kRetailEffectHeap) {
@@ -327,6 +331,9 @@ void trace_heaps() {
     const char *level = portablekit::env("TRACE_HEAPS");
     if (s.trace_heaps != 0 || level == nullptr) return;
     s.trace_heaps = std::string(level) == "2" ? 2 : 1;
+    if (!s.handle_heap_hooked)
+        s.handle_heap_hooked = hook_all(kernel().runtime(), {{kHandleHeapMake, &s.handle_heap_make, &on_handle_heap_make,
+                                                              "handle_heap_make"}});
     if (!hook_all(kernel().runtime(), {{kHandleHeapAlloc, &s.handle_heap_alloc, &on_handle_heap_alloc, "handle_heap_alloc"},
                                        {kBlockHeapAlloc, &s.block_heap_alloc, &on_block_heap_alloc, "block_heap_alloc"}}))
         s.trace_heaps = -1;

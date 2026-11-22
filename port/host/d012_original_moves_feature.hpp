@@ -11,6 +11,7 @@
 //     that changes Bartz or a fighter he borrows from);
 //   - a mod's package replaces one of the files the build changes;
 //   - the build does not come to the bytes the recipe says it must;
+//   - a disc mod is on (d012_disc_mod.hpp);
 //   - D012_NO_ORIGINAL_MOVES=1 or D012_NO_PACKAGE_MODS=1 is set.
 // Online, both players must have them or both be without (net::battle's
 // must_match). Bartz learns them at the levels the first game gave them

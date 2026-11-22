@@ -88,8 +88,11 @@ void wrap_vblank_waits(portablekit::HleRegistrar &hle) {
 
 void register_extra_hle(portablekit::HleRegistrar &hle) {
     // Before anything is allocated, so the game's blocks are where they are
-    // in 32 MiB (d012_model_memory.cpp).
-    model_memory::reserve();
+    // in 32 MiB (d012_model_memory.cpp). Not with a disc mod: a mod that asks
+    // for the larger memory (Emendatus) takes its own blocks from it, and the
+    // port's uses of it (bigger models, Bartz's original moves) are for the
+    // game's own disc.
+    if (disc_mod::disc_for_this_start().empty()) model_memory::reserve();
     register_suppreacc(hle);
 
     // The development kit's GPI switches; a retail console reads 0. The game

@@ -109,6 +109,9 @@ Subterrane and Sky Fortress Bahamut with the moves off too: the game's own.
 Each of these leaves the game as it is on the disc and writes one line to the log, starting
 `[original-moves] left out:`.
 
+- **A disc mod is on** (Emendatus, for one; [disc-mods.md](disc-mods.md)). The mod plays its own files, and the
+  memory above the game's 32 MiB that the moves' bigger heaps use is the mod's: a mod that asks for the larger
+  memory takes its own blocks from it. The port then reserves none of it (`d012_hle.cpp`).
 - **The disc's files are not the recipe's.** A disc mod that changes Bartz, or one of the fighters his moves borrow
   from, or the ability table. The moves were not made for those files.
 - **A mod's package replaces one of the eight files.** The mod's file is used. A character mod made with
