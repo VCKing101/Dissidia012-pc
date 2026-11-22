@@ -238,7 +238,12 @@ void install(std::vector<mod_abilities::Grant> &grants) {
         left_out("the recipe cannot be read (" + error + ")");
         return;
     }
-    s.recipe_crc = crc32(bytes);
+    // Line endings aside, as the port's source hash takes them: a checkout's
+    // recipe has LF or CRLF by its settings, and both players must agree.
+    Bytes text;
+    for (const std::uint8_t byte : bytes)
+        if (byte != 0x0Du) text.push_back(byte);  // CR
+    s.recipe_crc = crc32(text);
     try {
         // D012_TEST_ORIGINAL_MOVES=1: all eight from level 1, to try them on any save.
         const bool all_now = portablekit::env("TEST_ORIGINAL_MOVES") != nullptr;

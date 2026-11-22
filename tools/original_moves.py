@@ -2169,7 +2169,7 @@ def cmd_recipe(args):
     data["check"] = recipe_check(discs, data, commands)
     target = Path(args.recipe)
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(json.dumps(data, indent=1) + "\n", encoding="utf-8")
+    target.write_text(json.dumps(data, indent=1) + "\n", encoding="utf-8", newline="\n")  # LF, as the repository keeps it
     used = report.used
     print(f"wrote {target}: {target.stat().st_size:,} bytes; {len(used['attacks'])} attacks, {len(used['hits'])} hits, "
           f"{len(used['projectiles'])} projectiles, {len(used['anims'])} animations "
