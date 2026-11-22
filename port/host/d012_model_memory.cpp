@@ -35,14 +35,17 @@
 #include "hle/hle_common.hpp"
 #include "kernel/kernel.hpp"
 #include "profile.hpp"
+#include "snapshot.hpp"
 
 #include "psprecomp/runtime.hpp"
 
 #include <algorithm>
+#include <any>
 #include <cstdio>
 #include <initializer_list>
 #include <iostream>
 #include <string>
+#include <vector>
 
 namespace d012::model_memory {
 namespace {
@@ -97,7 +100,9 @@ struct Block {
 };
 
 struct State {
-    std::uint32_t base{}, end{};  // the reserved memory
+    std::uint32_t base{}, end{};  // the reserved memory not handed out yet
+    std::uint32_t reserved_end{};  // where the reserved memory ends
+    bool said_unkept{};
     std::uint32_t slot{};         // the staging block's size; 0: the game's own
     Block file{}, pool{}, sound{}, effects{};
     Runtime::RecompiledFunction alloc{}, free{}, make_heap{}, slot_load{};
@@ -260,6 +265,46 @@ bool hook_main_heap(Runtime &rt) {
     return s.main_heap_hooked;
 }
 
+// Rollback's save states (host/snapshot.hpp) keep the game's own 32 MiB and
+// the blocks handed out of the reserved memory: nothing else of it is ever
+// written, so copying it every frame would be wasted (it doubled a save's
+// time online). D012_SNAPSHOT_ALL_RAM=1 keeps it all.
+void name_kept_memory() {
+    State &s = state();
+    if (s.base == 0u) return;
+    std::vector<portablekit::snapshot::Range> ranges{
+        {psprecomp::GuestMemory::kPhysicalBase, s.base - psprecomp::GuestMemory::kPhysicalBase}};
+    for (const Block *block : {&s.file, &s.pool, &s.sound, &s.effects})
+        if (block->size != 0u) ranges.push_back({block->address, block->size});
+    portablekit::snapshot::set_ram_ranges(std::move(ranges));
+    std::cout << "[mods] model memory: a save state keeps "
+              << portablekit::snapshot::kept_ram_bytes(kernel().runtime()) / 1024u << " KiB of guest RAM" << std::endl;
+}
+
+// D012_CHECK_KEPT_MEMORY=1: at every save state, the reserved memory no state
+// keeps must still be all zero; the first page that is not is said.
+void check_unkept_memory() {
+    State &s = state();
+    if (s.said_unkept) return;
+    psprecomp::GuestMemory &memory = kernel().runtime().memory();
+    constexpr std::uint32_t kPage = 0x10000u;
+    for (std::uint32_t page = s.base; page < s.reserved_end; page += kPage) {
+        bool kept = false;
+        for (const Block *block : {&s.file, &s.pool, &s.sound, &s.effects})
+            kept = kept || (block->size != 0u && page + kPage > block->address && page < block->address + block->size);
+        if (kept) continue;
+        const std::uint8_t *data = memory.raw_pointer(page, kPage);
+        if (data == nullptr) continue;
+        for (std::uint32_t i = 0; i < kPage; ++i) {
+            if (data[i] == 0u) continue;
+            std::cerr << "[mods] model memory: guest memory at " << hex(page + i)
+                      << " was written though no save state keeps it; rollback would not undo it" << std::endl;
+            s.said_unkept = true;
+            return;
+        }
+    }
+}
+
 } // namespace
 
 void reserve() {
@@ -277,6 +322,13 @@ void reserve() {
     }
     s.base = block->address;
     s.end = block->address + block->size;
+    s.reserved_end = s.end;
+    if (portablekit::env("CHECK_KEPT_MEMORY") != nullptr)
+        portablekit::snapshot::add("d012 unkept memory check", [] {
+            check_unkept_memory();
+            return std::any{};
+        }, [](const std::any &) {});
+    name_kept_memory();
 }
 
 std::uint64_t block_size() { return state().slot != 0u ? state().slot : kRetailBlock; }
@@ -324,6 +376,7 @@ void fit(std::uint64_t largest) {
     std::cout << "[mods] model memory: model files up to " << s.slot << " bytes (the game's " << kRetailBlock
               << "); file heap " << s.file.size << " bytes at " << hex(s.file.address) << ", battle model pool "
               << s.pool.size << " bytes at " << hex(s.pool.address) << std::endl;
+    name_kept_memory();
 }
 
 void trace_heaps() {
@@ -378,6 +431,7 @@ void fit_battle_heaps(std::uint32_t sound_extra, std::uint32_t effect_extra) {
         if (block->size != 0u)
             std::cout << "[mods] model memory: " << block->name << " " << block->size << " bytes at " << hex(block->address)
                       << " (the game's " << (block == &s.sound ? kRetailSoundHeap : kRetailEffectHeap) << ")" << std::endl;
+    name_kept_memory();
 }
 
 } // namespace d012::model_memory

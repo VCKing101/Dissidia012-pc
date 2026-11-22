@@ -22,7 +22,10 @@ inline constexpr std::uint32_t kRetailPool = 0x780000u;      // the battle model
 // Keeps the guest memory above 0x0A000000 (the profile gives the game 64 MiB,
 // as a PSP-2000 has) from the kernel, so the game's own blocks are where they
 // would be in 32 MiB; the port takes from it. Called once, before anything is
-// allocated (register_extra_hle).
+// allocated (register_extra_hle). Rollback's save states then keep only the
+// game's 32 MiB and the blocks handed out of the rest (snapshot::
+// set_ram_ranges); D012_SNAPSHOT_ALL_RAM=1 keeps all of it, and
+// D012_CHECK_KEPT_MEMORY=1 says if the rest is ever written.
 void reserve();
 
 // Makes the staging block big enough for a model file of `largest` bytes, as

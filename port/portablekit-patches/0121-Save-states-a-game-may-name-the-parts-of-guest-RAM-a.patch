@@ -1,0 +1,190 @@
+From 77f26f58a4ef6b06fecc72f69268fdf822ace898 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Sun, 22 Nov 2026 19:05:39 +1030
+Subject: [PATCH] Save states: a game may name the parts of guest RAM a state
+ keeps
+
+A save state copied all of guest RAM. A port that gives its game more RAM
+than the game uses, and keeps the rest from the kernel for blocks of its
+own, now names the parts that can change: the game's own RAM and the
+blocks it hands out. A state copies and restores only those, back to back,
+and VRAM whole as before. Nothing named (the default) keeps all of RAM.
+
+- snapshot::set_ram_ranges(ranges): {guest address, length}, clipped to
+  RAM, sorted and merged; a state keeps the parts it was saved with.
+- snapshot::kept_ram_bytes(runtime), for logs.
+- <PREFIX>_SNAPSHOT_ALL_RAM=1 keeps all of RAM whatever is named.
+
+Why: Dissidia 012's port gives the game 64 MiB, the PSP-2000's, for
+bigger sound and effect heaps, and online rollback saved all 64 MiB every
+frame (4.3 ms on the PC measured, against 2.0 ms for 32 MiB). It now keeps
+the game's 32 MiB and its 9 MiB of heaps.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/snapshot.cpp | 77 +++++++++++++++++++++++++++++++++++++++++++++--
+ host/snapshot.hpp | 21 +++++++++++++
+ 2 files changed, 96 insertions(+), 2 deletions(-)
+
+diff --git a/host/snapshot.cpp b/host/snapshot.cpp
+index 8684059..5a10eb8 100644
+--- a/host/snapshot.cpp
++++ b/host/snapshot.cpp
+@@ -1,7 +1,11 @@
+ #include "snapshot.hpp"
+ 
+ #include "kernel/kernel.hpp"
++#include "profile.hpp"
+ 
++#include <algorithm>
++#include <iostream>
++#include <span>
+ #include <utility>
+ 
+ namespace portablekit::snapshot {
+@@ -19,9 +23,18 @@ std::vector<Participant> &participants() {
+     return list;
+ }
+ 
++// The parts of RAM states keep, as offsets into GuestMemory::bytes(); null:
++// all of it.
++using Ranges = std::vector<Range>;
++std::shared_ptr<const Ranges> &kept() {
++    static std::shared_ptr<const Ranges> ranges;
++    return ranges;
++}
++
+ } // namespace
+ 
+ struct State {
++    std::shared_ptr<const Ranges> ranges;  // the parts `ram` holds, back to back; null: all of RAM
+     std::vector<std::uint8_t> ram;
+     std::vector<std::uint8_t> vram;
+     psprecomp::AllegrexContext cpu;
+@@ -32,6 +45,42 @@ struct State {
+     std::vector<std::any> parts;
+ };
+ 
++void set_ram_ranges(std::vector<Range> ranges) {
++    if (ranges.empty() || env("SNAPSHOT_ALL_RAM") != nullptr) {
++        kept().reset();
++        return;
++    }
++    const std::uint64_t size = kernel().runtime().memory().size();
++    Ranges offsets;
++    for (const Range &r : ranges) {
++        const std::uint64_t address = r.address & 0x1FFFFFFFu;
++        if (address < psprecomp::GuestMemory::kPhysicalBase) continue;
++        const std::uint64_t from = address - psprecomp::GuestMemory::kPhysicalBase;
++        const std::uint64_t to = std::min<std::uint64_t>(from + r.length, size);
++        if (from < to) offsets.push_back({static_cast<std::uint32_t>(from), static_cast<std::uint32_t>(to - from)});
++    }
++    std::sort(offsets.begin(), offsets.end(), [](const Range &a, const Range &b) { return a.address < b.address; });
++    Ranges merged;
++    for (const Range &r : offsets) {
++        if (!merged.empty() && r.address <= std::uint64_t(merged.back().address) + merged.back().length) {
++            const std::uint64_t end = std::max<std::uint64_t>(std::uint64_t(merged.back().address) + merged.back().length,
++                                                             std::uint64_t(r.address) + r.length);
++            merged.back().length = static_cast<std::uint32_t>(end - merged.back().address);
++        } else {
++            merged.push_back(r);
++        }
++    }
++    kept() = merged.empty() ? nullptr : std::make_shared<const Ranges>(std::move(merged));
++}
++
++std::size_t kept_ram_bytes(psprecomp::Runtime &runtime) {
++    const auto ranges = kept();
++    if (!ranges) return runtime.memory().bytes().size();
++    std::size_t total = 0;
++    for (const Range &r : *ranges) total += r.length;
++    return total;
++}
++
+ void add(std::string name, std::function<std::any()> save, std::function<void(const std::any &)> restore) {
+     participants().push_back(Participant{std::move(name), std::move(save), std::move(restore)});
+ }
+@@ -45,7 +94,18 @@ std::shared_ptr<const State> save(psprecomp::Runtime &runtime) {
+ void save_into(psprecomp::Runtime &runtime, std::shared_ptr<State> &into) {
+     if (!into) into = std::make_shared<State>();
+     State *state = into.get();
+-    state->ram.assign(runtime.memory().bytes().begin(), runtime.memory().bytes().end());
++    const std::vector<std::uint8_t> &ram = runtime.memory().bytes();
++    state->ranges = kept();
++    if (!state->ranges) {
++        state->ram.assign(ram.begin(), ram.end());
++    } else {
++        // Copied straight in: a resize would fill a new state's buffer with
++        // zeros first. A reused one keeps its capacity.
++        state->ram.clear();
++        state->ram.reserve(kept_ram_bytes(runtime));
++        for (const Range &r : *state->ranges)
++            state->ram.insert(state->ram.end(), ram.begin() + r.address, ram.begin() + r.address + r.length);
++    }
+     state->vram.assign(runtime.memory().vram_bytes().begin(), runtime.memory().vram_bytes().end());
+     state->cpu = runtime.cpu();
+     state->starvation_phase = runtime.starvation_phase();
+@@ -58,7 +118,20 @@ void save_into(psprecomp::Runtime &runtime, std::shared_ptr<State> &into) {
+ }
+ 
+ void restore(psprecomp::Runtime &runtime, const State &state, bool keep_pacing) {
+-    runtime.memory().restore_bytes(state.ram, state.vram);
++    psprecomp::GuestMemory &memory = runtime.memory();
++    if (!state.ranges) {
++        memory.restore_bytes(state.ram, state.vram);
++    } else {
++        // In place, as restore_bytes does: recompiled code holds pointers
++        // into guest memory.
++        memory.copy_in(psprecomp::GuestMemory::kVramPhysicalBase, state.vram);
++        std::size_t at = 0;
++        for (const Range &r : *state.ranges) {
++            memory.copy_in(psprecomp::GuestMemory::kPhysicalBase + r.address,
++                           std::span<const std::uint8_t>(state.ram.data() + at, r.length));
++            at += r.length;
++        }
++    }
+     runtime.cpu() = state.cpu;
+     runtime.set_starvation_phase(state.starvation_phase);
+     psprecomp::set_runtime_thread_identity(state.thread_uid, state.thread_name);
+diff --git a/host/snapshot.hpp b/host/snapshot.hpp
+index a9e7e89..31c05bb 100644
+--- a/host/snapshot.hpp
++++ b/host/snapshot.hpp
+@@ -12,6 +12,11 @@
+ // Not in a state, on purpose: the host's renderer and the frames it holds,
+ // what the sound device has already played, the network, real-time pacing,
+ // and logs. Restoring a state does not undo them.
++//
++// Guest RAM is kept whole unless the game names the parts that can change
++// (set_ram_ranges): a game given more RAM than it uses, the rest kept from the
++// kernel for the port's own blocks, names its own RAM and those blocks, and a
++// state copies only them each frame.
+ 
+ #include "psprecomp/runtime.hpp"
+ 
+@@ -29,6 +34,22 @@ namespace portablekit::snapshot {
+ // the first save; the name is for messages.
+ void add(std::string name, std::function<std::any()> save, std::function<void(const std::any &)> restore);
+ 
++// A part of guest RAM: its guest address and length.
++struct Range {
++    std::uint32_t address{};
++    std::uint32_t length{};
++};
++// The parts of guest RAM a state keeps from now on; none (the default) keeps
++// all of it. The rest is neither saved nor restored, so nothing may ever write
++// to it: name only memory the kernel cannot give out and nothing else uses.
++// VRAM is always kept whole. A state keeps the parts it was saved with.
++// <PREFIX>_SNAPSHOT_ALL_RAM=1 keeps all of it whatever is named. Ranges are
++// clipped to RAM, sorted and merged.
++void set_ram_ranges(std::vector<Range> ranges);
++// The parts of guest RAM a state keeps now, in bytes (all of RAM when none are
++// named), for logs.
++[[nodiscard]] std::size_t kept_ram_bytes(psprecomp::Runtime &runtime);
++
+ struct State;
+ 
+ // The whole state now. Call only between dispatches.
+-- 
+2.53.0.windows.1
+

@@ -190,6 +190,38 @@ compares.
   32 copies of this build, and about 15,000 more steps of made-up and damaged packages, with both sides refusing
   the same ones.
 
+## Rollback
+
+The port's guest memory is 64 MiB for these moves' heaps (32 MiB before). Online rollback saves the game's state
+every frame, and a save state copied all of guest RAM, so this doubled the copy for every player online, whether or
+not anyone picks Bartz: 4.3 ms instead of 2.0 ms for the copy alone on the PC measured, and the 11 states rollback
+keeps through the public server took about 750 MB instead of about 400 MB.
+
+Nothing but the port's own blocks is ever written above 32 MiB: the port keeps that memory from the kernel at start
+(`model_memory::reserve`), so the game is never given any of it. So a save state now keeps the game's 32 MiB and the
+blocks the port hands out (the sound and effect heaps, 9 MiB; bigger models' blocks when a mod has them): 41 MiB
+(PortableKit patch 0121, `snapshot::set_ram_ranges`; `d012_model_memory.cpp`). With a disc mod the port reserves
+nothing (the mod's memory is its own), and a state keeps all 64 MiB, as it did before the moves were merged.
+
+| Switch | Effect |
+| --- | --- |
+| `D012_SNAPSHOT_ALL_RAM=1` | A save state keeps all of guest RAM, as before |
+| `D012_CHECK_KEPT_MEMORY=1` | At every save state, the memory no state keeps must still be zero; the log says where it is not |
+
+Checked (22 November 2026, Windows, clang build): one Bartz-against-Bartz battle recorded with the moves, then
+replayed headless with the clocks pinned, once plainly and once with `D012_ROLLBACK_TEST=8,9,wrong` (save at every
+9th read, run 8 more with player 2's input wrong, restore, run them again), each with `D012_SYNC_TRACE` (every
+64 KiB page of guest RAM at every pad read) and `D012_CHECK_KEPT_MEMORY=1`. Keeping the last run of each read
+(`tools/port/sync_last_run.py`; `tools/port/sync_compare.py` pairs records one for one, so a run that ran reads
+again parts from it): 0 of 26,136 reads differ, 16,316 of them in the battle, with 14,490 reads run again;
+the unkept memory stayed zero.
+
+Timed in the same replay with `D012_ROLLBACK_TEST=8,9` and the trace on: a save 7.2 ms and a restore 3.0 ms, against
+10.6 ms and 4.4 ms with `D012_SNAPSHOT_ALL_RAM=1`. The test makes a new state at every save, so its saves cost more
+than online, where rollback reuses its states and a save is mostly the copy (about 2.7 ms for 41 MiB, by the copy
+times above). A state is now 41 MiB of RAM and 2 MiB of VRAM, so the 11 through the public server take about 470 MB.
+That run's trace also matched the plain run's at all 22,769 reads it reached.
+
 ## Checked after the merge into main (22 November 2026, Windows, clang build, USA disc)
 
 - **A real save** (a copy of the owner's Steam Deck save, Bartz Lv 18; the clean copy is kept read-only): the
@@ -216,8 +248,5 @@ compares.
 - Bartz with his alternate costumes, and Bartz against the fighters with the biggest models, have not been played:
   his models are 280 KB bigger than the disc's and the game's model pool has little room to spare.
 - The moves' sounds have not been checked by ear; Flood's water sound is Terra's, as a stand-in.
-- **Rollback's cost of the larger memory.** The port's guest memory is 64 MiB for these moves' heaps (32 MiB before),
-  and online rollback saves all of it every frame: on the PC this was measured on, a save takes 4.3 ms instead of
-  2.0 ms, and the 11 saves rollback keeps through the public server take about 750 MB instead of about 400 MB. This
-  is so for every player online, whether or not anyone picks Bartz. Saving only the parts of the upper 32 MiB the
-  port hands out (about 9 MiB) would bring it near the old cost; that is a PortableKit change, not made.
+- Rollback's save states on Linux, the Steam Deck and Android, and in a real two-copy online battle: measured and
+  checked on Windows only (see "Rollback" above).
