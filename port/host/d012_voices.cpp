@@ -3,6 +3,7 @@
 
 #include "d012_voices.hpp"
 
+#include "d012_package_mods.hpp"
 #include "d012_voice_scenes.hpp"
 #include "hle/hle_common.hpp"
 #include "install/user_data.hpp"
@@ -806,9 +807,12 @@ std::shared_ptr<FileFilter> serve(std::string_view path, std::uint32_t fd) {
             build(bytes);
         }
         if (s.own.empty()) return nullptr;
-        return std::make_shared<BytesFilter>(game_index());
+        // A mod's package files go over this index and package (only one
+        // provider serves a file).
+        return std::make_shared<BytesFilter>(package_mods::index_over(game_index(), s.own_end + kRoom));
     }
-    if (relative == kPackagePath) return s.own.empty() ? nullptr : std::make_shared<PackageFilter>(fd);
+    if (relative == kPackagePath)
+        return s.own.empty() ? nullptr : package_mods::package_over(std::make_shared<PackageFilter>(fd));
     if (relative.starts_with(kMovieFolder)) {
         std::string name = relative.substr(kMovieFolder.size());
         MovieFilter::Reader own = [fd](std::uint64_t at, std::span<std::uint8_t> out) {

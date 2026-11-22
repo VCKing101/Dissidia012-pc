@@ -2,13 +2,16 @@
 // d012_mod_manifest.cpp, which the Battle BGM Maker shares), and serving mod
 // tracks to the game as BGM files. The manifest format is
 // docs/port/mod-folder.md. A broken mod is logged and left out; it never stops
-// the game, and nothing here replaces a file of the game's. MIT licence; see
-// port/README.md.
+// the game. Files a mod gives in place of the game's package entries are
+// d012_package_mods.cpp's. MIT licence; see port/README.md.
 
 #include "d012_mods.hpp"
 
+#include "d012_original_moves_feature.hpp"
 #include "d012_json.hpp"
 #include "d012_mod_manifest.hpp"
+#include "d012_mod_abilities.hpp"
+#include "d012_package_mods.hpp"
 
 #include "audio/host_audio.hpp"
 #include "hle/hle_common.hpp"
@@ -118,6 +121,8 @@ LoadedMod read_mod(const std::filesystem::path &folder) {
     result.mod.version = manifest.version;
     result.mod.author = manifest.author;
     result.mod.description = manifest.description;
+    result.mod.package = manifest.package;
+    for (const auto &ability : manifest.abilities) result.mod.abilities.emplace_back(ability.id, ability.learn);
     result.mod.loaded = true;
     for (const auto &entry : manifest.series) {
         LoadedSeries series;
@@ -449,15 +454,32 @@ void install(portablekit::HleRegistrar &) {
     installed = true;
     if (portablekit::env("NO_MODS") != nullptr) {
         std::cout << "[mods] off (" << portablekit::env_name("NO_MODS") << ")\n";
-        return;
+    } else {
+        if (!audio::host_audio_available())
+            std::cout << "[mods] this build cannot play host audio files, or "
+                      << portablekit::env_name("NO_HOST_AUDIO") << " is set: mod music is left out\n";
+        load();
+        set_up_test_override();
+        test_decode_all();
+        if (!catalogue().tracks.empty()) portablekit::add_file_provider(&serve_bgm);
     }
-    if (!audio::host_audio_available())
-        std::cout << "[mods] this build cannot play host audio files, or "
-                  << portablekit::env_name("NO_HOST_AUDIO") << " is set: mod music is left out\n";
-    load();
-    set_up_test_override();
-    test_decode_all();
-    if (!catalogue().tracks.empty()) portablekit::add_file_provider(&serve_bgm);
+    // Package files of the enabled mods, by mod id: when two replace the same
+    // entry, the mod whose id sorts first gives it.
+    std::vector<package_mods::Source> sources;
+    for (const Mod &mod : catalogue().mods)
+        if (mod.loaded && mod.enabled && !mod.package.empty()) sources.push_back({mod.id, mod.package});
+    std::sort(sources.begin(), sources.end(), [](const auto &a, const auto &b) { return a.mod_id < b.mod_id; });
+    // Abilities those packages add, given to the characters by level.
+    std::vector<mod_abilities::Grant> grants;
+    if (portablekit::env("NO_PACKAGE_MODS") == nullptr)
+        for (const Mod &mod : catalogue().mods)
+            if (mod.loaded && mod.enabled && !mod.package.empty())
+                for (const auto &[id, learn] : mod.abilities) grants.push_back({id, learn, mod.id});
+    // The port's own package files and abilities (Bartz's original moves),
+    // which no mod has to be on for: after the mods', whose files win.
+    original_moves::install(grants);
+    package_mods::install(sources);
+    mod_abilities::install(grants);
 }
 
 } // namespace d012::mods

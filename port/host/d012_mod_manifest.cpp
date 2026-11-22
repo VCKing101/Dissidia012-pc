@@ -170,6 +170,30 @@ bool read_loop(const Value *loop, Loop &out, Report &report, const std::string &
     return true;
 }
 
+// "package": a folder relative to the mod's folder, inside it, and there.
+// A problem leaves the package out; the mod's music still loads.
+std::optional<std::filesystem::path> package_folder(const Value &value, const std::filesystem::path &folder,
+                                                    Report &report) {
+    const std::filesystem::path relative = path_from_utf8(value.text);
+    if (relative.empty() || relative.is_absolute() || relative.has_root_name() || relative.has_root_directory()) {
+        report.error(&value, "mod.package", "\"package\" must be a folder inside the mod's folder; it is left out");
+        return std::nullopt;
+    }
+    for (const auto &part : relative) {
+        if (part == "..") {
+            report.error(&value, "mod.package", "\"package\" must not leave the mod's folder (\"..\"); it is left out");
+            return std::nullopt;
+        }
+    }
+    const std::filesystem::path full = folder / relative;
+    std::error_code ec;
+    if (!std::filesystem::is_directory(full, ec)) {
+        report.error(&value, "mod.package", "\"package\" names \"" + value.text + "\", which is not a folder of the mod; it is left out");
+        return std::nullopt;
+    }
+    return full;
+}
+
 // A track's file: relative to the mod's folder, inside it, there, and of a
 // kind host audio reads.
 std::optional<std::filesystem::path> track_file(const Value &value, const std::filesystem::path &folder,
@@ -259,7 +283,8 @@ bool read_stream_header(const Value &file, const std::filesystem::path &full, Lo
 // Problems in a series or a track leave that part out; problems with the mod
 // itself leave all of it out (`loaded` false).
 void check(const Value &root, const std::filesystem::path &folder, Manifest &result, Report &report) {
-    warn_unknown(root, {"format", "id", "name", "version", "author", "description", "music"}, report, "mod", "the mod");
+    warn_unknown(root, {"format", "id", "name", "version", "author", "description", "music", "package", "abilities"},
+                 report, "mod", "the mod");
     if (const Value *format = member(root, "format", Value::Kind::Number, false, report, "mod", "the mod")) {
         if (whole_number(*format) != kFormat) {
             report.error(format, "mod.format",
@@ -286,9 +311,43 @@ void check(const Value &root, const std::filesystem::path &folder, Manifest &res
     result.description = description.value_or("");
     result.loaded = true;
 
+    const Value *package = member(root, "package", Value::Kind::String, false, report, "mod", "the mod");
+    if (package != nullptr) {
+        if (auto found = package_folder(*package, folder, report)) result.package = std::move(*found);
+    }
+    // "abilities": what the package's system.bin adds, and when the port
+    // gives each. Without a package they are left out.
+    if (const Value *list = member(root, "abilities", Value::Kind::Array, false, report, "mod", "the mod")) {
+        for (std::size_t i = 0; i < list->items.size(); ++i) {
+            const Value &entry = list->items[i];
+            const std::string path = "abilities." + std::to_string(i);
+            if (!entry.is(Value::Kind::Object)) {
+                report.error(&entry, path, "an ability must be an object; it is left out");
+                continue;
+            }
+            warn_unknown(entry, {"id", "learn"}, report, path, "the ability");
+            const auto id = text_member(entry, "id", true, report, path, "the ability");
+            const Value *learn = member(entry, "learn", Value::Kind::Number, false, report, path, "the ability");
+            const auto level = learn != nullptr ? whole_number(*learn) : std::optional<std::int64_t>{0};
+            unsigned long number = 0;
+            const bool hex = id && id->size() == 4 &&
+                             std::all_of(id->begin(), id->end(), [](char c) { return std::isxdigit(static_cast<unsigned char>(c)) != 0; });
+            if (hex) number = std::stoul(*id, nullptr, 16);
+            if (!hex || !level || *level < 0 || *level > 100) {
+                report.error(&entry, path,
+                             "an ability needs \"id\" (four hex digits) and \"learn\" (a level, 0 to 100); it is left out");
+                continue;
+            }
+            if (result.package.empty()) {
+                report.error(&entry, path, "abilities come with the mod's package, and it has none; left out");
+                continue;
+            }
+            result.abilities.push_back({static_cast<std::uint16_t>(number), static_cast<int>(*level)});
+        }
+    }
     const Value *music = member(root, "music", Value::Kind::Object, false, report, "mod", "the mod");
     if (music == nullptr) {
-        report.warning(&root, "mod", "the mod adds nothing this build knows (no \"music\")");
+        if (package == nullptr) report.warning(&root, "mod", "the mod adds nothing this build knows (no \"music\")");
         return;
     }
     warn_unknown(*music, {"series"}, report, "music", "\"music\"");

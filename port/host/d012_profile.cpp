@@ -209,7 +209,10 @@ const GameProfile &game() {
                            0x91, 0x3B, 0x8F, 0x64, 0xB6, 0xFC, 0xB7, 0x12},
 
         .load_base = 0x08804000u,
-        .guest_ram_bytes = 32u * 1024u * 1024u,
+        // A PSP-2000's 64 MiB. The game's own blocks stay in the first 32
+        // MiB, a PSP-1000's: the rest is kept from the kernel for the port
+        // (d012_model_memory.hpp).
+        .guest_ram_bytes = 64u * 1024u * 1024u,
         .boot_path = "disc0:/PSP_GAME/SYSDIR/EBOOT.BIN",
         .overlay_slots = kOverlaySlots,
 

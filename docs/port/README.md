@@ -89,7 +89,12 @@ disassembler and the new `tools/port/` scripts cover the analysis.
 
 ## Mods (19 October 2026)
 
-- [Mod folder](mod-folder.md): mods that add content and never replace any, in `<data dir>/mods/<mod>/mod.json`.
+- [Bartz's original moves](original-moves.md): eight abilities of the first Dissidia's Bartz, built from the player's
+  own 012 disc by a recipe in the port; what is built, when it is left out, how it is checked for online play.
+- [Mod folder](mod-folder.md): mods in `<data dir>/mods/<mod>/mod.json`: music they add, and package files the game
+  reads in place of its own (section 9).
+- [Move Studio](move-studio.md): the scope for making dissidia-fan's Move Studio and `charmod.py` work with the
+  port, and the check of their tools against the USA disc.
   The first kind is battle music: series and tracks in MP3, Ogg Vorbis, Opus, FLAC or WAV, with loop points,
   played through a stand-in ATRAC3plus file that PortableKit's sceAtrac fills from the host file (three framework
   commits). A test switch played a generated mod track in place of a Quick Battle's music, looping where its
