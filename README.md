@@ -79,6 +79,13 @@ online and test sessions. Bugs and crashes go in [GitHub issues](https://github.
 - **Close the game from the title screen**: press circle there, then choose Yes.
 - **Cheats** on the menu's Cheats page: gil, KP, PP, AP, items and battle cheats, and PPSSPP cheat files
   ([below](#cheats)).
+- **Bartz's moves from the first Dissidia**: eight of his original attacks as abilities of their own, marked (OG),
+  beside his 012 ones in Customize. They are made from your 012 disc; the first game's disc is not needed
+  ([notes](docs/port/original-moves.md)).
+- **Sharp text**: descriptions, dialogs and menu rows drawn again at the internal resolution, so they stay sharp at
+  higher resolutions (menu's Video page, **Sharp text**; [notes](docs/port/sharp-text.md)).
+- **Disc mods (very early access)**: play a mod made for the PSP disc, such as Emendatus, from its `.xdelta` patch
+  (menu's System page, **Disc mod**). Expect bugs; see [the guide](docs/port/disc-mods.md#for-the-player).
 
 ## BGM playlist selector
 

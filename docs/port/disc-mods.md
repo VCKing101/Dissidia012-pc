@@ -9,6 +9,10 @@ Conventions as in the other port notes: "V:" verified (by a run, a trace or a ca
 
 ## For the player
 
+**Very early access: expect bugs.** Known so far with Emendatus: battles stutter on slower machines such as the
+Steam Deck (the mod's changed code runs slower than the game's own), and a battle against Chaos stops the game as
+it loads.
+
 Menu (Esc, or L3 + R3), **System**, section **Disc mod**:
 
 - **Choose the mod…** opens a file browser over the game. Choose the mod's patch (`.xdelta`), as its makers hand it
