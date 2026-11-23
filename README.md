@@ -85,7 +85,10 @@ online and test sessions. Bugs and crashes go in [GitHub issues](https://github.
 - **Sharp text**: descriptions, dialogs and menu rows drawn again at the internal resolution, so they stay sharp at
   higher resolutions (menu's Video page, **Sharp text**; [notes](docs/port/sharp-text.md)).
 - **Disc mods (very early access)**: play a mod made for the PSP disc, such as Emendatus, from its `.xdelta` patch
-  (menu's System page, **Disc mod**). Expect bugs; see [the guide](docs/port/disc-mods.md#for-the-player).
+  (menu's System page, **Disc mod**). Added because players asked for Emendatus. Expect bugs; see
+  [the guide](docs/port/disc-mods.md#for-the-player). For full Emendatus support, use
+  [LiinkPK's Dissidia 012 recomp](https://github.com/LiinkPK/Dissidia012-PC), the project Emendatus officially
+  supports.
 
 ## BGM playlist selector
 

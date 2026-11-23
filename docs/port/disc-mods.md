@@ -9,9 +9,12 @@ Conventions as in the other port notes: "V:" verified (by a run, a trace or a ca
 
 ## For the player
 
-**Very early access: expect bugs.** Known so far with Emendatus: battles stutter on slower machines such as the
-Steam Deck (the mod's changed code runs slower than the game's own), and a battle against Chaos stops the game as
-it loads.
+**Very early access: expect bugs.** Disc mods were added because players asked to play Emendatus in this port.
+Known so far with Emendatus: battles stutter on slower machines such as the Steam Deck (the mod's changed code runs
+slower than the game's own), and a battle against Chaos stops the game as it loads.
+
+For full Emendatus support, use [LiinkPK's Dissidia 012 recomp](https://github.com/LiinkPK/Dissidia012-PC), the
+project Emendatus officially supports.
 
 Menu (Esc, or L3 + R3), **System**, section **Disc mod**:
 
