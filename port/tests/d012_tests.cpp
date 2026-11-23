@@ -15,6 +15,7 @@
 #include "d012_dlc_packs_plan.hpp"
 #include "d012_frame_balance.hpp"
 #include "d012_json.hpp"
+#include "d012_manikin_rules.hpp"
 #include "d012_mod_manifest.hpp"
 #include "d012_no_window_rules.hpp"
 #include "d012_online_rules.hpp"
@@ -2201,6 +2202,169 @@ void test_original_moves() {
     expect(refused, "a file that is not the game's stops the build");
 }
 
+// The Manikin look (host/d012_manikin_rules.cpp): who has one, the next look,
+// and the look labels added to a menu text pack.
+namespace manikin_test {
+
+// The game's next look (main 0x088D608C), as its instructions run: from the
+// look above `current`, wrapping from 13 to 1, the first one the mask has; the
+// same look when it comes round again.
+int game_next_look(int current, std::uint16_t mask) {
+    int look = current + 1;
+    for (;;) {
+        if (look >= 14) look = 1;
+        if (look == current) return look;
+        if ((mask & (1u << look)) != 0u) return look;
+        ++look;
+    }
+}
+
+constexpr std::uint16_t kKey[16] = {0xED98, 0x90AB, 0x5E28, 0x8442, 0x32B1, 0x2DDA, 0xA657, 0xC8BF,
+                                    0x0033, 0x579A, 0xF227, 0x4B4C, 0x36A7, 0x927D, 0x739D, 0x84CE};
+
+void put16(std::vector<std::uint8_t> &out, std::size_t at, std::uint16_t value) {
+    out[at] = static_cast<std::uint8_t>(value);
+    out[at + 1u] = static_cast<std::uint8_t>(value >> 8u);
+}
+
+// A message table as the game stores one.
+std::vector<std::uint8_t> table(const std::vector<std::u16string> &strings) {
+    std::vector<std::uint8_t> out(2u + 2u * strings.size());
+    put16(out, 0u, static_cast<std::uint16_t>(strings.size()));
+    for (std::size_t i = 0; i < strings.size(); ++i) {
+        put16(out, 2u + 2u * i, static_cast<std::uint16_t>(out.size() / 2u));
+        std::u16string units = strings[i];
+        units.push_back(u'\0');
+        const std::size_t at = out.size();
+        out.resize(at + 2u + 2u * units.size());
+        put16(out, at, static_cast<std::uint16_t>(2u * units.size()));
+        for (std::size_t j = 0; j < units.size(); ++j)
+            put16(out, at + 2u + 2u * j, static_cast<std::uint16_t>(units[j] ^ kKey[(i + j) & 15u]));
+    }
+    return out;
+}
+
+// A text pack of these tables, laid out as the game's are.
+std::vector<std::uint8_t> pack(const std::vector<std::vector<std::uint8_t>> &tables) {
+    std::vector<std::uint8_t> out = {'m', 'e', 's', 's', ' ', 'p', 'a', 'k', 1, 0, 0, 0, 0, 0, 0, 0};
+    put16(out, 10u, static_cast<std::uint16_t>(tables.size()));
+    out.resize(16u + 8u * tables.size(), 0u);
+    for (std::size_t k = 0; k < tables.size(); ++k) {
+        while (out.size() % 16u != 0u) out.push_back(0x77u);
+        const std::uint32_t at = static_cast<std::uint32_t>(out.size());
+        const std::uint32_t size = static_cast<std::uint32_t>(tables[k].size());
+        for (std::size_t b = 0; b < 4u; ++b) {
+            out[16u + 8u * k + b] = static_cast<std::uint8_t>(at >> (8u * b));
+            out[16u + 8u * k + 4u + b] = static_cast<std::uint8_t>(size >> (8u * b));
+        }
+        out.insert(out.end(), tables[k].begin(), tables[k].end());
+    }
+    while (out.size() % 16u != 0u) out.push_back(0x77u);
+    return out;
+}
+
+std::vector<std::u16string> labels() {
+    std::vector<std::u16string> s = {u"Normal", u"Alt 1", u"Normal", u"Alt 1", u"Alt 2"};
+    for (int k = 1; k <= 9; ++k) s.push_back(u"DLC " + std::u16string(1, static_cast<char16_t>(u'0' + k)));
+    s.push_back(u"Alt 2");
+    for (int k = 1; k <= 9; ++k) s.push_back(u"DLC " + std::u16string(1, static_cast<char16_t>(u'0' + k)));
+    s.push_back(u"--");
+    s.push_back(u"--");
+    return s;
+}
+
+} // namespace manikin_test
+
+void test_manikin_look() {
+    namespace m = d012::manikin;
+    using namespace manikin_test;
+    int with = 0;
+    for (int c = 0; c <= 40; ++c) with += m::has_manikin(c) ? 1 : 0;
+    expect(with == 30, "thirty characters have a manikin");
+    expect(m::has_manikin(1) && m::has_manikin(22) && m::has_manikin(24) && m::has_manikin(31),
+           "Warrior of Light, Gabranth, Kain and Lightning have one");
+    expect(!m::has_manikin(0) && !m::has_manikin(23) && !m::has_manikin(32) && !m::has_manikin(33),
+           "Chaos, Feral Chaos and Aerith have none");
+    expect(m::with_manikin(7, 0x0Eu) == 0x0Fu, "Cecil's looks gain the manikin");
+    expect(m::with_manikin(23, 0x0Eu) == 0x0Eu, "Chaos's do not");
+    expect(m::with_manikin(7, 0u) == 0u, "a character not there to choose gains nothing");
+
+    // Without the manikin, every step is the game's own.
+    bool same = true;
+    for (std::uint32_t mask = 2u; mask < 0x4000u && same; mask += 4u)  // bit 1 set, bit 0 clear
+        for (int look = 0; look <= 13 && same; ++look)
+            same = m::next_look(look, static_cast<std::uint16_t>(mask)) ==
+                   game_next_look(look, static_cast<std::uint16_t>(mask));
+    expect(same, "without the manikin the next look is the game's for every mask and look");
+    // With it: after the last look, then Normal.
+    expect(m::next_look(1, 0x0Fu) == 2 && m::next_look(2, 0x0Fu) == 3, "Normal, Alt 1, Alt 2 as before");
+    expect(m::next_look(3, 0x0Fu) == 0, "the manikin after Alt 2");
+    expect(m::next_look(0, 0x0Fu) == 1, "Normal after the manikin");
+    expect(m::next_look(1, 0x03u) == 0 && m::next_look(0, 0x03u) == 1, "Normal and the manikin only");
+    expect(m::next_look(3, 0x102Fu) == 5 && m::next_look(5, 0x102Fu) == 12 && m::next_look(12, 0x102Fu) == 0,
+           "the manikin after the last DLC look");
+    expect(m::next_look(0, 0x01u) == 0, "the manikin alone stays");
+
+    // The menu's tables as the disc has them (menu overlay bytes).
+    const std::vector<std::uint16_t> first = {0, 0, 1, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13};
+    const std::vector<std::uint16_t> second = {2, 2, 3, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23};
+    expect(m::disc_table(m::kLabelTables[0]) == first, "character select's label table");
+    expect(m::disc_table(m::kLabelTables[1]) == second && m::disc_table(m::kLabelTables[2]) == second,
+           "the other two label tables");
+    const std::vector<std::u16string> disc_labels = labels();
+    for (const m::LabelTable &t : m::kLabelTables) {
+        const std::vector<std::uint16_t> numbers = m::disc_table(t);
+        expect(disc_labels[numbers[1]] == u"Normal" && disc_labels[numbers[2]] == u"Alt 1" &&
+                   disc_labels[numbers[3]] == u"Alt 2" && disc_labels[numbers[4]] == u"DLC 1" &&
+                   disc_labels[numbers[12]] == u"DLC 9",
+               "each table's numbers name the looks");
+    }
+
+    // The label added to a pack.
+    const std::vector<std::uint8_t> other = table({u"Set A", u"Set B", u"Lv 100"});
+    const std::vector<std::uint8_t> before = pack({other, table(labels()), other});
+    const auto after = m::with_manikin_label(before, u"Manikin");
+    expect(after.has_value(), "a pack with a label table gains the label");
+    if (after) {
+        const auto tables = m::pack_tables(*after);
+        expect(tables.size() == 3u, "it keeps its three tables");
+        bool aligned = after->size() % 16u == 0u;
+        for (const auto &[offset, size] : tables) aligned = aligned && offset % 16u == 0u;
+        expect(aligned, "on 16-byte boundaries");
+        if (tables.size() == 3u) {
+            const std::span<const std::uint8_t> bytes(*after);
+            const auto at = [&](std::size_t k) { return bytes.subspan(tables[k].first, tables[k].second); };
+            expect(std::equal(at(0).begin(), at(0).end(), other.begin(), other.end()) &&
+                       std::equal(at(2).begin(), at(2).end(), other.begin(), other.end()),
+                   "the other tables are unchanged");
+            const std::vector<std::u16string> got = m::table_strings(at(1));
+            std::vector<std::u16string> want = labels();
+            want.push_back(u"Manikin");
+            expect(got == want, "the label table has its 26 strings and Manikin as string 26");
+            expect(static_cast<int>(got.size()) == m::kManikinString + 1, "Manikin is the string the menus ask for");
+        }
+        expect(!m::with_manikin_label(*after, u"Manikin").has_value(), "a pack that has it is not changed again");
+    }
+    expect(!m::with_manikin_label(pack({other}), u"Manikin").has_value(), "a pack with no label table is left alone");
+    std::vector<std::uint8_t> not_pack = before;
+    not_pack[0] = 'M';
+    expect(!m::with_manikin_label(not_pack, u"Manikin").has_value(), "a file that is not a text pack is left alone");
+    std::vector<std::uint8_t> extra = before;
+    extra.insert(extra.end(), 16u, 0x00u);
+    expect(!m::with_manikin_label(extra, u"Manikin").has_value(), "a pack with more than fill after it is left alone");
+
+    // The battle portrait of a manikin.
+    const auto portrait = [](std::string_view path) { return m::portrait_instead(path).value_or("(none)"); };
+    expect_text(portrait("menu/JP/battle/chara_image/P_GST130_ZAKO.gim"), "menu/JP/battle/chara_image/P_GST130_1P.gim",
+                "a manikin's portrait is its Normal look's");
+    expect_text(portrait("menu/JP/battle/chara_image/P_FOR100_ZAKO_2.gim"),
+                "menu/JP/battle/chara_image/P_FOR100_1P_2.gim", "and so is its second one");
+    expect_text(portrait("menu/JP/battle/chara_image/P_ORG210_ZAKO.gim"), "(none)", "Feral Chaos keeps his own");
+    expect_text(portrait("menu/JP/battle/chara_image/P_GST130_1P.gim"), "(none)", "a Normal portrait is left alone");
+    expect_text(portrait("menu/JP/battle/chara_image/p_zako_n.gim"), "(none)", "the game's own manikin icons too");
+    expect_text(portrait("obj/P_GST130_ZAKO.gmo"), "(none)", "and the manikin's model");
+}
+
 int main(int argc, char **argv) {
     if (argc == 2 && std::string(argv[1]) == "--print-cases") {
         test_shared_cases(true);
@@ -2231,6 +2395,7 @@ int main(int argc, char **argv) {
     test_battle_cheats();
     test_package_index();
     test_original_moves();
+    test_manikin_look();
     if (g_failures == 0) std::cout << "all passed\n";
     return g_failures == 0 ? 0 : 1;
 }

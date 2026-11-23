@@ -487,8 +487,9 @@ mod off. `D012_TRACE_PACKAGE_MODS=<n>` logs the first n reads of `PACKAGE.BIN` t
 (`[mods] package read at <offset>, <length> bytes: <mod id>/<file> from byte <n>`).
 
 The port itself replaces package files the same way for [Bartz's original moves](original-moves.md), which it
-builds from the disc when the game first opens its package (`package_mods::add_late_source`). A mod's file of the
-same entry wins, and the port then leaves all of its own out. `D012_NO_MODS=1` does not turn those off;
+builds from the disc when the game first opens its package (`package_mods::add_late_source`), and for the
+[Manikin look](manikin-look.md)'s menu texts. A mod's file of the same entry wins, and the port then leaves all of
+that feature's own out. `D012_NO_MODS=1` does not turn those off;
 `D012_NO_PACKAGE_MODS=1` does.
 
 The code: `port/host/d012_package_index.cpp` (the index, and which bytes the game reads where; checked by

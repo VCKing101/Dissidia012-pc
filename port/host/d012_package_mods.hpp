@@ -34,7 +34,9 @@ struct Source {
 // with that CRC (package_index::path_crc): a mod's file wins, and a source
 // whose files belong together gives all of them or none.
 struct LateFile {
-    std::string path;  // package path, as in a mod's package folder
+    // Package path, as in a mod's package folder; by_crc/<CRC>.bin for an
+    // entry whose path is not known.
+    std::string path;
     std::shared_ptr<const std::vector<std::uint8_t>> bytes;
 };
 using LateSource = std::function<std::vector<LateFile>(const std::function<bool(std::uint32_t crc)> &taken)>;

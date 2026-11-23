@@ -91,6 +91,8 @@ disassembler and the new `tools/port/` scripts cover the analysis.
 
 - [Bartz's original moves](original-moves.md): eight abilities of the first Dissidia's Bartz, built from the player's
   own 012 disc by a recipe in the port; what is built, when it is left out, how it is checked for online play.
+- [Manikin look](manikin-look.md): each character's manikin (costume 0, already in the game's data) as a look the
+  menus offer, named Manikin; the looks mask, the next-look step, the label tables, the battle portrait.
 - [Mod folder](mod-folder.md): mods in `<data dir>/mods/<mod>/mod.json`: music they add, and package files the game
   reads in place of its own (section 9).
 - [Move Studio](move-studio.md): the scope for making dissidia-fan's Move Studio and `charmod.py` work with the
