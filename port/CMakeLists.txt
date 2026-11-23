@@ -2,6 +2,10 @@ cmake_minimum_required(VERSION 3.20)
 # The native PC port of Dissidia 012 Duodecim Final Fantasy (ULUS10566), on
 # PortableKit. See README.md for the build and run steps.
 project(D012Port VERSION 0.1.0 LANGUAGES C CXX)
+# Windows programs carry version details (cmake/version_info.cmake, at the end).
+if(WIN32)
+    enable_language(RC)
+endif()
 
 get_filename_component(D012_REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
 # PortableKit is not a submodule here: it is a local clone (on its local
@@ -488,3 +492,14 @@ foreach(check check_original_moves check_gmo_motion check_effect_package)
     target_include_directories(${check} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/host")
     set_target_properties(${check} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 endforeach()
+
+# The programs a player runs or a setup ships carry Windows version details:
+# name, publisher and the release's version.
+if(WIN32)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/version_info.cmake")
+    d012_version_info(D012Native "Dissidia 012 PC port")
+    d012_version_info(psp_recomp "Dissidia 012 PC port: the game code recompiler")
+    if(TARGET BgmMaker)
+        d012_version_info(BgmMaker "Dissidia 012 PC port: Battle BGM Maker")
+    endif()
+endif()

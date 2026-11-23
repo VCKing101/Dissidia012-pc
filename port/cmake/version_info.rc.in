@@ -1,0 +1,33 @@
+// Windows version details for @D012_RC_FILE@, filled in by
+// port/cmake/version_info.cmake from tools/port/release-version.txt.
+#include <winver.h>
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION @D012_RC_MAJOR@,@D012_RC_MINOR@,@D012_RC_PATCH@,0
+PRODUCTVERSION @D012_RC_MAJOR@,@D012_RC_MINOR@,@D012_RC_PATCH@,0
+FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
+FILEFLAGS 0
+FILEOS VOS_NT_WINDOWS32
+FILETYPE VFT_APP
+FILESUBTYPE VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName", "VCKing101"
+            VALUE "FileDescription", "@D012_RC_DESCRIPTION@"
+            VALUE "FileVersion", "@D012_RC_VERSION@"
+            VALUE "InternalName", "@D012_RC_NAME@"
+            VALUE "LegalCopyright", "Copyright (c) 2026 VCKing101. MIT License."
+            VALUE "OriginalFilename", "@D012_RC_FILE@"
+            VALUE "ProductName", "Dissidia 012 PC port"
+            VALUE "ProductVersion", "@D012_RC_VERSION@"
+            VALUE "Comments", "https://github.com/VCKing101/Dissidia012-pc. Not affiliated with Square Enix or Sony."
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END
