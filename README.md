@@ -204,7 +204,7 @@ ISO: it runs the same setup without a window (`D012Native.exe --prepare --game <
 Its video settings show on the game's page. The release's portable zip, `Dissidia012-PC-<version>-Windows-x64.zip`,
 is what it installs; the steps below are for the setup program.
 
-**1. Download** `Dissidia012-PC-Setup-<version>.exe` from the
+**1. Download** `Dissidia012-PC-<version>-Windows-x64-Setup.exe` from the
 [latest release](https://github.com/VCKing101/Dissidia012-pc/releases). Nothing else needs to be installed first.
 
 **2. Have your game ready:** your own USA disc image (**ULUS10566**) or European disc image (**ULES01505**), as an

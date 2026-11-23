@@ -23,7 +23,7 @@ BEGIN
             VALUE "OriginalFilename", "@D012_RC_FILE@"
             VALUE "ProductName", "Dissidia 012 PC port"
             VALUE "ProductVersion", "@D012_RC_VERSION@"
-            VALUE "Comments", "https://github.com/VCKing101/Dissidia012-pc. Not affiliated with Square Enix or Sony."
+            VALUE "Comments", "Open-source PC port of Dissidia 012 Duodecim Final Fantasy: https://github.com/VCKing101/Dissidia012-pc. Not affiliated with Square Enix or Sony."
         END
     END
     BLOCK "VarFileInfo"

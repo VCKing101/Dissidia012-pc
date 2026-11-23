@@ -45,7 +45,9 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0
 OutputDir={#OutputDir}
-OutputBaseFilename=Dissidia012-PC-Setup-{#AppVersion}
+; Not Dissidia012-PC-Setup-<version>.exe, the name 0.8.0 and 0.8.1 look for: their Download and install would
+; install it, and Defender flags a program installed that way (docs/port/releasing.md).
+OutputBaseFilename=Dissidia012-PC-{#AppVersion}-Windows-x64-Setup
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern

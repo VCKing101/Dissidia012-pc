@@ -8,12 +8,20 @@ all named with the version in `tools/port/release-version.txt`:
 
 | File | For | Made by |
 |---|---|---|
-| `Dissidia012-PC-Setup-<version>.exe` | Windows, the setup wizard | `tools/port/package_installer.py` |
+| `Dissidia012-PC-<version>-Windows-x64-Setup.exe` | Windows, the setup wizard (see below the table) | `tools/port/package_installer.py` |
 | `Dissidia012-PC-<version>-Windows-x64.zip` | Windows through [RecompLauncher](https://recomplauncher.com/game/dissidia012-pc): the same files, `recomplauncher.json` at the top | `tools/port/package_installer.py` |
 | `Dissidia012-Setup-<version>-x86_64.AppImage` | Linux and the Steam Deck | `tools/port/linux_setup.sh` (WSL) |
 | `Dissidia012-<version>-Android-arm64.apk` | Android 10 and later, arm64 | `tools/port/android_build.sh --release` (WSL) |
 | `SHA256SUMS` | all four, `sha256sum -c` format (two spaces) | collected by hand from the three |
 | `SHA256SUMS.sig` | the game's **Download and install**: the list's signature | `tools/port/release_signing.sh sign` |
+
+The Windows setup is not called `Dissidia012-PC-Setup-<version>.exe` (as up to 0.8.0) on purpose. That is the name
+0.8.0's and 0.8.1's **Download and install** look for, and a program installed that way, the game downloading the
+setup and running it without a window, is flagged by Microsoft Defender's cloud as `Trojan:Win32/Bearfoos.A!ml`
+within seconds: on 19 and 23 November 2026, three times out of three, while every setup run by hand passed. Once
+flagged, that program is flagged on every PC. Under another name those copies offer only **Open the download page**
+on Windows; Linux and Android still install from the menu. Keep it so until Windows installs from the menu in a way
+Defender accepts, tested with throwaway builds, never with a release's program.
 
 None of them carries anything of the game: each setup and the app make the game's code on the player's machine from
 their own disc. The scripts check that (no game file by name or content, no program with the game's code linked in,

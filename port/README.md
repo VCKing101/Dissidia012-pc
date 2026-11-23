@@ -408,7 +408,7 @@ llvm-mingw trimmed as PortableKit's own packaging trims it, `atracdenc.exe` with
 `README.txt`, licences and `tools/port/installer/THIRD_PARTY_NOTICES.md`),
 refuses it if it finds a file of the game by name or content, a program with the game's code linked in, or a path of
 this machine, and compiles `tools/port/installer/dissidia012.iss` with Inno Setup 7 (`tools/local/innosetup`) into
-`build/port/installer/dist/Dissidia012-PC-Setup-X.Y.Z.exe` (76 MB). The wizard asks for the folder (no
+`build/port/installer/dist/Dissidia012-PC-X.Y.Z-Windows-x64-Setup.exe` (76 MB). The wizard asks for the folder (no
 administrator rights) and the ISO, installs, runs `--install` and `--compile-game` with a progress bar from the
 latter's output, and makes the shortcuts; running it again over an installation is the update, and uninstalling keeps
 `data/` unless the player says otherwise. Checked on 28 October 2026 with a silent install (`/VERYSILENT /ISO=...`):

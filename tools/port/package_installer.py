@@ -1,4 +1,4 @@
-"""Builds the Windows installer, build/port/installer/dist/Dissidia012-PC-Setup-<version>.exe.
+"""Builds the Windows installer, build/port/installer/dist/Dissidia012-PC-<version>-Windows-x64-Setup.exe.
 
     python tools/port/package_installer.py [--version 0.3.0] [--portablekit DIR] [--no-build]
 
@@ -315,7 +315,7 @@ def compile_setup(version):
     DIST.mkdir(parents=True, exist_ok=True)
     run([ISCC, f"/DAppVersion={version}", f"/DStage={STAGE}", f"/DOutputDir={DIST}", "/Q",
          INSTALLER / "dissidia012.iss"])
-    setup = DIST / f"Dissidia012-PC-Setup-{version}.exe"
+    setup = DIST / f"Dissidia012-PC-{version}-Windows-x64-Setup.exe"
     print(f"  {setup} ({setup.stat().st_size / 2**20:.0f} MB)")
     return setup
 
