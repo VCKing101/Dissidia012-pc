@@ -119,6 +119,8 @@ portablekit_add_game(D012Native ${d012_corpus}
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_mod_abilities.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_summon_slot_guard.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_object_name_guard.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_manikin_look.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_manikin_rules.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_button_prompts.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_math_check.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_math.cpp"
@@ -463,6 +465,7 @@ target_link_libraries(d012_tests PRIVATE d012_manifest Threads::Threads)
 # The battle relay's STATUS packets (it builds without PortableKit).
 target_sources(d012_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_battle_relay.cpp"
                                   "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_dlc_packs_plan.cpp"
+                                  "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_manikin_rules.cpp"
                                   # The cheat engine, to run the battle cheats' codes.
                                   "${D012_PORTABLEKIT_DIR}/host/cheats/cwcheat.cpp")
 # The builder of Bartz's original moves: its tests need no game files.

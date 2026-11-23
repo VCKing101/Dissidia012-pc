@@ -170,7 +170,9 @@ void collect_late() {
         std::uint64_t total = 0u;
         for (LateFile &given : source(taken)) {
             File file;
-            file.crc = pix::path_crc(lower(given.path));
+            const std::string relative = lower(given.path);
+            const auto crc = by_crc(relative);
+            file.crc = crc ? *crc : pix::path_crc(relative);
             file.name = name + "/" + given.path;
             file.bytes = std::move(given.bytes);
             if (!file.bytes || taken(file.crc)) continue;

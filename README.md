@@ -82,6 +82,9 @@ online and test sessions. Bugs and crashes go in [GitHub issues](https://github.
 - **Bartz's moves from the first Dissidia**: eight of his original attacks as abilities of their own, marked (OG),
   beside his 012 ones in Customize. They are made from your 012 disc; the first game's disc is not needed
   ([notes](docs/port/original-moves.md)).
+- **Manikin look**: every character the game has a manikin of (all but Chaos and Feral Chaos) has one more look,
+  Manikin, after its others: Square on Player Select, Triangle in Customization
+  ([notes](docs/port/manikin-look.md)).
 - **Sharp text**: descriptions, dialogs and menu rows drawn again at the internal resolution, so they stay sharp at
   higher resolutions (menu's Video page, **Sharp text**; [notes](docs/port/sharp-text.md)).
 - **Disc mods (very early access)**: play a mod made for the PSP disc, such as Emendatus, from its `.xdelta` patch

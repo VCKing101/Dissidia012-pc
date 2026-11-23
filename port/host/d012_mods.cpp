@@ -7,6 +7,7 @@
 
 #include "d012_mods.hpp"
 
+#include "d012_manikin_look.hpp"
 #include "d012_original_moves_feature.hpp"
 #include "d012_json.hpp"
 #include "d012_mod_manifest.hpp"
@@ -475,9 +476,11 @@ void install(portablekit::HleRegistrar &) {
         for (const Mod &mod : catalogue().mods)
             if (mod.loaded && mod.enabled && !mod.package.empty())
                 for (const auto &[id, learn] : mod.abilities) grants.push_back({id, learn, mod.id});
-    // The port's own package files and abilities (Bartz's original moves),
-    // which no mod has to be on for: after the mods', whose files win.
+    // The port's own package files and abilities (Bartz's original moves, the
+    // Manikin look's menu texts), which no mod has to be on for: after the
+    // mods', whose files win.
     original_moves::install(grants);
+    manikin_look::install();
     package_mods::install(sources);
     mod_abilities::install(grants);
 }
