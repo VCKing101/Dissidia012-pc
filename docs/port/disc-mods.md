@@ -83,6 +83,13 @@ them, so the port keeps that code and lets PortableKit's interpreter run only wh
    executable is (patch 0122, `recompare_patched_overlays`). Emendatus writes hooks into its battle and menu overlays
    once they run (calls into code of its own at `0x0BFExxxx`): about 70 words the comparison at install could not see,
    which ran as the release's code until 0122.
+9. A port's replacement that runs the game's own function as part of its work (`call_original`,
+   `d012_decomp_harness.cpp`) runs the guest's code in a modded start, not the release's recompiled function: the
+   first instruction interpreted (the address is the replacement's own), the rest through dispatch, so a unit the mod
+   changed runs interpreted and the rest recompiled. Emendatus hooks the character record accessor, main `0x088CB164`
+   (the added abilities' replacement), as it runs: its call to the id-to-slot lookup goes to `0x0BFEA140` and its
+   return to `0x0BFEA060`, which hand the fighters it adds (Aerith, Chaos) records of their own. Before, the release's
+   accessor ran, gave them the game's shared blank record, and Aerith was level 1 with nothing to equip (issue 23).
 
 Port side (`port/host/d012_disc_mod.cpp`): the System page's rows, `settings.ini`'s `disc_mod.image` and
 `disc_mod.enabled`, and the profile's `patched_disc`. Also changed: `PACKAGE.BIN` is served up to its size on the
@@ -223,7 +230,8 @@ saves in `ms0-patched` (`GameData00` and `ExtGameData00/EMSX.BIN`). Two problems
   `0x089359A4`) reads a name at `0x00000020`, called from battle `0x08AF2CBC`, which fills an object and copies a name
   given by its caller. Reproduced on Windows (Quick Battle, Lightning against Chaos, the pack's starter save):
   - not the port's replacements: none has a word the patch changes inside it but `0x088CB164` (the added abilities'
-    record accessor), and the stop comes with `D012_NO_MOD_ABILITIES=1` too;
+    record accessor, whose hooks were skipped until 9 above), and the stop comes with `D012_NO_MOD_ABILITIES=1` too,
+    which leaves the accessor to the mod;
   - not code the comparison misses: with the overlays compared again (8 above) and at every vblank, every hook
     Emendatus writes is found before the stop, and it stops all the same;
   - not the recompiled code: with all of the executable and the overlays interpreted, one run reached the battle's
@@ -233,6 +241,15 @@ saves in `ms0-patched` (`GameData00` and `ExtGameData00/EMSX.BIN`). Two problems
   game's own code takes 7.4 ms a frame against 2.7 ms on the release disc (median of about 225 s each, same route).
   The Deck's slower processor makes that a larger share of its 33 ms frame. Compiling a mod's changed units ahead of
   time would remove it; not built.
+
+Issue 23, 24 November (two players: Aerith "has no attacks or abilities to equip"): reproduced on Windows with the
+pack's starter save, where Customization showed Aerith at level 1 with 0/330 CP and every slot empty while Lightning
+was level 100. With 9 above: level 100, 100/450 CP, her attacks in the slots (Cure, Tempest Combo); the mod's lookup
+and return hook run on every call (`PSPRECOMP_INTERPRETER_WATCH=0x0BFEA140,0x0BFEA060`); a Quick Battle as Aerith
+against Lightning plays to its end; `d012_tests` pass. Not run: the release disc with this change (its path is the
+code as before), Linux, the Deck, a battle against Chaos. The "1 of the patch's 210 parts did not come out as it
+expected" notice in the players' screenshots is the patch's first 8 MiB, which match no USA disc we have; the
+executable in them comes out right, and it is not the cause.
 
 Not verified: a whole story chapter, loading the mod's second save back,
 Android (the picker is desktop only), the European disc, another mod or a patch made by another tool than xdelta3.
