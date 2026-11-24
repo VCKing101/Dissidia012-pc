@@ -21,6 +21,7 @@
 #include <array>
 #include <cmath>
 #include <iterator>
+#include <mutex>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -29,6 +30,10 @@ namespace d012 {
 namespace {
 
 namespace input = portablekit::input;
+
+// The prompts of the last symbols drawn: what the port's own hints name the buttons by.
+std::mutex g_prompts_lock;
+input::ButtonPrompts g_last_prompts;
 
 constexpr std::uint32_t kScale = 4u;  // the drawn texture against the game's
 constexpr float S = static_cast<float>(kScale);
@@ -957,10 +962,19 @@ void scale_up(const std::vector<std::uint32_t> &native, std::uint32_t width, std
 
 std::span<const portablekit::EditedTexture> button_prompt_textures() { return kTextures; }
 
+portablekit::input::ButtonPrompts current_button_prompts() {
+    const std::lock_guard<std::mutex> hold(g_prompts_lock);
+    return g_last_prompts;
+}
+
 bool draw_button_prompts(std::size_t index, const std::uint32_t *pixels, std::uint32_t width, std::uint32_t height,
                          const portablekit::TextureEditContext &context, std::vector<std::uint32_t> &out,
                          std::uint32_t &out_width, std::uint32_t &out_height) {
     const input::ButtonPrompts &prompts = context.prompts;
+    {
+        const std::lock_guard<std::mutex> hold(g_prompts_lock);
+        g_last_prompts = prompts;
+    }
     if (prompts.style == input::PromptStyle::Psp || index >= std::size(kTextures)) return false;
     if (width != kTextures[index].width || height != kTextures[index].height) return false;
     std::vector<std::uint32_t> native(pixels, pixels + static_cast<std::size_t>(width) * height);

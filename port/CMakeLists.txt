@@ -139,6 +139,7 @@ portablekit_add_game(D012Native ${d012_corpus}
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_dialogs.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_cheats.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_ap_cheat.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_skill_pages.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_title_quit.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_no_window.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_no_window_rules.cpp"

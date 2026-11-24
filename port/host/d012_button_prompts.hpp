@@ -25,4 +25,9 @@ bool draw_button_prompts(std::size_t index, const std::uint32_t *pixels, std::ui
                          const portablekit::TextureEditContext &context, std::vector<std::uint32_t> &out,
                          std::uint32_t &out_width, std::uint32_t &out_height);
 
+// The prompts the game's symbols were last drawn in (the style, the pad's
+// shoulders, L and R on the triggers): the port's own hints name the buttons
+// the same way. The PSP's until the first symbol sheet is drawn.
+[[nodiscard]] portablekit::input::ButtonPrompts current_button_prompts();
+
 } // namespace d012

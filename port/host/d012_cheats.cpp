@@ -83,6 +83,9 @@ constexpr CheatChoice kMalaBestia[] = {{nullptr, "0x003BF762 0x00000063\n0x003BF
                                                  "0x003BF112 0x00000063\n0x003BF196 0x00000063\n"
                                                  "0x003BF0DE 0x00000063"}};
 constexpr CheatChoice kSummons[] = {{nullptr, summon_slots::kAllSummonsCode}};
+// Skill limit: no codes. The port keeps the second page of Skills itself
+// (d012_skill_pages.cpp).
+constexpr CheatChoice kSkillLimit[] = {{nullptr, nullptr}};
 
 // --- Battle ------------------------------------------------------------------
 // The codes are in d012_battle_cheat_codes.hpp.
@@ -112,6 +115,8 @@ constexpr BuiltinCheat kCheats[] = {
     {"accessories", kItems, "All accessories ×99", "Keeps 99 of every accessory.", kAccessories},
     {"mala_bestia", kItems, "Mala Bestia accessories ×99", "Keeps 99 of each Mala Bestia accessory.", kMalaBestia},
     {"summons", kItems, "All summons", "Gives you every summonstone, with 10 uses left.", kSummons},
+    {"skill_limit", kItems, "10 Skills", "Story Mode lets you hold 10 Skills, on two pages. L2 or R2 turns the page.",
+     kSkillLimit},
     {"infinite_hp", kBattle, "Infinite HP", "Your HP stays full.", kInfiniteHp},
     {"max_hp", kBattle, "Max HP 999,999", "Your maximum HP is 999,999.", kMaxHp},
     {"bravery", kBattle, "Bravery 9,999", "Your Bravery stays at 9,999.", kBravery},
@@ -139,6 +144,15 @@ std::uint32_t ap_after_battle() {
         return choice >= 1u && choice <= std::size(kApAmounts) ? kApAmounts[choice - 1u] : 0u;
     }
     return 0u;
+}
+
+bool skill_pages_on() {
+    if (!portablekit::settings::current().cheats || portablekit::cheats::paused_online()) return false;
+    const portablekit::cheats::Overview overview = portablekit::cheats::overview();
+    if (!overview.available) return false;
+    for (std::size_t i = 0; i < std::size(kCheats) && i < overview.builtin.size(); ++i)
+        if (std::strcmp(kCheats[i].key, "skill_limit") == 0) return overview.builtin[i].choice >= 1u;
+    return false;
 }
 
 } // namespace d012
