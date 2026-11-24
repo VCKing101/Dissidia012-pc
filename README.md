@@ -309,7 +309,10 @@ free space while it sets up (3.2 GB if the ISO is copied in; the installed game 
 start the AppImage, which most systems have. The setup's windows need `zenity`; without it, the setup asks its
 questions in a terminal window. SteamOS has all of these.
 
-- The Battle BGM Maker is not in the Linux setup yet. Music mods made with it elsewhere play as they do on Windows.
+- **The Battle BGM Maker** (for making music mods) is a download of its own,
+  `Dissidia012-BgmMaker-<version>-x86_64.AppImage`. Make it executable as in step 3 and open it; nothing is
+  installed. It finds the game by itself, and if you have more than one copy, it asks which one and remembers.
+  Kept in the game's folder, it always works on that copy.
 - Install it in a folder of its own: the setup will not install over the Windows version's folder (a Proton install).
 - The Linux build and setup are made on a Windows PC with WSL; see [docs/port/platforms.md](docs/port/platforms.md).
 

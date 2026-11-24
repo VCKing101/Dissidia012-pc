@@ -17,6 +17,7 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include <stb_image_write.h>
 
+#include <algorithm>
 #include <array>
 #include <cstring>
 #include <iostream>
@@ -68,8 +69,19 @@ bool Window::open(const std::string &title, std::string &error) {
     }
     scale_ = SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay());
     if (scale_ <= 0.0f) scale_ = 1.0f;
-    window_ = SDL_CreateWindow(title.c_str(), static_cast<int>(kWidth * scale_), static_cast<int>(kHeight * scale_),
-                               SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_HIDDEN);
+    int width = static_cast<int>(kWidth * scale_);
+    int height = static_cast<int>(kHeight * scale_);
+    SDL_WindowFlags flags = SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_HIDDEN;
+    // A screen with no room for that and the window's frame (a Steam Deck's,
+    // 1280x800 with a panel): maximised.
+    SDL_Rect usable{};
+    if (SDL_GetDisplayUsableBounds(SDL_GetPrimaryDisplay(), &usable) && usable.w > 0 && usable.h > 0 &&
+        (width > usable.w || height > usable.h)) {
+        width = std::min(width, usable.w);
+        height = std::min(height, usable.h);
+        flags |= SDL_WINDOW_MAXIMIZED;
+    }
+    window_ = SDL_CreateWindow(title.c_str(), width, height, flags);
     if (window_ == nullptr) {
         error = std::string("the window cannot be opened: ") + SDL_GetError();
         return false;

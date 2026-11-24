@@ -49,6 +49,14 @@ if [[ "$(cat "$deps/.sdl3.stamp" 2>/dev/null)" != "$SDL3_VERSION $SDL3_SHA256" ]
     echo "$SDL3_VERSION $SDL3_SHA256" > "$deps/.sdl3.stamp"
 fi
 
+if [[ "${D012_BGM_MAKER:-0}" -eq 1 ]]; then
+    # The Battle BGM Maker on its own, for its AppImage
+    # (tools/port/linux_bgm_maker.sh). It reads no corpus.
+    # shellcheck source=/dev/null
+    source "$root/src/linux_bgm_maker_in_sdk.sh"
+    exit 0
+fi
+
 if [[ "${D012_INSTALLER:-0}" -eq 1 ]]; then
     # The installer build (port/CMakeLists.txt, D012_INSTALLER_BUILD): the
     # program without the game's code, with psp_recomp and sdk/ beside it, for

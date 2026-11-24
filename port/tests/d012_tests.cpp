@@ -807,9 +807,15 @@ void test_psp_iso() {
     std::vector<std::int16_t> pcm(2 * 10000);
     for (std::size_t i = 0; i < pcm.size(); ++i) pcm[i] = static_cast<std::int16_t>(i);
     const auto input = psp::encoder_input(pcm, std::pair<std::int64_t, std::int64_t>{2000, 9000});
-    expect(input.size() == 2 * (9000 + psp::kTailSamples) && input[2 * 9000] == pcm[2 * 2000] &&
-               input[2 * 9000 - 1] == pcm[2 * 9000 - 1],
-           "the encoder's input: the audio to the loop end, then the loop's start again");
+    expect(input.size() == 2 * (9000 + psp::kTailSamples + psp::kEncoderPaddingSamples) &&
+               input[2 * 9000] == pcm[2 * 2000] && input[2 * 9000 - 1] == pcm[2 * 9000 - 1] &&
+               input[2 * (9000 + psp::kTailSamples) - 1] == pcm[2 * (2000 + psp::kTailSamples) - 1] &&
+               input[2 * (9000 + psp::kTailSamples)] == 0 && input.back() == 0,
+           "the encoder's input: the audio to the loop end, the loop's start again, then silence");
+    const auto once = psp::encoder_input(pcm, std::nullopt);
+    expect(once.size() == pcm.size() + 2 * psp::kEncoderPaddingSamples && once[pcm.size() - 1] == pcm.back() &&
+               once[pcm.size()] == 0 && once.back() == 0,
+           "the encoder's input for a track played once: the audio, then silence");
 
     // A whole image.
     const std::filesystem::path root = std::filesystem::temp_directory_path() / "d012-tests-psp";

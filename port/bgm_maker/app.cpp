@@ -11,6 +11,8 @@
 #include <imgui_internal.h>
 
 #include <algorithm>
+#include <cstdlib>
+#include <ctime>
 #include <fstream>
 #include <iterator>
 
@@ -38,7 +40,8 @@ void folder_chosen(void *userdata, const char *const *files, int) {
 
 } // namespace
 
-App::App(Window &window, ModsFolder mods) : window_(window), mods_(std::move(mods)) {
+App::App(Window &window, ModsFolder mods) : window_(window), mods_(std::move(mods)), copies_(find_game_copies()) {
+    choose_copy_ = mods_.ask && copies_.size() > 1;
     refresh_list();
     update_title();
 }
@@ -171,6 +174,7 @@ void App::new_mod() {
 
 void App::set_mods_folder(const std::filesystem::path &folder) {
     mods_ = {folder, "chosen in this window", true, mods_.checkout};
+    remember_mods_folder(folder);
     refresh_list();
     update_title();
 }
@@ -347,6 +351,7 @@ bool App::frame() {
     draw_top_bar();
     draw_tabs();
     draw_unsaved_prompt();
+    draw_copy_chooser();
     ImGui::End();
 
     if (pending_move_) {
@@ -502,6 +507,78 @@ void App::draw_unsaved_prompt() {
     ImGui::EndPopup();
 }
 
+void App::draw_copy_chooser() {
+    const auto mods_of = [](const GameCopy &copy) { return copy.folder / "data" / "mods"; };
+    if (choose_copy_ && !ImGui::IsPopupOpen("Which copy of the game?")) {
+        choose_copy_ = false;
+        copy_choice_ = 0;
+        for (int i = 0; i < static_cast<int>(copies_.size()); ++i)
+            if (mods_of(copies_[i]) == mods_.path) copy_choice_ = i;
+        ImGui::OpenPopup("Which copy of the game?");
+    }
+    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    if (!ImGui::BeginPopupModal("Which copy of the game?", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
+    ImGui::PushTextWrapPos(em() * 34.0f);
+    ImGui::TextUnformatted("This computer has more than one copy of the game. Whose mods do you want to work on? "
+                           "The Battle BGM Maker opens the same one next time.");
+    ImGui::PopTextWrapPos();
+    ImGui::Spacing();
+    const float row = ImGui::GetTextLineHeight() * 2.0f + ImGui::GetStyle().ItemSpacing.y;
+    bool use = false;
+    for (int i = 0; i < static_cast<int>(copies_.size()); ++i) {
+        const GameCopy &copy = copies_[i];
+        std::string played = "never played";
+        if (copy.last_played > 0) {
+            const std::time_t when = static_cast<std::time_t>(copy.last_played);
+            std::tm local{};
+#if defined(_WIN32)
+            localtime_s(&local, &when);
+#else
+            localtime_r(&when, &local);
+#endif
+            char text[64];
+            std::strftime(text, sizeof text, "%d %b %Y, %H:%M", &local);
+            played = std::string("last played ") + text;
+        }
+        const std::string second = std::string(copy.windows ? "Windows version (Proton)" : "Linux version") + "  " +
+                                   "\xC2\xB7" + "  " + played;
+        ImGui::PushID(i);
+        const ImVec2 start = ImGui::GetCursorPos();
+        // Choosing a row keeps the question open: "Use this one" (or a double click) answers it.
+        const ImGuiSelectableFlags flags = ImGuiSelectableFlags_AllowDoubleClick | ImGuiSelectableFlags_NoAutoClosePopups;
+        if (ImGui::Selectable("##copy", copy_choice_ == i, flags, ImVec2(em() * 34.0f, row))) {
+            copy_choice_ = i;
+            if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) use = true;
+        }
+        const ImVec2 end = ImGui::GetCursorPos();
+        ImGui::SetCursorPos(ImVec2(start.x + ImGui::GetStyle().FramePadding.x, start.y));
+        // The home folder as ~, as file managers show it.
+        std::string where = manifest::utf8(copy.folder);
+        const char *home = std::getenv("HOME");
+        if (home != nullptr && *home != '\0' && where.rfind(std::string(home) + "/", 0) == 0)
+            where = "~" + where.substr(std::string(home).size());
+        ImGui::TextUnformatted(where.c_str());
+        ImGui::SetCursorPosX(start.x + ImGui::GetStyle().FramePadding.x);
+        widgets::muted(second);
+        ImGui::SetCursorPos(end);
+        ImGui::Dummy(ImVec2(0.0f, 0.0f));
+        ImGui::PopID();
+    }
+    ImGui::Spacing();
+    if (ImGui::Button("Use this one")) use = true;
+    if (use && copy_choice_ >= 0 && copy_choice_ < static_cast<int>(copies_.size())) {
+        const std::filesystem::path folder = mods_of(copies_[copy_choice_]);
+        ImGui::CloseCurrentPopup();
+        after_unsaved_check([this, folder] {
+            set_mods_folder(folder);
+            mods_.found_by = "the copy of the game you chose";
+        });
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape, false)) ImGui::CloseCurrentPopup();
+    ImGui::EndPopup();
+}
+
 // --- 1. Mod ------------------------------------------------------------------
 
 void App::tab_mod() {
@@ -526,13 +603,17 @@ void App::mod_list() {
     widgets::muted("Mods folder");
     ImGui::PushTextWrapPos(0.0f);
     ImGui::TextUnformatted(manifest::utf8(mods_.path).c_str());
-    ImGui::PopTextWrapPos();
     widgets::muted("(" + mods_.found_by + ")");
+    ImGui::PopTextWrapPos();
     if (ImGui::Button((std::string("Open another") + kEllipsis).c_str())) choose_mods_folder();
     widgets::tooltip("Work on the mods in another folder, such as a copy");
     ImGui::SameLine();
     if (ImGui::Button("Refresh")) refresh_list();
     widgets::tooltip("Read the mods folder again");
+    if (copies_.size() > 1) {
+        if (ImGui::Button((std::string("Copies of the game") + kEllipsis).c_str())) choose_copy_ = true;
+        widgets::tooltip(("This computer has " + std::to_string(copies_.size()) + " copies of the game; pick whose mods").c_str());
+    }
     ImGui::Separator();
     if (ImGui::Button("+ New mod", ImVec2(-1.0f, 0.0f))) after_unsaved_check([this] { new_mod(); });
     ImGui::Spacing();

@@ -44,6 +44,12 @@ inline constexpr std::uint32_t kEncoderDelay = 1083u;
 // Samples of a loop's start encoded again after its end, so the frames the
 // decoder reads past the loop end hold what follows the seam.
 inline constexpr std::int64_t kTailSamples = 4096;
+// Silence after all that, which the game never plays: atracdenc stops when it
+// has read as many samples as its reader says the file has, without the
+// frames its own delay holds back, and its readers say different things (on
+// Windows Media Foundation's guess from the duration, more; on Linux
+// libsndfile's exact count). With this, either cuts into silence only.
+inline constexpr std::int64_t kEncoderPaddingSamples = 2048;
 // Sony's tool refuses shorter loops; the game's own are all far longer.
 inline constexpr std::int64_t kMinLoopSamples = 6144;
 inline constexpr int kRate = 44100;
@@ -123,7 +129,8 @@ struct BgmTable {
                                             std::string &error);
 
 // What the encoder is given for a track: 44.1 kHz stereo 16-bit samples
-// (interleaved), with the loop's tail added.
+// (interleaved), with the loop's tail added, then kEncoderPaddingSamples of
+// silence.
 [[nodiscard]] std::vector<std::int16_t> encoder_input(const std::vector<std::int16_t> &samples,
                                                       std::optional<std::pair<std::int64_t, std::int64_t>> loop);
 [[nodiscard]] Bytes wave_file(const std::vector<std::int16_t> &stereo);

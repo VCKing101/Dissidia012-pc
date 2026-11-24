@@ -933,11 +933,17 @@ std::optional<Bytes> at3_file(const Bytes &encoded, std::int64_t samples,
 
 std::vector<std::int16_t> encoder_input(const std::vector<std::int16_t> &samples,
                                         std::optional<std::pair<std::int64_t, std::int64_t>> loop) {
-    if (!loop) return samples;
-    const auto at = [&](std::int64_t frame) { return samples.begin() + static_cast<std::ptrdiff_t>(frame * 2); };
-    std::vector<std::int16_t> out(samples.begin(), at(loop->second));
-    const std::int64_t tail_end = std::min<std::int64_t>(loop->first + kTailSamples, static_cast<std::int64_t>(samples.size() / 2u));
-    out.insert(out.end(), at(loop->first), at(tail_end));
+    std::vector<std::int16_t> out;
+    if (!loop) {
+        out = samples;
+    } else {
+        const auto at = [&](std::int64_t frame) { return samples.begin() + static_cast<std::ptrdiff_t>(frame * 2); };
+        out.assign(samples.begin(), at(loop->second));
+        const std::int64_t tail_end =
+            std::min<std::int64_t>(loop->first + kTailSamples, static_cast<std::int64_t>(samples.size() / 2u));
+        out.insert(out.end(), at(loop->first), at(tail_end));
+    }
+    out.resize(out.size() + static_cast<std::size_t>(2 * kEncoderPaddingSamples), 0);
     return out;
 }
 

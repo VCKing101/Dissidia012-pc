@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <!-- The Battle BGM Maker's own icon: drawn for the port, nothing of the game's. -->
+  <rect x="8" y="8" width="240" height="240" rx="40" fill="#1b2a4a"/>
+  <!-- A loop: a ring with an arrow head. -->
+  <path d="M 198.5 68.9 A 92 92 0 1 1 144 37.4" fill="none" stroke="#d8b25a" stroke-width="10"
+        stroke-linecap="round"/>
+  <path d="M 172 40 L 142 22 L 146 54 Z" fill="#d8b25a"/>
+  <!-- Two beamed notes. -->
+  <path d="M 100 92 L 164 78 L 164 96 L 100 110 Z" fill="#f2f2f2"/>
+  <rect x="100" y="100" width="9" height="70" fill="#f2f2f2"/>
+  <rect x="155" y="86" width="9" height="70" fill="#f2f2f2"/>
+  <ellipse cx="90" cy="170" rx="19" ry="13" transform="rotate(-20 90 170)" fill="#f2f2f2"/>
+  <ellipse cx="145" cy="156" rx="19" ry="13" transform="rotate(-20 145 156)" fill="#f2f2f2"/>
+</svg>

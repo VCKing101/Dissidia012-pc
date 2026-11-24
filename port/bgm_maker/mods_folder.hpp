@@ -21,13 +21,46 @@ struct ModsFolder {
     // checkout, as play_d012.ps1 starts it (`checkout`: the checkout's root).
     bool tell_game{};
     std::filesystem::path checkout;
+    // Picked among several copies of the game found on this computer: the
+    // window asks which one.
+    bool ask{};
 };
 
+// A copy of the game found on this computer, with its data folder.
+struct GameCopy {
+    std::filesystem::path folder;
+    bool windows{};               // the Windows version (D012Native.exe, under Proton)
+    std::int64_t last_played{};   // seconds since 1970 of its newest log, settings or save; 0: never
+};
+
+// On Linux, the copies of the game in the places a player's are: the folder
+// the Linux setup's menu entry names, Steam's shortcuts to D012Native (read,
+// never changed) and the folders in ~/Games; each with D012Native (or the
+// Windows version's D012Native.exe) and a data/ folder, the one played last
+// first. Elsewhere none: the tool is installed beside the game.
+[[nodiscard]] std::vector<GameCopy> find_game_copies();
+
 // In order: `chosen` (the command line), D012_MODS_DIR, D012_DATA_DIR/mods,
-// the data/ folder beside the program (always in the installer build, else
-// when game/EBOOT.ELF is there too), build/port/data/mods of the checkout a
-// build directory is in, and the game's per-user data folder.
+// the data/ folder beside the program (in the installer build when the game
+// is there too, else when game/EBOOT.ELF is), build/port/data/mods of the
+// checkout a build directory is in, the folder last opened in the window,
+// on Linux the copy of the game played last (find_game_copies), and the
+// game's per-user data folder.
 [[nodiscard]] ModsFolder find_mods_folder(const std::optional<std::filesystem::path> &chosen);
+
+// The folder this program is in, as the player sees it: an AppImage's own
+// folder when it runs from one (Linux), not the folder it is unpacked to.
+[[nodiscard]] std::filesystem::path tool_folder();
+
+// Whether this program runs from an AppImage.
+[[nodiscard]] bool from_appimage();
+
+// The game's program (D012Native) in `folder`; empty when it is not there.
+[[nodiscard]] std::filesystem::path game_in(const std::filesystem::path &folder);
+
+// Remembers `folder`, opened in the window, for the next start
+// (find_mods_folder).
+void remember_mods_folder(const std::filesystem::path &folder);
 
 // One mod folder, read quickly: what the list shows and what the clash checks
 // across mods need.

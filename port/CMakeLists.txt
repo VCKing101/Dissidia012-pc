@@ -430,6 +430,11 @@ if(D012_INSTALLER_BUILD)
     # Beside the installed game, whose data/ is always there.
     target_compile_definitions(BgmMaker PRIVATE D012_INSTALLER_BUILD=1)
 endif()
+if(PORTABLEKIT_RELEASE AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # Its libraries (SDL3, FFmpeg) from lib/ beside it, as D012Native's
+    # (PortableKit's portablekit_add_game): tools/port/linux_bgm_maker.sh.
+    set_target_properties(BgmMaker PROPERTIES BUILD_WITH_INSTALL_RPATH TRUE INSTALL_RPATH "$ORIGIN/lib")
+endif()
 # The DLLs it runs with, in bin/ even when only BgmMaker is built.
 if(WIN32 AND TARGET SDL3::SDL3-shared)
     add_custom_command(TARGET BgmMaker POST_BUILD
