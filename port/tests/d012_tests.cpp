@@ -20,6 +20,7 @@
 #include "d012_online_rules.hpp"
 #include "d012_original_moves.hpp"
 #include "d012_package_index.hpp"
+#include "d012_skill_pages_rules.hpp"
 #include "d012_summon_slot_rules.hpp"
 #include "d012_update_rules.hpp"
 #include "d012_versus_rules.hpp"
@@ -2052,6 +2053,62 @@ void test_summon_slots() {
     expect(!slots::marked_but_empty(slots::Slot{60u, 10u, 0u, 3u}), "an owned summon is left alone");
 }
 
+// The 10 Skills cheat: the other page packed into the list's sixth slot.
+void test_skill_pages() {
+    namespace sp = d012::skill_pages;
+    // Every page the cheat can hold comes back as it went in.
+    for (int count = 0; count <= sp::kPageSize; ++count)
+        for (const bool second : {false, true}) {
+            sp::Packed packed;
+            packed.second_on_screen = second;
+            for (int i = 0; i < count; ++i) packed.other.ids[static_cast<std::size_t>(packed.other.count++)] = 24 - i * 5;
+            const std::uint32_t word = sp::pack(packed);
+            sp::Packed back;
+            expect(sp::unpack(word, back), "a packed page unpacks");
+            expect(back.other.count == count && back.second_on_screen == second, "its count and page come back");
+            for (int i = 0; i < count; ++i)
+                expect(back.other.ids[static_cast<std::size_t>(i)] == packed.other.ids[static_cast<std::size_t>(i)],
+                       "its Skills come back in order");
+            // What the game makes of the word: not -1 (an empty slot), and
+            // as the signed halfword it compares with Skill ids, negative.
+            expect(word != 0xFFFFFFFFu && static_cast<std::int32_t>(word) > 0, "the word is never -1");
+            expect(static_cast<std::int16_t>(word & 0xFFFFu) < 0, "its low half matches no Skill id");
+        }
+    // The largest id the game has, and the largest the packing takes.
+    sp::Packed edge;
+    edge.other.count = sp::kPageSize;
+    edge.other.ids = {31, 1, 24, 31, 2};
+    sp::Packed edge_back;
+    expect(sp::unpack(sp::pack(edge), edge_back) && edge_back.other.ids == edge.other.ids, "ids up to 31 pack");
+    // Nothing to keep: the slot stays as the game leaves it.
+    expect(sp::sixth_slot(sp::Packed{}) == 0xFFFFFFFFu, "an empty other page leaves -1");
+    // What the slot holds without the cheat is never taken for a page.
+    sp::Packed none;
+    for (const std::uint32_t word : {0xFFFFFFFFu, 0u, 1u, 18u, 24u, 0x00008000u, 0x7FFF7FFFu})
+        expect(!sp::unpack(word, none), "a Skill id, -1 or other words are not a page");
+    // Where a Skill obtained goes.
+    expect(sp::add_to(3, 0, 5) == sp::AddTo::ScreenPage, "the page on screen while it has room");
+    expect(sp::add_to(5, 0, 5) == sp::AddTo::OtherPage, "then the other page");
+    expect(sp::add_to(5, 4, 24) == sp::AddTo::OtherPage, "until it holds five");
+    expect(sp::add_to(5, 5, 5) == sp::AddTo::GameChoice, "then the game asks which to throw away");
+    expect(sp::add_to(5, 2, 40) == sp::AddTo::GameChoice, "an id too large to pack is the game's to place");
+    // The page turn: out to the right, swap, in from the right.
+    const int half = 8;
+    int swaps = 0;
+    for (int f = 0; f < 2 * half; ++f) {
+        const sp::TurnFrame t = sp::turn_frame(f, half);
+        if (t.swap_now) {
+            ++swaps;
+            expect(f == half - 1 && t.alpha <= 0.0f && t.offset >= 1.0f, "the pages swap when the page is gone");
+        }
+        expect(t.offset >= 0.0f && t.offset <= 1.0f && t.alpha >= 0.0f && t.alpha <= 1.0f, "turn frames stay in range");
+    }
+    expect(swaps == 1, "one swap a turn");
+    const sp::TurnFrame last = sp::turn_frame(2 * half - 1, half);
+    expect(last.offset == 0.0f && last.alpha == 1.0f, "the turn ends with the page in place");
+    expect(sp::turn_frame(half, half).offset > sp::turn_frame(half + 1, half).offset, "the new page comes in leftwards");
+}
+
 // The game's memory for the battle cheats: everything is RAM, nothing is code.
 class CheatRam final : public portablekit::cheats::Memory {
 public:
@@ -2228,6 +2285,7 @@ int main(int argc, char **argv) {
     test_dlc_packs();
     test_frame_balance();
     test_summon_slots();
+    test_skill_pages();
     test_battle_cheats();
     test_package_index();
     test_original_moves();

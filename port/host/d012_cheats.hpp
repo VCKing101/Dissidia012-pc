@@ -15,4 +15,8 @@ namespace d012 {
 // battle's rewards (d012_ap_cheat.cpp).
 [[nodiscard]] std::uint32_t ap_after_battle();
 
+// Whether the 10 Skills row is on (and Use cheats). Read by the Skill pages
+// (d012_skill_pages.cpp).
+[[nodiscard]] bool skill_pages_on();
+
 } // namespace d012

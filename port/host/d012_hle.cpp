@@ -18,6 +18,7 @@
 #include "d012_mod_abilities.hpp"
 #include "d012_mods.hpp"
 #include "d012_rollback.hpp"
+#include "d012_skill_pages.hpp"
 #include "d012_sync.hpp"
 #include "d012_test_switches.hpp"
 #include "d012_updates.hpp"
@@ -141,6 +142,8 @@ void register_extra_hle(portablekit::HleRegistrar &hle) {
     model_memory::trace_heaps();
     // The loading screen's music choice by series (d012_bgm_playlist.cpp).
     playlist::install(hle);
+    // The 10 Skills cheat's page hint (d012_skill_pages.cpp).
+    skill_pages::install();
     // The right-stick battle camera and R3 (d012_camera.cpp).
     camera::install(hle);
     // Bloom and the Video page's switch for it (d012_bloom.cpp).

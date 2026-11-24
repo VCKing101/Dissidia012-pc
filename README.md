@@ -77,7 +77,7 @@ online and test sessions. Bugs and crashes go in [GitHub issues](https://github.
   through menus and tilts the battle camera; the game's prompts show your keys; a keypad key can do one thing with
   Num Lock on and another with it off (menu's Controls page).
 - **Close the game from the title screen**: press circle there, then choose Yes.
-- **Cheats** on the menu's Cheats page: gil, KP, PP, AP, items and battle cheats, and PPSSPP cheat files
+- **Cheats** on the menu's Cheats page: gil, KP, PP, AP, items, 10 Skills, battle cheats, and PPSSPP cheat files
   ([below](#cheats)).
 - **Bartz's moves from the first Dissidia**: eight of his original attacks as abilities of their own, marked (OG),
   beside his 012 ones in Customize. They are made from your 012 disc; the first game's disc is not needed
@@ -457,8 +457,8 @@ an example pack, how to set the trace variable, memory use, and what was tested.
 Open the menu (Esc, or L3 + R3 on a controller) and go to **Cheats**:
 
 - **Money and points:** Gil, KP and PP, each at an amount you choose, and the AP each battle gives (100 or 999).
-- **Items:** 99 of every piece of equipment and every accessory, 99 of each Mala Bestia accessory, and every
-  summonstone with 10 uses.
+- **Items:** 99 of every piece of equipment and every accessory, 99 of each Mala Bestia accessory, every
+  summonstone with 10 uses, and 10 Skills in Story Mode instead of 5.
 - **Battle:** Infinite HP, Max HP 999,999, Bravery 9,999, Infinite EX, Infinite Assist and Level 100 for you;
   Bravery 0, Max HP 100, No EX and No Assist for the opponent, and Defeat with Select.
 - **Use cheats** at the top turns them all off at once.
@@ -466,6 +466,11 @@ Open the menu (Esc, or L3 + R3 on a controller) and go to **Cheats**:
 
 PP shows its new amount the next time you open the PP Catalog. **Level 100** really levels up the character you
 fight with: it stays at level 100 after you turn the cheat off.
+
+**10 Skills** puts your Skills on two pages of five. L2 or R2 turns the page, on the world map, in gateways and in
+the Moogle shop. A hint by the Skills shows the buttons and the page. A new Skill goes on the other page when the
+one on screen is full. If you turn the cheat off, you keep the page on
+screen. The other page comes back when you turn the cheat on again.
 
 **PPSSPP cheat files** work too. Put the file in a `Cheats` folder in your memory stick folder's `PSP` folder,
 named after your disc: `data\ms0\PSP\Cheats\ULUS10566.ini` in the install folder (`data/ms0/PSP/Cheats/` on Linux;
