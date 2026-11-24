@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Battle BGM Maker (Dissidia 012 PC port)
+Comment=Makes battle music mods for the Dissidia 012 PC port
+Exec=BgmMaker
+Icon=dissidia012-bgm-maker
+Terminal=false
+Categories=AudioVideo;Audio;

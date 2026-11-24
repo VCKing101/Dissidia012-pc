@@ -11,8 +11,9 @@ all named with the version in `tools/port/release-version.txt`:
 | `Dissidia012-PC-<version>-Windows-x64-Setup.exe` | Windows, the setup wizard (see below the table) | `tools/port/package_installer.py` |
 | `Dissidia012-PC-<version>-Windows-x64.zip` | Windows through [RecompLauncher](https://recomplauncher.com/game/dissidia012-pc): the same files, `recomplauncher.json` at the top | `tools/port/package_installer.py` |
 | `Dissidia012-Setup-<version>-x86_64.AppImage` | Linux and the Steam Deck | `tools/port/linux_setup.sh` (WSL) |
+| `Dissidia012-BgmMaker-<version>-x86_64.AppImage` | the Battle BGM Maker on Linux and the Steam Deck, on its own | `tools/port/linux_bgm_maker.sh` (WSL) |
 | `Dissidia012-<version>-Android-arm64.apk` | Android 10 and later, arm64 | `tools/port/android_build.sh --release` (WSL) |
-| `SHA256SUMS` | all four, `sha256sum -c` format (two spaces) | collected by hand from the three |
+| `SHA256SUMS` | all five, `sha256sum -c` format (two spaces) | collected by hand from the scripts' |
 | `SHA256SUMS.sig` | the game's **Download and install**: the list's signature | `tools/port/release_signing.sh sign` |
 
 The Windows setup is not called `Dissidia012-PC-Setup-<version>.exe` (as up to 0.8.0) on purpose. That is the name
@@ -94,6 +95,17 @@ beyond the scripts: `sdk/` is copied from it and is in the game code's key, and 
 recompiled every Linux player's game for no change at all.
 
 It refuses to make a setup whose program lacks the update signing key's public half (below).
+
+The Battle BGM Maker, an AppImage of its own (not in the setup):
+
+```bash
+wsl -d Ubuntu-24.04 -- bash tools/port/linux_bgm_maker.sh
+```
+
+BgmMaker as the installer build makes it (`~/d012-linux/build-bgm-maker`), atracdenc built from the commit
+`tools/port/build_atracdenc.cmd` names with libsndfile, and their libraries, licences and atracdenc's source; the
+same checks as the setup's. The result goes to `build/port/bgm-maker-linux/dist`. The game's **Download and
+install** looks for the setup's name only, so this file is never taken for it.
 
 Tests:
 - Run the new AppImage over the previous release's install in WSL (`~/d012-linux/setup-test`): the version is the
@@ -189,7 +201,7 @@ setup, AppImage or APK listed in a `SHA256SUMS` signed with this key. Its public
 
 ## 5. The release files and notes
 
-Copy the four files into `build/port/release/v<version>-files/` and write `SHA256SUMS` there for all four
+Copy the five files into `build/port/release/v<version>-files/` and write `SHA256SUMS` there for all five
 (`sha256sum Dissidia012-* > SHA256SUMS`; check with `sha256sum -c SHA256SUMS`). Then sign the list, with the owner
 typing the key's password in a terminal:
 
@@ -223,7 +235,7 @@ Each with the owner's yes, in this order:
 
 1. Push `main` (`gh auth status` shows VCKing101 active; never the work account).
 2. An annotated tag `v<version>` on the release commit (tagger VCKing101 with the noreply address), pushed.
-3. The GitHub release `v<version>`, full (latest) unless the owner says pre-release, with the four files, `SHA256SUMS`,
+3. The GitHub release `v<version>`, full (latest) unless the owner says pre-release, with the five files, `SHA256SUMS`,
    `SHA256SUMS.sig` and the notes. Check that GitHub's digests match `SHA256SUMS`.
 4. Tell those waiting on it (RecompLauncher, an issue's reporter); a Discord announcement, which the owner posts.
 

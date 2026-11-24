@@ -104,6 +104,8 @@ private:
     void draw_tabs();
     void draw_navigation();
     void draw_unsaved_prompt();
+    // Which copy of the game to work on, when this computer has several.
+    void draw_copy_chooser();
     void tab_mod();
     void tab_music();
     void tab_loops();
@@ -175,6 +177,9 @@ private:
     std::optional<Tab> switch_to_;
     std::function<void()> pending_;  // waiting on the unsaved-changes prompt
     bool prompt_{};
+    std::vector<GameCopy> copies_;  // the copies of the game on this computer (find_game_copies)
+    bool choose_copy_{};            // open the chooser on the next frame
+    int copy_choice_{};
     bool quit_{};
     bool focus_id_{};
     // A new mod's fields show their problems once left, or once the player

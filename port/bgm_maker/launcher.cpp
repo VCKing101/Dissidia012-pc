@@ -8,6 +8,7 @@
 #include <SDL3/SDL.h>
 
 #include <cstdlib>
+#include <fstream>
 
 #if defined(_WIN32)
 #ifndef WIN32_LEAN_AND_MEAN
@@ -31,14 +32,30 @@ constexpr const char *kGameFile = "D012Native.exe";
 constexpr const char *kGameFile = "D012Native";
 #endif
 
+// The folder of the game whose data folder the mods are in (<game>/data/mods).
+std::filesystem::path game_folder_around(const ModsFolder &mods) {
+    std::filesystem::path folder = mods.path.lexically_normal();
+    if (!folder.has_filename()) folder = folder.parent_path();
+    if (folder.filename() != "mods" || folder.parent_path().filename() != "data") return {};
+    return folder.parent_path().parent_path();
+}
+
 } // namespace
 
-std::filesystem::path game_program() {
-    const char *base = SDL_GetBasePath();
-    if (base == nullptr) return {};
-    const std::filesystem::path file = manifest::path_from_utf8(base) / kGameFile;
+std::filesystem::path game_program(const ModsFolder &mods) {
+    if (auto beside = game_in(tool_folder()); !beside.empty()) return beside;
+    return game_in(game_folder_around(mods));
+}
+
+bool windows_copy_around(const ModsFolder &mods) {
+#if defined(_WIN32)
+    (void)mods;
+    return false;
+#else
+    const std::filesystem::path folder = game_folder_around(mods);
     std::error_code ec;
-    return std::filesystem::is_regular_file(file, ec) ? file : std::filesystem::path();
+    return !folder.empty() && std::filesystem::is_regular_file(folder / "D012Native.exe", ec);
+#endif
 }
 
 bool game_running() {
@@ -53,6 +70,18 @@ bool game_running() {
         found = _wcsicmp(entry.szExeFile, L"D012Native.exe") == 0;
     CloseHandle(snapshot);
     return found;
+#elif defined(__linux__)
+    // Only looked at: each process's name (/proc/<id>/comm).
+    std::error_code ec;
+    for (auto it = std::filesystem::directory_iterator("/proc", ec); !ec && it != std::filesystem::directory_iterator();
+         it.increment(ec)) {
+        const std::string id = it->path().filename().string();
+        if (id.empty() || id.find_first_not_of("0123456789") != std::string::npos) continue;
+        std::ifstream comm(it->path() / "comm");
+        std::string name;
+        if (std::getline(comm, name) && name == kGameFile) return true;
+    }
+    return false;
 #else
     return false;
 #endif
@@ -89,9 +118,9 @@ bool GameLauncher::running() {
 }
 
 bool GameLauncher::start(const ModsFolder &mods, const std::string &track_id, std::string &error) {
-    const std::filesystem::path program = game_program();
+    const std::filesystem::path program = game_program(mods);
     if (program.empty()) {
-        error = std::string("the game (") + kGameFile + ") is not beside the Battle BGM Maker";
+        error = std::string("the game (") + kGameFile + ") was not found";
         return false;
     }
     if (running() || game_running()) {
@@ -103,6 +132,9 @@ bool GameLauncher::start(const ModsFolder &mods, const std::string &track_id, st
         error = SDL_GetError();
         return false;
     }
+    // Not the AppImage's own variables: the game is not in it.
+    if (from_appimage())
+        for (const char *name : {"APPIMAGE", "APPDIR", "ARGV0", "OWD"}) SDL_UnsetEnvironmentVariable(environment, name);
     for (const auto &[name, value] : game_environment(mods, track_id))
         SDL_SetEnvironmentVariable(environment, name.c_str(), value.c_str(), true);
     const std::string file = manifest::utf8(program);

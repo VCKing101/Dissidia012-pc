@@ -251,8 +251,8 @@ void App::try_section() {
         return (series.name.empty() ? series.key : series.name) + "  " + kMiddle + "  " +
                (track.title.empty() ? track.key : track.title);
     };
-    const std::filesystem::path program = game_program();
-    // Asking Windows for its processes is not for every frame.
+    const std::filesystem::path program = game_program(mods_);
+    // Asking the system for its processes is not for every frame.
     const auto now = std::chrono::steady_clock::now();
     if (now - game_checked_ > std::chrono::seconds(1)) {
         game_seen_running_ = launcher_.running() || game_running();
@@ -295,7 +295,9 @@ void App::try_section() {
     ImGui::EndDisabled();
     ImGui::SameLine();
     ImGui::AlignTextToFramePadding();
-    if (program.empty()) widgets::muted("the game is not beside this program");
+    if (program.empty() && windows_copy_around(mods_))
+        widgets::muted("not for the Windows version: play it from Steam and pick the track there");
+    else if (program.empty()) widgets::muted("the game was not found; open its data/mods folder on the Mod step");
     else if (game_seen_running_) widgets::muted("the game is running; close it to start it again");
     else if (!on_disc) widgets::muted("save the mod first");
 }

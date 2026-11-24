@@ -3,10 +3,13 @@
 
 #include "theme.hpp"
 
+#include <SDL3/SDL.h>
+
 #include <cstdlib>
 #include <filesystem>
-#include <initializer_list>
+#include <map>
 #include <string>
+#include <vector>
 
 namespace d012::bgm_maker::theme {
 namespace {
@@ -19,35 +22,98 @@ ImFont *g_text{};
 ImFont *g_heading{};
 ImFont *g_mono{};
 
+using Faces = std::vector<const char *>;
+
+std::string utf8(const std::filesystem::path &path) {
+    const std::u8string text = path.u8string();
+    return {text.begin(), text.end()};
+}
+
+#if defined(_WIN32)
+const Faces kTextFaces{"segoeui.ttf", "arial.ttf"};
+const Faces kHeadingFaces{"segoeuisb.ttf", "segoeuib.ttf"};
+const Faces kMonoFaces{"consola.ttf", "cour.ttf"};
+// Merged into each for what it lacks: symbols (✓ ▲ ▼ ●), then Japanese,
+// Chinese and Korean, for track titles in those scripts.
+const std::vector<Faces> kGapFaces{{"seguisym.ttf"}, {"YuGothM.ttc", "meiryo.ttc", "msgothic.ttc"},
+                                   {"msyh.ttc", "simsun.ttc"}, {"malgun.ttf"}};
+
 std::filesystem::path fonts_folder() {
     const char *windows = std::getenv("WINDIR");
     return std::filesystem::path(windows != nullptr && *windows != '\0' ? windows : "C:\\Windows") / "Fonts";
 }
 
 // The first of `names` in Windows' fonts folder, as UTF-8 for ImGui.
-std::string first_font(std::initializer_list<const char *> names) {
+std::string first_font(const Faces &names) {
     const std::filesystem::path folder = fonts_folder();
     std::error_code ec;
     for (const char *name : names) {
         const std::filesystem::path path = folder / name;
-        if (std::filesystem::is_regular_file(path, ec)) {
-            const std::u8string text = path.u8string();
-            return {text.begin(), text.end()};
-        }
+        if (std::filesystem::is_regular_file(path, ec)) return utf8(path);
     }
     return {};
 }
+#else
+const Faces kTextFaces{"NotoSans-Regular.ttf", "DejaVuSans.ttf", "LiberationSans-Regular.ttf"};
+const Faces kHeadingFaces{"NotoSans-SemiBold.ttf", "NotoSans-Bold.ttf", "DejaVuSans-Bold.ttf", "LiberationSans-Bold.ttf"};
+const Faces kMonoFaces{"NotoSansMono-Regular.ttf", "DejaVuSansMono.ttf", "LiberationMono-Regular.ttf"};
+// Merged into each for what it lacks: symbols (✓ ▲ ▼ ●), then Japanese,
+// Chinese and Korean (Noto Sans CJK has all three), for track titles in
+// those scripts.
+const std::vector<Faces> kGapFaces{{"DejaVuSans.ttf"}, {"NotoSansSymbols2-Regular.ttf"},
+                                   {"NotoSansCJK-Regular.ttc", "NotoSansCJKjp-Regular.otf"}};
 
-// `primary` with the faces that fill its gaps merged in: symbols (✓ ▲ ▼ ●),
-// then Japanese, Chinese and Korean, for track titles in those scripts.
+// The font files in the system's font folders, by file name (the first
+// found of each): every distribution has its own folders under them, so
+// they are searched through, once.
+const std::map<std::string, std::filesystem::path> &system_fonts() {
+    static const std::map<std::string, std::filesystem::path> fonts = [] {
+        std::vector<std::filesystem::path> roots;
+        const char *data = std::getenv("XDG_DATA_HOME");
+        const char *home = std::getenv("HOME");
+        if (data != nullptr && *data != '\0') roots.emplace_back(std::filesystem::path(data) / "fonts");
+        else if (home != nullptr && *home != '\0') roots.emplace_back(std::filesystem::path(home) / ".local/share/fonts");
+        if (home != nullptr && *home != '\0') roots.emplace_back(std::filesystem::path(home) / ".fonts");
+        roots.emplace_back("/usr/local/share/fonts");
+        roots.emplace_back("/usr/share/fonts");
+        std::map<std::string, std::filesystem::path> found;
+        for (const std::filesystem::path &root : roots) {
+            std::error_code ec;
+            auto it = std::filesystem::recursive_directory_iterator(
+                root, std::filesystem::directory_options::skip_permission_denied, ec);
+            for (; !ec && it != std::filesystem::recursive_directory_iterator(); it.increment(ec))
+                if (it->is_regular_file(ec)) found.emplace(it->path().filename().string(), it->path());
+        }
+        return found;
+    }();
+    return fonts;
+}
+
+// The first of `names` in the system's fonts, else in fonts/ beside this
+// program (the Japanese face a release carries), as UTF-8 for ImGui.
+std::string first_font(const Faces &names) {
+    for (const char *name : names)
+        if (const auto it = system_fonts().find(name); it != system_fonts().end()) return utf8(it->second);
+    const char *base = SDL_GetBasePath();
+    if (base == nullptr) return {};
+    std::error_code ec;
+    for (const char *name : names) {
+        const std::filesystem::path path = std::filesystem::path(base) / "fonts" / name;
+        if (std::filesystem::is_regular_file(path, ec)) return utf8(path);
+    }
+    return {};
+}
+#endif
+
+// `primary` with the faces that fill its gaps merged in (kGapFaces).
 ImFont *add_font(const std::string &primary) {
     ImGuiIO &io = ImGui::GetIO();
     if (primary.empty()) return nullptr;
     ImFont *font = io.Fonts->AddFontFromFileTTF(primary.c_str(), 0.0f);
     if (font == nullptr) return nullptr;
-    for (const std::string &extra : {first_font({"seguisym.ttf"}), first_font({"YuGothM.ttc", "meiryo.ttc", "msgothic.ttc"}),
-                                     first_font({"msyh.ttc", "simsun.ttc"}), first_font({"malgun.ttf"})}) {
-        if (extra.empty()) continue;
+    for (const Faces &gap : kGapFaces) {
+        const std::string extra = first_font(gap);
+        if (extra.empty() || extra == primary) continue;
         ImFontConfig merge;
         merge.MergeMode = true;
         io.Fonts->AddFontFromFileTTF(extra.c_str(), 0.0f, &merge);
@@ -151,10 +217,10 @@ void light_colours(ImGuiStyle &style) {
 } // namespace
 
 void load_fonts() {
-    g_text = add_font(first_font({"segoeui.ttf", "arial.ttf"}));
+    g_text = add_font(first_font(kTextFaces));
     if (g_text == nullptr) g_text = ImGui::GetIO().Fonts->AddFontDefaultVector();
-    g_heading = add_font(first_font({"segoeuisb.ttf", "segoeuib.ttf"}));
-    g_mono = add_font(first_font({"consola.ttf", "cour.ttf"}));
+    g_heading = add_font(first_font(kHeadingFaces));
+    g_mono = add_font(first_font(kMonoFaces));
     ImGui::GetIO().FontDefault = g_text;
 }
 

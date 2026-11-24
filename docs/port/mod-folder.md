@@ -303,9 +303,20 @@ game's own FFmpeg libraries. It never uses the network and never runs the game's
   remove it): *Battle BGM Maker* in the Start menu. It works on the install's `data\mods`.
 - **Built from source:** `setup.ps1` builds it, as `tools\local\port\build-d012-clang\bin\BgmMaker.exe`; it finds
   the checkout's `build\port\data\mods` by itself.
-- `BgmMaker.exe D:\my-data\mods` works on any mods folder, and *Open another...* picks one in the window.
+- **On Linux and the Steam Deck:** `Dissidia012-BgmMaker-<version>-x86_64.AppImage`, one file that runs where it is
+  with nothing installed (mark it executable first: *Properties > Permissions*, or `chmod +x`). Put in the game's
+  folder, beside `D012Native`, it works on that game's `data/mods`, and *Try in game* starts that game. Kept anywhere
+  else, it opens the folder last opened in it; the first time, it looks for copies of the game where players keep
+  them (the folder the Linux setup's menu entry names, Steam's shortcuts to `D012Native`, which it only reads, and
+  the folders in `~/Games`), each with its `data/` folder. One copy is used as it is; with several it starts on the
+  one played last (newest log, settings or save) and asks which one, and *Copies of the game...* on the Mod step asks
+  again. The Windows version under Proton (`D012Native.exe`) is listed too: its mods can be made, but *Try in game*
+  cannot start it. It carries atracdenc for the ISO export and a Japanese font for systems without one. Built from
+  WSL with `tools/port/linux_bgm_maker.sh` (the Steam Runtime SDK container, as the Linux setup).
+- `BgmMaker.exe D:\my-data\mods` works on any mods folder, and *Open another...* picks one in the window; with no
+  game beside it, the tool opens that folder again next time.
 
-The window follows Windows' light or dark theme. Its four steps are tabs: any can be clicked, *Back* and *Next* walk
+The window follows the system's light or dark theme. Its four steps are tabs: any can be clicked, *Back* and *Next* walk
 them in order, and each shows when it is done or how many problems it has. **Ctrl+Z** and **Ctrl+Y** undo and redo
 every change until the next save. Nothing is written until *Check & save*; closing the window or switching mod with
 unsaved changes asks first.
