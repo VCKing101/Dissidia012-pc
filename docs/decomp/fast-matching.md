@@ -184,6 +184,24 @@ The night started with a map of the texture path (`docs/port/texture-pipeline.md
 - agent38 (Sonnet), battle list 2 (250, `0x08A7EE74`–`0x08ACA77C`) from 06:55: 52 matches / 9,036 bytes, 25 near misses, 8 skips; it reached about 85 functions and stopped at 07:35. Its patterns: 0/1 functions as a C++ `bool` with `return true`, small range tests compiled to `slti` chains are a `switch`, `self->h = h = call();` keeps the result in `v0`, and a local name sweep settles float compare order.
 - Usage: one Opus agent used about 18% of a 5-hour window per hour, two about 35%. The first window ran out at about 02:40 and both agents running then were resumed after the reset.
 
+## Overnight run, 24–25 November 2026
+
+The queued lists from the previous night, worked by Sonnet agents two or three at a time, with one Opus agent at the start. Each agent ran until its own context filled (20–80 minutes) and was replaced by a fresh one on what it had not reached. Verified C/C++ totals went from 12,065 functions / 1,059,036 bytes to **13,569 functions / 1,249,576 bytes (26.49% of inventoried function bytes)**; the separate VFPU count is unchanged at 35 / 2,460. All four modules rebuild byte-identically and all 225 tests pass (7 skipped).
+
+| Module | Functions | Bytes | Added |
+| --- | ---: | ---: | ---: |
+| Main executable | 5,026 | 392,160 | 534 |
+| Menu overlay | 4,101 | 396,840 | 553 |
+| Battle overlay | 4,418 | 458,460 | 417 |
+| Extra overlay | 24 | 2,116 | 0 |
+
+- 27 agents (agent39–agent65) matched 1,445 integrated functions; the lead added 59 by hand. Results and each agent's notes are in `build/dc-results/agent39.md`–`agent65.md`.
+- Sonnet against Opus: one Sonnet agent used about 10% of a 5-hour window per hour and matched 20–140 functions before its context filled; the Opus agent used about three times as much per hour and matched 67 in 75 minutes. Two Sonnet agents fit a 5-hour window; three need a pause before the reset.
+- Lists matter more than models: agents given the leftovers of earlier agents matched about a quarter as many as agents given untouched ranges, so fresh ranges went first and leftovers last.
+- Families gave the most matches per hour (see the patterns below). The lead's own fixes: the battle input-check family at `0x08B31640` (29 functions, 4,896 bytes, from one generated source shape that an agent had skipped after eight attempts), and 30 main functions (stat pairs, stat adds, two hook setters, two destructors; 3,528 bytes) that agents had left 2–7 words off, fixed by the delay-slot helper pattern.
+- Not integrated: a battle source for `0x08ACD0BC`, already in a unit; two menu matches (`0x08B34478`, `0x08B51518`) whose files the agent deleted after listing them. Three main units were renamed to lower-case file names, which `dc.py integrate` requires.
+- WSL stopped answering from about 03:01 to 03:50 (`Wsl/Service/CreateInstance/HCS_E_CONNECTION_TIMEOUT`), during a batch build of main while two agents were compiling; every compile goes through WSL, so the agents were stopped. It recovered without a restart. After that, builds ran with at most one agent compiling.
+
 ## SNC patterns learned while matching
 
 Collected from both agent rounds (544 hand matches). Each was confirmed by a byte match.
@@ -255,12 +273,26 @@ Collected from both agent rounds (544 hand matches). Each was confirmed by a byt
 - Framebuffer arguments typed `void *` stop SNC merging an int constant with an equal pointer constant; a value OR-ed from four shifts needs separate `c |= ...` statements.
 - Declaring `T **link;` before a list-unlink `if` fixes its delay slot.
 
+**Learned overnight (24–25 November)**
+- Delay slots: when retail fills a branch (or `bnel`) delay slot with a `lui`/`lw` from the next block and the build leaves a `nop`, move the whole body into an in-class static helper and make the `extern "C"` function call it; writing the body on one line does not help. A value reloaded from a stack struct after a call fills the slot when the reload comes before the test (`int ok = f(...); w = l.w; if (ok) ...`). This turned two near-miss families (12 and 14 functions) and four smaller ones into matches.
+- A field tested from the incoming `a0` and then reloaded from `s0` for a call argument: test `self->handle != 0` directly and pass an in-class accessor `self->H()` as the argument (SNC does not merge the two loads).
+- `andi s1, 0xFF` at the join after `s1 = 0` / `s1 = 1`: build the flag in an `int t`, then `unsigned char r = t;`, in a function returning `unsigned char`. An extra `b` to the epilogue before the last return comes from putting that return in its own block with a local (`{ int hit = ...; return hit != 0 || r; }`).
+- A compare against a named `int one = 1;` declared after the call keeps a fresh `ori`; declared before the call it is kept in a saved register. A named `int zero = 0;` gives `ori`, a literal 0 gives `move $zero`.
+- Retail's `bnez x, body; nop; b end` shape is `if (!x) return;` written first with the body at top level; retail often tests the non-zero side first, so swapping then and else is worth a try. `do { r = f(); if (r == 0) break; } while (1);` gives the `beqz/nop/b` loop exit; `if (r == -1) { return -1; } return r;` gives `bne` plus an explicit `b`.
+- Small `bgtz/bltz/slti` ladders are plain `switch` statements with the cases in the order of retail's bodies (read it from the `jal` order, not Ghidra's); empty `case K: break;` plus `default: break;` gives the `beq/b/nop` stub ladder.
+- Pointer-to-member calls through an object (`lw aN, OFF(obj); addiu ..., 8*(k+1); lh; lw; addu; jalr`) are C++ virtual calls on a class with `char data[OFF];` before its virtuals; a vptr at offset 0 needs a data-free class. About 40 wrapper functions matched this way, including float and 64-bit arguments (a `u64` travels in `a2/a3`).
+- Families: same-size neighbours with the same shape usually differ only in constants, globals and callees. Matching one and generating the rest gave 29 battle input checks, 33 binary searches, 17 release loops, 14 stat adds, 12 stat pairs, 11 flag checks, 9 block copies and several smaller groups (templates: `src/battle/input_check_08b31640.cpp`, `src/main/bsearch_088b715c.cpp`, `src/main/stat_add_0895b104.cpp`, `src/main/stat_pair_08974d20.cpp`).
+- Ghidra drops arguments a callee takes but the function only forwards: if retail never touches `a0`/`a1` before a call, declare and pass them. Copy parameters into locals in the order retail moves them into saved registers.
+- `T *volatile D_xxx` reproduces retail reloading a global pointer; release loops are C++ `for (int i = 0, *p = self; i < N; i++, p++)`, constructor-style clear loops plain C `int i; int *p; for (i = 0, p = self; ...)`.
+- Stack temporaries with an outgoing-argument area: one struct of locals with a leading `int pad[4]` fixes the offsets and frame size.
+
 **Not solved yet**
 - s-register permutations in otherwise identical code, constants that SNC keeps in a saved register where retail rematerialises them (often a `lui`), and single load or `$ra` scheduling slots remain the commonest causes of the 181 near misses left overnight.
 - A spilled parameter that is also copied into another argument register for the call: SNC swaps the parameter registers and retail does not.
 - Pointer-to-member-function dispatch through state tables ending in `jalr; nop` (about 40 menu functions); an investigation was cut off by the usage limit before reporting.
 - Loop rotation in a few search loops, `sw $ra` scheduled before dependent loads, and bit sets kept as `and ~m; or m`.
 - Readable rewrites of the generated files are installed in battle and most of menu; the per-region headers (`include/<module>/auto_region*.h`) overlap and still need merging into real class headers.
+- Still open after 24–25 November: parameter-spill loaders (retail stores `a1` then `a0` at `4($sp)`/`0($sp)` before the first call and keeps neither in a saved register), four-halfword copy loops (`lhu; sll/sra; sh`), flags built from `mode == 1` by branches (`bne; ori 0; b; ori 1`), bool helpers on a float test (`bc1fl`/`bc1tl`), pointer-to-member dispatch through a stack table, a result variable's `ori 0` that retail puts in a loop test's delay slot, and loops where only the counter and pointer registers swap.
 
 ## 6. VFPU inline assembly is counted separately (15 November 2026)
 
