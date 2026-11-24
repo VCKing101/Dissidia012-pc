@@ -10,6 +10,7 @@
 #include "kernel/kernel.hpp"
 #include "overlay_module.hpp"
 #include "overlays.hpp"
+#include "patched_edition.hpp"
 #include "profile.hpp"
 
 #include "psprecomp/common.hpp"
@@ -644,13 +645,31 @@ void call_original(Guest *g, std::uint32_t address, GuestRegs &regs) {
     if (m->live) k.set_dispatch_enabled(false);
     std::string error;
     bool ok = true;
-    {
-        ChainOff chain_off(m->rt);
-        h.overrides[found->second].original(m->rt, c);
+    if (portablekit::patched::active()) {
+        // A patched edition may change the function, on its disc or by writing
+        // over it as the game runs (Emendatus hooks main 0x088CB164, the
+        // character record accessor, that way: its fighters without a save slot
+        // get their records from the mod). The release's recompiled function
+        // would skip the change, so the guest's code runs instead: the first
+        // instruction interpreted (the address itself is the override's), the
+        // rest through dispatch, recompiled where the code is the release's and
+        // interpreted where the patch changed it.
+        if (psprecomp::interpret_allegrex(m->rt, c, 1u) != psprecomp::InterpreterExit::Unreachable &&
+            !m->rt.stopped()) {
+            if (c.pc != kReturnMagic) ok = run_nested(m->rt, c, m->live, m->live ? ~0ull : 3'000'000ull, &error);
+        } else {
+            ok = false;
+            error = m->rt.stopped() ? "runtime stopped: " + m->rt.stop_reason() : "no code at " + hex(address);
+        }
+    } else {
+        {
+            ChainOff chain_off(m->rt);
+            h.overrides[found->second].original(m->rt, c);
+        }
+        // What it calls or jumps to afterwards runs through dispatch, as in
+        // machine_call(), until it returns.
+        if (c.pc != kReturnMagic) ok = run_nested(m->rt, c, m->live, m->live ? ~0ull : 3'000'000ull, &error);
     }
-    // What it calls or jumps to afterwards runs through dispatch, as in
-    // machine_call(), until it returns.
-    if (c.pc != kReturnMagic) ok = run_nested(m->rt, c, m->live, m->live ? ~0ull : 3'000'000ull, &error);
     if (m->live) k.set_dispatch_enabled(dispatch);
     if (!ok) throw std::runtime_error("original " + hex(address) + ": " + error);
     regs.v0 = c.gpr[2];
