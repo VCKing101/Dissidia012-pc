@@ -1,0 +1,76 @@
+extern short *func_089A00F4(int n);
+extern int func_089A04E8(void);
+extern void func_089A0384(int a);
+extern void func_089A03DC(int a);
+extern void func_089A113C(int a, int b, int c);
+extern void func_089A0E20(int a, int b);
+extern void func_089A0E60(int a, int b);
+extern void func_0899D2F8(int a);
+extern void func_089A12A4(int a, int b, int c, int d, int e);
+extern void func_089A0520(int a, int b, int c, int d, short *p);
+extern void func_0899FDC4(int a);
+typedef struct B102 { char pad[0xEE4]; int w_ee4; unsigned w_ee8; } B102;
+typedef union Col102 { unsigned char b[4]; unsigned w; } Col102;
+
+void func_088AD2B0(B102 *self) {
+    short *p;
+    int h;
+    Col102 c;
+    unsigned char t;
+    unsigned char v;
+    int k;
+    unsigned w;
+    unsigned f;
+    p = func_089A00F4(0x40);
+    k = 0x80;
+    c.b[0] = k;
+    c.b[1] = k;
+    c.b[2] = k;
+    c.b[3] = 0xFF;
+    w = self->w_ee8;
+    f = w & 4;
+    t = w & 3;
+    if (f != 0) {
+        v = t * 32 + 0x9F;
+    } else {
+        v = (3 - t) * 32 + 0x9F;
+    }
+    c.b[3] = v;
+    p[0x10] = 0;
+    p[0] = 0;
+    p[0x18] = k;
+    p[8] = k;
+    p[9] = 0;
+    p[1] = 0;
+    p[0x19] = 0x20;
+    p[0x11] = 0x20;
+    *(unsigned *)(p + 2) = c.w;
+    *(unsigned *)(p + 10) = c.w;
+    *(unsigned *)(p + 0x12) = c.w;
+    *(unsigned *)(p + 0x1A) = c.w;
+    p[0x14] = 0x15C;
+    p[4] = 0x15C;
+    p[0x1C] = 0x1DC;
+    p[0xC] = 0x1DC;
+    p[0xD] = 0xF0;
+    p[5] = 0xF0;
+    p[0x1D] = 0x110;
+    p[0x15] = 0x110;
+    p[0x1E] = 0;
+    p[0x16] = 0;
+    p[0xE] = 0;
+    p[6] = 0;
+    h = func_089A04E8();
+    func_089A0384(4);
+    func_089A0384(0x15);
+    func_089A113C(6, 0, 0xFF);
+    func_089A0384(0);
+    func_089A03DC(1);
+    func_089A03DC(5);
+    func_089A0E20(0, 1);
+    func_089A0E60(1, 1);
+    func_0899D2F8(self->w_ee4);
+    func_089A12A4(0, 2, 3, 0, 0);
+    func_089A0520(4, 0x80011E, 4, 0, p);
+    func_0899FDC4(h);
+}

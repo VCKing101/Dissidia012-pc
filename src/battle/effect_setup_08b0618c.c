@@ -1,0 +1,54 @@
+struct V3 { float x, y, z; };
+struct V4 { float x, y, z, w; };
+struct Fx { char pad[0x24]; int a24; int a28; float f2c; int f30; unsigned char b34, b35, b36; };
+extern int D_08A62280;
+extern unsigned char D_089D6C98;
+extern int D_089D6AE8;
+extern void func_08A62020(float f, int a, int b);
+extern void func_0883820C(int h, void *out);
+extern void func_089A34C0(void *dst, void *src);
+extern void func_08B082B4(struct Fx *self, int a, int b, int c, int d);
+extern void func_0880FE58(int h, struct V4 *v);
+extern void func_0880FEA0(int h, int a, int b);
+extern void func_0880FD34(int h, int a, float f, int b);
+extern void func_08896558(int a);
+extern int func_08873CE0(int a, int b, int c);
+extern void func_08873C20(int h, float f, int a, int b, int c);
+extern int func_08874A70(void);
+void func_08B0618C(struct Fx *self)
+{
+    struct V4 q;
+    struct V4 v; struct V3 c;
+    float one, zero;
+    int h;
+    int s;
+    int zi;
+    { float rate = 0.02f; func_08A62020(rate, D_08A62280, 0); }
+    s = self->a28;
+    func_0883820C(self->a24, &v);
+    func_089A34C0(&c, &v);
+    func_08B082B4(self, s, self->a24, 0x898, 0);
+    q.x = c.x; q.y = c.y; q.z = c.z;
+    one = 1.0f;
+    q.w = one;
+    func_0880FE58(s, &q);
+    func_0880FEA0(s, 2, 1);
+    func_0880FEA0(s, 4, 1);
+    zero = 0.0f;
+    func_0880FD34(s, 0x898, zero, 0);
+    zi = 0;
+    D_089D6C98 = zi;
+    func_08896558(D_089D6AE8);
+    h = func_08873CE0(0, 0, 2);
+    func_08873C20(h, zero, 3, 0, 0);
+    func_08873C20(h, one, 3, 0, 0);
+    func_08873C20(h, 2.0f, 1, 0, 0);
+    func_08873C20(h, 3.0f, 1, 0, 0);
+    func_08873C20(h, 4.0f, 3, 0, 0);
+    func_08873C20(h, 12.0f, 2, 0, 0);
+    self->f30 = func_08874A70();
+    self->b34 = 0;
+    self->b35 = 0;
+    self->b36 = 0;
+    self->f2c = zero;
+}

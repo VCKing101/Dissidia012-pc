@@ -410,6 +410,17 @@
       ]
     },
     {
+      "name": "bits_dispatch_089dedb0",
+      "source": "src/battle/bits_dispatch_089dedb0.c",
+      "functions": [
+        {
+          "name": "func_089DEDB0",
+          "address": "0x089DEDB0",
+          "size": 756
+        }
+      ]
+    },
+    {
       "name": "model_set_089df0b8",
       "source": "src/battle/model_set_089df0b8.c",
       "functions": [
@@ -791,6 +802,17 @@
           "name": "func_089E12A8",
           "address": "0x089E12A8",
           "size": 132
+        }
+      ]
+    },
+    {
+      "name": "effect_slot_update_089e132c",
+      "source": "src/battle/effect_slot_update_089e132c.c",
+      "functions": [
+        {
+          "name": "func_089E132C",
+          "address": "0x089E132C",
+          "size": 448
         }
       ]
     },
@@ -1183,6 +1205,17 @@
       ]
     },
     {
+      "name": "pair_update_089e3cdc",
+      "source": "src/battle/pair_update_089e3cdc.cpp",
+      "functions": [
+        {
+          "name": "func_089E3CDC",
+          "address": "0x089E3CDC",
+          "size": 456
+        }
+      ]
+    },
+    {
       "name": "binding_set_089e3f08",
       "source": "src/battle/binding_set_089e3f08.c",
       "functions": [
@@ -1490,6 +1523,17 @@
       "unused_inline_symbols": [
         "__0fUBattleDrawingFlagOpsKclear_flagP6XMainDrawingRecordPrefixUiT",
         "__0fUBattleDrawingFlagOpsIhas_flagPC6XMainDrawingRecordPrefixUiT"
+      ]
+    },
+    {
+      "name": "lookup_update_089e57c4",
+      "source": "src/battle/lookup_update_089e57c4.c",
+      "functions": [
+        {
+          "name": "func_089E57C4",
+          "address": "0x089E57C4",
+          "size": 452
+        }
       ]
     },
     {
@@ -2058,6 +2102,20 @@
           "address": "0x089E77B8",
           "size": 36
         }
+      ]
+    },
+    {
+      "name": "slot_follow_089e77dc",
+      "source": "src/battle/slot_follow_089e77dc.cpp",
+      "functions": [
+        {
+          "name": "func_089E77DC",
+          "address": "0x089E77DC",
+          "size": 428
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fBHDhasUiT"
       ]
     },
     {
@@ -4139,6 +4197,17 @@
       ],
       "unused_inline_symbols": [
         "__0oEKept7P6MTask089F06E8_ct9BA"
+      ]
+    },
+    {
+      "name": "obj_phase_update_089f0720",
+      "source": "src/battle/obj_phase_update_089f0720.cpp",
+      "functions": [
+        {
+          "name": "func_089F0720",
+          "address": "0x089F0720",
+          "size": 460
+        }
       ]
     },
     {
@@ -10533,6 +10602,17 @@
           "name": "func_08A0CC88",
           "address": "0x08A0CC88",
           "size": 80
+        }
+      ]
+    },
+    {
+      "name": "recv_update_08a0ccd8",
+      "source": "src/battle/recv_update_08a0ccd8.c",
+      "functions": [
+        {
+          "name": "func_08A0CCD8",
+          "address": "0x08A0CCD8",
+          "size": 260
         }
       ]
     },
@@ -18509,6 +18589,20 @@
       ]
     },
     {
+      "name": "effect_roll_flags_08a33ab4",
+      "source": "src/battle/effect_roll_flags_08a33ab4.cpp",
+      "functions": [
+        {
+          "name": "func_08A33AB4",
+          "address": "0x08A33AB4",
+          "size": 444
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fCBREnextvT"
+      ]
+    },
+    {
       "name": "finish_guard_cue_08a33e60",
       "source": "src/battle/finish_guard_cue_08a33e60.cpp",
       "functions": [
@@ -18696,6 +18790,20 @@
       ]
     },
     {
+      "name": "effect_roll_ints_08a38530",
+      "source": "src/battle/effect_roll_ints_08a38530.cpp",
+      "functions": [
+        {
+          "name": "func_08A38530",
+          "address": "0x08A38530",
+          "size": 464
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fCBREnextvT"
+      ]
+    },
+    {
       "name": "finish_guard_cue_08a38708",
       "source": "src/battle/finish_guard_cue_08a38708.cpp",
       "functions": [
@@ -18791,6 +18899,20 @@
       ],
       "unused_inline_symbols": [
         "__0fJCueBannerEshowiT"
+      ]
+    },
+    {
+      "name": "effect_roll_speed_08a3b370",
+      "source": "src/battle/effect_roll_speed_08a3b370.cpp",
+      "functions": [
+        {
+          "name": "func_08A3B370",
+          "address": "0x08A3B370",
+          "size": 496
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fCBREnextvT"
       ]
     },
     {
@@ -19219,6 +19341,20 @@
       ]
     },
     {
+      "name": "effect_roll_ranges_08a42194",
+      "source": "src/battle/effect_roll_ranges_08a42194.cpp",
+      "functions": [
+        {
+          "name": "func_08A42194",
+          "address": "0x08A42194",
+          "size": 416
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fCBREnextvT"
+      ]
+    },
+    {
       "name": "finish_guard_cue_08a4233c",
       "source": "src/battle/finish_guard_cue_08a4233c.cpp",
       "functions": [
@@ -19277,6 +19413,20 @@
           "address": "0x08A43CB0",
           "size": 160
         }
+      ]
+    },
+    {
+      "name": "effect_roll_pair_08a43f5c",
+      "source": "src/battle/effect_roll_pair_08a43f5c.cpp",
+      "functions": [
+        {
+          "name": "func_08A43F5C",
+          "address": "0x08A43F5C",
+          "size": 484
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fCBREnextvT"
       ]
     },
     {
@@ -20220,6 +20370,17 @@
       ]
     },
     {
+      "name": "vec_scale_add_08a54b38",
+      "source": "src/battle/vec_scale_add_08a54b38.cpp",
+      "functions": [
+        {
+          "name": "func_08A54B38",
+          "address": "0x08A54B38",
+          "size": 408
+        }
+      ]
+    },
+    {
       "name": "battle_08a54cd0",
       "source": "src/battle/auto/battle_08a54cd0.c",
       "functions": [
@@ -20502,6 +20663,17 @@
           "name": "func_08A58734",
           "address": "0x08A58734",
           "size": 144
+        }
+      ]
+    },
+    {
+      "name": "vec_scale_08a587c4",
+      "source": "src/battle/vec_scale_08a587c4.c",
+      "functions": [
+        {
+          "name": "func_08A587C4",
+          "address": "0x08A587C4",
+          "size": 312
         }
       ]
     },
@@ -20820,6 +20992,17 @@
       ]
     },
     {
+      "name": "vec_setup_08a5c404",
+      "source": "src/battle/vec_setup_08a5c404.cpp",
+      "functions": [
+        {
+          "name": "func_08A5C404",
+          "address": "0x08A5C404",
+          "size": 456
+        }
+      ]
+    },
+    {
       "name": "battle_08a5c5cc",
       "source": "src/battle/auto/battle_08a5c5cc.c",
       "functions": [
@@ -20957,6 +21140,20 @@
       ],
       "unused_inline_symbols": [
         "__0fOPlacement60E4CJset_flagsP6OPlacement60E4CUiT"
+      ]
+    },
+    {
+      "name": "damage_tick_08a61298",
+      "source": "src/battle/damage_tick_08a61298.cpp",
+      "functions": [
+        {
+          "name": "func_08A61298",
+          "address": "0x08A61298",
+          "size": 468
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fBHDeq1iT"
       ]
     },
     {
@@ -22849,6 +23046,17 @@
           "name": "func_08A6BBE8",
           "address": "0x08A6BBE8",
           "size": 100
+        }
+      ]
+    },
+    {
+      "name": "state_machine_update_08a6bdcc",
+      "source": "src/battle/state_machine_update_08a6bdcc.cpp",
+      "functions": [
+        {
+          "name": "func_08A6BDCC",
+          "address": "0x08A6BDCC",
+          "size": 488
         }
       ]
     },
@@ -25473,6 +25681,17 @@
           "name": "func_08A87B58",
           "address": "0x08A87B58",
           "size": 148
+        }
+      ]
+    },
+    {
+      "name": "update_chain_08a87bec",
+      "source": "src/battle/update_chain_08a87bec.c",
+      "functions": [
+        {
+          "name": "func_08A87BEC",
+          "address": "0x08A87BEC",
+          "size": 480
         }
       ]
     },
@@ -28483,6 +28702,17 @@
       ]
     },
     {
+      "name": "player_cursor_update_08a9fd5c",
+      "source": "src/battle/player_cursor_update_08a9fd5c.c",
+      "functions": [
+        {
+          "name": "func_08A9FD5C",
+          "address": "0x08A9FD5C",
+          "size": 460
+        }
+      ]
+    },
+    {
       "name": "rank_event_08a9ff28",
       "source": "src/battle/rank_event_08a9ff28.c",
       "functions": [
@@ -29471,6 +29701,17 @@
       ]
     },
     {
+      "name": "item_usable_08aa7f28",
+      "source": "src/battle/item_usable_08aa7f28.c",
+      "functions": [
+        {
+          "name": "func_08AA7F28",
+          "address": "0x08AA7F28",
+          "size": 408
+        }
+      ]
+    },
+    {
       "name": "check_entry_08aa80c0",
       "source": "src/battle/check_entry_08aa80c0.cpp",
       "functions": [
@@ -30319,6 +30560,17 @@
           "name": "func_08AAE61C",
           "address": "0x08AAE61C",
           "size": 56
+        }
+      ]
+    },
+    {
+      "name": "unit_action_pick_08aaec0c",
+      "source": "src/battle/unit_action_pick_08aaec0c.cpp",
+      "functions": [
+        {
+          "name": "func_08AAEC0C",
+          "address": "0x08AAEC0C",
+          "size": 496
         }
       ]
     },
@@ -37397,6 +37649,21 @@
       ]
     },
     {
+      "name": "record_median_08af0f14",
+      "source": "src/battle/record_median_08af0f14.cpp",
+      "functions": [
+        {
+          "name": "func_08AF0F14",
+          "address": "0x08AF0F14",
+          "size": 624
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fDCmpElessP6DRecTBT",
+        "__0fDCmpFvalueP6DRecT"
+      ]
+    },
+    {
       "name": "record_sort_step_08af129c",
       "source": "src/battle/record_sort_step_08af129c.cpp",
       "functions": [
@@ -39518,6 +39785,17 @@
       ]
     },
     {
+      "name": "effect_setup_08b0618c",
+      "source": "src/battle/effect_setup_08b0618c.c",
+      "functions": [
+        {
+          "name": "func_08B0618C",
+          "address": "0x08B0618C",
+          "size": 484
+        }
+      ]
+    },
+    {
       "name": "battle_08b06984",
       "source": "src/battle/auto/battle_08b06984.c",
       "functions": [
@@ -39573,6 +39851,17 @@
       ],
       "unused_inline_symbols": [
         "__0fHState57Dis4P6HState57T"
+      ]
+    },
+    {
+      "name": "world_update_08b07324",
+      "source": "src/battle/world_update_08b07324.cpp",
+      "functions": [
+        {
+          "name": "func_08B07324",
+          "address": "0x08B07324",
+          "size": 476
+        }
       ]
     },
     {
@@ -40752,6 +41041,17 @@
           "name": "func_08B126DC",
           "address": "0x08B126DC",
           "size": 60
+        }
+      ]
+    },
+    {
+      "name": "playplan_load_08b12718",
+      "source": "src/battle/playplan_load_08b12718.c",
+      "functions": [
+        {
+          "name": "func_08B12718",
+          "address": "0x08B12718",
+          "size": 440
         }
       ]
     },
@@ -46368,6 +46668,17 @@
       ]
     },
     {
+      "name": "camera_follow_setup_08b3fe3c",
+      "source": "src/battle/camera_follow_setup_08b3fe3c.c",
+      "functions": [
+        {
+          "name": "func_08B3FE3C",
+          "address": "0x08B3FE3C",
+          "size": 464
+        }
+      ]
+    },
+    {
       "name": "mid_value_08b4024c",
       "source": "src/battle/mid_value_08b4024c.c",
       "functions": [
@@ -47846,6 +48157,17 @@
       ]
     },
     {
+      "name": "menu_init_08b49914",
+      "source": "src/battle/menu_init_08b49914.c",
+      "functions": [
+        {
+          "name": "func_08B49914",
+          "address": "0x08B49914",
+          "size": 408
+        }
+      ]
+    },
+    {
       "name": "battle_08b49aac",
       "source": "src/battle/auto/battle_08b49aac.c",
       "functions": [
@@ -48175,6 +48497,17 @@
       ],
       "unused_inline_symbols": [
         "__0oLOrd08B4AE04ctv"
+      ]
+    },
+    {
+      "name": "format_costs_08b4b040",
+      "source": "src/battle/format_costs_08b4b040.c",
+      "functions": [
+        {
+          "name": "func_08B4B040",
+          "address": "0x08B4B040",
+          "size": 456
+        }
       ]
     },
     {
@@ -49091,6 +49424,21 @@
       ]
     },
     {
+      "name": "random_color_08b56118",
+      "source": "src/battle/random_color_08b56118.cpp",
+      "functions": [
+        {
+          "name": "func_08B56118",
+          "address": "0x08B56118",
+          "size": 480
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fHColRandEnextvT",
+        "__0fHColRandHbetweenfTBT"
+      ]
+    },
+    {
       "name": "battle_08b562f8",
       "source": "src/battle/auto/battle_08b562f8.c",
       "functions": [
@@ -49168,6 +49516,21 @@
           "address": "0x08B570EC",
           "size": 28
         }
+      ]
+    },
+    {
+      "name": "random_color_08b57268",
+      "source": "src/battle/random_color_08b57268.cpp",
+      "functions": [
+        {
+          "name": "func_08B57268",
+          "address": "0x08B57268",
+          "size": 468
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fHColRandEnextvT",
+        "__0fHColRandHbetweenfTBT"
       ]
     },
     {
@@ -49329,6 +49692,21 @@
       ]
     },
     {
+      "name": "random_color_08b5a46c",
+      "source": "src/battle/random_color_08b5a46c.cpp",
+      "functions": [
+        {
+          "name": "func_08B5A46C",
+          "address": "0x08B5A46C",
+          "size": 412
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fHColRandEnextvT",
+        "__0fHColRandHbetweenfTBT"
+      ]
+    },
+    {
       "name": "battle_08b5a608",
       "source": "src/battle/auto/battle_08b5a608.c",
       "functions": [
@@ -49405,6 +49783,17 @@
           "name": "func_08B5C9F0",
           "address": "0x08B5C9F0",
           "size": 44
+        }
+      ]
+    },
+    {
+      "name": "particle_vertices_08b5ca1c",
+      "source": "src/battle/particle_vertices_08b5ca1c.c",
+      "functions": [
+        {
+          "name": "func_08B5CA1C",
+          "address": "0x08B5CA1C",
+          "size": 436
         }
       ]
     },
@@ -49618,6 +50007,20 @@
       ]
     },
     {
+      "name": "random_pick_08b5fde4",
+      "source": "src/battle/random_pick_08b5fde4.cpp",
+      "functions": [
+        {
+          "name": "func_08B5FDE4",
+          "address": "0x08B5FDE4",
+          "size": 472
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fBHBziT"
+      ]
+    },
+    {
       "name": "count_matches_08b60238",
       "source": "src/battle/count_matches_08b60238.cpp",
       "functions": [
@@ -49673,6 +50076,21 @@
           "address": "0x08B608AC",
           "size": 192
         }
+      ]
+    },
+    {
+      "name": "random_color_08b60b34",
+      "source": "src/battle/random_color_08b60b34.cpp",
+      "functions": [
+        {
+          "name": "func_08B60B34",
+          "address": "0x08B60B34",
+          "size": 412
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fHColRandEnextvT",
+        "__0fHColRandHbetweenfTBT"
       ]
     },
     {
@@ -49804,6 +50222,17 @@
           "name": "func_08B61EA0",
           "address": "0x08B61EA0",
           "size": 144
+        }
+      ]
+    },
+    {
+      "name": "anchor_position_08b62cf8",
+      "source": "src/battle/anchor_position_08b62cf8.c",
+      "functions": [
+        {
+          "name": "func_08B62CF8",
+          "address": "0x08B62CF8",
+          "size": 440
         }
       ]
     }
@@ -52919,7 +53348,88 @@
     "func_088D4BF4": "0x088D4BF4",
     "D_08B49880": "0x08B49880",
     "D_08B49888": "0x08B49888",
-    "D_08B3AC18": "0x08B3AC18"
+    "D_08B3AC18": "0x08B3AC18",
+    "D_089E1C40": "0x089E1C40",
+    "func_08935E90": "0x08935E90",
+    "func_08AA7D3C": "0x08AA7D3C",
+    "D_089E59E0": "0x089E59E0",
+    "D_089E59F0": "0x089E59F0",
+    "D_089E5A00": "0x089E5A00",
+    "D_089E5A10": "0x089E5A10",
+    "func_0892DAF4": "0x0892DAF4",
+    "func_0892FE20": "0x0892FE20",
+    "func_08932A54": "0x08932A54",
+    "func_08930B48": "0x08930B48",
+    "func_0892D0EC": "0x0892D0EC",
+    "func_0892B8C8": "0x0892B8C8",
+    "func_0892CC04": "0x0892CC04",
+    "func_0892AE74": "0x0892AE74",
+    "func_089E47F4": "0x089E47F4",
+    "func_089E41CC": "0x089E41CC",
+    "D_08B12DE4": "0x08B12DE4",
+    "func_08862C40": "0x08862C40",
+    "func_08862854": "0x08862854",
+    "func_08869954": "0x08869954",
+    "D_08B12DEC": "0x08B12DEC",
+    "D_08B12DF0": "0x08B12DF0",
+    "D_08B12DE8": "0x08B12DE8",
+    "D_08B12DF4": "0x08B12DF4",
+    "func_088A0DBC": "0x088A0DBC",
+    "D_08B12DB4": "0x08B12DB4",
+    "func_08A8A530": "0x08A8A530",
+    "func_0885EA90": "0x0885EA90",
+    "func_0885EA98": "0x0885EA98",
+    "D_08B62ED0": "0x08B62ED0",
+    "D_08B62ED8": "0x08B62ED8",
+    "D_08B62ED4": "0x08B62ED4",
+    "D_089D4794": "0x089D4794",
+    "D_08A61778": "0x08A61778",
+    "D_08A6177C": "0x08A6177C",
+    "func_0883C7BC": "0x0883C7BC",
+    "D_08A34D90": "0x08A34D90",
+    "D_08A39900": "0x08A39900",
+    "D_08A39938": "0x08A39938",
+    "D_08A455C0": "0x08A455C0",
+    "D_08A455F8": "0x08A455F8",
+    "D_08A43AC0": "0x08A43AC0",
+    "D_08A43AF8": "0x08A43AF8",
+    "D_08A3C900": "0x08A3C900",
+    "D_08A3C938": "0x08A3C938",
+    "D_08A3C970": "0x08A3C970",
+    "func_0883820C": "0x0883820C",
+    "func_08B082B4": "0x08B082B4",
+    "func_0880FEA0": "0x0880FEA0",
+    "func_08896558": "0x08896558",
+    "func_08874A70": "0x08874A70",
+    "D_08B5D5D0": "0x08B5D5D0",
+    "D_08B5D5AC": "0x08B5D5AC",
+    "func_0885CD44": "0x0885CD44",
+    "func_089A34F4": "0x089A34F4",
+    "func_089A3B98": "0x089A3B98",
+    "func_08B5FA5C": "0x08B5FA5C",
+    "func_08B5F994": "0x08B5F994",
+    "D_089E799C": "0x089E799C",
+    "func_08838DCC": "0x08838DCC",
+    "func_0884E46C": "0x0884E46C",
+    "D_089E7998": "0x089E7998",
+    "func_08A7479C": "0x08A7479C",
+    "D_08AB2EC8": "0x08AB2EC8",
+    "D_08A58980": "0x08A58980",
+    "D_08A54D84": "0x08A54D84",
+    "D_08A54D88": "0x08A54D88",
+    "D_08A54D80": "0x08A54D80",
+    "func_089A38A8": "0x089A38A8",
+    "func_089A38E0": "0x089A38E0",
+    "D_089D8508": "0x089D8508",
+    "func_088CA528": "0x088CA528",
+    "D_08B1FE60": "0x08B1FE60",
+    "D_08B212E8": "0x08B212E8",
+    "func_0887CFE4": "0x0887CFE4",
+    "func_0887D2A8": "0x0887D2A8",
+    "func_08B0AD88": "0x08B0AD88",
+    "func_08B0B71C": "0x08B0B71C",
+    "func_089DE6EC": "0x089DE6EC",
+    "func_089DFCA4": "0x089DFCA4"
   },
   "status": "112 matching C/C++ functions / 8380 bytes; connected curve controls, resource cleanup and second activation/cleanup group added. Broader combat ownership remains provisional."
 }

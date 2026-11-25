@@ -1879,6 +1879,20 @@
       ]
     },
     {
+      "name": "battle_chunk_lookup_088135d4",
+      "source": "src/main/battle_chunk_lookup_088135d4.cpp",
+      "functions": [
+        {
+          "name": "func_088135D4",
+          "address": "0x088135D4",
+          "size": 728
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fBKDKeyR6CK4T"
+      ]
+    },
+    {
       "name": "main_088138ac",
       "source": "src/main/auto/main_088138ac.c",
       "functions": [
@@ -1887,6 +1901,20 @@
           "address": "0x088138AC",
           "size": 112
         }
+      ]
+    },
+    {
+      "name": "scene_setup_0881391c",
+      "source": "src/main/scene_setup_0881391c.cpp",
+      "functions": [
+        {
+          "name": "func_0881391C",
+          "address": "0x0881391C",
+          "size": 668
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fBHFkeyofP6BKT"
       ]
     },
     {
@@ -2960,6 +2988,17 @@
       ]
     },
     {
+      "name": "scene_setup_0881aa10",
+      "source": "src/main/scene_setup_0881aa10.c",
+      "functions": [
+        {
+          "name": "func_0881AA10",
+          "address": "0x0881AA10",
+          "size": 636
+        }
+      ]
+    },
+    {
       "name": "main_0881af4c",
       "source": "src/main/auto/main_0881af4c.c",
       "functions": [
@@ -3582,6 +3621,20 @@
       "unused_inline_symbols": [
         "__0fMAgent4Vptr08HdestroyP6MAgent4Vptr08UiPvT",
         "__0fMAgent4Vptr10HdestroyP6MAgent4Vptr10UiPvT"
+      ]
+    },
+    {
+      "name": "dtor_0881dfe8",
+      "source": "src/main/dtor_0881dfe8.cpp",
+      "functions": [
+        {
+          "name": "func_0881DFE8",
+          "address": "0x0881DFE8",
+          "size": 520
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fHDtor102DruniUiT"
       ]
     },
     {
@@ -7665,6 +7718,17 @@
       ]
     },
     {
+      "name": "obj_manager_tasks_08841cc0",
+      "source": "src/main/obj_manager_tasks_08841cc0.c",
+      "functions": [
+        {
+          "name": "func_08841CC0",
+          "address": "0x08841CC0",
+          "size": 500
+        }
+      ]
+    },
+    {
       "name": "main_08841eb4",
       "source": "src/main/auto/main_08841eb4.c",
       "functions": [
@@ -8125,6 +8189,17 @@
           "name": "func_08843BE0",
           "address": "0x08843BE0",
           "size": 60
+        }
+      ]
+    },
+    {
+      "name": "serialize_08843cf4",
+      "source": "src/main/serialize_08843cf4.c",
+      "functions": [
+        {
+          "name": "func_08843CF4",
+          "address": "0x08843CF4",
+          "size": 600
         }
       ]
     },
@@ -10115,6 +10190,17 @@
           "name": "func_08857804",
           "address": "0x08857804",
           "size": 32
+        }
+      ]
+    },
+    {
+      "name": "model_parts_load_08857824",
+      "source": "src/main/model_parts_load_08857824.c",
+      "functions": [
+        {
+          "name": "func_08857824",
+          "address": "0x08857824",
+          "size": 448
         }
       ]
     },
@@ -13268,6 +13354,39 @@
       ]
     },
     {
+      "name": "rec_apply_0886c050",
+      "source": "src/main/rec_apply_0886c050.c",
+      "functions": [
+        {
+          "name": "func_0886C050",
+          "address": "0x0886C050",
+          "size": 456
+        }
+      ]
+    },
+    {
+      "name": "draw_node_0886c38c",
+      "source": "src/main/draw_node_0886c38c.c",
+      "functions": [
+        {
+          "name": "func_0886C38C",
+          "address": "0x0886C38C",
+          "size": 568
+        }
+      ]
+    },
+    {
+      "name": "rec_walk_0886c5c4",
+      "source": "src/main/rec_walk_0886c5c4.c",
+      "functions": [
+        {
+          "name": "func_0886C5C4",
+          "address": "0x0886C5C4",
+          "size": 432
+        }
+      ]
+    },
+    {
       "name": "model_list_texture_calls_0886c9ac",
       "source": "src/main/model_list_texture_calls_0886c9ac.c",
       "functions": [
@@ -15185,6 +15304,28 @@
       ]
     },
     {
+      "name": "object_init_08878a78",
+      "source": "src/main/object_init_08878a78.c",
+      "functions": [
+        {
+          "name": "func_08878A78",
+          "address": "0x08878A78",
+          "size": 432
+        }
+      ]
+    },
+    {
+      "name": "vtable_init_08878c28",
+      "source": "src/main/vtable_init_08878c28.c",
+      "functions": [
+        {
+          "name": "func_08878C28",
+          "address": "0x08878C28",
+          "size": 440
+        }
+      ]
+    },
+    {
       "name": "statics_init_088796ac",
       "source": "src/main/statics_init_088796ac.cpp",
       "functions": [
@@ -15433,6 +15574,17 @@
           "name": "func_0887A19C",
           "address": "0x0887A19C",
           "size": 104
+        }
+      ]
+    },
+    {
+      "name": "sphere_overlap_0887a204",
+      "source": "src/main/sphere_overlap_0887a204.c",
+      "functions": [
+        {
+          "name": "func_0887A204",
+          "address": "0x0887A204",
+          "size": 176
         }
       ]
     },
@@ -15687,6 +15839,17 @@
       ]
     },
     {
+      "name": "text_file_load_0887aacc",
+      "source": "src/main/text_file_load_0887aacc.c",
+      "functions": [
+        {
+          "name": "func_0887AACC",
+          "address": "0x0887AACC",
+          "size": 344
+        }
+      ]
+    },
+    {
       "name": "header_bind_0887ac24",
       "source": "src/main/header_bind_0887ac24.c",
       "functions": [
@@ -15694,6 +15857,17 @@
           "name": "func_0887AC24",
           "address": "0x0887AC24",
           "size": 76
+        }
+      ]
+    },
+    {
+      "name": "text_new_from_file_entry_0887ad78",
+      "source": "src/main/text_new_from_file_entry_0887ad78.c",
+      "functions": [
+        {
+          "name": "func_0887AD78",
+          "address": "0x0887AD78",
+          "size": 308
         }
       ]
     },
@@ -15870,6 +16044,17 @@
           "name": "func_0887B648",
           "address": "0x0887B648",
           "size": 88
+        }
+      ]
+    },
+    {
+      "name": "text_init_0887b6a0",
+      "source": "src/main/text_init_0887b6a0.c",
+      "functions": [
+        {
+          "name": "func_0887B6A0",
+          "address": "0x0887B6A0",
+          "size": 168
         }
       ]
     },
@@ -16150,6 +16335,21 @@
       ]
     },
     {
+      "name": "text_width_0887bb6c",
+      "source": "src/main/text_width_0887bb6c.cpp",
+      "functions": [
+        {
+          "name": "func_0887BB6C",
+          "address": "0x0887BB6C",
+          "size": 92
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fOSprite0887BB6CDhasP6OSprite0887BB6CUiT",
+        "__0fOSprite0887BB6CDrunP6OSprite0887BB6CT"
+      ]
+    },
+    {
       "name": "main_0887bbc8",
       "source": "src/main/auto/main_0887bbc8.c",
       "functions": [
@@ -16370,6 +16570,48 @@
       ]
     },
     {
+      "name": "text_new_0887d868",
+      "source": "src/main/text_new_0887d868.cpp",
+      "functions": [
+        {
+          "name": "func_0887D868",
+          "address": "0x0887D868",
+          "size": 416
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fLMgr0887D868Itake_onev",
+        "__0fLMgr0887D868Jgive_backP6MItem0887D868",
+        "__0fLMgr0887D868Jpush_backP6MItem0887D868"
+      ]
+    },
+    {
+      "name": "text_images_free_0887da08",
+      "source": "src/main/text_images_free_0887da08.cpp",
+      "functions": [
+        {
+          "name": "func_0887DA08",
+          "address": "0x0887DA08",
+          "size": 184
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fMList0887DA08GunlinkP6MItem0887DA08",
+        "__0fMList0887DA08HadvanceP6MItem0887DA08"
+      ]
+    },
+    {
+      "name": "text_bytes_to_utf16_0887df14",
+      "source": "src/main/text_bytes_to_utf16_0887df14.c",
+      "functions": [
+        {
+          "name": "func_0887DF14",
+          "address": "0x0887DF14",
+          "size": 224
+        }
+      ]
+    },
+    {
       "name": "slot_set_0887e090",
       "source": "src/main/slot_set_0887e090.c",
       "functions": [
@@ -16524,6 +16766,28 @@
       ]
     },
     {
+      "name": "text_copy_remapped_0887e81c",
+      "source": "src/main/text_copy_remapped_0887e81c.c",
+      "functions": [
+        {
+          "name": "func_0887E81C",
+          "address": "0x0887E81C",
+          "size": 172
+        }
+      ]
+    },
+    {
+      "name": "text_length_0887e8c8",
+      "source": "src/main/text_length_0887e8c8.c",
+      "functions": [
+        {
+          "name": "func_0887E8C8",
+          "address": "0x0887E8C8",
+          "size": 260
+        }
+      ]
+    },
+    {
       "name": "heaps_init_08881f2c",
       "source": "src/main/heaps_init_08881f2c.cpp",
       "functions": [
@@ -16581,6 +16845,17 @@
           "name": "func_088820C0",
           "address": "0x088820C0",
           "size": 24
+        }
+      ]
+    },
+    {
+      "name": "heap_alloc_088820d8",
+      "source": "src/main/heap_alloc_088820d8.c",
+      "functions": [
+        {
+          "name": "func_088820D8",
+          "address": "0x088820D8",
+          "size": 64
         }
       ]
     },
@@ -21326,6 +21601,28 @@
       ]
     },
     {
+      "name": "list_stop_by_key_08896100",
+      "source": "src/main/list_stop_by_key_08896100.c",
+      "functions": [
+        {
+          "name": "func_08896100",
+          "address": "0x08896100",
+          "size": 152
+        }
+      ]
+    },
+    {
+      "name": "list_fade_by_key_08896198",
+      "source": "src/main/list_fade_by_key_08896198.c",
+      "functions": [
+        {
+          "name": "func_08896198",
+          "address": "0x08896198",
+          "size": 168
+        }
+      ]
+    },
+    {
       "name": "map_bgm_restart_08896240",
       "source": "src/main/map_bgm_restart_08896240.c",
       "functions": [
@@ -21410,6 +21707,17 @@
           "name": "func_088965F4",
           "address": "0x088965F4",
           "size": 40
+        }
+      ]
+    },
+    {
+      "name": "object_release_0889661c",
+      "source": "src/main/object_release_0889661c.c",
+      "functions": [
+        {
+          "name": "func_0889661C",
+          "address": "0x0889661C",
+          "size": 160
         }
       ]
     },
@@ -21611,6 +21919,20 @@
           "address": "0x08897518",
           "size": 108
         }
+      ]
+    },
+    {
+      "name": "bitset_collect_08897584",
+      "source": "src/main/bitset_collect_08897584.cpp",
+      "functions": [
+        {
+          "name": "func_08897584",
+          "address": "0x08897584",
+          "size": 352
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fDOwnEtestP6DOwniTCT"
       ]
     },
     {
@@ -22754,6 +23076,17 @@
       ]
     },
     {
+      "name": "volume_scaled_call_088a16b0",
+      "source": "src/main/volume_scaled_call_088a16b0.c",
+      "functions": [
+        {
+          "name": "func_088A16B0",
+          "address": "0x088A16B0",
+          "size": 168
+        }
+      ]
+    },
+    {
       "name": "main_088a17a4",
       "source": "src/main/auto/main_088a17a4.c",
       "functions": [
@@ -22957,6 +23290,17 @@
           "name": "func_088A1DCC",
           "address": "0x088A1DCC",
           "size": 120
+        }
+      ]
+    },
+    {
+      "name": "state_advance_088a1e44",
+      "source": "src/main/state_advance_088a1e44.cpp",
+      "functions": [
+        {
+          "name": "func_088A1E44",
+          "address": "0x088A1E44",
+          "size": 232
         }
       ]
     },
@@ -23835,6 +24179,17 @@
       ]
     },
     {
+      "name": "effect_manager_tasks_088a5a98",
+      "source": "src/main/effect_manager_tasks_088a5a98.c",
+      "functions": [
+        {
+          "name": "func_088A5A98",
+          "address": "0x088A5A98",
+          "size": 412
+        }
+      ]
+    },
+    {
       "name": "main_088a5c34",
       "source": "src/main/auto/main_088a5c34.c",
       "functions": [
@@ -24032,6 +24387,17 @@
           "name": "func_088A6278",
           "address": "0x088A6278",
           "size": 48
+        }
+      ]
+    },
+    {
+      "name": "motion_sync_088a63cc",
+      "source": "src/main/motion_sync_088a63cc.c",
+      "functions": [
+        {
+          "name": "func_088A63CC",
+          "address": "0x088A63CC",
+          "size": 172
         }
       ]
     },
@@ -25177,6 +25543,17 @@
       ]
     },
     {
+      "name": "menu_step_088acafc",
+      "source": "src/main/menu_step_088acafc.c",
+      "functions": [
+        {
+          "name": "func_088ACAFC",
+          "address": "0x088ACAFC",
+          "size": 656
+        }
+      ]
+    },
+    {
       "name": "unit_can_act_088acd8c",
       "source": "src/main/unit_can_act_088acd8c.c",
       "functions": [
@@ -25254,6 +25631,17 @@
       ]
     },
     {
+      "name": "quad_draw_088ad2b0",
+      "source": "src/main/quad_draw_088ad2b0.c",
+      "functions": [
+        {
+          "name": "func_088AD2B0",
+          "address": "0x088AD2B0",
+          "size": 432
+        }
+      ]
+    },
+    {
       "name": "special_draw_load_088ad460",
       "source": "src/main/special_draw_load_088ad460.c",
       "functions": [
@@ -25316,6 +25704,17 @@
           "name": "func_088AD994",
           "address": "0x088AD994",
           "size": 36
+        }
+      ]
+    },
+    {
+      "name": "clear_tables_088ad9b8",
+      "source": "src/main/clear_tables_088ad9b8.c",
+      "functions": [
+        {
+          "name": "func_088AD9B8",
+          "address": "0x088AD9B8",
+          "size": 300
         }
       ]
     },
@@ -25685,6 +26084,17 @@
           "name": "func_088AFBB4",
           "address": "0x088AFBB4",
           "size": 24
+        }
+      ]
+    },
+    {
+      "name": "init_088b04ac",
+      "source": "src/main/init_088b04ac.c",
+      "functions": [
+        {
+          "name": "func_088B04AC",
+          "address": "0x088B04AC",
+          "size": 680
         }
       ]
     },
@@ -26720,6 +27130,17 @@
       ]
     },
     {
+      "name": "slot_ids_collect_088b6f48",
+      "source": "src/main/slot_ids_collect_088b6f48.c",
+      "functions": [
+        {
+          "name": "func_088B6F48",
+          "address": "0x088B6F48",
+          "size": 268
+        }
+      ]
+    },
+    {
       "name": "main_088b7060",
       "source": "src/main/auto/main_088b7060.c",
       "functions": [
@@ -27391,6 +27812,42 @@
           "address": "0x088BA34C",
           "size": 12
         }
+      ]
+    },
+    {
+      "name": "tables_save_088ba358",
+      "source": "src/main/tables_save_088ba358.cpp",
+      "functions": [
+        {
+          "name": "func_088BA358",
+          "address": "0x088BA358",
+          "size": 244
+        }
+      ]
+    },
+    {
+      "name": "tables_load_088ba44c",
+      "source": "src/main/tables_load_088ba44c.cpp",
+      "functions": [
+        {
+          "name": "func_088BA44C",
+          "address": "0x088BA44C",
+          "size": 256
+        }
+      ]
+    },
+    {
+      "name": "pair_list_add_088ba54c",
+      "source": "src/main/pair_list_add_088ba54c.cpp",
+      "functions": [
+        {
+          "name": "func_088BA54C",
+          "address": "0x088BA54C",
+          "size": 288
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fDRecGclosedv"
       ]
     },
     {
@@ -28712,6 +29169,17 @@
       ]
     },
     {
+      "name": "pmf_dispatch_088c1f6c",
+      "source": "src/main/pmf_dispatch_088c1f6c.cpp",
+      "functions": [
+        {
+          "name": "func_088C1F6C",
+          "address": "0x088C1F6C",
+          "size": 268
+        }
+      ]
+    },
+    {
       "name": "take_item_088c2560",
       "source": "src/main/take_item_088c2560.c",
       "functions": [
@@ -29789,6 +30257,17 @@
       ]
     },
     {
+      "name": "slot_lookup_088c7fe4",
+      "source": "src/main/slot_lookup_088c7fe4.c",
+      "functions": [
+        {
+          "name": "func_088C7FE4",
+          "address": "0x088C7FE4",
+          "size": 372
+        }
+      ]
+    },
+    {
       "name": "main_088c823c",
       "source": "src/main/auto/main_088c823c.c",
       "functions": [
@@ -30665,6 +31144,17 @@
       ]
     },
     {
+      "name": "update_task_start_088cca0c",
+      "source": "src/main/update_task_start_088cca0c.c",
+      "functions": [
+        {
+          "name": "func_088CCA0C",
+          "address": "0x088CCA0C",
+          "size": 268
+        }
+      ]
+    },
+    {
       "name": "handle_start_088ccb18",
       "source": "src/main/handle_start_088ccb18.c",
       "functions": [
@@ -30750,6 +31240,20 @@
           "address": "0x088CD4C8",
           "size": 112
         }
+      ]
+    },
+    {
+      "name": "unlink_close_088cd538",
+      "source": "src/main/unlink_close_088cd538.cpp",
+      "functions": [
+        {
+          "name": "func_088CD538",
+          "address": "0x088CD538",
+          "size": 236
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fDOpsGunlinkP6ENodeP6EListT"
       ]
     },
     {
@@ -31657,6 +32161,17 @@
       ]
     },
     {
+      "name": "node_texts_bind_088d44ec",
+      "source": "src/main/node_texts_bind_088d44ec.c",
+      "functions": [
+        {
+          "name": "func_088D44EC",
+          "address": "0x088D44EC",
+          "size": 152
+        }
+      ]
+    },
+    {
       "name": "main_088d4584",
       "source": "src/main/auto/main_088d4584.c",
       "functions": [
@@ -32012,6 +32527,28 @@
       ]
     },
     {
+      "name": "object_start_088d6e24",
+      "source": "src/main/object_start_088d6e24.c",
+      "functions": [
+        {
+          "name": "func_088D6E24",
+          "address": "0x088D6E24",
+          "size": 256
+        }
+      ]
+    },
+    {
+      "name": "object_start_088d6f24",
+      "source": "src/main/object_start_088d6f24.c",
+      "functions": [
+        {
+          "name": "func_088D6F24",
+          "address": "0x088D6F24",
+          "size": 260
+        }
+      ]
+    },
+    {
       "name": "handle_start_088d7028",
       "source": "src/main/handle_start_088d7028.c",
       "functions": [
@@ -32162,6 +32699,17 @@
           "name": "func_088D7884",
           "address": "0x088D7884",
           "size": 112
+        }
+      ]
+    },
+    {
+      "name": "step_run_088d78f4",
+      "source": "src/main/step_run_088d78f4.cpp",
+      "functions": [
+        {
+          "name": "func_088D78F4",
+          "address": "0x088D78F4",
+          "size": 252
         }
       ]
     },
@@ -32559,6 +33107,20 @@
           "address": "0x088D8A54",
           "size": 68
         }
+      ]
+    },
+    {
+      "name": "node_text_unlink_088d8a98",
+      "source": "src/main/node_text_unlink_088d8a98.cpp",
+      "functions": [
+        {
+          "name": "func_088D8A98",
+          "address": "0x088D8A98",
+          "size": 192
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fMNodeTextListGunlinkP6JNodeLabelP6INodeTextT"
       ]
     },
     {
@@ -33558,6 +34120,17 @@
       ]
     },
     {
+      "name": "state_update_088dea98",
+      "source": "src/main/state_update_088dea98.c",
+      "functions": [
+        {
+          "name": "func_088DEA98",
+          "address": "0x088DEA98",
+          "size": 372
+        }
+      ]
+    },
+    {
       "name": "main_088dec0c",
       "source": "src/main/auto/main_088dec0c.c",
       "functions": [
@@ -34287,6 +34860,36 @@
       ]
     },
     {
+      "name": "slots_free_088e36c4",
+      "source": "src/main/slots_free_088e36c4.cpp",
+      "functions": [
+        {
+          "name": "func_088E36C4",
+          "address": "0x088E36C4",
+          "size": 272
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fGSlot98EkilliP6GSlot98TBT",
+        "__0fGSlot98Fkill2iP6GSlot98TBT"
+      ]
+    },
+    {
+      "name": "slots_release_088e37d4",
+      "source": "src/main/slots_release_088e37d4.cpp",
+      "functions": [
+        {
+          "name": "func_088E37D4",
+          "address": "0x088E37D4",
+          "size": 260
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fGSlot98EkilliP6GSlot98TBT",
+        "__0fGSlot98Fkill2iP6GSlot98TBT"
+      ]
+    },
+    {
       "name": "id_resolve_088e38d8",
       "source": "src/main/id_resolve_088e38d8.c",
       "functions": [
@@ -34323,6 +34926,17 @@
       ],
       "unused_inline_symbols": [
         "__0fFEntryFemptyP6FEntryT"
+      ]
+    },
+    {
+      "name": "state_init_088e39d4",
+      "source": "src/main/state_init_088e39d4.c",
+      "functions": [
+        {
+          "name": "func_088E39D4",
+          "address": "0x088E39D4",
+          "size": 576
+        }
       ]
     },
     {
@@ -35364,6 +35978,17 @@
       ]
     },
     {
+      "name": "seq_state_088eadec",
+      "source": "src/main/seq_state_088eadec.c",
+      "functions": [
+        {
+          "name": "func_088EADEC",
+          "address": "0x088EADEC",
+          "size": 412
+        }
+      ]
+    },
+    {
       "name": "main_088eaf88",
       "source": "src/main/auto/main_088eaf88.c",
       "functions": [
@@ -36132,6 +36757,17 @@
       ]
     },
     {
+      "name": "day_scan_088eff98",
+      "source": "src/main/day_scan_088eff98.c",
+      "functions": [
+        {
+          "name": "func_088EFF98",
+          "address": "0x088EFF98",
+          "size": 248
+        }
+      ]
+    },
+    {
       "name": "day_bits_count_088f0438",
       "source": "src/main/day_bits_count_088f0438.c",
       "functions": [
@@ -36150,6 +36786,17 @@
           "name": "func_088F049C",
           "address": "0x088F049C",
           "size": 200
+        }
+      ]
+    },
+    {
+      "name": "seq_select_088f0564",
+      "source": "src/main/seq_select_088f0564.c",
+      "functions": [
+        {
+          "name": "func_088F0564",
+          "address": "0x088F0564",
+          "size": 412
         }
       ]
     },
@@ -36366,6 +37013,17 @@
       ]
     },
     {
+      "name": "day_search_088f1360",
+      "source": "src/main/day_search_088f1360.c",
+      "functions": [
+        {
+          "name": "func_088F1360",
+          "address": "0x088F1360",
+          "size": 228
+        }
+      ]
+    },
+    {
       "name": "main_088f1444",
       "source": "src/main/auto/main_088f1444.c",
       "functions": [
@@ -36552,6 +37210,17 @@
           "name": "func_088F23E4",
           "address": "0x088F23E4",
           "size": 96
+        }
+      ]
+    },
+    {
+      "name": "tick_088f2444",
+      "source": "src/main/tick_088f2444.cpp",
+      "functions": [
+        {
+          "name": "func_088F2444",
+          "address": "0x088F2444",
+          "size": 328
         }
       ]
     },
@@ -37028,6 +37697,17 @@
           "name": "func_088F45FC",
           "address": "0x088F45FC",
           "size": 60
+        }
+      ]
+    },
+    {
+      "name": "level_table_fill_088f4638",
+      "source": "src/main/level_table_fill_088f4638.c",
+      "functions": [
+        {
+          "name": "func_088F4638",
+          "address": "0x088F4638",
+          "size": 244
         }
       ]
     },
@@ -38268,6 +38948,17 @@
       ]
     },
     {
+      "name": "pad_flags_088faef8",
+      "source": "src/main/pad_flags_088faef8.cpp",
+      "functions": [
+        {
+          "name": "func_088FAEF8",
+          "address": "0x088FAEF8",
+          "size": 304
+        }
+      ]
+    },
+    {
       "name": "lookup_short_088fb934",
       "source": "src/main/lookup_short_088fb934.c",
       "functions": [
@@ -38535,6 +39226,17 @@
       ]
     },
     {
+      "name": "ui_reload_088fc3f8",
+      "source": "src/main/ui_reload_088fc3f8.cpp",
+      "functions": [
+        {
+          "name": "func_088FC3F8",
+          "address": "0x088FC3F8",
+          "size": 400
+        }
+      ]
+    },
+    {
       "name": "main_088fc588",
       "source": "src/main/auto/main_088fc588.c",
       "functions": [
@@ -38721,6 +39423,17 @@
           "name": "func_088FCCE0",
           "address": "0x088FCCE0",
           "size": 36
+        }
+      ]
+    },
+    {
+      "name": "menu_select_088fd314",
+      "source": "src/main/menu_select_088fd314.c",
+      "functions": [
+        {
+          "name": "func_088FD314",
+          "address": "0x088FD314",
+          "size": 432
         }
       ]
     },
@@ -39542,6 +40255,17 @@
       ]
     },
     {
+      "name": "shutdown_0890380c",
+      "source": "src/main/shutdown_0890380c.cpp",
+      "functions": [
+        {
+          "name": "func_0890380C",
+          "address": "0x0890380C",
+          "size": 232
+        }
+      ]
+    },
+    {
       "name": "release_handle_08903c58",
       "source": "src/main/release_handle_08903c58.cpp",
       "functions": [
@@ -40357,6 +41081,17 @@
       ]
     },
     {
+      "name": "setup_slots_08907608",
+      "source": "src/main/setup_slots_08907608.cpp",
+      "functions": [
+        {
+          "name": "func_08907608",
+          "address": "0x08907608",
+          "size": 272
+        }
+      ]
+    },
+    {
       "name": "check_all_ready_08907a04",
       "source": "src/main/check_all_ready_08907a04.cpp",
       "functions": [
@@ -40698,6 +41433,17 @@
       ]
     },
     {
+      "name": "pmf_two_089097e4",
+      "source": "src/main/pmf_two_089097e4.cpp",
+      "functions": [
+        {
+          "name": "func_089097E4",
+          "address": "0x089097E4",
+          "size": 248
+        }
+      ]
+    },
+    {
       "name": "lobby_open_089098dc",
       "source": "src/main/lobby_open_089098dc.c",
       "functions": [
@@ -40800,6 +41546,21 @@
       ]
     },
     {
+      "name": "dispatch_08909cf0",
+      "source": "src/main/dispatch_08909cf0.cpp",
+      "functions": [
+        {
+          "name": "func_08909CF0",
+          "address": "0x08909CF0",
+          "size": 240
+        }
+      ],
+      "rodata": {
+        "address": "0x089CDD38",
+        "size": 40
+      }
+    },
+    {
       "name": "flow_update_08909ed8",
       "source": "src/main/flow_update_08909ed8.cpp",
       "functions": [
@@ -40829,6 +41590,17 @@
           "name": "func_08909F6C",
           "address": "0x08909F6C",
           "size": 84
+        }
+      ]
+    },
+    {
+      "name": "ver_check_0890a080",
+      "source": "src/main/ver_check_0890a080.cpp",
+      "functions": [
+        {
+          "name": "func_0890A080",
+          "address": "0x0890A080",
+          "size": 316
         }
       ]
     },
@@ -40913,6 +41685,17 @@
       ],
       "unused_inline_symbols": [
         "__0fIFlowInitJconstructP6IDataFlowT"
+      ]
+    },
+    {
+      "name": "pmf_two_0890a7a8",
+      "source": "src/main/pmf_two_0890a7a8.cpp",
+      "functions": [
+        {
+          "name": "func_0890A7A8",
+          "address": "0x0890A7A8",
+          "size": 284
+        }
       ]
     },
     {
@@ -41057,6 +41840,21 @@
           "size": 128
         }
       ]
+    },
+    {
+      "name": "dispatch_0890ae50",
+      "source": "src/main/dispatch_0890ae50.cpp",
+      "functions": [
+        {
+          "name": "func_0890AE50",
+          "address": "0x0890AE50",
+          "size": 332
+        }
+      ],
+      "rodata": {
+        "address": "0x089CDFE0",
+        "size": 48
+      }
     },
     {
       "name": "vcall_pair_0890af9c",
@@ -41490,6 +42288,17 @@
           "name": "func_0890C810",
           "address": "0x0890C810",
           "size": 96
+        }
+      ]
+    },
+    {
+      "name": "pad_state_from_mask_0890d090",
+      "source": "src/main/pad_state_from_mask_0890d090.c",
+      "functions": [
+        {
+          "name": "func_0890D090",
+          "address": "0x0890D090",
+          "size": 388
         }
       ]
     },
@@ -42358,6 +43167,17 @@
       ]
     },
     {
+      "name": "effect_spawn_lookup_08911d68",
+      "source": "src/main/effect_spawn_lookup_08911d68.c",
+      "functions": [
+        {
+          "name": "func_08911D68",
+          "address": "0x08911D68",
+          "size": 184
+        }
+      ]
+    },
+    {
       "name": "motion_update_08911e20",
       "source": "src/main/motion_update_08911e20.c",
       "functions": [
@@ -43060,6 +43880,21 @@
       ]
     },
     {
+      "name": "mode_set_08913b58",
+      "source": "src/main/mode_set_08913b58.c",
+      "functions": [
+        {
+          "name": "func_08913B58",
+          "address": "0x08913B58",
+          "size": 204
+        }
+      ],
+      "rodata": {
+        "address": "0x089CE600",
+        "size": 32
+      }
+    },
+    {
       "name": "scene_resume_08913d8c",
       "source": "src/main/scene_resume_08913d8c.c",
       "functions": [
@@ -43439,6 +44274,17 @@
           "name": "func_08915D68",
           "address": "0x08915D68",
           "size": 64
+        }
+      ]
+    },
+    {
+      "name": "talk_open_08915da8",
+      "source": "src/main/talk_open_08915da8.cpp",
+      "functions": [
+        {
+          "name": "func_08915DA8",
+          "address": "0x08915DA8",
+          "size": 376
         }
       ]
     },
@@ -43922,6 +44768,17 @@
       ]
     },
     {
+      "name": "menu_slot_init_089175bc",
+      "source": "src/main/menu_slot_init_089175bc.cpp",
+      "functions": [
+        {
+          "name": "func_089175BC",
+          "address": "0x089175BC",
+          "size": 244
+        }
+      ]
+    },
+    {
       "name": "main_08917714",
       "source": "src/main/auto/main_08917714.c",
       "functions": [
@@ -43966,6 +44823,17 @@
       ]
     },
     {
+      "name": "menu_slot_open_08917830",
+      "source": "src/main/menu_slot_open_08917830.cpp",
+      "functions": [
+        {
+          "name": "func_08917830",
+          "address": "0x08917830",
+          "size": 316
+        }
+      ]
+    },
+    {
       "name": "menu_start_list_0891796c",
       "source": "src/main/menu_start_list_0891796c.c",
       "functions": [
@@ -43974,6 +44842,20 @@
           "address": "0x0891796C",
           "size": 76
         }
+      ]
+    },
+    {
+      "name": "menu_slot_back_089179b8",
+      "source": "src/main/menu_slot_back_089179b8.cpp",
+      "functions": [
+        {
+          "name": "func_089179B8",
+          "address": "0x089179B8",
+          "size": 228
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fLHlp089179B8DanyP6MBits089179B8T"
       ]
     },
     {
@@ -44792,6 +45674,17 @@
           "name": "func_0891E1EC",
           "address": "0x0891E1EC",
           "size": 28
+        }
+      ]
+    },
+    {
+      "name": "timer_step_0891e208",
+      "source": "src/main/timer_step_0891e208.c",
+      "functions": [
+        {
+          "name": "func_0891E208",
+          "address": "0x0891E208",
+          "size": 152
         }
       ]
     },
@@ -46076,6 +46969,21 @@
       ]
     },
     {
+      "name": "effect_pair_08923aac",
+      "source": "src/main/effect_pair_08923aac.c",
+      "functions": [
+        {
+          "name": "func_08923AAC",
+          "address": "0x08923AAC",
+          "size": 304
+        }
+      ],
+      "rodata": {
+        "address": "0x089CE920",
+        "size": 64
+      }
+    },
+    {
       "name": "unit_special_motion_08923e08",
       "source": "src/main/unit_special_motion_08923e08.c",
       "functions": [
@@ -46172,6 +47080,20 @@
           "address": "0x08925128",
           "size": 92
         }
+      ]
+    },
+    {
+      "name": "effect_attach_08925184",
+      "source": "src/main/effect_attach_08925184.cpp",
+      "functions": [
+        {
+          "name": "func_08925184",
+          "address": "0x08925184",
+          "size": 248
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fCMkEmakevT"
       ]
     },
     {
@@ -46479,6 +47401,17 @@
           "name": "func_089261E0",
           "address": "0x089261E0",
           "size": 108
+        }
+      ]
+    },
+    {
+      "name": "rgba_iter_0892631c",
+      "source": "src/main/rgba_iter_0892631c.c",
+      "functions": [
+        {
+          "name": "func_0892631C",
+          "address": "0x0892631C",
+          "size": 300
         }
       ]
     },
@@ -46868,6 +47801,17 @@
       ],
       "unused_inline_symbols": [
         "__0fEPairHInvalidRC6EPairT"
+      ]
+    },
+    {
+      "name": "blob_copy_08929afc",
+      "source": "src/main/blob_copy_08929afc.c",
+      "functions": [
+        {
+          "name": "func_08929AFC",
+          "address": "0x08929AFC",
+          "size": 208
+        }
       ]
     },
     {
@@ -48039,6 +48983,17 @@
           "name": "func_0892D88C",
           "address": "0x0892D88C",
           "size": 100
+        }
+      ]
+    },
+    {
+      "name": "effect_swap_0892d8f0",
+      "source": "src/main/effect_swap_0892d8f0.c",
+      "functions": [
+        {
+          "name": "func_0892D8F0",
+          "address": "0x0892D8F0",
+          "size": 432
         }
       ]
     },
@@ -49762,6 +50717,17 @@
       ]
     },
     {
+      "name": "state_switch_08933cbc",
+      "source": "src/main/state_switch_08933cbc.c",
+      "functions": [
+        {
+          "name": "func_08933CBC",
+          "address": "0x08933CBC",
+          "size": 244
+        }
+      ]
+    },
+    {
       "name": "main_08933db0",
       "source": "src/main/auto/main_08933db0.c",
       "functions": [
@@ -49873,6 +50839,20 @@
       "unused_inline_symbols": [
         "__0fBHDhasUiTBT",
         "__0fBHEhasbPUciT"
+      ]
+    },
+    {
+      "name": "guard_pmf_08934114",
+      "source": "src/main/guard_pmf_08934114.cpp",
+      "functions": [
+        {
+          "name": "func_08934114",
+          "address": "0x08934114",
+          "size": 288
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fBBDhasUiTBT"
       ]
     },
     {
@@ -51307,6 +52287,17 @@
       ]
     },
     {
+      "name": "anim_init_089545b8",
+      "source": "src/main/anim_init_089545b8.c",
+      "functions": [
+        {
+          "name": "func_089545B8",
+          "address": "0x089545B8",
+          "size": 196
+        }
+      ]
+    },
+    {
       "name": "stat_slot_08954fd0",
       "source": "src/main/stat_slot_08954fd0.cpp",
       "functions": [
@@ -51611,6 +52602,17 @@
           "name": "func_0895AA5C",
           "address": "0x0895AA5C",
           "size": 36
+        }
+      ]
+    },
+    {
+      "name": "vec_copy_call_0895aa80",
+      "source": "src/main/vec_copy_call_0895aa80.c",
+      "functions": [
+        {
+          "name": "func_0895AA80",
+          "address": "0x0895AA80",
+          "size": 152
         }
       ]
     },
@@ -53197,6 +54199,28 @@
       ]
     },
     {
+      "name": "object_release_0897301c",
+      "source": "src/main/object_release_0897301c.cpp",
+      "functions": [
+        {
+          "name": "func_0897301C",
+          "address": "0x0897301C",
+          "size": 284
+        }
+      ]
+    },
+    {
+      "name": "object_init_08973138",
+      "source": "src/main/object_init_08973138.cpp",
+      "functions": [
+        {
+          "name": "func_08973138",
+          "address": "0x08973138",
+          "size": 284
+        }
+      ]
+    },
+    {
       "name": "call_neg1_08973254",
       "source": "src/main/call_neg1_08973254.c",
       "functions": [
@@ -53799,6 +54823,17 @@
       ]
     },
     {
+      "name": "pair_transform_0897bcc8",
+      "source": "src/main/pair_transform_0897bcc8.cpp",
+      "functions": [
+        {
+          "name": "func_0897BCC8",
+          "address": "0x0897BCC8",
+          "size": 280
+        }
+      ]
+    },
+    {
       "name": "main_0897c4c8",
       "source": "src/main/auto/main_0897c4c8.c",
       "functions": [
@@ -53887,6 +54922,17 @@
           "name": "func_0897CE68",
           "address": "0x0897CE68",
           "size": 56
+        }
+      ]
+    },
+    {
+      "name": "random_offset_burst_0897d0b4",
+      "source": "src/main/random_offset_burst_0897d0b4.c",
+      "functions": [
+        {
+          "name": "func_0897D0B4",
+          "address": "0x0897D0B4",
+          "size": 236
         }
       ]
     },
@@ -54082,6 +55128,21 @@
       ]
     },
     {
+      "name": "mode_effect_08983cd8",
+      "source": "src/main/mode_effect_08983cd8.c",
+      "functions": [
+        {
+          "name": "func_08983CD8",
+          "address": "0x08983CD8",
+          "size": 220
+        }
+      ],
+      "rodata": {
+        "address": "0x089D07C8",
+        "size": 32
+      }
+    },
+    {
       "name": "which_of_08983db4",
       "source": "src/main/which_of_08983db4.c",
       "functions": [
@@ -54170,6 +55231,17 @@
       ]
     },
     {
+      "name": "rate_decay_089850a4",
+      "source": "src/main/rate_decay_089850a4.c",
+      "functions": [
+        {
+          "name": "func_089850A4",
+          "address": "0x089850A4",
+          "size": 168
+        }
+      ]
+    },
+    {
       "name": "init_record_089851c0",
       "source": "src/main/init_record_089851c0.c",
       "functions": [
@@ -54214,6 +55286,17 @@
       ]
     },
     {
+      "name": "sprite_reset_08985b58",
+      "source": "src/main/sprite_reset_08985b58.c",
+      "functions": [
+        {
+          "name": "func_08985B58",
+          "address": "0x08985B58",
+          "size": 284
+        }
+      ]
+    },
+    {
       "name": "main_08986204",
       "source": "src/main/auto/main_08986204.c",
       "functions": [
@@ -54221,6 +55304,17 @@
           "name": "func_08986204",
           "address": "0x08986204",
           "size": 8
+        }
+      ]
+    },
+    {
+      "name": "slot_setup_089866c8",
+      "source": "src/main/slot_setup_089866c8.c",
+      "functions": [
+        {
+          "name": "func_089866C8",
+          "address": "0x089866C8",
+          "size": 364
         }
       ]
     },
@@ -54378,6 +55472,28 @@
           "name": "func_0898AE1C",
           "address": "0x0898AE1C",
           "size": 52
+        }
+      ]
+    },
+    {
+      "name": "draw_dispatch_0898ae50",
+      "source": "src/main/draw_dispatch_0898ae50.cpp",
+      "functions": [
+        {
+          "name": "func_0898AE50",
+          "address": "0x0898AE50",
+          "size": 288
+        }
+      ]
+    },
+    {
+      "name": "draw_dispatch_0898af70",
+      "source": "src/main/draw_dispatch_0898af70.cpp",
+      "functions": [
+        {
+          "name": "func_0898AF70",
+          "address": "0x0898AF70",
+          "size": 396
         }
       ]
     },
@@ -54918,6 +56034,17 @@
           "name": "func_08992140",
           "address": "0x08992140",
           "size": 108
+        }
+      ]
+    },
+    {
+      "name": "stream_open_089921ac",
+      "source": "src/main/stream_open_089921ac.c",
+      "functions": [
+        {
+          "name": "func_089921AC",
+          "address": "0x089921AC",
+          "size": 336
         }
       ]
     },
@@ -61579,7 +62706,187 @@
     "func_08B533E4": "0x08B533E4",
     "func_08B53354": "0x08B53354",
     "func_089C5CC0": "0x089C5CC0",
-    "func_089C5D08": "0x089C5D08"
+    "func_089C5D08": "0x089C5D08",
+    "D_089D6964": "0x089D6964",
+    "D_089D6988": "0x089D6988",
+    "func_0887F294": "0x0887F294",
+    "func_0887E9CC": "0x0887E9CC",
+    "func_0887DAC0": "0x0887DAC0",
+    "D_089CF350": "0x089CF350",
+    "func_08911CC8": "0x08911CC8",
+    "func_088D7720": "0x088D7720",
+    "func_088CF188": "0x088CF188",
+    "func_08986F0C": "0x08986F0C",
+    "D_089DA120": "0x089DA120",
+    "func_088FB324": "0x088FB324",
+    "D_089CBCF4": "0x089CBCF4",
+    "func_088CFF30": "0x088CFF30",
+    "func_0895ACA4": "0x0895ACA4",
+    "func_089918C0": "0x089918C0",
+    "func_0898B664": "0x0898B664",
+    "func_0898BF80": "0x0898BF80",
+    "func_0898C2F0": "0x0898C2F0",
+    "func_0898AB80": "0x0898AB80",
+    "func_0898B2C4": "0x0898B2C4",
+    "D_089CE380": "0x089CE380",
+    "D_089CE388": "0x089CE388",
+    "func_08AF2F14": "0x08AF2F14",
+    "func_08AF2F1C": "0x08AF2F1C",
+    "func_089176B0": "0x089176B0",
+    "func_08B448A0": "0x08B448A0",
+    "func_089C2D48": "0x089C2D48",
+    "func_089748F4": "0x089748F4",
+    "func_08973F94": "0x08973F94",
+    "func_08973FF0": "0x08973FF0",
+    "func_08987848": "0x08987848",
+    "func_08987BBC": "0x08987BBC",
+    "func_08987E60": "0x08987E60",
+    "func_089883E4": "0x089883E4",
+    "func_089C5CE0": "0x089C5CE0",
+    "func_089C5D00": "0x089C5D00",
+    "func_089C5CF8": "0x089C5CF8",
+    "func_08897584": "0x08897584",
+    "func_08892FD0": "0x08892FD0",
+    "func_088AB6F4": "0x088AB6F4",
+    "func_089C5D90": "0x089C5D90",
+    "func_089C5D80": "0x089C5D80",
+    "func_08909DE0": "0x08909DE0",
+    "func_08909FC0": "0x08909FC0",
+    "func_0890A080": "0x0890A080",
+    "func_088BA66C": "0x088BA66C",
+    "D_089D7490": "0x089D7490",
+    "func_088C2690": "0x088C2690",
+    "D_089D8280": "0x089D8280",
+    "D_089D82B0": "0x089D82B0",
+    "func_089038F4": "0x089038F4",
+    "D_089D82E0": "0x089D82E0",
+    "D_089D8320": "0x089D8320",
+    "func_089C57B0": "0x089C57B0",
+    "func_089C5788": "0x089C5788",
+    "func_088E052C": "0x088E052C",
+    "D_089CC2B8": "0x089CC2B8",
+    "D_089CC2C0": "0x089CC2C0",
+    "D_089CC2C8": "0x089CC2C8",
+    "D_09B4E7C8": "0x09B4E7C8",
+    "func_08A64054": "0x08A64054",
+    "D_089CE3C4": "0x089CE3C4",
+    "func_088F203C": "0x088F203C",
+    "D_089CD06C": "0x089CD06C",
+    "func_0895477C": "0x0895477C",
+    "func_0895470C": "0x0895470C",
+    "func_08954918": "0x08954918",
+    "func_089549C8": "0x089549C8",
+    "func_08B43E28": "0x08B43E28",
+    "func_08B45808": "0x08B45808",
+    "func_08B43FC8": "0x08B43FC8",
+    "D_08B4BFE0": "0x08B4BFE0",
+    "func_08B443B8": "0x08B443B8",
+    "func_08B33418": "0x08B33418",
+    "D_089CEA88": "0x089CEA88",
+    "func_0885C9E4": "0x0885C9E4",
+    "func_0892624C": "0x0892624C",
+    "func_089DEBDC": "0x089DEBDC",
+    "func_08ABC158": "0x08ABC158",
+    "func_08ABC1D0": "0x08ABC1D0",
+    "D_089CAF78": "0x089CAF78",
+    "D_089CAF94": "0x089CAF94",
+    "D_089CAFB0": "0x089CAFB0",
+    "D_089CAFCC": "0x089CAFCC",
+    "D_089CAFE8": "0x089CAFE8",
+    "D_089CB004": "0x089CB004",
+    "D_089CB020": "0x089CB020",
+    "D_089CB03C": "0x089CB03C",
+    "D_089CB05C": "0x089CB05C",
+    "D_089C8D8C": "0x089C8D8C",
+    "D_089C8D94": "0x089C8D94",
+    "D_089C86A0": "0x089C86A0",
+    "func_088413D0": "0x088413D0",
+    "D_089C86A8": "0x089C86A8",
+    "func_088416EC": "0x088416EC",
+    "D_089C86C0": "0x089C86C0",
+    "D_089C86DC": "0x089C86DC",
+    "D_089C86F8": "0x089C86F8",
+    "D_089C8710": "0x089C8710",
+    "D_089C872C": "0x089C872C",
+    "D_089C8750": "0x089C8750",
+    "D_089C876C": "0x089C876C",
+    "func_088419EC": "0x088419EC",
+    "D_089C8788": "0x089C8788",
+    "D_08B56308": "0x08B56308",
+    "D_08B60578": "0x08B60578",
+    "D_08B531D0": "0x08B531D0",
+    "D_08B52E48": "0x08B52E48",
+    "func_08B5202C": "0x08B5202C",
+    "D_08B58948": "0x08B58948",
+    "D_08B501B0": "0x08B501B0",
+    "D_08B55948": "0x08B55948",
+    "func_08878A70": "0x08878A70",
+    "D_08B4EEC8": "0x08B4EEC8",
+    "D_08B4EBB8": "0x08B4EBB8",
+    "D_08B51720": "0x08B51720",
+    "D_08B5ED40": "0x08B5ED40",
+    "D_08B60EC0": "0x08B60EC0",
+    "D_08B60CD0": "0x08B60CD0",
+    "D_089C9C70": "0x089C9C70",
+    "D_08B61010": "0x08B61010",
+    "D_08B619E8": "0x08B619E8",
+    "D_08B61B48": "0x08B61B48",
+    "func_089B2CCC": "0x089B2CCC",
+    "func_089B4918": "0x089B4918",
+    "func_089AD32C": "0x089AD32C",
+    "func_089B4948": "0x089B4948",
+    "func_0886C5C4": "0x0886C5C4",
+    "func_089B47AC": "0x089B47AC",
+    "func_088C4E9C": "0x088C4E9C",
+    "D_089D5F1C": "0x089D5F1C",
+    "func_088EB0B4": "0x088EB0B4",
+    "func_08A40658": "0x08A40658",
+    "D_08A3B160": "0x08A3B160",
+    "D_08A3C890": "0x08A3C890",
+    "D_08A3D5E0": "0x08A3D5E0",
+    "D_08A33510": "0x08A33510",
+    "D_08A34D18": "0x08A34D18",
+    "D_08A35DB0": "0x08A35DB0",
+    "D_08A37230": "0x08A37230",
+    "D_08A309C0": "0x08A309C0",
+    "D_08A43A40": "0x08A43A40",
+    "D_08A38410": "0x08A38410",
+    "D_08A41F78": "0x08A41F78",
+    "D_08A39888": "0x08A39888",
+    "D_08A45548": "0x08A45548",
+    "D_08A47230": "0x08A47230",
+    "D_08A4EFD8": "0x08A4EFD8",
+    "D_08A4C1F0": "0x08A4C1F0",
+    "D_08A4D918": "0x08A4D918",
+    "D_08A4A888": "0x08A4A888",
+    "D_08A48530": "0x08A48530",
+    "D_08A4FC90": "0x08A4FC90",
+    "D_089CB700": "0x089CB700",
+    "func_088ADB10": "0x088ADB10",
+    "func_088ACDF8": "0x088ACDF8",
+    "D_089C6F14": "0x089C6F14",
+    "D_089C6F1C": "0x089C6F1C",
+    "D_089C6F24": "0x089C6F24",
+    "D_089C6F2C": "0x089C6F2C",
+    "D_089C6F34": "0x089C6F34",
+    "func_08A801B4": "0x08A801B4",
+    "D_089C6F3C": "0x089C6F3C",
+    "D_089C6F44": "0x089C6F44",
+    "func_08AC61AC": "0x08AC61AC",
+    "D_089C6F4C": "0x089C6F4C",
+    "D_089C6F54": "0x089C6F54",
+    "func_08843A80": "0x08843A80",
+    "func_0885C648": "0x0885C648",
+    "D_089D48D0": "0x089D48D0",
+    "D_089C6ED4": "0x089C6ED4",
+    "D_089C6EDC": "0x089C6EDC",
+    "D_089C6EE4": "0x089C6EE4",
+    "D_089C6EEC": "0x089C6EEC",
+    "D_089C6EF4": "0x089C6EF4",
+    "func_08811598": "0x08811598",
+    "D_089C6EFC": "0x089C6EFC",
+    "D_089C6F04": "0x089C6F04",
+    "D_089C6F0C": "0x089C6F0C"
   },
   "status": "97 matching C/C++ functions / 6104 bytes; typed presentation callbacks, initialization, rendering gates, exact task unlink and drawing allocation support. Larger transition/update and task factory/registration remain unfinished."
 }

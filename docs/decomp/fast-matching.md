@@ -219,6 +219,42 @@ A daytime run of 20 Sonnet agents (agent66–agent86, two or three at a time): n
 - The mask-call shape (a virtual `v1(unsigned long long mask)` through a manager whose vptr sits at `0x34`) matched seven menu handlers; a scan of all three modules for it found two more battle input checks, which the overnight generator matched unchanged.
 - WSL hung again at 11:54 at the start of a batch build with no agents running, and recovered by 12:20. The weekly usage limit was reached at 14:00 and reset by the owner.
 
+## Overnight run, 25–26 November 2026: the text system
+
+A night with two goals: map the game's text system for a native text renderer in the port
+([text-system.md](text-system.md)), and match its functions. Three Opus agents wrote and widened the map and two
+reviewed it; Sonnet agents matched the 42 unmatched text functions and the text path around them, then, once those
+had all been tried, worked untouched ranges in all three modules. Verified C/C++ totals went from 13,956 functions /
+1,319,584 bytes to **14,141 functions / 1,393,272 bytes (29.53% of inventoried function bytes)**; the separate VFPU
+count is unchanged at 35 / 2,460. All four modules rebuild byte-identically and all 225 tests pass (7 skipped).
+
+| Module | Functions | Bytes | Added |
+| --- | ---: | ---: | ---: |
+| Main executable | 5,300 | 449,560 | 96 |
+| Menu overlay | 4,311 | 457,512 | 54 |
+| Battle overlay | 4,506 | 484,084 | 35 |
+| Extra overlay | 24 | 2,116 | 0 |
+
+- Text system: 13 functions (2,752 bytes): 11 of the 42 in `0x0887A000`–`0x08883000` (among them `text_new`
+  `0x0887D868`, the function 127 call sites use to make a text) and two layout-node functions outside it
+  (`0x088D44EC`, `0x088D8A98`). The rest stay near misses with readable drafts: the draw function `0x0887BC2C`, the
+  layout `0x0887F294`, the bitmap-font layout `0x0887E9CC`, the image drawer `0x0887CA50` and the font init
+  `0x08881954` compile from the map's drafts but are 260–900 words off. Tonight's text files were renamed to the
+  map's names before integration.
+- The rest: 172 functions in untouched ranges (main 83, menu 54, battle 35): first the functions earlier agents had
+  claimed but never reached, then unclaimed functions of 380–680 bytes, then float-using functions up to 500 bytes
+  (battle's gave 24). Unclaimed mid-size functions without floats are now nearly used up: 25 in main, 42 in battle
+  and about 100 in menu at 300–800 bytes. Main's float functions (0 of about 15 tried) differ mostly in
+  float-register numbering.
+- Agents: agent87–agent110 (results in `build/dc-results/`). Sonnet contexts filled in 10–30 minutes on these longer
+  functions, so most lists took three to five instances. Retrying the text functions' near misses with fresh Sonnet agents gave
+  little (2 matches in four passes); untouched lists gave 5–28 per instance at first and 0–2 once only their hard
+  residue was left.
+- The lead matched three by hand: `0x088D8A98` (declare the unlink pointer before the `if`), `0x088D44EC` (use the
+  parameters directly; only the cursor and the end constant as locals), `0x08A8C9A0` (a `goto` to the shared tail,
+  so the inner branch jumps straight there as retail does).
+- Integration ran in four batches during the night (28, 104, 45 and 8 units), each rebuilt byte-identically.
+
 ## SNC patterns learned while matching
 
 Collected from both agent rounds (544 hand matches). Each was confirmed by a byte match.
@@ -311,6 +347,24 @@ Collected from both agent rounds (544 hand matches). Each was confirmed by a byt
 - Fields above `0x7FFF` must be reached through typed struct members (`lui` + `addu`); a raw `(char *)p + 0x10000 + off` folds into an `ori`. Typed arrays and pair structs in block structs reproduce retail's stride arithmetic where byte offsets do not; struct assignments give the unrolled and paired-word copy loops.
 - A parameter that retail stores with `sh` but never sign-extends is an `int`; a constant passed to an `unsigned char` callee parameter is not shared with a later store; in C++ a literal `return 0` gives `ori v0,zero,0` where a `.c` file gives `move v0,zero`.
 
+**Learned on 25–26 November**
+- Jump threading: an inner `if` whose branch should jump straight to the function's shared tail (retail) but stops at
+  the end of its own `if`/`else` (SNC) matches with an explicit `goto tail;` before the outer block's end.
+- Prologue order: a table walker whose parameters retail moves into s-registers in an odd order matched once the
+  parameters were used directly and only the cursor and end constant were locals.
+- A repeated load that SNC merges (common subexpression) but retail repeats: read the second one through a second
+  struct type. A constructor-style clear matches as a typed struct whose member types follow retail's store kinds
+  (`swc1`, `sb`/`sh`, `sw`), with named constants (`int neg = -1; float hund = 100.0f;`) declared before use.
+- Comparisons pick the branch: `x <= 0` (not `x < 1`) gives retail's `bgtz` skip; `0 < id` (not `id > 0`) gives
+  `slt` + `beqz` instead of `blez`. A `(i - 4) / 2` index is SNC's signed-division idiom
+  (`(i + ((unsigned)(i - 4) >> 31) - 4) >> 1`); index the global directly, not through a local copy, to keep the
+  `addu` operand order.
+- Floats: declare a callee's prototype with its arguments in the order retail loads them; `&elem[i].sub` pointers
+  reproduce retail's address steps; a C++ inline bool helper reproduces `sltu`/`andi` flag tests. Two battle families
+  (an effect roll at `0x08A33AB4`, a random colour at `0x08B5A46C`) matched from one source shape each.
+- A brute-force search over the order of local declarations (`build/scratch/agent103/var.py`) found one match that
+  hand edits had not.
+
 **Not solved yet**
 - s-register permutations in otherwise identical code, constants that SNC keeps in a saved register where retail rematerialises them (often a `lui`), and single load or `$ra` scheduling slots remain the commonest causes of the 181 near misses left overnight.
 - A spilled parameter that is also copied into another argument register for the call: SNC swaps the parameter registers and retail does not.
@@ -318,6 +372,12 @@ Collected from both agent rounds (544 hand matches). Each was confirmed by a byt
 - Loop rotation in a few search loops, `sw $ra` scheduled before dependent loads, and bit sets kept as `and ~m; or m`.
 - Readable rewrites of the generated files are installed in battle and most of menu; the per-region headers (`include/<module>/auto_region*.h`) overlap and still need merging into real class headers.
 - Still open after 24–25 November: parameter-spill loaders (retail stores `a1` then `a0` at `4($sp)`/`0($sp)` before the first call and keeps neither in a saved register), four-halfword copy loops (`lhu; sll/sra; sh`), flags built from `mode == 1` by branches (`bne; ori 0; b; ori 1`), bool helpers on a float test (`bc1fl`/`bc1tl`), pointer-to-member dispatch through a stack table, a result variable's `ori 0` that retail puts in a loop test's delay slot, and loops where only the counter and pointer registers swap.
+- Still open after 25–26 November: a slot-release function that ends `if (flags & 1) free(self, size)`, where retail
+  fills the last `beqz` delay slot with the call's first argument move (or uses `beql` with the next test's `andi`),
+  four in main (`0x0898A030`, `0x0896753C`, `0x0895C9DC`, `0x08969FAC`; best form 6 words off); a temporary that
+  retail gives the dying flags register (`0x088D9E48`, 4 words); two data/heap arguments whose registers retail
+  swaps (`0x0887AD1C`, 4 words); slot searches that recompute `i * 20 + 4` every pass with no strength reduction
+  (`0x0887D034`, `0x0887D160`, `0x0887D330`); main's float functions, which differ in float-register numbering.
 
 ## 6. VFPU inline assembly is counted separately (15 November 2026)
 
