@@ -20049,6 +20049,17 @@
       ]
     },
     {
+      "name": "follow_up_check_08a50af4",
+      "source": "src/battle/follow_up_check_08a50af4.c",
+      "functions": [
+        {
+          "name": "func_08A50AF4",
+          "address": "0x08A50AF4",
+          "size": 276
+        }
+      ]
+    },
+    {
       "name": "battle_08a5153c",
       "source": "src/battle/auto/battle_08a5153c.c",
       "functions": [
@@ -20153,6 +20164,17 @@
         "__0fLStartStatusIairborneP6LStartStatusT",
         "__0fMStartFighterHknockedP6MStartFighterT",
         "__0fMStartFighterIairborneP6MStartFighterT"
+      ]
+    },
+    {
+      "name": "follow_up_pick_08a52ed8",
+      "source": "src/battle/follow_up_pick_08a52ed8.c",
+      "functions": [
+        {
+          "name": "func_08A52ED8",
+          "address": "0x08A52ED8",
+          "size": 268
+        }
       ]
     },
     {
@@ -22670,6 +22692,17 @@
           "name": "func_08A6AF38",
           "address": "0x08A6AF38",
           "size": 52
+        }
+      ]
+    },
+    {
+      "name": "event_direction_08a6af6c",
+      "source": "src/battle/event_direction_08a6af6c.c",
+      "functions": [
+        {
+          "name": "func_08A6AF6C",
+          "address": "0x08A6AF6C",
+          "size": 204
         }
       ]
     },
@@ -26812,6 +26845,17 @@
           "name": "func_08A94648",
           "address": "0x08A94648",
           "size": 100
+        }
+      ]
+    },
+    {
+      "name": "table_point_08a946ac",
+      "source": "src/battle/table_point_08a946ac.c",
+      "functions": [
+        {
+          "name": "func_08A946AC",
+          "address": "0x08A946AC",
+          "size": 236
         }
       ]
     },
@@ -31688,6 +31732,17 @@
       ]
     },
     {
+      "name": "parse_fill_08ab3d9c",
+      "source": "src/battle/parse_fill_08ab3d9c.c",
+      "functions": [
+        {
+          "name": "func_08AB3D9C",
+          "address": "0x08AB3D9C",
+          "size": 228
+        }
+      ]
+    },
+    {
       "name": "battle_08ab3e80",
       "source": "src/battle/auto/battle_08ab3e80.c",
       "functions": [
@@ -35247,6 +35302,20 @@
       ]
     },
     {
+      "name": "pool_push_08ad07b8",
+      "source": "src/battle/pool_push_08ad07b8.cpp",
+      "functions": [
+        {
+          "name": "func_08AD07B8",
+          "address": "0x08AD07B8",
+          "size": 88
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fIPoolPushCInUiTBT"
+      ]
+    },
+    {
       "name": "list_clear_08ad0a94",
       "source": "src/battle/list_clear_08ad0a94.c",
       "functions": [
@@ -35374,6 +35443,20 @@
       ]
     },
     {
+      "name": "pool_push_08ad2930",
+      "source": "src/battle/pool_push_08ad2930.cpp",
+      "functions": [
+        {
+          "name": "func_08AD2930",
+          "address": "0x08AD2930",
+          "size": 88
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fIPoolPushCInUiTBT"
+      ]
+    },
+    {
       "name": "model_node_ctor_08ad29d8",
       "source": "src/battle/model_node_ctor_08ad29d8.cpp",
       "functions": [
@@ -35498,6 +35581,20 @@
           "address": "0x08AD7724",
           "size": 52
         }
+      ]
+    },
+    {
+      "name": "pool_push_08ad7790",
+      "source": "src/battle/pool_push_08ad7790.cpp",
+      "functions": [
+        {
+          "name": "func_08AD7790",
+          "address": "0x08AD7790",
+          "size": 88
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fIPoolPushCInUiTBT"
       ]
     },
     {
@@ -36428,6 +36525,17 @@
       ]
     },
     {
+      "name": "slot_call_08ae3b28",
+      "source": "src/battle/slot_call_08ae3b28.c",
+      "functions": [
+        {
+          "name": "func_08AE3B28",
+          "address": "0x08AE3B28",
+          "size": 44
+        }
+      ]
+    },
+    {
       "name": "grid_clear_08ae3bc8",
       "source": "src/battle/grid_clear_08ae3bc8.c",
       "functions": [
@@ -36435,6 +36543,17 @@
           "name": "func_08AE3BC8",
           "address": "0x08AE3BC8",
           "size": 76
+        }
+      ]
+    },
+    {
+      "name": "two_slot_loop_08ae3c14",
+      "source": "src/battle/two_slot_loop_08ae3c14.cpp",
+      "functions": [
+        {
+          "name": "func_08AE3C14",
+          "address": "0x08AE3C14",
+          "size": 92
         }
       ]
     },
@@ -36526,6 +36645,17 @@
           "name": "func_08AE7FA0",
           "address": "0x08AE7FA0",
           "size": 8
+        }
+      ]
+    },
+    {
+      "name": "hp_diff_08ae83f0",
+      "source": "src/battle/hp_diff_08ae83f0.c",
+      "functions": [
+        {
+          "name": "func_08AE83F0",
+          "address": "0x08AE83F0",
+          "size": 240
         }
       ]
     },
@@ -37051,6 +37181,17 @@
       ]
     },
     {
+      "name": "event_dispatch_08aee6dc",
+      "source": "src/battle/event_dispatch_08aee6dc.c",
+      "functions": [
+        {
+          "name": "func_08AEE6DC",
+          "address": "0x08AEE6DC",
+          "size": 336
+        }
+      ]
+    },
+    {
       "name": "battle_08aeed04",
       "source": "src/battle/auto/battle_08aeed04.c",
       "functions": [
@@ -37135,6 +37276,17 @@
           "name": "func_08AEF1C0",
           "address": "0x08AEF1C0",
           "size": 48
+        }
+      ]
+    },
+    {
+      "name": "pair_status_init_08aef284",
+      "source": "src/battle/pair_status_init_08aef284.c",
+      "functions": [
+        {
+          "name": "func_08AEF284",
+          "address": "0x08AEF284",
+          "size": 340
         }
       ]
     },
@@ -37423,6 +37575,17 @@
           "name": "func_08AF359C",
           "address": "0x08AF359C",
           "size": 48
+        }
+      ]
+    },
+    {
+      "name": "obj_state5_08af3864",
+      "source": "src/battle/obj_state5_08af3864.c",
+      "functions": [
+        {
+          "name": "func_08AF3864",
+          "address": "0x08AF3864",
+          "size": 212
         }
       ]
     },
@@ -39504,6 +39667,17 @@
       ]
     },
     {
+      "name": "menu_flags_08b07e28",
+      "source": "src/battle/menu_flags_08b07e28.c",
+      "functions": [
+        {
+          "name": "func_08B07E28",
+          "address": "0x08B07E28",
+          "size": 300
+        }
+      ]
+    },
+    {
       "name": "fade_start_08b07f54",
       "source": "src/battle/fade_start_08b07f54.c",
       "functions": [
@@ -39914,6 +40088,20 @@
           "address": "0x08B0D9DC",
           "size": 124
         }
+      ]
+    },
+    {
+      "name": "destroy_flag_08b0da58",
+      "source": "src/battle/destroy_flag_08b0da58.cpp",
+      "functions": [
+        {
+          "name": "func_08B0DA58",
+          "address": "0x08B0DA58",
+          "size": 100
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fLObj08B0DA58DrunP6LObj08B0DA58UiT"
       ]
     },
     {
@@ -40411,6 +40599,20 @@
       ]
     },
     {
+      "name": "list_append_08b113f8",
+      "source": "src/battle/list_append_08b113f8.cpp",
+      "functions": [
+        {
+          "name": "func_08B113F8",
+          "address": "0x08B113F8",
+          "size": 168
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fFRun57GappendP6GList57P6GNode57T"
+      ]
+    },
+    {
       "name": "battle_08b114a0",
       "source": "src/battle/auto/battle_08b114a0.c",
       "functions": [
@@ -40429,6 +40631,17 @@
           "name": "func_08B11718",
           "address": "0x08B11718",
           "size": 72
+        }
+      ]
+    },
+    {
+      "name": "battle_float_18_08b11760",
+      "source": "src/battle/battle_float_18_08b11760.c",
+      "functions": [
+        {
+          "name": "func_08B11760",
+          "address": "0x08B11760",
+          "size": 16
         }
       ]
     },
@@ -40772,6 +40985,17 @@
       ]
     },
     {
+      "name": "free_all_08b14714",
+      "source": "src/battle/free_all_08b14714.cpp",
+      "functions": [
+        {
+          "name": "func_08B14714",
+          "address": "0x08B14714",
+          "size": 84
+        }
+      ]
+    },
+    {
       "name": "battle_08b14768",
       "source": "src/battle/auto/battle_08b14768.c",
       "functions": [
@@ -40827,6 +41051,17 @@
       ]
     },
     {
+      "name": "find_slot_08b14d24",
+      "source": "src/battle/find_slot_08b14d24.cpp",
+      "functions": [
+        {
+          "name": "func_08B14D24",
+          "address": "0x08B14D24",
+          "size": 68
+        }
+      ]
+    },
+    {
       "name": "side_notify_08b15a34",
       "source": "src/battle/side_notify_08b15a34.cpp",
       "functions": [
@@ -40855,6 +41090,17 @@
         {
           "name": "func_08B16DF4",
           "address": "0x08B16DF4",
+          "size": 188
+        }
+      ]
+    },
+    {
+      "name": "release_three_08b16eb0",
+      "source": "src/battle/release_three_08b16eb0.cpp",
+      "functions": [
+        {
+          "name": "func_08B16EB0",
+          "address": "0x08B16EB0",
           "size": 188
         }
       ]
@@ -42624,6 +42870,17 @@
       ]
     },
     {
+      "name": "key_cycle_08b234d0",
+      "source": "src/battle/key_cycle_08b234d0.cpp",
+      "functions": [
+        {
+          "name": "func_08B234D0",
+          "address": "0x08B234D0",
+          "size": 236
+        }
+      ]
+    },
+    {
       "name": "camera_sync_08b235bc",
       "source": "src/battle/camera_sync_08b235bc.c",
       "functions": [
@@ -42866,6 +43123,17 @@
       ]
     },
     {
+      "name": "battle_attach_08b27b1c",
+      "source": "src/battle/battle_attach_08b27b1c.c",
+      "functions": [
+        {
+          "name": "func_08B27B1C",
+          "address": "0x08B27B1C",
+          "size": 316
+        }
+      ]
+    },
+    {
       "name": "view_open_08b27c58",
       "source": "src/battle/view_open_08b27c58.c",
       "functions": [
@@ -42917,6 +43185,39 @@
           "name": "func_08B27FC0",
           "address": "0x08B27FC0",
           "size": 76
+        }
+      ]
+    },
+    {
+      "name": "battle_setup_08b28128",
+      "source": "src/battle/battle_setup_08b28128.cpp",
+      "functions": [
+        {
+          "name": "func_08B28128",
+          "address": "0x08B28128",
+          "size": 396
+        }
+      ]
+    },
+    {
+      "name": "battle_reset_08b282b4",
+      "source": "src/battle/battle_reset_08b282b4.cpp",
+      "functions": [
+        {
+          "name": "func_08B282B4",
+          "address": "0x08B282B4",
+          "size": 308
+        }
+      ]
+    },
+    {
+      "name": "battle_setup_08b283e8",
+      "source": "src/battle/battle_setup_08b283e8.cpp",
+      "functions": [
+        {
+          "name": "func_08B283E8",
+          "address": "0x08B283E8",
+          "size": 388
         }
       ]
     },
@@ -44297,6 +44598,51 @@
       ]
     },
     {
+      "name": "input_check_08b30cc0",
+      "source": "src/battle/input_check_08b30cc0.cpp",
+      "functions": [
+        {
+          "name": "func_08B30CC0",
+          "address": "0x08B30CC0",
+          "size": 168
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fNOwner08B30CC0BHv"
+      ]
+    },
+    {
+      "name": "input_check_08b30d68",
+      "source": "src/battle/input_check_08b30d68.cpp",
+      "functions": [
+        {
+          "name": "func_08B30D68",
+          "address": "0x08B30D68",
+          "size": 168
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fNOwner08B30D68BHv"
+      ]
+    },
+    {
+      "name": "input_check_08b31108",
+      "source": "src/battle/input_check_08b31108.cpp",
+      "functions": [
+        {
+          "name": "func_08B31108",
+          "address": "0x08B31108",
+          "size": 316
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fLSub08B31108Fg8000P6LSub08B31108T",
+        "__0fNFlags08B31108Cg4P6NFlags08B31108T",
+        "__0fNFlags08B31108GlockedP6NFlags08B31108T",
+        "__0fNOwner08B31108BHv"
+      ]
+    },
+    {
       "name": "input_check_08b31640",
       "source": "src/battle/input_check_08b31640.cpp",
       "functions": [
@@ -45271,6 +45617,17 @@
       ]
     },
     {
+      "name": "reset_floats_08b349e0",
+      "source": "src/battle/reset_floats_08b349e0.cpp",
+      "functions": [
+        {
+          "name": "func_08B349E0",
+          "address": "0x08B349E0",
+          "size": 80
+        }
+      ]
+    },
+    {
       "name": "battle_08b34a4c",
       "source": "src/battle/auto/battle_08b34a4c.c",
       "functions": [
@@ -45359,6 +45716,17 @@
       ]
     },
     {
+      "name": "flag_5b6_80_08b34e38",
+      "source": "src/battle/flag_5b6_80_08b34e38.c",
+      "functions": [
+        {
+          "name": "func_08B34E38",
+          "address": "0x08B34E38",
+          "size": 20
+        }
+      ]
+    },
+    {
       "name": "set_slot_flag_08b34e98",
       "source": "src/battle/set_slot_flag_08b34e98.cpp",
       "functions": [
@@ -45366,6 +45734,17 @@
           "name": "func_08B34E98",
           "address": "0x08B34E98",
           "size": 56
+        }
+      ]
+    },
+    {
+      "name": "clear_slot_flag_08b34ed0",
+      "source": "src/battle/clear_slot_flag_08b34ed0.cpp",
+      "functions": [
+        {
+          "name": "func_08B34ED0",
+          "address": "0x08B34ED0",
+          "size": 112
         }
       ]
     },
@@ -45422,6 +45801,20 @@
           "address": "0x08B3A968",
           "size": 64
         }
+      ]
+    },
+    {
+      "name": "dtor_flagged_08b3ad98",
+      "source": "src/battle/dtor_flagged_08b3ad98.cpp",
+      "functions": [
+        {
+          "name": "func_08B3AD98",
+          "address": "0x08B3AD98",
+          "size": 124
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fDObjDrunP6DObjUiT"
       ]
     },
     {
@@ -45618,6 +46011,17 @@
         }
       ],
       "inline_asm": "vfpu"
+    },
+    {
+      "name": "float_blend_08b3b99c",
+      "source": "src/battle/float_blend_08b3b99c.c",
+      "functions": [
+        {
+          "name": "func_08B3B99C",
+          "address": "0x08B3B99C",
+          "size": 40
+        }
+      ]
     },
     {
       "name": "init_effect_08b3b9c4",
@@ -45914,6 +46318,20 @@
           "address": "0x08B3F268",
           "size": 64
         }
+      ]
+    },
+    {
+      "name": "record_pos_08b3f40c",
+      "source": "src/battle/record_pos_08b3f40c.cpp",
+      "functions": [
+        {
+          "name": "func_08B3F40C",
+          "address": "0x08B3F40C",
+          "size": 244
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fLTgt08B3F40CDHitv"
       ]
     },
     {
@@ -46415,6 +46833,20 @@
           "address": "0x08B445A0",
           "size": 100
         }
+      ]
+    },
+    {
+      "name": "list_node_init_08b44b78",
+      "source": "src/battle/list_node_init_08b44b78.cpp",
+      "functions": [
+        {
+          "name": "func_08B44B78",
+          "address": "0x08B44B78",
+          "size": 84
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fENodeDrunP6ENodeP6FOwneriT"
       ]
     },
     {
@@ -46974,6 +47406,17 @@
       ]
     },
     {
+      "name": "menu_step_08b48098",
+      "source": "src/battle/menu_step_08b48098.cpp",
+      "functions": [
+        {
+          "name": "func_08B48098",
+          "address": "0x08B48098",
+          "size": 316
+        }
+      ]
+    },
+    {
       "name": "switch_state_08b481d4",
       "source": "src/battle/switch_state_08b481d4.c",
       "functions": [
@@ -47069,6 +47512,17 @@
           "name": "func_08B48614",
           "address": "0x08B48614",
           "size": 76
+        }
+      ]
+    },
+    {
+      "name": "view_angle_08b4878c",
+      "source": "src/battle/view_angle_08b4878c.c",
+      "functions": [
+        {
+          "name": "func_08B4878C",
+          "address": "0x08B4878C",
+          "size": 208
         }
       ]
     },
@@ -47311,6 +47765,17 @@
           "name": "func_08B49418",
           "address": "0x08B49418",
           "size": 84
+        }
+      ]
+    },
+    {
+      "name": "menu_step_08b4946c",
+      "source": "src/battle/menu_step_08b4946c.cpp",
+      "functions": [
+        {
+          "name": "func_08B4946C",
+          "address": "0x08B4946C",
+          "size": 300
         }
       ]
     },
@@ -47724,6 +48189,17 @@
       ]
     },
     {
+      "name": "release_all_08b4b430",
+      "source": "src/battle/release_all_08b4b430.cpp",
+      "functions": [
+        {
+          "name": "func_08B4B430",
+          "address": "0x08B4B430",
+          "size": 168
+        }
+      ]
+    },
+    {
       "name": "battle_08b4b4d8",
       "source": "src/battle/auto/battle_08b4b4d8.c",
       "functions": [
@@ -47944,6 +48420,17 @@
       ]
     },
     {
+      "name": "clear_blocks_08b4c9f0",
+      "source": "src/battle/clear_blocks_08b4c9f0.cpp",
+      "functions": [
+        {
+          "name": "func_08B4C9F0",
+          "address": "0x08B4C9F0",
+          "size": 124
+        }
+      ]
+    },
+    {
       "name": "battle_08b4ccd0",
       "source": "src/battle/auto/battle_08b4ccd0.c",
       "functions": [
@@ -47951,6 +48438,28 @@
           "name": "func_08B4CCD0",
           "address": "0x08B4CCD0",
           "size": 44
+        }
+      ]
+    },
+    {
+      "name": "call_each_08b4ccfc",
+      "source": "src/battle/call_each_08b4ccfc.cpp",
+      "functions": [
+        {
+          "name": "func_08B4CCFC",
+          "address": "0x08B4CCFC",
+          "size": 80
+        }
+      ]
+    },
+    {
+      "name": "call_each_08b4cd4c",
+      "source": "src/battle/call_each_08b4cd4c.cpp",
+      "functions": [
+        {
+          "name": "func_08B4CD4C",
+          "address": "0x08B4CD4C",
+          "size": 80
         }
       ]
     },
@@ -48021,6 +48530,17 @@
       ]
     },
     {
+      "name": "free_four_slots_08b4dfe4",
+      "source": "src/battle/free_four_slots_08b4dfe4.cpp",
+      "functions": [
+        {
+          "name": "func_08B4DFE4",
+          "address": "0x08B4DFE4",
+          "size": 72
+        }
+      ]
+    },
+    {
       "name": "ripple_refs_08b4ed88",
       "source": "src/battle/ripple_refs_08b4ed88.c",
       "functions": [
@@ -48083,6 +48603,17 @@
           "name": "func_08B4F768",
           "address": "0x08B4F768",
           "size": 44
+        }
+      ]
+    },
+    {
+      "name": "random_pick_08b4f794",
+      "source": "src/battle/random_pick_08b4f794.c",
+      "functions": [
+        {
+          "name": "func_08B4F794",
+          "address": "0x08B4F794",
+          "size": 340
         }
       ]
     },
@@ -48219,6 +48750,17 @@
           "name": "func_08B5202C",
           "address": "0x08B5202C",
           "size": 116
+        }
+      ]
+    },
+    {
+      "name": "cell_pick_init_08b520a0",
+      "source": "src/battle/cell_pick_init_08b520a0.c",
+      "functions": [
+        {
+          "name": "func_08B520A0",
+          "address": "0x08B520A0",
+          "size": 220
         }
       ]
     },
@@ -48677,6 +49219,17 @@
       ]
     },
     {
+      "name": "loop_ten_08b58a00",
+      "source": "src/battle/loop_ten_08b58a00.cpp",
+      "functions": [
+        {
+          "name": "func_08B58A00",
+          "address": "0x08B58A00",
+          "size": 68
+        }
+      ]
+    },
+    {
       "name": "named_ref_store_08b58a44",
       "source": "src/battle/named_ref_store_08b58a44.c",
       "functions": [
@@ -48699,6 +49252,17 @@
       ]
     },
     {
+      "name": "loop_ten_08b58ac8",
+      "source": "src/battle/loop_ten_08b58ac8.cpp",
+      "functions": [
+        {
+          "name": "func_08B58AC8",
+          "address": "0x08B58AC8",
+          "size": 68
+        }
+      ]
+    },
+    {
       "name": "battle_08b58b0c",
       "source": "src/battle/auto/battle_08b58b0c.c",
       "functions": [
@@ -48706,6 +49270,17 @@
           "name": "func_08B58B0C",
           "address": "0x08B58B0C",
           "size": 196
+        }
+      ]
+    },
+    {
+      "name": "color_cycle_08b58bd0",
+      "source": "src/battle/color_cycle_08b58bd0.c",
+      "functions": [
+        {
+          "name": "func_08B58BD0",
+          "address": "0x08B58BD0",
+          "size": 312
         }
       ]
     },
@@ -48728,6 +49303,17 @@
           "name": "func_08B59CD0",
           "address": "0x08B59CD0",
           "size": 84
+        }
+      ]
+    },
+    {
+      "name": "draw_sequence_08b59fc0",
+      "source": "src/battle/draw_sequence_08b59fc0.c",
+      "functions": [
+        {
+          "name": "func_08B59FC0",
+          "address": "0x08B59FC0",
+          "size": 344
         }
       ]
     },
@@ -48962,6 +49548,28 @@
       ]
     },
     {
+      "name": "two_pass_then_clear_08b5f064",
+      "source": "src/battle/two_pass_then_clear_08b5f064.cpp",
+      "functions": [
+        {
+          "name": "func_08B5F064",
+          "address": "0x08B5F064",
+          "size": 100
+        }
+      ]
+    },
+    {
+      "name": "two_pass_then_clear_08b5f364",
+      "source": "src/battle/two_pass_then_clear_08b5f364.cpp",
+      "functions": [
+        {
+          "name": "func_08B5F364",
+          "address": "0x08B5F364",
+          "size": 100
+        }
+      ]
+    },
+    {
       "name": "random_color_08b5f4d0",
       "source": "src/battle/random_color_08b5f4d0.cpp",
       "functions": [
@@ -48995,6 +49603,17 @@
           "name": "func_08B5F940",
           "address": "0x08B5F940",
           "size": 84
+        }
+      ]
+    },
+    {
+      "name": "clear_entries_08b5fd48",
+      "source": "src/battle/clear_entries_08b5fd48.cpp",
+      "functions": [
+        {
+          "name": "func_08B5FD48",
+          "address": "0x08B5FD48",
+          "size": 48
         }
       ]
     },
@@ -52237,7 +52856,70 @@
     "func_08AE3C80": "0x08AE3C80",
     "func_0888B70C": "0x0888B70C",
     "func_088A72E8": "0x088A72E8",
-    "func_08A87E70": "0x08A87E70"
+    "func_08A87E70": "0x08A87E70",
+    "func_0880FBA0": "0x0880FBA0",
+    "D_08B3F1A8": "0x08B3F1A8",
+    "D_08B15638": "0x08B15638",
+    "func_08B305E8": "0x08B305E8",
+    "func_08AE9DE0": "0x08AE9DE0",
+    "func_088954C4": "0x088954C4",
+    "func_08895528": "0x08895528",
+    "D_089D6AD0": "0x089D6AD0",
+    "D_08B45BC0": "0x08B45BC0",
+    "func_08B58D68": "0x08B58D68",
+    "func_08B59204": "0x08B59204",
+    "D_089D4918": "0x089D4918",
+    "func_088984E8": "0x088984E8",
+    "func_08B5FD78": "0x08B5FD78",
+    "func_0886808C": "0x0886808C",
+    "D_08B491B0": "0x08B491B0",
+    "D_08B27D68": "0x08B27D68",
+    "D_08B28580": "0x08B28580",
+    "func_088D1170": "0x088D1170",
+    "func_0888A0FC": "0x0888A0FC",
+    "func_088D1118": "0x088D1118",
+    "D_09B491E8": "0x09B491E8",
+    "func_088D71F0": "0x088D71F0",
+    "func_088CD988": "0x088CD988",
+    "func_088CE6D0": "0x088CE6D0",
+    "D_08B18830": "0x08B18830",
+    "func_0888A0C4": "0x0888A0C4",
+    "D_08B59DB8": "0x08B59DB8",
+    "func_089A113C": "0x089A113C",
+    "func_089A1178": "0x089A1178",
+    "func_08B249B8": "0x08B249B8",
+    "func_08B253FC": "0x08B253FC",
+    "func_08B23E3C": "0x08B23E3C",
+    "func_08B232FC": "0x08B232FC",
+    "func_0888B014": "0x0888B014",
+    "func_088AF29C": "0x088AF29C",
+    "D_089D7260": "0x089D7260",
+    "func_08B050A8": "0x08B050A8",
+    "func_0888AD50": "0x0888AD50",
+    "func_088CBB3C": "0x088CBB3C",
+    "func_088CBB58": "0x088CBB58",
+    "func_0885EB34": "0x0885EB34",
+    "func_0881BC9C": "0x0881BC9C",
+    "func_08B51FB8": "0x08B51FB8",
+    "func_08B51F44": "0x08B51F44",
+    "func_08907300": "0x08907300",
+    "func_0889381C": "0x0889381C",
+    "func_08AB3AFC": "0x08AB3AFC",
+    "func_08B3F7F4": "0x08B3F7F4",
+    "func_08B3F5A8": "0x08B3F5A8",
+    "func_08B3DE68": "0x08B3DE68",
+    "func_08AEDA5C": "0x08AEDA5C",
+    "func_08AEDC80": "0x08AEDC80",
+    "func_08AEDF5C": "0x08AEDF5C",
+    "func_08AEE82C": "0x08AEE82C",
+    "func_08AEE038": "0x08AEE038",
+    "func_088D688C": "0x088D688C",
+    "D_08B48510": "0x08B48510",
+    "D_08B48518": "0x08B48518",
+    "func_088D4BF4": "0x088D4BF4",
+    "D_08B49880": "0x08B49880",
+    "D_08B49888": "0x08B49888",
+    "D_08B3AC18": "0x08B3AC18"
   },
   "status": "112 matching C/C++ functions / 8380 bytes; connected curve controls, resource cleanup and second activation/cleanup group added. Broader combat ownership remains provisional."
 }

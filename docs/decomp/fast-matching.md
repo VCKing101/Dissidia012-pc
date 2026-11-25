@@ -202,6 +202,23 @@ The queued lists from the previous night, worked by Sonnet agents two or three a
 - Not integrated: a battle source for `0x08ACD0BC`, already in a unit; two menu matches (`0x08B34478`, `0x08B51518`) whose files the agent deleted after listing them. Three main units were renamed to lower-case file names, which `dc.py integrate` requires.
 - WSL stopped answering from about 03:01 to 03:50 (`Wsl/Service/CreateInstance/HCS_E_CONNECTION_TIMEOUT`), during a batch build of main while two agents were compiling; every compile goes through WSL, so the agents were stopped. It recovered without a restart. After that, builds ran with at most one agent compiling.
 
+## Session of 25 November 2026
+
+A daytime run of 20 Sonnet agents (agent66–agent86, two or three at a time): near-miss retries first, then functions no agent had tried. Verified C/C++ totals went from 13,569 functions / 1,249,576 bytes to **13,956 functions / 1,319,584 bytes (27.97% of inventoried function bytes)**; the separate VFPU count is unchanged at 35 / 2,460. All four modules rebuild byte-identically and all 225 tests pass (7 skipped).
+
+| Module | Functions | Bytes | Added |
+| --- | ---: | ---: | ---: |
+| Main executable | 5,204 | 419,512 | 178 |
+| Menu overlay | 4,257 | 429,884 | 156 |
+| Battle overlay | 4,471 | 468,072 | 53 |
+| Extra overlay | 24 | 2,116 | 0 |
+
+- Near-miss retries: 313 functions earlier agents had left 1–6 words off were retried with the new patterns; about a quarter matched (`build/dc-claims/*-near1125.txt`, results in `agent66.md`–`agent68.md` and `agent83.md`).
+- Never-tried functions: a sweep found functions no results file mentioned (348 in main, 243 in battle, 22 in menu, up to 400 bytes). Most of battle's were float branches, VFPU or register jumps; battle's easy work is now largely done, and its last agents matched 4–10 functions each.
+- Import stubs are not C: `0x089C5770`–`0x089C60B0` in main is a section of 296 eight-byte `jr ra; nop` entries that the PSP loader patches into import calls. An agent "matched" 261 of them as empty C functions; they were moved out of `src/main` and are not counted.
+- The mask-call shape (a virtual `v1(unsigned long long mask)` through a manager whose vptr sits at `0x34`) matched seven menu handlers; a scan of all three modules for it found two more battle input checks, which the overnight generator matched unchanged.
+- WSL hung again at 11:54 at the start of a batch build with no agents running, and recovered by 12:20. The weekly usage limit was reached at 14:00 and reset by the owner.
+
 ## SNC patterns learned while matching
 
 Collected from both agent rounds (544 hand matches). Each was confirmed by a byte match.
@@ -285,6 +302,14 @@ Collected from both agent rounds (544 hand matches). Each was confirmed by a byt
 - Ghidra drops arguments a callee takes but the function only forwards: if retail never touches `a0`/`a1` before a call, declare and pass them. Copy parameters into locals in the order retail moves them into saved registers.
 - `T *volatile D_xxx` reproduces retail reloading a global pointer; release loops are C++ `for (int i = 0, *p = self; i < N; i++, p++)`, constructor-style clear loops plain C `int i; int *p; for (i = 0, p = self; ...)`.
 - Stack temporaries with an outgoing-argument area: one struct of locals with a leading `int pad[4]` fixes the offsets and frame size.
+
+**Learned on 25 November**
+- Delay slots, continued: splitting a body between the `extern "C"` function (first half) and an in-class static helper (second half) gives retail's `beql`/`bnel` with the hoisted load in the slot; a call argument read through a pointer next to a global argument moves into the slot unless it is read into a single-use local first (`int x = *p; call(D_x, x);`).
+- Layout: `if (a == 0) { return 0; } else if (b == 0) { return 0; } else { body }` gives per-condition `b end` stubs where sequential returns or `&&` put them inline; `while (c) { ...; break; }` gives a stub instead of a threaded jump; `else { continue; }` after the last `if` in a loop lets SNC fill the `b` slot from the loop test; `if (c) x = a; else x = b;` gives `bnel`.
+- Register numbering follows the order of first initialisation, not of declaration (`i = 0;` before `p = ...`); a block-scoped copy passed as an argument (`{ Thing *t = self; f(t); }`) gives the early `move s0,a0`.
+- Operand order follows the alphabetical order of local names for compares, adds and float multiplies; renaming fixed several functions without changing register allocation.
+- Fields above `0x7FFF` must be reached through typed struct members (`lui` + `addu`); a raw `(char *)p + 0x10000 + off` folds into an `ori`. Typed arrays and pair structs in block structs reproduce retail's stride arithmetic where byte offsets do not; struct assignments give the unrolled and paired-word copy loops.
+- A parameter that retail stores with `sh` but never sign-extends is an `int`; a constant passed to an `unsigned char` callee parameter is not shared with a later store; in C++ a literal `return 0` gives `ori v0,zero,0` where a `.c` file gives `move v0,zero`.
 
 **Not solved yet**
 - s-register permutations in otherwise identical code, constants that SNC keeps in a saved register where retail rematerialises them (often a `lui`), and single load or `$ra` scheduling slots remain the commonest causes of the 181 near misses left overnight.
