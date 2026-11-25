@@ -215,6 +215,9 @@ disassembler and the new `tools/port/` scripts cover the analysis.
 - [Sharp text](sharp-text.md): the game's sentence text, which the port draws letter by letter into small buffers
   the game then enlarges, drawn again at the internal resolution (patch 0120; Video, Text, Sharp text;
   `D012_NO_SHARP_TEXT=1`). Titles and names in the game's serif style are pictures and stay as they were.
+- 26 November 2026: the text is drawn glyph by glyph from a glyph atlas in place of the game's text quads (native
+  text, patch 0123; `D012_NO_NATIVE_TEXT=1`), so holding a direction in the shop or accessory list no longer
+  stutters ([sharp-text.md](sharp-text.md#native-text-patch-0123)).
 
 ## Next steps
 

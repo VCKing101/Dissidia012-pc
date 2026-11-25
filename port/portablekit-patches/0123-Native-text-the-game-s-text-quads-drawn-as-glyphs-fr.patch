@@ -1,0 +1,910 @@
+From 7efb9e679a667c2f20ce7506fc99f7a7ac952f96 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Thu, 26 Nov 2026 08:55:12 +1030
+Subject: [PATCH] Native text: the game's text quads drawn as glyphs from a
+ glyph atlas
+
+Sharp text made a texture for every new text at the internal resolution,
+the size of the game's TexImage times the scale squared (1 MiB at 4x, 4 MiB
+at 8x for a two-digit number). Dissidia 012 makes about 24 new texts on
+every step of a held list in its shop and accessory list, so the frame
+stalled 60-130 ms on each step. Its text is drawn one quad per run: a
+TRIANGLE_FAN of four through-mode vertices sampling part of the glyph
+buffer as a CLUT4 texture whose palette is white with an alpha ramp,
+modulated by the vertex colour, alpha test "greater".
+
+- The renderer (Impl::native_text, from submit()): a quad of a glyph buffer
+  that is an upright rectangle showing upright texels, with one colour and
+  depth, modulated by its vertex colour with an alpha test of "greater",
+  whose palette is one colour with an alpha ramp, is drawn as the glyphs
+  that lie in its texels: each placed through the quad's mapping from
+  buffer to target pixels (the interface's fit included), drawn from the
+  font at that size (to 1/32 of a pixel per texel and half a pixel
+  across) into a glyph atlas the first time, cut at the quad's edges and
+  drawn with the quad's colour and depth, in its place and state. A new
+  text costs no texture. Quads that draw nothing (no alpha, outside the
+  scissor, no area) are skipped. Anything else is drawn from Sharp text's
+  pictures as before.
+- The atlas: two pages, 2048 pixels square up to 4x and 4096 above; new
+  glyphs are staged in the frame's upload ring and copied ahead of the
+  frame's commands (record_glyph_uploads() from frame_batch()). A full
+  page is replaced by the other once no frame drew from it for six
+  recorded frames (frames in flight and frame interpolation's replays);
+  until then new text is drawn from pictures. A new font clears both.
+- fonts::glyph_list(): the glyphs of the buffer a texture lies in, under
+  Sharp text's checks (shared with sharp_text(), now checked_buffer()).
+- fonts::place() and fonts::render_at(): where a glyph the game placed has
+  its outline's origin in the buffer, and the outline drawn at any scale
+  with a subpixel shift and the 1x glyph's emboldening.
+- <PREFIX>_NO_NATIVE_TEXT=1 draws every text from Sharp text's pictures, as
+  before; <PREFIX>_TRACE_NATIVE_TEXT=1 counts every 300 frames what was
+  drawn, skipped, declined and why, and the atlas page's fill.
+- The descriptor pool has room for the two pages.
+- docs/PROFILE_GUIDE.md: native text, its switches, and that a texture pack
+  does not replace text drawn this way.
+
+Tested on Windows (clang, llvm-mingw, RX 9070 XT) with Dissidia 012
+(ULUS10566), test data only. The shop list held down and up at 4x: frames
+over 25 ms 18 -> 0, longest frame 67.5 -> 17.6 ms, render time at most
+69.9 -> 0.8 ms, 3304 -> 0 textures; at 8x 53 -> 0 frames over 25 ms,
+render time at most 129.0 -> 0.9 ms. The accessory list: 9 -> 0. The
+graphics tour's menus, Story Mode gateway, Old Chaos Shrine battle and
+battle results routes at 4x with frame interpolation: every text quad
+drawn as glyphs, none from pictures, no page switch, the replay check at
+0.02%; captures against Sharp text's differ at glyph edges only. Fill in
+a 2384x781 window: text where Sharp text puts it. With
+<PREFIX>_NO_NATIVE_TEXT=1 and with text.sharp=0 the old drawing. The
+port's tests pass. Not tested: Japanese text, text whose scale animates,
+a font change while playing, Sharp text's pictures for draws native text
+declines (none seen), Linux, the Steam Deck, Android, the framework's own
+build and tests, another game.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ docs/PROFILE_GUIDE.md        |   6 +-
+ host/fonts/game_font.cpp     |  43 +++
+ host/fonts/game_font.hpp     |  15 +
+ host/fonts/sharp_text.cpp    |  66 +++--
+ host/fonts/sharp_text.hpp    |  24 ++
+ host/gpu/vulkan_renderer.cpp | 527 ++++++++++++++++++++++++++++++++++-
+ 6 files changed, 659 insertions(+), 22 deletions(-)
+
+diff --git a/docs/PROFILE_GUIDE.md b/docs/PROFILE_GUIDE.md
+index 971b010..f842343 100644
+--- a/docs/PROFILE_GUIDE.md
++++ b/docs/PROFILE_GUIDE.md
+@@ -83,7 +83,11 @@ For a picture of the port's own beside one of the game's screens, such as a hint
+ 
+ `glyph_cache` is for changing the font while a game runs. A game that caches the glyphs it has drawn keeps them until its atlas needs the cell, so a new font shows only in text it has not drawn yet. Where the game keeps that atlas, read off its own text code, lets the framework make it draw them again. Null for any game nobody has traced.
+ 
+-Sharp text needs nothing from the profile. A game that draws the buffer it hands `sceFontGetCharGlyphImage` as a texture, as Dissidia 012 does with each block of text, gets that text drawn again at the internal resolution (`host/fonts/sharp_text.hpp`): the framework keeps each glyph it draws into a buffer, and when the renderer loads a 4- or 8-bit texture lying in one that holds exactly what the glyphs left, it draws the same glyphs that many times larger. A buffer the game also wrote itself, or one drawn with another font, keeps the game's texture, and a game that copies its glyphs on into an atlas never draws the buffer, so it is drawn as before. The Video page's Text section has **Sharp text** (`text.sharp`, on); `<prefix>_NO_SHARP_TEXT=1` turns it off for a comparison, `<prefix>_SHARP_TEXT_MEMORY=<MB>` sets the GPU memory such text may use (256 MB; past it, text not drawn in the last two frames goes first, and new text is drawn from the game's texture when none can), and `<prefix>_TRACE_SHARP_TEXT=1` logs each texture looked up and why one is not drawn sharp.
++Sharp text needs nothing from the profile. A game that draws the buffer it hands `sceFontGetCharGlyphImage` as a texture, as Dissidia 012 does with each block of text, gets that text drawn at the internal resolution (`host/fonts/sharp_text.hpp`): the framework keeps each glyph it draws into a buffer, and when the renderer meets a 4- or 8-bit texture lying in one that holds exactly what the glyphs left, it draws the same glyphs at the size they have on the screen. A buffer the game also wrote itself, or one drawn with another font, keeps the game's texture, and a game that copies its glyphs on into an atlas never draws the buffer, so it is drawn as before.
++
++Most such draws are **native text**: an upright quad showing part of the buffer, its texture modulated by the vertex colour with an alpha test of "greater" and a palette of one colour whose alpha rises with the index (a glyph's coverage), is drawn as its glyphs from a glyph atlas in the quad's place, with its state and colour, each glyph cut at the quad's edges. A new text then costs no texture at all: a game that makes 20 or more texts in one frame (a list scrolled by holding a direction) no longer stalls on making their textures. A quad that can draw nothing (no alpha, wholly outside the scissor, or no area) is skipped. The atlas has two pages (2048 pixels square up to 4x, 4096 above): when the current one is full, the other, once no frame drew from it for six frames, is cleared and takes over; until then new text is drawn from a texture. Any other draw of a glyph buffer is drawn from a texture, the glyphs drawn again that many times larger (Sharp text's pictures). A texture pack does not replace text drawn natively, and **Dump textures** does not write it.
++
++The Video page's Text section has **Sharp text** (`text.sharp`, on), which turns both on and off. `<prefix>_NO_SHARP_TEXT=1` turns it off for a comparison and `<prefix>_NO_NATIVE_TEXT=1` keeps Sharp text's pictures for every draw; `<prefix>_SHARP_TEXT_MEMORY=<MB>` sets the GPU memory those pictures may use (256 MB; past it, text not drawn in the last two frames goes first, and new text is drawn from the game's texture when none can); `<prefix>_TRACE_SHARP_TEXT=1` logs each texture looked up and why one is not drawn sharp, and `<prefix>_TRACE_NATIVE_TEXT=1` counts every 300 frames what native text drew, skipped and declined.
+ 
+ `sharp_textures` lists pixel art to draw with nearest filtering whatever the Texture filter setting says, for a sprite that smoothing blurs at a higher resolution. Each is a `SharpTexture`: its key as **Dump textures** names the file (the address ignored, xxh64), and its width and height. Only a texture of a listed size is hashed, when it is uploaded, so the list costs nothing for the others. A key covers one texture with one palette, so a sprite sheet loaded with another palette, or as a different part of its picture, has a key of its own: dump each scene it appears in. `<prefix>_NO_SHARP_PIXEL_ART=1` draws them as the setting says, for a comparison. A texture pack's image for a listed texture keeps the pack's own filtering. Without any, the setting decides for every texture.
+ 
+diff --git a/host/fonts/game_font.cpp b/host/fonts/game_font.cpp
+index 6318dec..5fcdfc1 100644
+--- a/host/fonts/game_font.cpp
++++ b/host/fonts/game_font.cpp
+@@ -650,6 +650,49 @@ GlyphBitmap render_scaled(std::uint32_t code, std::int32_t x64, std::int32_t y64
+     return placed;
+ }
+ 
++bool place(std::uint32_t code, std::int32_t x64, std::int32_t y64, GlyphPlace &out) {
++    State &s = loaded_state();
++    const Layout &layout = layout_for(s, code);
++    if (layout.face == nullptr || layout.metrics.width == 0) return false;
++    // As in render_scaled(): the 1x bitmap's natural box goes at (x64, y64).
++    const float x = static_cast<float>(x64) / 64.0f;
++    const float y = static_cast<float>(y64) / 64.0f;
++    out.origin_x = x - static_cast<float>(layout.natural_x0);
++    out.origin_y = y - static_cast<float>(layout.natural_y0);
++    // A subpixel shift moves the bitmap by up to a pixel either way.
++    out.x0 = x - 1.0f;
++    out.y0 = y - 1.0f;
++    out.x1 = x + static_cast<float>(layout.metrics.width) + 1.0f;
++    out.y1 = y + static_cast<float>(layout.metrics.height) + 1.0f;
++    return true;
++}
++
++GlyphBitmap render_at(std::uint32_t code, float scale_x, float scale_y, float shift_x) {
++    State &s = loaded_state();
++    const Layout &layout = layout_for(s, code);
++    GlyphBitmap bitmap;
++    if (layout.face == nullptr || layout.metrics.width == 0 || !(scale_x > 0.0f) || !(scale_y > 0.0f) ||
++        scale_x > 32.0f || scale_y > 32.0f)
++        return bitmap;
++    const float glyph_x = layout.scale_x * scale_x;
++    const float glyph_y = layout.scale_y * scale_y;
++    const float fx = std::clamp(shift_x, 0.0f, 63.0f / 64.0f);
++    int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
++    stbtt_GetGlyphBitmapBoxSubpixel(&layout.face->info, layout.glyph, glyph_x, glyph_y, fx, 0.0f, &x0, &y0, &x1, &y1);
++    bitmap.width = std::max(x1 - x0, 0);
++    bitmap.height = std::max(y1 - y0, 0);
++    bitmap.x = x0;
++    bitmap.y = y0;
++    bitmap.pixels.assign(static_cast<std::size_t>(bitmap.width) * static_cast<std::size_t>(bitmap.height), 0u);
++    if (!bitmap.pixels.empty())
++        stbtt_MakeGlyphBitmapSubpixel(&layout.face->info, bitmap.pixels.data(), bitmap.width, bitmap.height,
++                                      bitmap.width, glyph_x, glyph_y, fx, 0.0f, layout.glyph);
++    // The 1x glyph's emboldening, as many of these pixels wide.
++    const int bold = static_cast<int>(std::lround(static_cast<float>(layout.bold) * scale_x));
++    if (bold > 0 && !bitmap.pixels.empty()) embolden(bitmap, bold);
++    return bitmap;
++}
++
+ static void (*reload_hook)() = nullptr;
+ 
+ void reload() {
+diff --git a/host/fonts/game_font.hpp b/host/fonts/game_font.hpp
+index 0401522..89a5414 100644
+--- a/host/fonts/game_font.hpp
++++ b/host/fonts/game_font.hpp
+@@ -91,6 +91,21 @@ bool ready();
+ // top-left pixel goes in the larger buffer.
+ [[nodiscard]] GlyphBitmap render_scaled(std::uint32_t code, std::int32_t x64, std::int32_t y64, int factor);
+ 
++// Where the glyph the game asked to be drawn at (x64, y64) in its buffer has
++// its outline's origin, in buffer pixels, and a box in the buffer its 1x
++// bitmap lies within. False when nothing is drawn for the character.
++struct GlyphPlace {
++    float origin_x{};
++    float origin_y{};
++    float x0{}, y0{}, x1{}, y1{};
++};
++bool place(std::uint32_t code, std::int32_t x64, std::int32_t y64, GlyphPlace &out);
++// The same outline drawn scale_x by scale_y times as large as the game's
++// glyph, with its origin shift_x (0 to 1) of a pixel right of a whole pixel:
++// `x` and `y` are where its top-left pixel goes relative to that pixel.
++// Not cached: the renderer keeps what it draws.
++[[nodiscard]] GlyphBitmap render_at(std::uint32_t code, float scale_x, float scale_y, float shift_x);
++
+ // Rereads the font settings and clears every cached glyph, so the next glyph
+ // the game asks for comes from the new font, then runs the hook.
+ void reload();
+diff --git a/host/fonts/sharp_text.cpp b/host/fonts/sharp_text.cpp
+index 4e99dcd..6b95dd7 100644
+--- a/host/fonts/sharp_text.cpp
++++ b/host/fonts/sharp_text.cpp
+@@ -172,43 +172,77 @@ void after_glyph(const psprecomp::GuestMemory &memory, const GlyphTarget &target
+     b.expected.assign(bytes, bytes + size);
+ }
+ 
+-bool sharp_text(const psprecomp::GuestMemory &memory, const SharpTextQuery &query, SharpText &out) {
+-    if (!sharp_text_available() || query.factor < 2 || query.factor > 16) return false;
+-    if (query.bits != 4u && query.bits != 8u) return false;
+-    if (query.width == 0u || query.height == 0u) return false;
+-    Registry &r = registry();
+-    const std::lock_guard lock(r.mutex);
++namespace {
++
++// The buffer a texture lies in, when it holds only the glyphs the host drew,
++// and where the texture's first texel is in it. The registry's lock is held.
++Buffer *checked_buffer(Registry &r, const psprecomp::GuestMemory &memory, const SharpTextQuery &query,
++                       std::uint32_t &base, std::uint32_t &column0, std::uint32_t &row0) {
++    if (query.bits != 4u && query.bits != 8u) return nullptr;
++    if (query.width == 0u || query.height == 0u) return nullptr;
+     auto it = r.buffers.upper_bound(query.address);
+-    if (it == r.buffers.begin()) return false;
++    if (it == r.buffers.begin()) return nullptr;
+     --it;
+-    const std::uint32_t base = it->first;
++    base = it->first;
+     Buffer &b = it->second;
+     const GlyphTarget &t = b.target;
+     const std::size_t size = buffer_bytes(t);
+-    if (static_cast<std::uint64_t>(query.address) >= static_cast<std::uint64_t>(base) + size) return false;
++    if (static_cast<std::uint64_t>(query.address) >= static_cast<std::uint64_t>(base) + size) return nullptr;
+     const std::uint32_t bits = t.pixel_format == kFormat4 ? 4u : 8u;
+     if (bits != query.bits || static_cast<std::uint64_t>(query.stride) * bits / 8u != t.bytes_per_line) {
+         trace("%08X: texture %ux%u stride %u at %u bits is not laid out like glyph buffer %08X (%u bytes a line)",
+               query.address, query.width, query.height, query.stride, query.bits, base, t.bytes_per_line);
+-        return false;
++        return nullptr;
+     }
+     if (b.foreign || b.stamps.empty()) {
+         trace("%08X: buffer %08X %s", query.address, base, b.foreign ? "holds more than glyphs" : "has no glyphs");
+-        return false;
++        return nullptr;
+     }
+     if (b.generation != generation()) {
+         trace("%08X: buffer %08X was drawn with another font", query.address, base);
+-        return false;
++        return nullptr;
+     }
+     const std::uint8_t *bytes = memory.raw_pointer(base, size);
+     if (bytes == nullptr || b.expected.size() != size || std::memcmp(bytes, b.expected.data(), size) != 0) {
+         trace("%08X: buffer %08X was changed after its glyphs were drawn", query.address, base);
+-        return false;
++        return nullptr;
+     }
+     const std::uint32_t offset = query.address - base;
+-    const std::uint32_t row0 = offset / t.bytes_per_line;
+-    const std::uint32_t column0 = (offset % t.bytes_per_line) * 8u / bits;
+-    if (column0 >= t.width || row0 >= t.height) return false;
++    row0 = offset / t.bytes_per_line;
++    column0 = (offset % t.bytes_per_line) * 8u / bits;
++    if (column0 >= t.width || row0 >= t.height) return nullptr;
++    return &b;
++}
++
++} // namespace
++
++bool glyph_list(const psprecomp::GuestMemory &memory, const SharpTextQuery &query, GlyphList &out) {
++    if (!sharp_text_available()) return false;
++    Registry &r = registry();
++    const std::lock_guard lock(r.mutex);
++    std::uint32_t base = 0u, column0 = 0u, row0 = 0u;
++    Buffer *b = checked_buffer(r, memory, query, base, column0, row0);
++    if (b == nullptr) return false;
++    out.column = column0;
++    out.row = row0;
++    out.width = b->target.width;
++    out.height = b->target.height;
++    out.stamps.clear();
++    out.stamps.reserve(b->stamps.size());
++    for (const Stamp &stamp : b->stamps) out.stamps.push_back({stamp.code, stamp.x64, stamp.y64, stamp.clip});
++    b->last_used = ++r.clock;
++    return true;
++}
++
++bool sharp_text(const psprecomp::GuestMemory &memory, const SharpTextQuery &query, SharpText &out) {
++    if (!sharp_text_available() || query.factor < 2 || query.factor > 16) return false;
++    Registry &r = registry();
++    const std::lock_guard lock(r.mutex);
++    std::uint32_t base = 0u, column0 = 0u, row0 = 0u;
++    Buffer *found = checked_buffer(r, memory, query, base, column0, row0);
++    if (found == nullptr) return false;
++    Buffer &b = *found;
++    const GlyphTarget &t = b.target;
+     const std::uint32_t covered_width = std::min(query.width, t.width - column0);
+     const std::uint32_t covered_height = std::min(query.height, t.height - row0);
+     const auto f = static_cast<std::int64_t>(query.factor);
+diff --git a/host/fonts/sharp_text.hpp b/host/fonts/sharp_text.hpp
+index ab0a0a5..1fa92a4 100644
+--- a/host/fonts/sharp_text.hpp
++++ b/host/fonts/sharp_text.hpp
+@@ -75,4 +75,28 @@ struct SharpText {
+ // only the glyphs the host drew into it.
+ bool sharp_text(const psprecomp::GuestMemory &memory, const SharpTextQuery &query, SharpText &out);
+ 
++// One glyph the host drew into a buffer, where sceFontGetCharGlyphImage put it.
++struct GlyphStamp {
++    std::uint32_t code{};
++    std::int32_t x64{};
++    std::int32_t y64{};
++    GlyphClip clip;
++};
++
++// The glyphs of the buffer a texture lies in, for drawing them straight from
++// the font instead of from the texture (the renderer's native text): where the
++// texture's first texel is in the buffer, the buffer's size, and every glyph
++// drawn into it since it was last clear.
++struct GlyphList {
++    std::uint32_t column{};
++    std::uint32_t row{};
++    std::uint32_t width{};
++    std::uint32_t height{};
++    std::vector<GlyphStamp> stamps;
++};
++
++// True and fills `out` under the same conditions as sharp_text(); the query's
++// factor is not used.
++bool glyph_list(const psprecomp::GuestMemory &memory, const SharpTextQuery &query, GlyphList &out);
++
+ } // namespace portablekit::fonts
+diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
+index 83fd610..b62c357 100644
+--- a/host/gpu/vulkan_renderer.cpp
++++ b/host/gpu/vulkan_renderer.cpp
+@@ -15,6 +15,7 @@
+ #include "texture_pack.hpp"
+ #include "texture_pack_import.hpp"
+ 
++#include "fonts/game_font.hpp"
+ #include "fonts/sharp_text.hpp"
+ #include "install/user_data.hpp"
+ 
+@@ -62,6 +63,7 @@
+ #include <set>
+ #include <sstream>
+ #include <thread>
++#include <unordered_map>
+ #include <vector>
+ 
+ namespace portablekit::gpu {
+@@ -2303,6 +2305,80 @@ struct VulkanRenderer::Impl {
+     [[nodiscard]] std::uint32_t sharp_text_factor(const TextureState &state) const;
+     bool sharp_text_picture(const GuestMemory &memory, const TextureState &state, std::vector<std::uint32_t> &pixels,
+                             std::vector<std::uint32_t> &out, std::uint32_t &out_width, std::uint32_t &out_height);
++
++    // Native text: a quad that shows part of a glyph buffer (a run of the
++    // game's text, fonts::glyph_list) is drawn as the glyphs themselves, from
++    // a glyph atlas drawn at the size they have on the screen, in the quad's
++    // place and with its state, instead of from a texture of the buffer. A
++    // new text then costs no texture at all. <prefix>_NO_NATIVE_TEXT draws
++    // such quads from textures again (Sharp text's pictures);
++    // <prefix>_TRACE_NATIVE_TEXT=1 counts what it did every 300 frames.
++    //
++    // The atlas has two pages. Glyphs go into the current one; when it is
++    // full, the other, once no frame drew from it for kGlyphPageRest frames
++    // (so neither the GPU nor frame interpolation can still draw one that
++    // does), is cleared and becomes the current page. Every glyph of one
++    // quad comes from one page.
++    struct AtlasGlyph {
++        std::uint16_t x{}, y{}, width{}, height{};  // in the page; 0 x 0 for a blank glyph
++        std::int16_t left{}, top{};                 // its top-left pixel from the origin's pixel
++    };
++    struct AtlasShelf {
++        std::uint32_t y{}, height{}, x{};
++    };
++    struct AtlasUpload {
++        VkBuffer buffer{};
++        VkBufferImageCopy copy{};
++    };
++    struct GlyphPage {
++        Texture texture;
++        std::uint32_t side{};
++        std::vector<AtlasShelf> shelves;
++        std::uint32_t next_y{1u};
++        std::unordered_map<std::uint64_t, AtlasGlyph> glyphs;
++        std::uint64_t used_frame{};
++        bool used{};
++        bool clear_pending{};  // cleared on the GPU ahead of its next uploads
++        bool initialized{};    // its image has been laid out for sampling
++        std::vector<AtlasUpload> uploads;
++    };
++    // Frames recorded (begin_frame), which pages' use is counted in: two may
++    // be in flight and frame interpolation draws the last two again.
++    static constexpr std::uint64_t kGlyphPageRest = 6u;
++    std::uint64_t glyph_frame{};
++    std::array<GlyphPage, 2> glyph_pages{};
++    std::uint32_t glyph_page{};
++    std::uint64_t glyph_font_generation{~0ull};
++    std::vector<GpuVertex> text_vertices;
++    fonts::GlyphList text_glyphs;
++    std::vector<std::uint32_t> glyph_pixels;
++    struct NativeTextCounts {
++        std::uint64_t quads{}, glyphs{}, added{}, skipped{}, fallbacks{}, switches{};
++        // Quads of a glyph buffer not taken, by the first check that
++        // failed: texture state and alpha test, palette, shape.
++        std::array<std::uint64_t, 3> declined{};
++    } native_text_counts;
++    enum class TextQuad {
++        NotText,  // draw it as before
++        Nothing,  // it draws nothing: skip it
++        Glyphs,   // text_vertices hold its glyphs, from `descriptor`'s page
++    };
++    [[nodiscard]] static bool native_text_off() {
++        static const bool off = portablekit::env("NO_NATIVE_TEXT") != nullptr;
++        return off;
++    }
++    TextQuad native_text(const GuestMemory &memory, const DrawCall &call, const std::array<const Vertex *, 4> &corners,
++                         float fit_x, float fit_y, VkDescriptorSet &descriptor, float &page_side);
++    enum class GlyphAdd { Ready, Full, Failed };
++    GlyphAdd atlas_glyph(GlyphPage &page, std::uint64_t key, std::uint32_t code, float scale_x, float scale_y,
++                         float shift_x, const AtlasGlyph *&out);
++    [[nodiscard]] std::uint32_t wanted_glyph_page_side() const;
++    bool switch_glyph_page();
++    // Records the pages' clears and new glyphs into the frame's uploads.
++    void record_glyph_uploads();
++    void reset_glyph_pages();
++    void destroy_glyph_pages();
++    void report_native_text();
+     [[nodiscard]] VkDescriptorSet texture_descriptor(const GuestMemory &memory, const DrawCall &call);
+     std::uint64_t texture_clock{};
+     // texture_key results for the display list being walked, by the state that
+@@ -3336,7 +3412,7 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
+     // makes it smaller, to test a full pool.
+     std::uint32_t sampled_sets = static_cast<std::uint32_t>(2u * kMaxCachedTextures + 1u + kMaxFramebufferTextureSets +
+                                                             2u * kMaxFramebufferSnapshots + kMaxPaletteViews +
+-                                                            2u * kMaxPalettes);
++                                                            2u * kMaxPalettes + 2u /* glyph atlas pages */);
+     if (const char *text = portablekit::env("TEXTURE_SETS"); text != nullptr && std::atoi(text) > 0)
+         sampled_sets = std::min(sampled_sets, static_cast<std::uint32_t>(std::atoi(text)));
+     const std::array<VkDescriptorPoolSize, 3> pool_sizes{
+@@ -5110,8 +5186,12 @@ void VulkanRenderer::Impl::finish_pending_textures() {
+ }
+ 
+ std::uint32_t VulkanRenderer::Impl::frame_batch(VkCommandBuffer commands, std::array<VkCommandBuffer, 2> &batch) {
+-    // Textures still decoding are uploaded ahead of the draws that use them.
+-    if (commands == command_buffer) finish_pending_textures();
++    // Textures still decoding are uploaded ahead of the draws that use them,
++    // and so are the glyphs native text added.
++    if (commands == command_buffer) {
++        finish_pending_textures();
++        record_glyph_uploads();
++    }
+     std::uint32_t count = 0u;
+     if (commands == command_buffer && frame_uploads_open) {
+         breadcrumb(frame_uploads, "texture uploads (" + std::to_string(frame_upload_count) + ")");
+@@ -5636,6 +5716,404 @@ bool VulkanRenderer::Impl::sharp_text_picture(const GuestMemory &memory, const T
+     return true;
+ }
+ 
++std::uint32_t VulkanRenderer::Impl::wanted_glyph_page_side() const {
++    // A glyph of the game's menu text is about 40 x 45 pixels at 4x; past
++    // that, a page of 2048 would fill with a few screens of text.
++    const std::uint32_t lines = (target_extent.height + kPspHeight / 2u) / kPspHeight;
++    return lines <= 4u ? 2048u : 4096u;
++}
++
++void VulkanRenderer::Impl::reset_glyph_pages() {
++    for (GlyphPage &page : glyph_pages) {
++        page.glyphs.clear();
++        page.shelves.clear();
++        page.next_y = 1u;
++        page.uploads.clear();
++        page.clear_pending = page.texture.descriptor != VK_NULL_HANDLE;
++    }
++}
++
++void VulkanRenderer::Impl::destroy_glyph_pages() {
++    for (GlyphPage &page : glyph_pages) {
++        destroy_texture(page.texture);
++        page = GlyphPage{};
++    }
++    glyph_page = 0u;
++}
++
++bool VulkanRenderer::Impl::switch_glyph_page() {
++    GlyphPage &page = glyph_pages[glyph_page ^ 1u];
++    if (page.used && page.used_frame + kGlyphPageRest > glyph_frame) return false;
++    const std::uint32_t side = wanted_glyph_page_side();
++    if (page.texture.descriptor != VK_NULL_HANDLE && page.side != side) {
++        // No frame has drawn from it for kGlyphPageRest frames, so the GPU
++        // is done with it.
++        destroy_texture(page.texture);
++        page.initialized = false;
++    }
++    page.glyphs.clear();
++    page.shelves.clear();
++    page.next_y = 1u;
++    page.uploads.clear();
++    page.clear_pending = page.texture.descriptor != VK_NULL_HANDLE;
++    page.used = false;
++    glyph_page ^= 1u;
++    ++native_text_counts.switches;
++    return true;
++}
++
++VulkanRenderer::Impl::GlyphAdd VulkanRenderer::Impl::atlas_glyph(GlyphPage &page, std::uint64_t key,
++                                                                 std::uint32_t code, float scale_x, float scale_y,
++                                                                 float shift_x, const AtlasGlyph *&out) {
++    if (const auto found = page.glyphs.find(key); found != page.glyphs.end()) {
++        out = &found->second;
++        return GlyphAdd::Ready;
++    }
++    if (page.texture.descriptor == VK_NULL_HANDLE) {
++        page.side = wanted_glyph_page_side();
++        page.texture = create_texture_image(page.side, page.side);
++        if (page.texture.descriptor == VK_NULL_HANDLE) return GlyphAdd::Failed;
++        page.initialized = false;
++        page.clear_pending = true;
++    }
++    const fonts::GlyphBitmap bitmap = fonts::render_at(code, scale_x, scale_y, shift_x);
++    AtlasGlyph glyph{};
++    glyph.left = static_cast<std::int16_t>(std::clamp(bitmap.x, -32768, 32767));
++    glyph.top = static_cast<std::int16_t>(std::clamp(bitmap.y, -32768, 32767));
++    if (bitmap.width > 0 && bitmap.height > 0) {
++        const auto width = static_cast<std::uint32_t>(bitmap.width);
++        const auto height = static_cast<std::uint32_t>(bitmap.height);
++        if (width + 2u > page.side || height + 2u > page.side) return GlyphAdd::Failed;
++        // Shelves of glyphs side by side, a blank pixel between any two: the
++        // first shelf tall enough and not much taller, else a new one.
++        AtlasShelf *shelf = nullptr;
++        for (AtlasShelf &candidate : page.shelves) {
++            if (candidate.height >= height && candidate.height <= height + std::max(4u, height / 4u) &&
++                candidate.x + width + 1u <= page.side) {
++                shelf = &candidate;
++                break;
++            }
++        }
++        if (shelf == nullptr) {
++            const std::uint32_t shelf_height = (height + 3u) & ~3u;
++            if (page.next_y + shelf_height + 1u > page.side) return GlyphAdd::Full;
++            page.shelves.push_back({page.next_y, shelf_height, 1u});
++            page.next_y += shelf_height + 1u;
++            shelf = &page.shelves.back();
++        }
++        glyph.x = static_cast<std::uint16_t>(shelf->x);
++        glyph.y = static_cast<std::uint16_t>(shelf->y);
++        glyph.width = static_cast<std::uint16_t>(width);
++        glyph.height = static_cast<std::uint16_t>(height);
++        shelf->x += width + 1u;
++        // White, the coverage in alpha: the game's palette is white with an
++        // alpha ramp (native_text() checks), and the quad's colour tints it.
++        glyph_pixels.resize(std::size_t{width} * height);
++        for (std::size_t i = 0; i < glyph_pixels.size(); ++i)
++            glyph_pixels[i] = 0x00FFFFFFu | (static_cast<std::uint32_t>(bitmap.pixels[i]) << 24u);
++        VkBuffer buffer{};
++        VkDeviceSize offset = 0u;
++        if (!stage_upload(glyph_pixels.data(), static_cast<VkDeviceSize>(glyph_pixels.size()) * 4u, buffer, offset))
++            return GlyphAdd::Failed;
++        AtlasUpload upload{};
++        upload.buffer = buffer;
++        upload.copy.bufferOffset = offset;
++        upload.copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0u, 0u, 1u};
++        upload.copy.imageOffset = {static_cast<std::int32_t>(glyph.x), static_cast<std::int32_t>(glyph.y), 0};
++        upload.copy.imageExtent = {width, height, 1u};
++        page.uploads.push_back(upload);
++        ++native_text_counts.added;
++    }
++    out = &page.glyphs.emplace(key, glyph).first->second;
++    return GlyphAdd::Ready;
++}
++
++void VulkanRenderer::Impl::record_glyph_uploads() {
++    if (frame_uploads == VK_NULL_HANDLE) return;
++    for (GlyphPage &page : glyph_pages) {
++        if (page.texture.image == VK_NULL_HANDLE || (!page.clear_pending && page.uploads.empty())) continue;
++        if (!frame_uploads_open) {
++            VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
++            begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
++            vkBeginCommandBuffer(frame_uploads, &begin);
++            frame_uploads_open = true;
++        }
++        // The barrier's first scope covers the frames before, which may have
++        // drawn from the page; its second, this frame's commands.
++        transition(frame_uploads, page.texture.image,
++                   page.initialized ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL : VK_IMAGE_LAYOUT_UNDEFINED,
++                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
++        if (page.clear_pending) {
++            const VkClearColorValue transparent{};
++            const VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0u, 1u, 0u, 1u};
++            vkCmdClearColorImage(frame_uploads, page.texture.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
++                                 &transparent, 1u, &range);
++            page.clear_pending = false;
++        }
++        for (const AtlasUpload &upload : page.uploads)
++            vkCmdCopyBufferToImage(frame_uploads, upload.buffer, page.texture.image,
++                                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1u, &upload.copy);
++        transition(frame_uploads, page.texture.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
++                   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
++        page.initialized = true;
++        frame_upload_count += static_cast<std::uint32_t>(page.uploads.size());
++        page.uploads.clear();
++    }
++}
++
++void VulkanRenderer::Impl::report_native_text() {
++    static const bool trace = portablekit::env("TRACE_NATIVE_TEXT") != nullptr;
++    // Every 300 frames recorded (`frames` counts presents).
++    ++glyph_frame;
++    if (!trace || glyph_frame % 300u != 0u) return;
++    NativeTextCounts &c = native_text_counts;
++    const std::uint64_t declined = c.declined[0] + c.declined[1] + c.declined[2];
++    if (c.quads + c.skipped + c.fallbacks + c.switches + declined != 0u) {
++        const GlyphPage &page = glyph_pages[glyph_page];
++        std::cout << "[native-text] frame " << frames << ": " << c.quads << " quads as " << c.glyphs << " glyphs, "
++                  << c.added << " glyphs added, " << c.skipped << " quads that draw nothing skipped, " << c.fallbacks
++                  << " drawn from textures, " << c.switches << " page switches; declined (state, palette, shape) "
++                  << c.declined[0] << "/" << c.declined[1] << "/" << c.declined[2] << "; page " << glyph_page << " "
++                  << page.side << "px, " << page.glyphs.size()
++                  << " glyphs, filled to row " << page.next_y << "\n";
++    }
++    c = NativeTextCounts{};
++}
++
++VulkanRenderer::Impl::TextQuad VulkanRenderer::Impl::native_text(const GuestMemory &memory, const DrawCall &call,
++                                                                const std::array<const Vertex *, 4> &corners,
++                                                                float fit_x, float fit_y, VkDescriptorSet &descriptor,
++                                                                float &page_side) {
++    const TextureState &state = call.texture;
++    if (!sharp_text || native_text_off() || !fonts::sharp_text_available()) return TextQuad::NotText;
++    // New glyphs reach the GPU with the frame's uploads.
++    if (!recording || !async_uploads() || frame_uploads == VK_NULL_HANDLE) return TextQuad::NotText;
++    static const bool trace = portablekit::env("TRACE_NATIVE_TEXT") != nullptr;
++    const auto decline = [&](std::size_t reason, const char *why) {
++        ++native_text_counts.declined[reason];
++        static std::uint32_t told = 0u;
++        if (trace && told < 24u) {
++            ++told;
++            std::cout << "[native-text] 0x" << std::hex << state.address << std::dec << " " << state.width << "x"
++                      << state.height << " fmt " << static_cast<int>(state.format) << ": " << why << "\n";
++        }
++        return TextQuad::NotText;
++    };
++    // A 4- or 8-bit texture at an internal resolution of 2x or more, lying
++    // in a glyph buffer that holds only the glyphs the host drew.
++    if (sharp_text_factor(state) == 0u) return TextQuad::NotText;
++    const bool four_bit = state.format == TextureFormat::Clut4;
++    const fonts::SharpTextQuery query{state.address, state.buffer_width != 0u ? state.buffer_width : state.width,
++                                      state.width, state.height, four_bit ? 4u : 8u, 0};
++    if (!fonts::glyph_list(memory, query, text_glyphs)) return TextQuad::NotText;
++    // Modulated by the vertex colour, its blank texels dropped by the alpha
++    // test: then a glyph's pixels are all the quad draws. (Through-mode
++    // vertices are never lit, whatever the lighting switch says.)
++    if (state.function != 0u || !state.alpha_from_texture || !call.has_vertex_color)
++        return decline(0u, "not modulated by a vertex colour");
++    if (!call.alpha_test.enabled || call.alpha_test.function != 6u) return decline(0u, "no alpha test greater");
++    // The palette: one colour, its alpha rising with the index as a glyph's
++    // coverage does (entry 0, never seen, may have any colour).
++    const std::uint32_t entries = four_bit ? 16u : 256u;
++    const std::uint32_t tint = clut_color(memory, state, entries - 1u) & 0x00FFFFFFu;
++    for (std::uint32_t i = 0; i < entries; ++i) {
++        const std::uint32_t entry = clut_color(memory, state, i);
++        if ((entry >> 24u) != (four_bit ? i * 17u : i) || (i != 0u && (entry & 0x00FFFFFFu) != tint)) {
++            if (trace) {
++                static std::uint32_t told = 0u;
++                if (told++ < 4u) {
++                    std::cout << "[native-text] palette of 0x" << std::hex << state.address << ":";
++                    for (std::uint32_t k = 0; k < std::min(entries, 16u); ++k)
++                        std::cout << " " << clut_color(memory, state, k);
++                    std::cout << std::dec << "\n";
++                }
++            }
++            return decline(1u, "palette not one colour with an alpha ramp");
++        }
++    }
++
++    // The quad: an upright rectangle showing an upright rectangle of texels,
++    // u growing with x and v with y.
++    const Vertex &first = *corners[0];
++    float x0 = first.position[0], x1 = x0, y0 = first.position[1], y1 = y0;
++    for (const Vertex *corner : corners) {
++        x0 = std::min(x0, corner->position[0]);
++        x1 = std::max(x1, corner->position[0]);
++        y0 = std::min(y0, corner->position[1]);
++        y1 = std::max(y1, corner->position[1]);
++    }
++    // A quad of no area covers no pixel (the empty run before an inline image).
++    if (!(x1 > x0) || !(y1 > y0)) {
++        ++native_text_counts.skipped;
++        return TextQuad::Nothing;
++    }
++    float u_at_x0 = 0.0f, u_at_x1 = 0.0f, v_at_y0 = 0.0f, v_at_y1 = 0.0f;
++    bool seen[4]{};
++    for (const Vertex *corner : corners) {
++        const bool left = corner->position[0] == x0, top = corner->position[1] == y0;
++        if ((!left && corner->position[0] != x1) || (!top && corner->position[1] != y1))
++            return decline(2u, "not an upright rectangle");
++        if (corner->color != first.color || corner->position[2] != first.position[2])
++            return decline(2u, "corners of different colours or depths");
++        float &u = left ? u_at_x0 : u_at_x1;
++        float &v = top ? v_at_y0 : v_at_y1;
++        bool &u_seen = seen[left ? 0 : 1];
++        bool &v_seen = seen[top ? 2 : 3];
++        if ((u_seen && u != corner->texcoord[0]) || (v_seen && v != corner->texcoord[1]))
++            return decline(2u, "texels not upright with the rectangle");
++        u = corner->texcoord[0];
++        v = corner->texcoord[1];
++        u_seen = v_seen = true;
++    }
++    if (!seen[0] || !seen[1] || !seen[2] || !seen[3] || !(u_at_x1 > u_at_x0) || !(v_at_y1 > v_at_y0))
++        return decline(2u, "texels flipped or of no size");
++    // Quads that draw nothing: no alpha (every texel then fails the alpha
++    // test, so not even depth is written), or wholly outside the scissor.
++    const std::uint32_t color = first.color;
++    const auto clamp_axis = [](std::uint32_t value, std::uint32_t limit) { return std::min(value, limit); };
++    const std::uint32_t sx1 = clamp_axis(call.viewport.scissor_x1, kPspWidth - 1u);
++    const std::uint32_t sy1 = clamp_axis(call.viewport.scissor_y1, kPspHeight - 1u);
++    const std::uint32_t sx2 = clamp_axis(std::max(call.viewport.scissor_x2, sx1), kPspWidth - 1u);
++    const std::uint32_t sy2 = clamp_axis(std::max(call.viewport.scissor_y2, sy1), kPspHeight - 1u);
++    if ((color >> 24u) == 0u || x1 <= static_cast<float>(sx1) || x0 >= static_cast<float>(sx2 + 1u) ||
++        y1 <= static_cast<float>(sy1) || y0 >= static_cast<float>(sy2 + 1u)) {
++        ++native_text_counts.skipped;
++        return TextQuad::Nothing;
++    }
++    if (fonts::generation() != glyph_font_generation) {
++        // Another font: the glyphs drawn so far are the old one's.
++        if (glyph_font_generation != ~0ull) {
++            device_wait_idle();
++            reset_glyph_pages();
++        }
++        glyph_font_generation = fonts::generation();
++    }
++
++    // A PSP position to a target pixel: the interface's fit about the
++    // screen's centre (1 when not fitted), then the target's scale.
++    const float target_x = static_cast<float>(target_extent.width) / static_cast<float>(kPspWidth);
++    const float target_y = static_cast<float>(target_extent.height) / static_cast<float>(kPspHeight);
++    const float ax = fit_x * target_x;
++    const float bx = 0.5f * static_cast<float>(kPspWidth) * (1.0f - fit_x) * target_x;
++    const float ay = fit_y * target_y;
++    const float by = 0.5f * static_cast<float>(kPspHeight) * (1.0f - fit_y) * target_y;
++    // A buffer position to a target pixel, through the quad.
++    const float bu0 = static_cast<float>(text_glyphs.column) + u_at_x0;
++    const float bu1 = static_cast<float>(text_glyphs.column) + u_at_x1;
++    const float bv0 = static_cast<float>(text_glyphs.row) + v_at_y0;
++    const float bv1 = static_cast<float>(text_glyphs.row) + v_at_y1;
++    const float kx = ax * (x1 - x0) / (bu1 - bu0);
++    const float ky = ay * (y1 - y0) / (bv1 - bv0);
++    const float ox = ax * x0 + bx - kx * bu0;
++    const float oy = ay * y0 + by - ky * bv0;
++    // Glyphs are drawn at sizes 1/32 of a pixel apart, so the runs of one
++    // text, whose quads round their widths differently, share them.
++    const int qx = std::clamp(static_cast<int>(std::lround(kx * 32.0f)), 1, 1023);
++    const int qy = std::clamp(static_cast<int>(std::lround(ky * 32.0f)), 1, 1023);
++    const float scale_x = static_cast<float>(qx) / 32.0f;
++    const float scale_y = static_cast<float>(qy) / 32.0f;
++    // The quad's own pixels: its glyphs are cut at its edges, as its texels
++    // are (a glyph can reach into the next run of the line).
++    const long quad_x0 = std::lround(ax * x0 + bx), quad_x1 = std::lround(ax * x1 + bx);
++    const long quad_y0 = std::lround(ay * y0 + by), quad_y1 = std::lround(ay * y1 + by);
++    const float z = first.position[2];
++    const auto times = [](std::uint32_t a, std::uint32_t b, std::uint32_t shift) {
++        return (((a >> shift) & 0xFFu) * ((b >> shift) & 0xFFu) + 127u) / 255u << shift;
++    };
++    const std::uint32_t tinted = tint == 0x00FFFFFFu ? color
++                                                     : (color & 0xFF000000u) | times(color, tint, 0u) |
++                                                           times(color, tint, 8u) | times(color, tint, 16u);
++
++    for (int attempt = 0; attempt < 2; ++attempt) {
++        text_vertices.clear();
++        GlyphPage &page = glyph_pages[glyph_page];
++        GlyphAdd failure = GlyphAdd::Ready;
++        std::uint64_t drawn = 0u;
++        for (const fonts::GlyphStamp &stamp : text_glyphs.stamps) {
++            fonts::GlyphPlace place{};
++            if (!fonts::place(stamp.code, stamp.x64, stamp.y64, place)) continue;
++            if (place.x1 <= bu0 || place.x0 >= bu1 || place.y1 <= bv0 || place.y0 >= bv1) continue;
++            // The outline's origin on the target, to a whole pixel down and
++            // half a pixel across.
++            const float origin_x = ox + kx * place.origin_x;
++            float whole_x = std::floor(origin_x);
++            const float rest = origin_x - whole_x;
++            float shift = 0.0f;
++            if (rest >= 0.75f) whole_x += 1.0f;
++            else if (rest >= 0.25f) shift = 0.5f;
++            const long pixel_x = static_cast<long>(whole_x);
++            const long pixel_y = std::lround(oy + ky * place.origin_y);
++            const std::uint64_t key = static_cast<std::uint64_t>(stamp.code) << 32u |
++                                      static_cast<std::uint64_t>(qx) << 20u | static_cast<std::uint64_t>(qy) << 8u |
++                                      (shift != 0.0f ? 1u : 0u);
++            const AtlasGlyph *glyph = nullptr;
++            const GlyphAdd added = atlas_glyph(page, key, stamp.code, scale_x, scale_y, shift, glyph);
++            if (added != GlyphAdd::Ready) {
++                failure = added;
++                break;
++            }
++            if (glyph->width == 0u) continue;
++            const long glyph_x0 = pixel_x + glyph->left, glyph_y0 = pixel_y + glyph->top;
++            long cut_x0 = std::max(glyph_x0, quad_x0), cut_y0 = std::max(glyph_y0, quad_y0);
++            long cut_x1 = std::min(glyph_x0 + static_cast<long>(glyph->width), quad_x1);
++            long cut_y1 = std::min(glyph_y0 + static_cast<long>(glyph->height), quad_y1);
++            // The rectangle the game let the glyph be drawn into, if any.
++            constexpr std::int64_t kWhole = 0x7FFFFFFF;
++            if (stamp.clip.x > 0 || stamp.clip.y > 0 || stamp.clip.width < kWhole || stamp.clip.height < kWhole) {
++                const double right = static_cast<double>(stamp.clip.x) + static_cast<double>(stamp.clip.width);
++                const double bottom = static_cast<double>(stamp.clip.y) + static_cast<double>(stamp.clip.height);
++                cut_x0 = std::max(cut_x0, std::lround(ox + kx * static_cast<float>(stamp.clip.x)));
++                cut_y0 = std::max(cut_y0, std::lround(oy + ky * static_cast<float>(stamp.clip.y)));
++                cut_x1 = std::min(cut_x1, std::lround(ox + kx * static_cast<float>(std::min(right, 1.0e6))));
++                cut_y1 = std::min(cut_y1, std::lround(oy + ky * static_cast<float>(std::min(bottom, 1.0e6))));
++            }
++            if (cut_x0 >= cut_x1 || cut_y0 >= cut_y1) continue;
++            const float u0 = static_cast<float>(glyph->x + (cut_x0 - glyph_x0));
++            const float v0 = static_cast<float>(glyph->y + (cut_y0 - glyph_y0));
++            const float u1 = u0 + static_cast<float>(cut_x1 - cut_x0);
++            const float v1 = v0 + static_cast<float>(cut_y1 - cut_y0);
++            const float left = (static_cast<float>(cut_x0) - bx) / ax, right = (static_cast<float>(cut_x1) - bx) / ax;
++            const float top = (static_cast<float>(cut_y0) - by) / ay, bottom = (static_cast<float>(cut_y1) - by) / ay;
++            const auto corner = [&](float x, float y, float u, float v) {
++                GpuVertex out{};
++                out.x = x;
++                out.y = y;
++                out.z = z;
++                out.u = u;
++                out.v = v;
++                out.color = tinted;
++                // Sampled between the centres of its edge texels only.
++                set_uv_rect(out, u0 + 0.5f, v0 + 0.5f, u1 - 0.5f, v1 - 0.5f);
++                return out;
++            };
++            const GpuVertex top_left = corner(left, top, u0, v0), top_right = corner(right, top, u1, v0);
++            const GpuVertex bottom_right = corner(right, bottom, u1, v1), bottom_left = corner(left, bottom, u0, v1);
++            text_vertices.insert(text_vertices.end(),
++                                 {top_left, top_right, bottom_right, top_left, bottom_right, bottom_left});
++            ++drawn;
++        }
++        if (failure == GlyphAdd::Ready) {
++            // Only blank glyphs (spaces), or none inside the quad.
++            if (text_vertices.empty()) {
++                ++native_text_counts.skipped;
++                return TextQuad::Nothing;
++            }
++            page.used = true;
++            page.used_frame = glyph_frame;
++            descriptor = page.texture.descriptor;
++            page_side = static_cast<float>(page.side);
++            ++native_text_counts.quads;
++            native_text_counts.glyphs += drawn;
++            return TextQuad::Glyphs;
++        }
++        if (failure == GlyphAdd::Failed || attempt == 1 || !switch_glyph_page()) break;
++    }
++    // No room until the other page is free: drawn from a texture meanwhile.
++    ++native_text_counts.fallbacks;
++    text_vertices.clear();
++    return TextQuad::NotText;
++}
++
+ void VulkanRenderer::Impl::apply_texture_dump() {
+     if (dump_wanted == static_cast<bool>(dumper)) return;
+     if (!dump_wanted) {
+@@ -8231,6 +8709,7 @@ void VulkanRenderer::begin_frame() {
+         impl.drop_cached_textures();
+     }
+     impl.sharp_text_frame_clocks = {impl.sharp_text_frame_clocks[1], impl.texture_clock};
++    impl.report_native_text();
+     impl.replacements.begin_frame(impl.frames);
+     if (texture_pack_trace() && impl.pack && impl.frames % 60u == 0u) {
+         std::cout << "[texpack] frame " << impl.frames << ": " << impl.replaced_draws << " draws replaced in 60 frames, "
+@@ -9082,6 +9561,37 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+         census::note_texture_source(call, framebuffer_source.target != nullptr, framebuffer_source.x,
+                                     framebuffer_source.y);
+ 
++    // Native text (Impl::native_text): a quad showing a run of the game's
++    // text becomes its glyphs from the glyph atlas, or nothing at all when it
++    // can show nothing. Its fit below is decided by the quad, as for the quad
++    // itself.
++    VkDescriptorSet text_descriptor = VK_NULL_HANDLE;
++    float text_page_side = 0.0f;
++    bool text_fitted = false;
++    if (call.through && call.texture.enabled && !call.clear_mode && !raw && framebuffer_source.target == nullptr &&
++        call.primitive == PrimitiveType::TriangleFan && count == 4u) {
++        const std::array<const Vertex *, 4> corners{&vertex_at(0), &vertex_at(1), &vertex_at(2), &vertex_at(3)};
++        float left = corners[0]->position[0], right = left;
++        for (const Vertex *corner : corners) {
++            left = std::min(left, corner->position[0]);
++            right = std::max(right, corner->position[0]);
++        }
++        float text_fit_x = 1.0f, text_fit_y = 1.0f;
++        text_fitted = impl.shows(call.target.color_address) && impl.interface_fit(text_fit_x, text_fit_y) &&
++                      right - left < kScreenWideDraw;
++        if (!text_fitted) text_fit_x = text_fit_y = 1.0f;
++        switch (impl.native_text(memory, call, corners, text_fit_x, text_fit_y, text_descriptor, text_page_side)) {
++        case Impl::TextQuad::Nothing:
++            return;
++        case Impl::TextQuad::Glyphs:
++            impl.scratch.swap(impl.text_vertices);
++            break;
++        case Impl::TextQuad::NotText:
++            text_descriptor = VK_NULL_HANDLE;
++            break;
++        }
++    }
++
+     // Under Fill the game's 480x272 screen is spread over a target of the
+     // window's shape, which suits the 3D view the game now draws at that
+     // shape, but would stretch the 2D interface. Its draws into the shown
+@@ -9098,7 +9608,7 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+             left = std::min(left, vertex.x);
+             right = std::max(right, vertex.x);
+         }
+-        if (right - left < kScreenWideDraw) {
++        if (text_descriptor != VK_NULL_HANDLE ? text_fitted : right - left < kScreenWideDraw) {
+             fitted = true;
+             const float centre_x = 0.5f * static_cast<float>(kPspWidth);
+             const float centre_y = 0.5f * static_cast<float>(kPspHeight);
+@@ -9337,7 +9847,13 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+     if (trace_fb && call.texture.enabled && !call.clear_mode) impl.trace_framebuffer_texture(call);
+ 
+     VkDescriptorSet texture_descriptor = impl.white_texture.descriptor;
+-    if (call.texture.enabled && !call.clear_mode) {
++    if (text_descriptor != VK_NULL_HANDLE) {
++        // The glyphs' coordinates are texels of the atlas page, and each
++        // keeps to its own rectangle there (set_uv_rect).
++        texture_descriptor = text_descriptor;
++        push.texture_params[0] = 1.0f;
++        push.uv_transform = {1.0f / text_page_side, 1.0f / text_page_side, 0.0f, 0.0f};
++    } else if (call.texture.enabled && !call.clear_mode) {
+         const Impl::FramebufferTexture &source = framebuffer_source;
+         const bool opaque = call.texture.format == TextureFormat::Rgba5650;
+         // How a guest pixel position in the target becomes a coordinate in
+@@ -11731,6 +12247,7 @@ void VulkanRenderer::shutdown() {
+     impl.replacements.shutdown();
+     impl.pack.reset();
+     impl.dumper.reset();
++    impl.destroy_glyph_pages();
+     impl.destroy_texture(impl.white_texture);
+     for (Impl::Staging &staging : impl.overlay_staging) {
+         if (staging.mapped != nullptr) vkUnmapMemory(impl.device, staging.memory);
+-- 
+2.53.0.windows.1
+
