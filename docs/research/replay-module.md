@@ -93,6 +93,39 @@
 | `0x08872304` | 404 | `RawPad_inject` | buttons in, stick bytes rebuilt, a poll | near (11 words) |
 | `0x08872970` | | `LogicalPad_injectAndUpdate` | called by the player per fighter | |
 
+Camera Edit and camera data (main), all matched on 26-27 November:
+
+| Address | Size | Name here | Role |
+| --- | ---: | --- | --- |
+| `0x088C9F2C` | 188 | `replay_set_camera_data` | Set Camera Data: overwrites the entry at the cursor (keeping its frame) or adds one |
+| `0x088C9AEC` | 1088 | `replay_add_camera_data` | inserts camera data at the play frame in frame order (near: 5 words) |
+| `0x088C9FE8` | 412 | `replay_remove_camera_data` | removes the entry in force at the play frame; a new first entry gets frame 0 |
+| `0x088C854C` | 904 | `replay_normalize_span` | span edit at a frame: the range from the last open entry is bounded by a start and an end marker |
+| `0x088C88D4` | 700 | `replay_remove_span` | removes the span edit at a frame |
+| `0x088C8B90` / `0x088C8CC0` / `0x088C8DE8` | 304 / 296 / 380 | `replay_insert_span`, `replay_remove_span` (by index), `replay_insert_span_at` | span table helpers |
+
+Battle and menu callers matched on 26-27 November (the brief's "if time is left"):
+
+| Module | Address | Size | Name | Role |
+| --- | --- | ---: | --- | --- |
+| battle | `0x08B07B94` | 512 | `ending_update` | Save Replay on square (or the request byte) and the save's result |
+| battle | `0x08B07974` | 360 | `ending_dispatch` | the ending's page update by battle mode (jump table) |
+| battle | `0x08B07500` | 676 | `ending_pad_step` | the ending's pad step; page 0x11 for a replay with camera data |
+| battle | `0x08B2337C` | 340 | `replay_camera_pick` | the camera data around the play frame for the replay camera |
+| battle | `0x08B274AC` | 844 | `replay_cam_edit_input` | Camera Edit's input: set, remove and add camera data, span edits |
+| battle | `0x08B2721C` | 656 | `replay_pause_step` | pausing and resuming a replay |
+| battle | `0x08B2BEDC` | 580 | `replay_cam_label` | Camera Edit's "No.%03d" label |
+| battle | `0x08B2C9D4` | 492 | `replay_cam_counter` | the pause screen's free camera slots (0-999) |
+| battle | `0x08B2CF9C` | 740 | `replay_menu_step` | the save/load prompt's state machine |
+| battle | `0x08ADDCF8` | 400 | `effect_slot_start` | an effect slot's start (calls main `0x088CAF10`) |
+| battle | `0x08B1F538` | 1140 | (scratch) | the playback HUD's input step. The source matches over 1,140 bytes, but `config/inventory/battle.json` gives the function 972 bytes in two ranges and leaves out its case bodies `0x08B1F8D0..0x08B1F978`; integrating it needs that entry fixed |
+| menu | `0x08A44504` | 1244 | `replay_menu_step` | a replay menu's step: builds the REPLAY.BIN save object, starts LISTLOAD or SIZES |
+| menu | `0x08A40C98` | 620 | `replay_menu_exit` | hand-off into playback (`+0x1296 == 2` gives flags bit 1) |
+| menu | `0x08A499A0` | 444 | `replay_list_exit` | hand-off into playback (state 5 gives flags bit 1; jump table) |
+| menu | `0x08A505C0` | 144 | `field_mode12_battle_start` | starts a FIELD mode 12 battle |
+| menu | `0x08A49D7C` | 148 | | the load set-up (near: 19 words) |
+| menu | `0x08A49750` | 592 | | the Creation replay screen's enter (near: 7 words) |
+
 ## 2. The replay object (question 1)
 
 V: one static object at `0x08B99030`, pointer at `0x089D7750`, copied into FIELD `+0x7C8` by the FIELD constructor

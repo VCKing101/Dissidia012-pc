@@ -12477,6 +12477,21 @@
       ]
     },
     {
+      "name": "replay_menu_step_08a44504",
+      "source": "src/menu/replay_menu_step_08a44504.cpp",
+      "functions": [
+        {
+          "name": "func_08A44504",
+          "address": "0x08A44504",
+          "size": 1244
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fELoadDHasUi",
+        "__0fELoadEPickiTB"
+      ]
+    },
+    {
       "name": "menu_08a45838",
       "source": "src/menu/auto/menu_08a45838.c",
       "functions": [
@@ -51369,7 +51384,16 @@
     "func_08AE07D0": "0x08AE07D0",
     "func_08AE22E8": "0x08AE22E8",
     "D_08AC42A2": "0x08AC42A2",
-    "func_08889BAC": "0x08889BAC"
+    "func_08889BAC": "0x08889BAC",
+    "func_08A42090": "0x08A42090",
+    "func_08A44108": "0x08A44108",
+    "func_08A41F70": "0x08A41F70",
+    "func_08A43CB0": "0x08A43CB0",
+    "func_088FF908": "0x088FF908",
+    "D_08A45650": "0x08A45650",
+    "D_08A45658": "0x08A45658",
+    "func_088B0AF8": "0x088B0AF8",
+    "func_088AF348": "0x088AF348"
   },
   "status": "45 matching C/C++ functions / 4344 bytes; savedata callbacks and newly audited presentation completion callback. Controller table remains14/20; broader ownership incomplete."
 }

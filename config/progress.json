@@ -13737,7 +13737,9 @@
     "replay_cam_counter_08b2c9d4": "battle_helpers",
     "replay_cam_label_08b2bedc": "battle_helpers",
     "replay_cam_edit_input_08b274ac": "battle_helpers",
-    "replay_pause_step_08b2721c": "battle_helpers"
+    "replay_pause_step_08b2721c": "battle_helpers",
+    "replay_menu_step_08b2cf9c": "battle_helpers",
+    "replay_menu_step_08a44504": "menu_helpers"
   },
   "features": [
     {
