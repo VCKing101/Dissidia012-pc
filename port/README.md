@@ -420,6 +420,21 @@ fresh install in 196 s with the optional "Battle BGM Maker" ticked: the shortcut
 ISO (from `settings.ini`) and `atracdenc.exe`, and made a PSP / PPSSPP ISO from the command line in 13 s; 0.3.0 with
 its Python tool, then 0.4.0 over it in 19 s, removed `bgm-maker/` and FFmpeg's programs and kept the mods.
 
+**The zip started by itself**: the release's zip (the setup's folder, for RecompLauncher) is often unpacked and its
+`D012Native.exe` started directly, with no setup or launcher to compile. Its first start shows PortableKit's setup
+screens, which ask for the ISO and decrypt the executable; then, with no `game-code/main.dll` beside the program,
+the profile's `prepare_game` (`host/d012_game_code.cpp`) compiles the game's code on those screens, the same steps as
+`--compile-game`, before "All set". A copy whose disc is set up but whose code is missing (a setup whose compile
+failed, or a zip copy started before this) compiles on screens of its own at its next start. Cancel, or closing the
+window, stops the compile at the next part and the game does not start; the parts already made stay in
+`game-code-cache/`, so the next start goes on from them. With `D012_GAME_CODE_DIR` set nothing is compiled. Before
+this, such a copy only said "The game's code is not compiled yet" and to run the setup again. Checked on 26 November
+2026 with a zip from `package_installer.py`'s own steps, unpacked into a new folder: the ISO dropped on the first
+screen and used in place, 324 parts compiled in 3 min 18 s on the setup screens, then "All set" and Play started the
+game. With `game-code/` and the cache deleted from that copy, the next start compiled on its own screens; Esc at part
+64 stopped it 12 s later with 87 parts kept, the start after compiled the other 237 and played, and Esc in the game
+still opened the menu.
+
 ```powershell
 cmake -S port -B tools/local/port/build-d012-installer -G Ninja -DCMAKE_BUILD_TYPE=Release `
       -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DD012_INSTALLER_BUILD=ON -DPORTABLEKIT_RELEASE=ON
@@ -463,6 +478,15 @@ by `tools/port/android_runtime.sh`, nothing from the NDK. Those, clang's headers
 programs, remade at every start, and clang runs with `-no-canonical-prefixes` so it finds its headers and the
 linker from the links' folder. Measured on 15 November 2026 on a Galaxy S25 Ultra: 12 s to unpack, 6 min 51 s for
 the whole compile (7 jobs), then the game; the next start went straight to it.
+
+The three compiles at a start (a Windows copy without `game-code/main.dll`, a Linux copy that just updated itself
+from the menu, the Android app) show it the same way, through `host/d012_compile_screens.cpp`: one stage, "Compiling
+the game's code", so the time left runs from its start (the setup's screens restart their estimate whenever the
+stage's text changes, and the compile's own messages, which go to the log, count parts); and Cancel, Esc (Android's
+Back), the pad's Back button or closing the window stop it at the next part, with the parts already made kept in
+`game-code-cache/`. On the screens it opens itself, the interface is set to take input for the compile, or Esc would
+wait for the game and open its menu. Before 26 November 2026 the Linux and Android compiles could not be cancelled
+and their time left restarted at every part.
 
 Measured on 28 October 2026 (i7-12700K, 8 jobs, -O1): 4 minutes from the ISO, of which about 1 for the five
 recompiles and 3 for the compile. The C++ it generates is byte for byte the developer pipeline's (main and all

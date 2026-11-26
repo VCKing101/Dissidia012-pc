@@ -79,13 +79,10 @@
 #include <SDL3/SDL_system.h>
 #include <jni.h>
 #elif defined(__linux__) && defined(D012_INSTALLER_BUILD)
+#include "d012_compile_screens.hpp"
 #include "d012_curl.hpp"
 
 #include "install/installer.hpp"
-
-#if defined(PORTABLEKIT_HAS_RENDERER)
-#include <SDL3/SDL.h>
-#endif
 
 #include <fcntl.h>
 #include <sys/wait.h>
@@ -94,7 +91,6 @@
 #include <cerrno>
 #include <cstdio>
 #include <functional>
-#include <memory>
 #endif
 
 #include <algorithm>
@@ -128,7 +124,8 @@
 #if defined(D012_INSTALLS_ON_LINUX)
 namespace d012::compile_game {
 // host/d012_compile_game.cpp: --compile-game's steps in this process.
-int run_here(bool check_only, std::function<void(const std::string &, unsigned)> listener);
+int run_here(bool check_only, std::function<void(const std::string &, unsigned)> listener,
+             std::function<bool()> stop);
 }
 #endif
 
@@ -1153,48 +1150,18 @@ bool prepare_after_update(portablekit::install::InstallerUi *given, const fs::pa
     const fs::path old = portablekit::executable_directory() / kOldFiles;
     if (!fs::is_directory(old, ec)) return true;
     std::cout << "[update] this copy was just updated: checking the game's code" << std::endl;
-    if (compile_game::run_here(true, {}) != 0) {
-        // The setup's screens, as the Android app's compile uses them
-        // (d012_device_compile.cpp).
-        std::unique_ptr<portablekit::install::InstallerUi> own;
-        if (given == nullptr) own = portablekit::install::make_installer_ui();
-        portablekit::install::InstallerUi *ui = given != nullptr ? given : own.get();
-        std::string failure;
-        int code = 1;
-#if defined(PORTABLEKIT_HAS_RENDERER)
-        // The screen stays on: the work can take many minutes.
-        SDL_DisableScreenSaver();
-#endif
-        const auto work = [&] {
-            // Called from the compile's worker threads too: it must not throw,
-            // so the screen's Cancel is not honoured while it compiles.
-            std::mutex lock;
-            code = compile_game::run_here(false, [&](const std::string &message, unsigned percent) {
-                const std::lock_guard<std::mutex> guard(lock);
-                failure = message;
-                if (!ui) return;
-                try {
-                    ui->progress(message, percent, 100u);
-                } catch (...) {
-                }
+    if (compile_game::run_here(true, {}, {}) != 0) {
+        // The setup's screens, as the Windows and Android compiles use them.
+        const compile_screens::Result result = compile_screens::run(
+            given, "Making the game's code for version " + std::string(kVersion),
+            [](portablekit::install::InstallerUi *, const compile_screens::Hooks &hooks) {
+                return compile_game::run_here(false, hooks.listener, hooks.stop);
             });
-        };
-        try {
-            if (ui) ui->run_task("Making the game's code for version " + std::string(kVersion), work);
-            else work();
-        } catch (const portablekit::install::InstallCancelled &) {
-#if defined(PORTABLEKIT_HAS_RENDERER)
-            SDL_EnableScreenSaver();
-#endif
-            return false;
-        }
-#if defined(PORTABLEKIT_HAS_RENDERER)
-        SDL_EnableScreenSaver();
-#endif
-        if (code != 0) {
+        if (result.outcome == compile_screens::Outcome::Cancelled) return false;
+        if (result.outcome == compile_screens::Outcome::Failed) {
             portablekit::install::report_problem(
                 "The game could not be made",
-                "Making the game's code for the new version did not succeed:\n\n" + failure +
+                "Making the game's code for the new version did not succeed:\n\n" + result.message +
                     "\n\nStart the game again to try again, or run the newest setup from the project's releases page "
                     "and install into this folder. The log is game-code-build.log in the game's folder.",
                 false);

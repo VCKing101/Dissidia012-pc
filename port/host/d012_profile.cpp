@@ -39,6 +39,16 @@ bool prepare(portablekit::install::InstallerUi *ui, const std::filesystem::path 
 }
 #elif defined(__linux__) && defined(D012_INSTALLER_BUILD)
 #include "d012_update_install.hpp"
+#elif defined(_WIN32) && defined(D012_INSTALLER_BUILD)
+#include <filesystem>
+namespace portablekit::install {
+class InstallerUi;
+}
+namespace d012::game_code {
+// d012_game_code.cpp
+bool prepare_at_start(portablekit::install::InstallerUi *ui, const std::filesystem::path &executable,
+                      const std::filesystem::path &disc_image);
+}
 #endif
 
 namespace portablekit {
@@ -254,6 +264,11 @@ const GameProfile &game() {
         // A copy the Linux setup installed makes the game's code itself after
         // an update from the menu (d012_update_install.cpp).
         .prepare_game = &d012::update_install::prepare_after_update,
+#elif defined(_WIN32) && defined(D012_INSTALLER_BUILD)
+        // A copy without its game code (the release's zip started by itself,
+        // or a setup whose compile failed) makes it on the setup's screens
+        // (d012_game_code.cpp).
+        .prepare_game = &d012::game_code::prepare_at_start,
 #endif
         // A modded disc, switched on on the System page (d012_disc_mod.cpp).
         // After prepare_game, as GameProfile declares them: GCC refuses

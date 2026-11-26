@@ -182,6 +182,16 @@ constexpr int kNeedsCompile = 3;
 // Android app's progress screen).
 std::function<void(const std::string &message, unsigned percent)> g_listener;
 
+// Asked before each recompile, each part and each link: true stops the
+// compile there (the player cancelled it on the setup's screens). Called from
+// the compile's worker threads too. Parts already compiled stay in the cache,
+// so the next run goes on from them.
+std::function<bool()> g_stop;
+
+constexpr const char *kStopped = "Cancelled.";
+
+bool stop_asked() { return g_stop && g_stop(); }
+
 struct Paths {
     fs::path folder, game_dir, eboot, iso, recompiler, compiler, sdk, out, work, status, log;
     fs::path android_sysroot, android_builtins;  // in the Android app
@@ -775,6 +785,7 @@ int run(const Options &options) {
             std::vector<std::string> args{recompiler, text(p.eboot), "--auto", text(main.generated), hex32(kMainBase)};
             const auto rows = dispatch_calls(dispatch, "main");
             args.insert(args.end(), rows.begin(), rows.end());
+            if (stop_asked()) throw Error(kStopped);
             run_checked(args, p, "psp_recomp for the main executable");
             const auto entry = read_all(p.sdk / "corpus_module.cpp.in");
             write_all(main.generated / "main_module.cpp", std::string_view(reinterpret_cast<const char *>(entry.data()), entry.size()));
@@ -800,6 +811,7 @@ int run(const Options &options) {
                                           hex32(image.base), "--prefix", prefix};
             const auto rows = dispatch_calls(dispatch, kDiscFiles[i].name);
             args.insert(args.end(), rows.begin(), rows.end());
+            if (stop_asked()) throw Error(kStopped);
             run_checked(args, p, std::string("psp_recomp for the ") + kDiscFiles[i].name + " overlay");
             std::string entry = overlay_template;
             entry = replace_all(entry, "@PORTABLEKIT_OVERLAY_PREFIX@", prefix);
@@ -899,7 +911,7 @@ int run(const Options &options) {
         std::vector<std::thread> workers;
         for (unsigned j = 0; j < std::min<std::size_t>(jobs, to_compile.size()); ++j)
             workers.emplace_back([&] {
-                for (std::size_t i = next++; i < to_compile.size() && !failed; i = next++) {
+                for (std::size_t i = next++; i < to_compile.size() && !failed && !stop_asked(); i = next++) {
                     const Unit &unit = *to_compile[i];
                     // Into the cache under another name first: an object
                     // under its key is always a whole one.
@@ -930,6 +942,7 @@ int run(const Options &options) {
             });
         for (std::thread &worker : workers) worker.join();
         if (failed) throw Error(failure);
+        if (stop_asked()) throw Error(kStopped);
 
         // 5. Link: every library on its own, with its own C++ runtime.
         progress.step("Linking the game's code", static_cast<unsigned>(libraries.size()));
@@ -949,6 +962,7 @@ int run(const Options &options) {
             std::vector<std::string> args{compiler};
             args.insert(args.end(), linking.begin(), linking.end());
             args.insert(args.end(), {"-o", text(p.work / "result" / library.name), "@" + text(rsp)});
+            if (stop_asked()) throw Error(kStopped);
             run_checked(args, p, "linking " + library.name);
             progress.advance();
         }
@@ -996,30 +1010,41 @@ int run(const Options &options) {
 // The Android app's compile (host/d012_device_compile.cpp): the same steps,
 // with the app's paths (find_paths). 0: up to date or compiled;
 // kNeedsCompile with check_only when it must compile; 1: failed, with the
-// reason given to the listener.
-int run_in_app(bool check_only, std::function<void(const std::string &, unsigned)> listener) {
+// reason given to the listener. With `stop` (asked from the workers too, so
+// thread-safe), the compile ends when it says so, and the listener is told
+// "Cancelled.".
+int run_in_app(bool check_only, std::function<void(const std::string &, unsigned)> listener,
+               std::function<bool()> stop) {
     Options options;
     options.android = true;
     options.check_only = check_only;
     g_listener = std::move(listener);
+    g_stop = std::move(stop);
     const int code = run(options);
     g_listener = nullptr;
+    g_stop = nullptr;
     return code;
 }
 
 int needs_compile_code() { return kNeedsCompile; }
 #else
-// A copy that updated itself from the menu (host/d012_update_install.cpp,
-// Linux): the same steps as --compile-game, in this process, with the progress
-// given to `listener`. 0: up to date or compiled; kNeedsCompile with
-// check_only when it must compile; 1: failed, with the reason given to the
-// listener.
-int run_here(bool check_only, std::function<void(const std::string &, unsigned)> listener) {
+// The same steps as --compile-game, in this process, with the progress given
+// to `listener`: for a copy that updated itself from the menu
+// (host/d012_update_install.cpp, Linux) and for a copy whose game code was
+// never made (host/d012_game_code.cpp, Windows). 0: up to date or compiled;
+// kNeedsCompile with check_only when it must compile; 1: failed, with the
+// reason given to the listener. With `stop` (asked from the workers too, so
+// thread-safe), the compile ends when it says so, and the listener is told
+// "Cancelled.".
+int run_here(bool check_only, std::function<void(const std::string &, unsigned)> listener,
+             std::function<bool()> stop) {
     Options options;
     options.check_only = check_only;
     g_listener = std::move(listener);
+    g_stop = std::move(stop);
     const int code = run(options);
     g_listener = nullptr;
+    g_stop = nullptr;
     return code;
 }
 

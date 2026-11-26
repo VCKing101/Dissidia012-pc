@@ -12,6 +12,10 @@ What Setup does
      minutes (about 4 on a recent 8-core PC, longer on a laptop) and uses about 2 GB of disk while it works.
   Nothing is downloaded, and nothing made from your disc leaves your PC.
 
+Unpacked the zip instead?
+  Start D012Native.exe in the folder. The first start asks for your .iso, then compiles the game's code as Setup
+  does. Setup also makes the Start menu shortcuts and an uninstaller.
+
 Playing
   Start "Dissidia 012 (PC port)" from the Start menu or the desktop. Esc on the keyboard, or L3 + R3 on a
   controller, opens the port's menu: video, controls and audio.
