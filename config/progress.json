@@ -13729,7 +13729,13 @@
     "replay_camera_pick_08b2337c": "battle_helpers",
     "field_mode12_battle_start_08a505c0": "menu_helpers",
     "replay_list_exit_08a499a0": "menu_helpers",
-    "replay_menu_exit_08a40c98": "menu_helpers"
+    "replay_menu_exit_08a40c98": "menu_helpers",
+    "replay_remove_camera_data_088c9fe8": "main_helpers",
+    "replay_set_camera_data_088c9f2c": "main_helpers",
+    "effect_slot_start_08addcf8": "battle_helpers",
+    "ending_pad_step_08b07500": "battle_helpers",
+    "replay_cam_counter_08b2c9d4": "battle_helpers",
+    "replay_cam_label_08b2bedc": "battle_helpers"
   },
   "features": [
     {

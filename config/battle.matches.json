@@ -36121,6 +36121,17 @@
       ]
     },
     {
+      "name": "effect_slot_start_08addcf8",
+      "source": "src/battle/effect_slot_start_08addcf8.cpp",
+      "functions": [
+        {
+          "name": "func_08ADDCF8",
+          "address": "0x08ADDCF8",
+          "size": 400
+        }
+      ]
+    },
+    {
       "name": "bonus_total_08ade14c",
       "source": "src/battle/bonus_total_08ade14c.c",
       "functions": [
@@ -39862,6 +39873,21 @@
           "address": "0x08B07324",
           "size": 476
         }
+      ]
+    },
+    {
+      "name": "ending_pad_step_08b07500",
+      "source": "src/battle/ending_pad_step_08b07500.cpp",
+      "functions": [
+        {
+          "name": "func_08B07500",
+          "address": "0x08B07500",
+          "size": 676
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fBTCeqiTBT",
+        "__0fBTDhasUiTBT"
       ]
     },
     {
@@ -44228,6 +44254,22 @@
       ]
     },
     {
+      "name": "replay_cam_label_08b2bedc",
+      "source": "src/battle/replay_cam_label_08b2bedc.cpp",
+      "functions": [
+        {
+          "name": "func_08B2BEDC",
+          "address": "0x08B2BEDC",
+          "size": 580
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fKEffectListDsetPP6LModelEffectP6LModelEffectT",
+        "__0fKEffectListGattachP6LEffectModelP6LModelEffectT",
+        "__0fKEffectListGdetachP6LEffectModelP6LModelEffectT"
+      ]
+    },
+    {
       "name": "light_apply_08b2c120",
       "source": "src/battle/light_apply_08b2c120.c",
       "functions": [
@@ -44324,6 +44366,22 @@
           "address": "0x08B2C560",
           "size": 96
         }
+      ]
+    },
+    {
+      "name": "replay_cam_counter_08b2c9d4",
+      "source": "src/battle/replay_cam_counter_08b2c9d4.cpp",
+      "functions": [
+        {
+          "name": "func_08B2C9D4",
+          "address": "0x08B2C9D4",
+          "size": 492
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fKEffectListDsetPP6LModelEffectP6LModelEffectT",
+        "__0fKEffectListGattachP6LEffectModelP6LModelEffectT",
+        "__0fKEffectListGdetachP6LEffectModelP6LModelEffectT"
       ]
     },
     {
@@ -53477,7 +53535,17 @@
     "func_088CA3C8": "0x088CA3C8",
     "func_088CA240": "0x088CA240",
     "func_088CA2E0": "0x088CA2E0",
-    "func_088CA354": "0x088CA354"
+    "func_088CA354": "0x088CA354",
+    "func_088CAF10": "0x088CAF10",
+    "func_08ADDFE4": "0x08ADDFE4",
+    "func_0888B080": "0x0888B080",
+    "D_08B0CDB0": "0x08B0CDB0",
+    "D_08B0CDB8": "0x08B0CDB8",
+    "func_08B1D044": "0x08B1D044",
+    "func_088C83FC": "0x088C83FC",
+    "D_08B2CCC8": "0x08B2CCC8",
+    "func_0887DFF4": "0x0887DFF4",
+    "D_08B2C260": "0x08B2C260"
   },
   "status": "112 matching C/C++ functions / 8380 bytes; connected curve controls, resource cleanup and second activation/cleanup group added. Broader combat ownership remains provisional."
 }

@@ -30688,6 +30688,34 @@
       ]
     },
     {
+      "name": "replay_set_camera_data_088c9f2c",
+      "source": "src/main/replay_set_camera_data_088c9f2c.cpp",
+      "functions": [
+        {
+          "name": "func_088C9F2C",
+          "address": "0x088C9F2C",
+          "size": 188
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0oOD012ReplayVec3asRC6OD012ReplayVec3"
+      ]
+    },
+    {
+      "name": "replay_remove_camera_data_088c9fe8",
+      "source": "src/main/replay_remove_camera_data_088c9fe8.cpp",
+      "functions": [
+        {
+          "name": "func_088C9FE8",
+          "address": "0x088C9FE8",
+          "size": 412
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0oOD012ReplayVec3asRC6OD012ReplayVec3"
+      ]
+    },
+    {
       "name": "store_cursor_item_088ca240",
       "source": "src/main/store_cursor_item_088ca240.c",
       "functions": [
@@ -63142,7 +63170,8 @@
     "func_0888B0A4": "0x0888B0A4",
     "D_089CBC70": "0x089CBC70",
     "func_088C965C": "0x088C965C",
-    "func_088C8DE8": "0x088C8DE8"
+    "func_088C8DE8": "0x088C8DE8",
+    "func_088C9AEC": "0x088C9AEC"
   },
   "status": "97 matching C/C++ functions / 6104 bytes; typed presentation callbacks, initialization, rendering gates, exact task unlink and drawing allocation support. Larger transition/update and task factory/registration remain unfinished."
 }
