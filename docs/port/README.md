@@ -224,7 +224,9 @@ disassembler and the new `tools/port/` scripts cover the analysis.
 - [The menu](menu.md): Esc or L3+R3 opens a pause screen (Resume, Settings, Controls, Cheats, Resolution and Frame
   rate, Quit game); the settings are a full-screen page with the focused setting's preview beside the rows, drawn
   from the player's pad, mouse and paused game. Text about 21 px on a 1080-line screen or a Steam Deck, in Cinzel and
-  Barlow, night blue and silver (patch 0124; `D012_CLASSIC_MENU=1`).
+  Barlow, night blue and silver (patch 0124; `D012_CLASSIC_MENU=1`). Patch 0125: previews for Resolution, Sharp text
+  and Bloom, the previews follow the controller in your hands, and the pause screen credits the recompilation and
+  Square Enix.
 
 ## Next steps
 
