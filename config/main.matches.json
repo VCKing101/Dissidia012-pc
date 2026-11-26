@@ -25978,6 +25978,17 @@
       ]
     },
     {
+      "name": "save_begin_request_088af620",
+      "source": "src/main/save_begin_request_088af620.c",
+      "functions": [
+        {
+          "name": "func_088AF620",
+          "address": "0x088AF620",
+          "size": 256
+        }
+      ]
+    },
+    {
       "name": "table_pick_088af720",
       "source": "src/main/table_pick_088af720.c",
       "functions": [
@@ -25996,6 +26007,28 @@
           "name": "func_088AF75C",
           "address": "0x088AF75C",
           "size": 84
+        }
+      ]
+    },
+    {
+      "name": "save_find_slot_088af7b0",
+      "source": "src/main/save_find_slot_088af7b0.c",
+      "functions": [
+        {
+          "name": "func_088AF7B0",
+          "address": "0x088AF7B0",
+          "size": 184
+        }
+      ]
+    },
+    {
+      "name": "save_start_sizes_088af868",
+      "source": "src/main/save_start_sizes_088af868.c",
+      "functions": [
+        {
+          "name": "func_088AF868",
+          "address": "0x088AF868",
+          "size": 292
         }
       ]
     },
@@ -63171,7 +63204,8 @@
     "D_089CBC70": "0x089CBC70",
     "func_088C965C": "0x088C965C",
     "func_088C8DE8": "0x088C8DE8",
-    "func_088C9AEC": "0x088C9AEC"
+    "func_088C9AEC": "0x088C9AEC",
+    "func_089C5858": "0x089C5858"
   },
   "status": "97 matching C/C++ functions / 6104 bytes; typed presentation callbacks, initialization, rendering gates, exact task unlink and drawing allocation support. Larger transition/update and task factory/registration remain unfinished."
 }

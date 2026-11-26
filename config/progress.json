@@ -13739,7 +13739,12 @@
     "replay_cam_edit_input_08b274ac": "battle_helpers",
     "replay_pause_step_08b2721c": "battle_helpers",
     "replay_menu_step_08b2cf9c": "battle_helpers",
-    "replay_menu_step_08a44504": "menu_helpers"
+    "replay_menu_step_08a44504": "menu_helpers",
+    "save_begin_request_088af620": "main_helpers",
+    "save_find_slot_088af7b0": "main_helpers",
+    "save_start_sizes_088af868": "main_helpers",
+    "replay_creation_enter_08a49750": "menu_helpers",
+    "replay_creation_step_08a4b5ac": "menu_helpers"
   },
   "features": [
     {

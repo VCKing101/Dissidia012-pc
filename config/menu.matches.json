@@ -13049,6 +13049,20 @@
       ]
     },
     {
+      "name": "replay_creation_enter_08a49750",
+      "source": "src/menu/replay_creation_enter_08a49750.cpp",
+      "functions": [
+        {
+          "name": "func_08A49750",
+          "address": "0x08A49750",
+          "size": 592
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fGMenu4CFClearv"
+      ]
+    },
+    {
       "name": "replay_list_exit_08a499a0",
       "source": "src/menu/replay_list_exit_08a499a0.cpp",
       "functions": [
@@ -13349,6 +13363,22 @@
           "address": "0x08A4AC94",
           "size": 48
         }
+      ]
+    },
+    {
+      "name": "replay_creation_step_08a4b5ac",
+      "source": "src/menu/replay_creation_step_08a4b5ac.cpp",
+      "functions": [
+        {
+          "name": "func_08A4B5AC",
+          "address": "0x08A4B5AC",
+          "size": 1972
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fELoadDHasUiTBT",
+        "__0fEPairDOkcvT",
+        "__0fEPairHInvalidRC6EPairT"
       ]
     },
     {
@@ -51393,7 +51423,28 @@
     "D_08A45650": "0x08A45650",
     "D_08A45658": "0x08A45658",
     "func_088B0AF8": "0x088B0AF8",
-    "func_088AF348": "0x088AF348"
+    "func_088AF348": "0x088AF348",
+    "D_08A4C0C0": "0x08A4C0C0",
+    "func_088D1604": "0x088D1604",
+    "D_08A4C010": "0x08A4C010",
+    "func_08A49D7C": "0x08A49D7C",
+    "D_08A4C0E8": "0x08A4C0E8",
+    "D_08A4C034": "0x08A4C034",
+    "func_08A4B250": "0x08A4B250",
+    "func_088FF914": "0x088FF914",
+    "func_08A4A6FC": "0x08A4A6FC",
+    "func_08A4A5C8": "0x08A4A5C8",
+    "func_08A4ACFC": "0x08A4ACFC",
+    "func_08929958": "0x08929958",
+    "func_08929A70": "0x08929A70",
+    "func_088B1440": "0x088B1440",
+    "func_08872A18": "0x08872A18",
+    "func_088B1764": "0x088B1764",
+    "func_088B178C": "0x088B178C",
+    "D_08A4C090": "0x08A4C090",
+    "func_08A49F1C": "0x08A49F1C",
+    "D_08A4C088": "0x08A4C088",
+    "func_08A4ACE0": "0x08A4ACE0"
   },
   "status": "45 matching C/C++ functions / 4344 bytes; savedata callbacks and newly audited presentation completion callback. Controller table remains14/20; broader ownership incomplete."
 }
