@@ -124,7 +124,17 @@ Battle and menu callers matched on 26-27 November (the brief's "if time is left"
 | menu | `0x08A499A0` | 444 | `replay_list_exit` | hand-off into playback (state 5 gives flags bit 1; jump table) |
 | menu | `0x08A505C0` | 144 | `field_mode12_battle_start` | starts a FIELD mode 12 battle |
 | menu | `0x08A49D7C` | 148 | | the load set-up (near: 19 words) |
-| menu | `0x08A49750` | 592 | | the Creation replay screen's enter (near: 7 words) |
+
+The save manager `*(0x089D7260)`, which runs every savedata request (REPLAY.BIN's included), matched on 26-27
+November: `0x088AF620` `save_begin_request` (a request and its message box), `0x088AF868` `save_start_sizes` (a
+SIZES request), `0x088AF7B0` `save_find_slot`, `0x088ADDE8` `save_default_name` (the name from a time stamp),
+`0x088ADB10` `save_fill_params` (the savedata parameters), `0x088ADC08` `save_finish_texts` (title and detail), and
+`0x088AEF54` `save_header_check`, and `0x088B01C0` `save_update` (the "Update" task's body: polls the utility, runs
+`0x088AFDE4` when a request ends, opens the result's message box). Near: `0x088AFDE4` (the per-request update that
+calls the header check after a LISTLOAD, 24 words: register numbering), `0x088AF424` (the request state machine, 2
+words), `0x088AF044` (4), `0x088AF134` (runs a request, 6), `0x088AFBCC` (80).
+| menu | `0x08A49750` | 592 | `replay_creation_enter` | the Collection > Creation replay screen's enter: state object, 0x40000 buffer, the load set-up, the task |
+| menu | `0x08A4B5AC` | 1972 | `replay_creation_step` | the replay list's step: pad input, LISTLOAD or SIZES, the load, delete and copy prompts |
 
 ## 2. The replay object (question 1)
 

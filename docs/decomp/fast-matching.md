@@ -255,6 +255,73 @@ count is unchanged at 35 / 2,460. All four modules rebuild byte-identically and 
   so the inner branch jumps straight there as retail does).
 - Integration ran in four batches during the night (28, 104, 45 and 8 units), each rebuilt byte-identically.
 
+## Overnight run, 26–27 November 2026: the battle replay
+
+A night with two goals: map the game's battle replay code (recording, playback, saving and loading) for the port's
+planned replay input track ([replay-module.md](../research/replay-module.md)), and match it. The lead mapped it from
+the code, decrypted the test data's replays offline and checked one question in a run. Sonnet agents (two at a time)
+then matched the replay module, its battle and menu callers and the save manager that writes and reads REPLAY.BIN.
+Verified C/C++ totals went from 14,141 functions / 1,393,272 bytes to **14,187 functions / 1,415,896 bytes (30.01%
+of inventoried function bytes)**. The separate VFPU count is unchanged at 35 / 2,460. All four modules rebuild
+byte-identically and all 225 tests pass (7 skipped).
+
+| Module | Functions | Bytes | Added |
+| --- | ---: | ---: | ---: |
+| Main executable | 5,330 | 461,568 | 30 |
+| Menu overlay | 4,317 | 462,528 | 6 |
+| Battle overlay | 4,516 | 489,684 | 10 |
+| Extra overlay | 24 | 2,116 | 0 |
+
+- **Replay module** (main), all of the brief's functions:
+  - the task `0x0888948C`, recorder `0x088CA680`, player `0x088CA9A8` (with its jump table), the record writer, the
+    save copy `0x0888AD50`, and the load copy;
+  - clear, reset and rewind;
+  - the battle start `0x08889694`;
+  - Camera Edit's camera data and span editors.
+  - A shared header, `include/main/replay_types.h`, gives the replay object as C and as the C++ the game was written
+    in.
+  - The four save functions already matched were given readable names and the header: `0x088AFB30` was misnamed
+    `round_stop`, and the descriptor's "detail" field is the save key.
+- **Callers**:
+  - battle: the ending's Save Replay, pages and pad step; the replay pause toggle, camera pick, Camera Edit input,
+    label, counter and save/load prompt;
+  - menu: both hand-offs into playback, the Creation replay screen and list, a replay menu step, and the mode-12
+    start;
+  - main: the save manager (begin, SIZES, slot search, default name, parameters, texts, the Update task).
+- **Not matched**:
+  - `RawPad_inject` `0x08872304`: 11 words, the first 64-bit mask test's scheduling; about 100 variants.
+  - Near misses of 2 to 24 words, kept in `build/scratch/agent1xx/`: the add-camera-data shift loop (5), the
+    camera-event test (5), the FIELD constructor (6), the twin current-entry lookups (13), the save manager's update
+    (24) and request machine (2), and three menu set-ups.
+  - Battle `0x08B1F538` matches over 1,140 bytes, but `config/inventory/battle.json` gives it 972 in two ranges,
+    leaving out its case bodies `0x08B1F8D0..0x08B1F978`. It needs that inventory entry fixed before it can be
+    integrated.
+- Agents: agent111–agent130, results in `build/dc-results/`. Fresh Sonnet instances per one to three functions
+  matched about two of every three they were given. Several stopped after 5–25 minutes, believing time was up, so the
+  briefs now tell them to check `date` and keep going.
+- **Integration**:
+  - Nine batches during the night, each rebuilt byte-identically and tested before its commit.
+  - Moving the replay's C++ types into the shared header renamed their inline bodies. The units list those bodies by
+    mangled name (`unused_inline_symbols`), so the main build failed with "Listed inline helper has no unique
+    linkonce section" until the two lists were updated.
+
+**SNC patterns from this run** (added to the list below):
+- C++ `for (int i = 0; ...)` loop-scoped counters put retail's register saves before the first body store, where C
+  and function-scope counters let SNC sink them. This fixed clear, reset and the span lookups.
+- A struct whose vector members have an inline constructor and assignment calling the library's vector zero and copy
+  (`0x089A34E0`/`0x089A34C0`) reproduces compiler-generated member-by-member copies (`*dst = *src`), including the
+  byte loop for a 3-byte array member.
+- `do { if (!(a || b || c)) break; ... } while (0)` gave retail's `beq; beq; beq; b end` for a three-way test. A
+  `default: return;` arm fixed a switch's branch sense. `while (1) { ...; break; }` around arms gives un-threaded
+  `b end; nop` islands.
+- Locals declared at function top, not inside a block: SNC keeps an early return inline when its block declares
+  locals.
+- A local copy of a field (`int enabled = save->enabled;`) set both load order and compare operand order.
+- In-class `bool`/`unsigned char` helpers reproduce duplicated `andi 0xFF` booleans. A member helper holding a
+  computation moved a `lui` into a branch delay slot.
+- Shift loops: an outer counter with an inner copy (`i = j`, copied back), and the loop limit reloaded and assigned in
+  the test. One-element arrays hold stack-spilled locals.
+
 ## SNC patterns learned while matching
 
 Collected from both agent rounds (544 hand matches). Each was confirmed by a byte match.

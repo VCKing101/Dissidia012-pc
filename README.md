@@ -26,7 +26,7 @@ online and test sessions. Bugs and crashes go in [GitHub issues](https://github.
   (SteamOS), with mods, DLC and the Japanese voices. Other x86-64 Linux systems with Vulkan should work but are
   untested. The Windows build through Proton also still works on the Deck
   ([docs/port/steam-deck.md](docs/port/steam-deck.md)).
-- **Matching decompilation:** 14,141 functions, about 29.5% of the game's code by size, are matching C/C++, and the
+- **Matching decompilation:** 14,187 functions, about 30% of the game's code by size, are matching C/C++, and the
   executable and all three overlays rebuild byte for byte; the rest is still machine code. See the
   [decompilation notes](docs/decomp/README.md) and the [progress report](docs/decomp/progress.md).
 

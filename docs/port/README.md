@@ -13,7 +13,7 @@ repository. The byte-identical builds stay as the reference for what the origina
 **The route.** Static recompilation of the whole game to C++, running on a native PSP runtime, with decompiled C
 swapped in function by function where enhancements need it. At 0.44% matching C (278 of about 21,000 functions),
 waiting for a decompilation is not an option; the N64 and Xbox 360 recompiled ports also started from machine code.
-(By 26 November the decompilation stood at 29.53%, 14,141 functions; see the
+(By 27 November the decompilation stood at 30.01%, 14,187 functions; see the
 [progress report](../decomp/progress.md).)
 
 **PSP recompilation exists now.** It appeared between July and October 2026:
