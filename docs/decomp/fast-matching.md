@@ -261,13 +261,13 @@ A night with two goals: map the game's battle replay code (recording, playback, 
 planned replay input track ([replay-module.md](../research/replay-module.md)), and match it. The lead mapped it from
 the code, decrypted the test data's replays offline and checked one question in a run. Sonnet agents (two at a time)
 then matched the replay module, its battle and menu callers and the save manager that writes and reads REPLAY.BIN.
-Verified C/C++ totals went from 14,141 functions / 1,393,272 bytes to **14,187 functions / 1,415,896 bytes (30.01%
+Verified C/C++ totals went from 14,141 functions / 1,393,272 bytes to **14,189 functions / 1,417,412 bytes (30.04%
 of inventoried function bytes)**. The separate VFPU count is unchanged at 35 / 2,460. All four modules rebuild
 byte-identically and all 225 tests pass (7 skipped).
 
 | Module | Functions | Bytes | Added |
 | --- | ---: | ---: | ---: |
-| Main executable | 5,330 | 461,568 | 30 |
+| Main executable | 5,332 | 463,084 | 32 |
 | Menu overlay | 4,317 | 462,528 | 6 |
 | Battle overlay | 4,516 | 489,684 | 10 |
 | Extra overlay | 24 | 2,116 | 0 |
@@ -287,7 +287,8 @@ byte-identically and all 225 tests pass (7 skipped).
     label, counter and save/load prompt;
   - menu: both hand-offs into playback, the Creation replay screen and list, a replay menu step, and the mode-12
     start;
-  - main: the save manager (begin, SIZES, slot search, default name, parameters, texts, the Update task).
+  main: the save manager (begin, SIZES, slot search, default name, parameters, texts, the Update task, the
+  per-frame poll) and the save module's flag-table init.
 - **Not matched**:
   - `RawPad_inject` `0x08872304`: 11 words, the first 64-bit mask test's scheduling; about 100 variants.
   - Near misses of 2 to 24 words, kept in `build/scratch/agent1xx/`: the add-camera-data shift loop (5), the

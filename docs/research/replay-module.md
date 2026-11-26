@@ -129,7 +129,8 @@ The save manager `*(0x089D7260)`, which runs every savedata request (REPLAY.BIN'
 November: `0x088AF620` `save_begin_request` (a request and its message box), `0x088AF868` `save_start_sizes` (a
 SIZES request), `0x088AF7B0` `save_find_slot`, `0x088ADDE8` `save_default_name` (the name from a time stamp),
 `0x088ADB10` `save_fill_params` (the savedata parameters), `0x088ADC08` `save_finish_texts` (title and detail), and
-`0x088AEF54` `save_header_check`, and `0x088B01C0` `save_update` (the "Update" task's body: polls the utility, runs
+`0x088AEF54` `save_header_check`, `0x088AE9B8` `save_poll_request` (the per-frame poll that starts or finishes
+the next request), and `0x088B01C0` `save_update` (the "Update" task's body: polls the utility, runs
 `0x088AFDE4` when a request ends, opens the result's message box). Near: `0x088AFDE4` (the per-request update that
 calls the header check after a LISTLOAD, 24 words: register numbering), `0x088AF424` (the request state machine, 2
 words), `0x088AF044` (4), `0x088AF134` (runs a request, 6), `0x088AFBCC` (80).

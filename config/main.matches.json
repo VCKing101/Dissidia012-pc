@@ -25901,6 +25901,17 @@
       ]
     },
     {
+      "name": "save_poll_request_088ae9b8",
+      "source": "src/main/save_poll_request_088ae9b8.c",
+      "functions": [
+        {
+          "name": "func_088AE9B8",
+          "address": "0x088AE9B8",
+          "size": 668
+        }
+      ]
+    },
+    {
       "name": "save_header_check_088aef54",
       "source": "src/main/save_header_check_088aef54.c",
       "functions": [
@@ -26245,6 +26256,21 @@
       ],
       "unused_inline_symbols": [
         "__0fOObject088B075CHdestroyP6OObject088B075CiT"
+      ]
+    },
+    {
+      "name": "save_flag_tables_init_088b0788",
+      "source": "src/main/save_flag_tables_init_088b0788.cpp",
+      "functions": [
+        {
+          "name": "func_088B0788",
+          "address": "0x088B0788",
+          "size": 848
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fHFlagOpsDsetiUi",
+        "__0fHFlagOpsFcleariUi"
       ]
     },
     {
@@ -63254,7 +63280,8 @@
     "D_089CB428": "0x089CB428",
     "D_089CB434": "0x089CB434",
     "func_088AFBCC": "0x088AFBCC",
-    "func_088AFDE4": "0x088AFDE4"
+    "func_088AFDE4": "0x088AFDE4",
+    "func_088AE500": "0x088AE500"
   },
   "status": "97 matching C/C++ functions / 6104 bytes; typed presentation callbacks, initialization, rendering gates, exact task unlink and drawing allocation support. Larger transition/update and task factory/registration remain unfinished."
 }
