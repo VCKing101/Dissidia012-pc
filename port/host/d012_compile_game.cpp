@@ -1010,14 +1010,19 @@ int run(const Options &options) {
 // The Android app's compile (host/d012_device_compile.cpp): the same steps,
 // with the app's paths (find_paths). 0: up to date or compiled;
 // kNeedsCompile with check_only when it must compile; 1: failed, with the
-// reason given to the listener.
-int run_in_app(bool check_only, std::function<void(const std::string &, unsigned)> listener) {
+// reason given to the listener. With `stop` (asked from the workers too, so
+// thread-safe), the compile ends when it says so, and the listener is told
+// "Cancelled.".
+int run_in_app(bool check_only, std::function<void(const std::string &, unsigned)> listener,
+               std::function<bool()> stop) {
     Options options;
     options.android = true;
     options.check_only = check_only;
     g_listener = std::move(listener);
+    g_stop = std::move(stop);
     const int code = run(options);
     g_listener = nullptr;
+    g_stop = nullptr;
     return code;
 }
 
@@ -1041,10 +1046,6 @@ int run_here(bool check_only, std::function<void(const std::string &, unsigned)>
     g_listener = nullptr;
     g_stop = nullptr;
     return code;
-}
-
-int run_here(bool check_only, std::function<void(const std::string &, unsigned)> listener) {
-    return run_here(check_only, std::move(listener), {});
 }
 
 int main(int argc, char **argv) {

@@ -27,6 +27,8 @@
 
 #if defined(PORTABLEKIT_ANDROID_APP) && defined(D012_INSTALLER_BUILD)
 
+#include "d012_compile_screens.hpp"
+
 #include "app_paths.hpp"
 #include "install/installer.hpp"
 #include "install/user_data.hpp"
@@ -42,8 +44,6 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
-#include <memory>
-#include <mutex>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -51,7 +51,8 @@
 #include <vector>
 
 namespace d012::compile_game {
-int run_in_app(bool check_only, std::function<void(const std::string &, unsigned)> listener);
+int run_in_app(bool check_only, std::function<void(const std::string &, unsigned)> listener,
+               std::function<bool()> stop);
 int needs_compile_code();
 }
 
@@ -174,21 +175,15 @@ bool prepare(portablekit::install::InstallerUi *given, const fs::path &, const f
     const bool fresh_toolchain = stamp.empty() || read_text(toolchain_dir() / ".stamp") != stamp;
     if (!fresh_toolchain) {
         link_programs();
-        const int code = d012::compile_game::run_in_app(true, {});
+        const int code = d012::compile_game::run_in_app(true, {}, {});
         if (code == 0) return true;
         std::cout << "[device-compile] the game's code must be made (" << code << ")" << std::endl;
     }
 
     // The installer's own screens when it asks (it is setting up), or ours.
-    std::unique_ptr<portablekit::install::InstallerUi> own;
-    if (given == nullptr) own = portablekit::install::make_installer_ui();
-    portablekit::install::InstallerUi *ui = given != nullptr ? given : own.get();
-    std::string failure;
-    int code = 1;
-    // The screen stays on: the work can take many minutes.
-    SDL_DisableScreenSaver();
-    const auto work = [&] {
-        try {
+    const compile_screens::Result result = compile_screens::run(
+        given, "Making the game from your disc",
+        [&](portablekit::install::InstallerUi *ui, const compile_screens::Hooks &hooks) {
             if (fresh_toolchain) {
                 if (stamp.empty()) throw std::runtime_error("the app's compiler is missing from it");
                 unpack(stamp, [&](std::uint64_t done, std::uint64_t total) {
@@ -196,41 +191,15 @@ bool prepare(portablekit::install::InstallerUi *given, const fs::path &, const f
                 });
             }
             link_programs();
-            // Called from the compile's worker threads too: it must not throw,
-            // so the screen's Cancel is not honoured while it compiles.
-            std::mutex lock;
-            code = d012::compile_game::run_in_app(false, [&](const std::string &message, unsigned percent) {
-                const std::lock_guard<std::mutex> guard(lock);
-                failure = message;
-                if (!ui) return;
-                try {
-                    ui->progress(message, percent, 100u);
-                } catch (...) {
-                }
-            });
-        } catch (const portablekit::install::InstallCancelled &) {
-            failure = "Cancelled.";
-            code = 1;
-            throw;
-        } catch (const std::exception &e) {
-            failure = e.what();
-            code = 1;
-        }
-    };
-    try {
-        if (ui) ui->run_task("Making the game from your disc", work);
-        else work();
-    } catch (const portablekit::install::InstallCancelled &) {
-        SDL_EnableScreenSaver();
-        return false;
-    }
-    SDL_EnableScreenSaver();
-    if (code == 0) return true;
-    portablekit::install::report_problem(
-        "The game could not be made",
-        "Making the game's code from your disc did not succeed:\n\n" + failure +
-            "\n\nStart the app again to try again. The log is game-code-build.log in the app's data.",
-        false);
+            return d012::compile_game::run_in_app(false, hooks.listener, hooks.stop);
+        });
+    if (result.outcome == compile_screens::Outcome::Done) return true;
+    if (result.outcome == compile_screens::Outcome::Failed)
+        portablekit::install::report_problem(
+            "The game could not be made",
+            "Making the game's code from your disc did not succeed:\n\n" + result.message +
+                "\n\nStart the app again to try again. The log is game-code-build.log in the app's data.",
+            false);
     return false;
 }
 

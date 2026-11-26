@@ -479,6 +479,15 @@ programs, remade at every start, and clang runs with `-no-canonical-prefixes` so
 linker from the links' folder. Measured on 15 November 2026 on a Galaxy S25 Ultra: 12 s to unpack, 6 min 51 s for
 the whole compile (7 jobs), then the game; the next start went straight to it.
 
+The three compiles at a start (a Windows copy without `game-code/main.dll`, a Linux copy that just updated itself
+from the menu, the Android app) show it the same way, through `host/d012_compile_screens.cpp`: one stage, "Compiling
+the game's code", so the time left runs from its start (the setup's screens restart their estimate whenever the
+stage's text changes, and the compile's own messages, which go to the log, count parts); and Cancel, Esc (Android's
+Back), the pad's Back button or closing the window stop it at the next part, with the parts already made kept in
+`game-code-cache/`. On the screens it opens itself, the interface is set to take input for the compile, or Esc would
+wait for the game and open its menu. Before 26 November 2026 the Linux and Android compiles could not be cancelled
+and their time left restarted at every part.
+
 Measured on 28 October 2026 (i7-12700K, 8 jobs, -O1): 4 minutes from the ISO, of which about 1 for the five
 recompiles and 3 for the compile. The C++ it generates is byte for byte the developer pipeline's (main and all
 four overlays, with the same overlay names and entry files). The game's code runs about three times faster than

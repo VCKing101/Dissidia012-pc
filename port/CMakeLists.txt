@@ -57,6 +57,7 @@ if(D012_INSTALLER_BUILD AND ANDROID)
     set(d012_corpus NO_CORPUS)
     set(d012_game_code "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_game_code.cpp"
                        "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_compile_game.cpp"
+                       "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_compile_screens.cpp"
                        "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_device_compile.cpp")
 elseif(D012_INSTALLER_BUILD)
     set(d012_profile_dir "${CMAKE_BINARY_DIR}/installer-profile")
@@ -64,7 +65,8 @@ elseif(D012_INSTALLER_BUILD)
     # own, which adds --compile-game (host/d012_compile_game.cpp).
     set(d012_corpus NO_CORPUS HOST_MAIN_NAME d012_portablekit_main)
     set(d012_game_code "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_game_code.cpp"
-                       "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_compile_game.cpp")
+                       "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_compile_game.cpp"
+                       "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_compile_screens.cpp")
 else()
     set(d012_profile_dir "${D012_WORK_DIR}")
     set(d012_corpus)
