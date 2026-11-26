@@ -34,4 +34,13 @@ void install(std::vector<mod_abilities::Grant> &grants);
 // opened its package.
 [[nodiscard]] bool active();
 
+// His looks from DLC (the official DLC's fourth, costume packs): each one the
+// game opens as his fighter's model is given the moves' animations as it is
+// read, as his disc looks are; one that cannot take them (another skeleton,
+// other animations) is drawn as his first look in a battle, menus aside.
+// Nothing changes on the memory stick. Called once, before dlc_packs::install,
+// so that it sees the packs' files before they are served. Off with
+// D012_NO_ORIGINAL_MOVES_LOOKS=1.
+void install_looks();
+
 } // namespace d012::original_moves

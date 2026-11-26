@@ -2265,6 +2265,136 @@ void test_original_moves() {
     expect(refused, "a file that is not the game's stops the build");
 }
 
+// Bartz's looks from DLC (host/d012_original_moves.cpp fit_look and
+// fighter_look_model), with made-up models in the GMO layout the builder
+// reads: 16 bytes of magic, then {u16 type, u16 header size, u32 size, u32
+// where the children start, u32 data, name} chunks, a model's bones and
+// animations its children.
+namespace looks_test {
+
+using Bytes = std::vector<std::uint8_t>;
+
+void add32(Bytes &out, std::uint32_t value) {
+    for (unsigned k = 0u; k < 4u; ++k) out.push_back(static_cast<std::uint8_t>(value >> (8u * k)));
+}
+
+Bytes chunk(std::uint16_t type, const std::string &name, const std::vector<Bytes> &kids) {
+    Bytes name_bytes(name.begin(), name.end());
+    name_bytes.push_back(0u);
+    while (name_bytes.size() % 4u != 0u) name_bytes.push_back(0u);
+    const std::uint32_t header = 16u + static_cast<std::uint32_t>(name_bytes.size());
+    std::uint32_t size = header;
+    for (const Bytes &kid : kids) size += static_cast<std::uint32_t>(kid.size());
+    Bytes out;
+    out.push_back(static_cast<std::uint8_t>(type));
+    out.push_back(static_cast<std::uint8_t>(type >> 8u));
+    out.push_back(static_cast<std::uint8_t>(header));
+    out.push_back(static_cast<std::uint8_t>(header >> 8u));
+    add32(out, size);
+    add32(out, header);
+    add32(out, header);
+    out.insert(out.end(), name_bytes.begin(), name_bytes.end());
+    for (const Bytes &kid : kids) out.insert(out.end(), kid.begin(), kid.end());
+    return out;
+}
+
+// An animation: a chunk with a little data of its own.
+Bytes motion(const std::string &name, std::uint8_t fill) { return chunk(0x000Bu, name, {Bytes(24u, fill)}); }
+
+Bytes model(const std::vector<std::string> &bones, const std::vector<Bytes> &motions) {
+    std::vector<Bytes> kids;
+    for (const std::string &bone : bones) kids.push_back(chunk(0x0004u, bone, {}));
+    kids.insert(kids.end(), motions.begin(), motions.end());
+    const std::string magic("OMG.00.1PSP\0\0\0\0\0", 16u);
+    Bytes out(magic.begin(), magic.end());
+    const Bytes file = chunk(0x0002u, "file", {chunk(0x0003u, "model", kids)});
+    out.insert(out.end(), file.begin(), file.end());
+    return out;
+}
+
+Bytes row_file(int character, int flags, const std::string &name) {
+    Bytes out;
+    add32(out, 0x0Cu);
+    add32(out, 1u);
+    Bytes row(0x44u, 0u);
+    row[0] = 0xE8u;
+    row[1] = 0x02u;
+    row[6] = static_cast<std::uint8_t>(character);
+    row[7] = 4u;
+    row[8] = static_cast<std::uint8_t>(flags);
+    row[9] = 0x29u;
+    std::copy(name.begin(), name.end(), row.begin() + 0x24);
+    const std::string data = "p_fiv100";
+    std::copy(data.begin(), data.end(), row.begin() + 0x34);
+    out.insert(out.end(), row.begin(), row.end());
+    return out;
+}
+
+} // namespace looks_test
+
+void test_original_moves_looks() {
+    namespace om = d012::original_moves;
+    using namespace looks_test;
+    const std::vector<std::string> bones = {"root", "spine", "head"};
+    const std::vector<Bytes> own = {motion("_000A", 1), motion("_010A", 2)};
+    const std::vector<Bytes> moves = {motion("_600A_OG", 7), motion("_607A_OG", 8)};
+    std::vector<Bytes> all = own;
+    all.insert(all.end(), moves.begin(), moves.end());
+    const Bytes built = model(bones, all);  // his first look as the build makes it
+    const Bytes look = model(bones, own);   // a DLC look as it comes
+    const std::uint64_t big = 0x264000u;
+
+    const om::FittedLook added = om::fit_look(look, built, moves.size(), big);
+    expect(added.fit == om::LookFit::moves_added, "a look with his bones and animations takes the moves");
+    expect(added.bytes == built, "it comes to the same bytes as the build's model, the moves' animations after its own");
+
+    // A look of its own drawing: the same names, other animation data.
+    const Bytes redrawn = model(bones, {motion("_000A", 3), motion("_010A", 4)});
+    std::vector<Bytes> redrawn_all = {motion("_000A", 3), motion("_010A", 4)};
+    redrawn_all.insert(redrawn_all.end(), moves.begin(), moves.end());
+    const om::FittedLook drawn = om::fit_look(redrawn, built, moves.size(), big);
+    expect(drawn.fit == om::LookFit::moves_added && drawn.bytes == model(bones, redrawn_all),
+           "a look with its own animation data keeps it and gets the moves' as the build made them");
+
+    expect(om::fit_look(built, built, moves.size(), big).fit == om::LookFit::has_moves, "a look that has the moves is left as it is");
+    const om::FittedLook other_moves =
+        om::fit_look(model(bones, {own[0], own[1], moves[0], motion("_607A_OG", 9)}), built, moves.size(), big);
+    expect(other_moves.fit == om::LookFit::cannot, "a look with other bytes for a move's animation is not taken as having them");
+
+    const om::FittedLook other_bones = om::fit_look(model({"root", "spine", "tail"}, own), built, moves.size(), big);
+    expect(other_bones.fit == om::LookFit::cannot && other_bones.why.find("bones") != std::string::npos,
+           "a look with other bones cannot take the moves, and says so");
+    expect(om::fit_look(model(bones, {own[0]}), built, moves.size(), big).fit == om::LookFit::cannot,
+           "a look missing one of his animations cannot take the moves");
+    expect(om::fit_look(model(bones, {own[1], own[0]}), built, moves.size(), big).fit == om::LookFit::cannot,
+           "a look with his animations in another order cannot take the moves");
+    expect(om::fit_look(look, built, moves.size(), built.size() - 1u).fit == om::LookFit::cannot,
+           "a look that would come to more than the game's model block cannot take the moves");
+    const Bytes junk(64u, 0x5Au);
+    const om::FittedLook not_model = om::fit_look(junk, built, moves.size(), big);
+    expect(not_model.fit == om::LookFit::cannot && !not_model.why.empty(), "a file that is no model cannot take the moves");
+    bool threw = false;
+    try {
+        (void)om::fit_look(look, look, moves.size(), big);
+    } catch (const om::Error &) {
+        threw = true;
+    }
+    expect(threw, "a built model without the moves' animations is the port's mistake, not the look's");
+
+    const auto fighter = om::fighter_look_model(row_file(9, 0, "P_FIV100_4P"));
+    expect(fighter && *fighter == "P_FIV100_4P", "his DLC fighter row names its model");
+    expect(!om::fighter_look_model(row_file(9, 8, "P_FIV100_4P_A")), "his assist's row is not a fighter look");
+    expect(!om::fighter_look_model(row_file(13, 0, "P_SEV100_4P")), "another character's row is not his");
+    expect(!om::fighter_look_model(row_file(9, 0, "P_FIV100_W")), "a weapon's row is not a fighter look");
+    expect(!om::fighter_look_model(row_file(9, 0, "G_ATT_060")), "a row whose name is no fighter's is not a fighter look");
+    Bytes short_row = row_file(9, 0, "P_FIV100_4P");
+    short_row.resize(40u);
+    expect(!om::fighter_look_model(short_row), "a cut-off row is no row");
+    Bytes other_table = row_file(9, 0, "P_FIV100_4P");
+    other_table[0] = 0x10u;
+    expect(!om::fighter_look_model(other_table), "a file that is not a costume table is no row");
+}
+
 // The Manikin look (host/d012_manikin_rules.cpp): who has one, the next look,
 // and the look labels added to a menu text pack.
 namespace manikin_test {
@@ -2459,6 +2589,7 @@ int main(int argc, char **argv) {
     test_battle_cheats();
     test_package_index();
     test_original_moves();
+    test_original_moves_looks();
     test_manikin_look();
     if (g_failures == 0) std::cout << "all passed\n";
     return g_failures == 0 ? 0 : 1;

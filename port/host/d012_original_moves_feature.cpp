@@ -3,6 +3,10 @@
 
 #include "d012_original_moves_feature.hpp"
 
+#include "d012_decomp_harness.hpp"
+#include "d012_dlc.hpp"
+#include "d012_dlc_packs.hpp"
+#include "d012_dlc_packs_plan.hpp"
 #include "d012_json.hpp"
 #include "d012_model_memory.hpp"
 #include "d012_net.hpp"
@@ -13,9 +17,11 @@
 #include "hle/hle_common.hpp"
 #include "install/user_data.hpp"
 #include "patched_edition.hpp"
+#include "portablekit/hle_extension.hpp"
 #include "profile.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
@@ -26,6 +32,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 
 namespace d012 {
 // The recipe (port/features/bartz-original-moves.json), compiled into the
@@ -50,11 +57,17 @@ constexpr std::uint32_t kSoundRoom = 0x100000u;
 constexpr std::uint32_t kEffectRoom = 0x200000u;
 // Changes with the builder: a cache made by an older one is not used.
 constexpr unsigned kBuilderVersion = 1u;
+// His first look, which the build gives the moves like the others.
+constexpr const char *kFirstLook = "obj/P_FIV100_1P.gmo";
 
 struct State {
     std::optional<json::Value> recipe;
     std::uint32_t recipe_crc{};
     bool active{};
+    // His first look as built, which his DLC looks are fitted to, and how many
+    // animations the build adds.
+    std::shared_ptr<const Bytes> first_look;
+    std::size_t added{};
 };
 State &state() {
     static State s;
@@ -204,8 +217,12 @@ std::vector<package_mods::LateFile> build_for_package(const std::function<bool(s
             save_cache(folder, wanted, *files);
         }
         const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
-        for (File &file : *files)
-            out.push_back({std::move(file.path), std::make_shared<const std::vector<std::uint8_t>>(std::move(file.bytes))});
+        for (File &file : *files) {
+            auto bytes = std::make_shared<const std::vector<std::uint8_t>>(std::move(file.bytes));
+            if (file.path == kFirstLook) s.first_look = bytes;
+            out.push_back({std::move(file.path), std::move(bytes)});
+        }
+        s.added = added_animations(recipe);
         s.active = true;
         net::battle::must_match(kMatchItem, "on, recipe " + hex8(s.recipe_crc));
         char took[32];
@@ -226,6 +243,144 @@ std::vector<package_mods::LateFile> files_for_package(const std::function<bool(s
     std::vector<package_mods::LateFile> out = build_for_package(taken);
     if (!state().active) mod_abilities::withdraw(kGrantOwner);
     return out;
+}
+
+// --- His looks from DLC ------------------------------------------------------
+// A DLC look is a model file of its own on the memory stick (or in a DLC
+// pack), read by the hash of its name. As the game opens one of his as a
+// fighter's, it is served with the moves' animations added (fit_look); one
+// that cannot take them is served, in a battle, as his first look, so that he
+// never runs a move he has no animation for, and both copies of an online
+// battle run it alike whatever look each draws. Outside a battle (the menus'
+// previews) it stays as it is.
+
+struct Look {
+    std::string model;                        // "P_FIV100_4P"
+    std::optional<LookFit> fit;               // once the file has been seen
+    std::shared_ptr<const Bytes> with_moves;  // with moves_added
+    bool told_in_battle{};
+};
+struct Looks {
+    bool scanned{};
+    std::map<std::uint32_t, Look> by_name;  // by the hash of obj/<model>.gmo
+};
+Looks &looks() {
+    static Looks l;
+    return l;
+}
+
+// The battle overlay is in the overlay window (battle 0x08B2F2E4's first two
+// instructions, as d012_versus.cpp tells a battle).
+bool battle_on() {
+    constexpr std::uint32_t kSetAiMode = 0x08B2F2E4u;
+    return decomp::live_load32(kSetAiMode) == 0x27BDFFF0u && decomp::live_load32(kSetAiMode + 4u) == 0x2CA60006u;
+}
+
+std::string lower(std::string_view text) {
+    std::string out(text);
+    for (char &c : out) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return out;
+}
+
+// A DLC file as the game finds it: the memory stick's own, else a pack's.
+std::optional<Bytes> dlc_file(std::uint32_t crc) {
+    char name[16];
+    std::snprintf(name, sizeof name, "%08x.edat", static_cast<unsigned>(crc));
+    if (auto bytes = read_host_file(dlc::folder() / name)) return bytes;
+    return dlc_packs::served_file(crc);
+}
+
+// His fighter looks among the DLC's costume rows.
+void scan(Looks &l) {
+    for (int slot = 0; slot < 256; ++slot) {
+        char row_path[32];
+        std::snprintf(row_path, sizeof row_path, "dlc/obj/dlc_%03doe.bin", slot);
+        const auto row = dlc_file(dlc_packs::name_crc(row_path));
+        if (!row) continue;
+        if (const auto model = fighter_look_model(*row))
+            l.by_name[dlc_packs::name_crc("obj/" + *model + ".gmo")].model = *model;
+    }
+}
+
+Bytes read_open(std::uint32_t fd) {
+    Bytes bytes;
+    std::uint8_t chunk[64 * 1024];
+    for (std::uint64_t at = 0u;;) {
+        const std::size_t got = portablekit::hle_extension::read_open_file(fd, at, chunk);
+        if (got == 0u) break;
+        bytes.insert(bytes.end(), chunk, chunk + got);
+        at += got;
+    }
+    return bytes;
+}
+
+class ServedLook final : public portablekit::hle_extension::FileFilter {
+public:
+    explicit ServedLook(std::shared_ptr<const Bytes> bytes) : bytes_(std::move(bytes)) {}
+    [[nodiscard]] std::uint64_t size() const override { return bytes_->size(); }
+    std::size_t read(std::uint64_t offset, std::uint8_t *destination, std::size_t length) override {
+        if (offset >= bytes_->size()) return 0u;
+        const std::size_t count = static_cast<std::size_t>(std::min<std::uint64_t>(length, bytes_->size() - offset));
+        std::copy_n(bytes_->begin() + static_cast<std::ptrdiff_t>(offset), count, destination);
+        return count;
+    }
+
+private:
+    std::shared_ptr<const Bytes> bytes_;
+};
+
+std::shared_ptr<portablekit::hle_extension::FileFilter> serve_look(std::string_view path, std::uint32_t fd) {
+    State &s = state();
+    if (!s.active || s.first_look == nullptr) return nullptr;
+    const std::size_t slash = path.rfind('/');
+    if (slash == std::string_view::npos) return nullptr;
+    const auto crc = dlc_packs::crc_of_file_name(path.substr(slash + 1u));
+    if (!crc) return nullptr;
+    static const std::string folder = lower("ms0:/PSP/GAME/" + std::string(portablekit::active_disc_id()) + "/");
+    if (lower(path.substr(0u, slash + 1u)) != folder) return nullptr;
+    Looks &l = looks();
+    if (!l.scanned) {
+        l.scanned = true;
+        scan(l);
+    }
+    const auto found = l.by_name.find(*crc);
+    if (found == l.by_name.end()) return nullptr;
+    Look &look = found->second;
+    if (!look.fit) {
+        std::optional<Bytes> bytes = fd != 0u ? std::optional<Bytes>(read_open(fd)) : dlc_packs::served_file(*crc);
+        if (!bytes || bytes->empty()) return nullptr;  // no file: the game draws his first look itself
+        FittedLook fitted;
+        try {
+            fitted = fit_look(*bytes, *s.first_look, s.added, model_memory::block_size());
+        } catch (const std::exception &failure) {
+            fitted.fit = LookFit::cannot;
+            fitted.why = failure.what();
+        }
+        look.fit = fitted.fit;
+        const std::string name = look.model + " (" + hex8(*crc) + ".edat)";
+        if (fitted.fit == LookFit::moves_added) {
+            look.with_moves = std::make_shared<const Bytes>(std::move(fitted.bytes));
+            std::cout << "[original-moves] DLC look " << name << ": the moves' animations added (" << look.with_moves->size()
+                      << " bytes)" << std::endl;
+        } else if (fitted.fit == LookFit::has_moves) {
+            std::cout << "[original-moves] DLC look " << name << ": has the moves' animations" << std::endl;
+        } else {
+            std::cout << "[original-moves] DLC look " << name << ": the moves cannot go in (" << fitted.why
+                      << "); in a battle he wears his first look" << std::endl;
+        }
+    }
+    switch (*look.fit) {
+    case LookFit::has_moves: return nullptr;
+    case LookFit::moves_added: return std::make_shared<ServedLook>(look.with_moves);
+    case LookFit::cannot:
+        if (!battle_on()) return nullptr;
+        if (!look.told_in_battle) {
+            look.told_in_battle = true;
+            std::cout << "[original-moves] DLC look " << look.model << " drawn in this battle as his first look" << std::endl;
+        }
+        return std::make_shared<ServedLook>(s.first_look);
+    }
+    return nullptr;
 }
 
 } // namespace
@@ -283,5 +438,17 @@ void install(std::vector<mod_abilities::Grant> &grants) {
 }
 
 bool active() { return state().active; }
+
+void install_looks() {
+    static bool installed = false;
+    if (installed) return;
+    installed = true;
+    if (portablekit::env("NO_ORIGINAL_MOVES_LOOKS") != nullptr) {
+        std::cout << "[original-moves] DLC looks left as they are (" << portablekit::env_name("NO_ORIGINAL_MOVES_LOOKS")
+                  << ")\n";
+        return;
+    }
+    portablekit::hle_extension::add_file_provider(serve_look);
+}
 
 } // namespace d012::original_moves

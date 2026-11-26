@@ -125,6 +125,7 @@ Each of these leaves the game as it is on the disc and writes one line to the lo
 | `D012_TEST_ORIGINAL_MOVES=1` | All eight are given from level 1 (testing) |
 | `D012_NO_BATTLE_ROOM=1` | The sound and effect heaps keep the game's sizes (testing; battle sounds go missing) |
 | `D012_TRACE_HEAPS=1` | Logs every allocation of the game's heaps that finds no room (`=2`: every allocation) |
+| `D012_NO_ORIGINAL_MOVES_LOOKS=1` | His looks from DLC are left as they are (testing; see "Looks from DLC") |
 
 ## Online
 
@@ -140,6 +141,51 @@ files are built with `-ffp-contract=off`, and `d012_gmo_motion.cpp` refuses to b
 builds on Windows come to the same bytes as the Python reference. The whole port has not been run on Linux or
 Android yet; if a build differed there, its check would fail and it would leave the moves out rather than use
 other bytes.
+
+## Looks from DLC
+
+The build gives the moves' 16 animations to his four looks on the disc (1P, 2P, 3P and the Manikin). A look from
+DLC is a model file of its own on the memory stick, `ms0:/PSP/GAME/ULUS10566/<hash>.edat`: the official DLC's
+fourth look (`P_FIV100_4P`, `bddf3ffc.edat`), or a costume pack in `data/dlc` ([dlc-packs.md](dlc-packs.md)). The
+build never sees it. In such a look a move found no animation, so he held still in his bind pose while its effects
+played. Online it was worse: a copy without that DLC draws his first look, which has the animations, so the two
+battles went apart a moment later ("Network sync failed"; reported 26 November 2026, Steam Deck against a PC).
+
+Now, as the game opens one of his DLC looks as a fighter's model (`d012_original_moves_feature.cpp`, `serve_look`;
+the DLC's costume rows `dlc/obj/dlc_NNNoe.bin` say which files those are):
+
+- **A look made from his own model** (the same bones, and his 84 animations by name and in order) is served with the
+  moves' 16 animations added after its own: the same bytes the build adds to the disc's looks. The official fourth
+  look is one: its 84 animations are the 1P model's byte for byte, so with the moves every look of his animates
+  alike, and a copy drawing another look stays in step. Nothing changes on the memory stick.
+- **Any other look** (another skeleton, other animations, or too big for the game's model block with them) is drawn
+  as his first look in a battle. The menus still show it.
+- His assist's rows, and other characters' looks, are left alone.
+
+The log says which:
+
+```
+[original-moves] DLC look P_FIV100_4P (BDDF3FFC.edat): the moves' animations added (2361860 bytes)
+[original-moves] DLC look P_FIV100_4P (BDDF3FFC.edat): the moves cannot go in (its bones are not his); in a battle he wears his first look
+```
+
+Checked (26 November 2026, Windows, clang build, USA disc, the official USA DLC, Ascendent Lance (OG) equipped):
+
+- Quick Battle, Bartz in DLC 1: with `D012_NO_ORIGINAL_MOVES_LOOKS=1` he stands in his bind pose while the move's
+  shield and lance appear; without it he leaps in with the lance and hits.
+- The same with the DLC in a pack folder instead of on the memory stick: the animations are added; he leaps in.
+- His fourth look with one bone renamed (a look the moves cannot go in): Player Select still shows DLC 1; in the
+  battle he wears his first look and the move hits.
+- Online, two copies on this PC through `D012Native --adhoc-server --loopback`, Cornelia lobby (customized
+  characters), copy 1 with the DLC as Bartz in DLC 1, copy 2 without it as Lightning: with the switch the battle
+  went apart at frame 660, just after the move ("Network sync failed" on both); without it the move hit and the
+  battle was in step at frames 650 and 1,290 with the move used again and again, both copies showing the same
+  Brave, HP and time.
+- `d012_tests` checks the fitting with made-up models (added, already there, other bones, a missing animation,
+  another order, too big, no model) and the costume rows.
+
+Not checked: Linux, the Steam Deck and Android; a fan costume pack; rollback (the online test was a hosted lobby
+battle, lockstep).
 
 ## For developers
 
@@ -245,8 +291,9 @@ That run's trace also matched the plain run's at all 22,769 reads it reached.
 - Other languages: the USA and European packages hold the ability names and help texts under `EN` only, and that
   is what the build changes. How the game shows these abilities with another language chosen is not checked.
 - With a character mod on, the moves are left out (see above); merging into a mod's files is not attempted.
-- Bartz with his alternate costumes, and Bartz against the fighters with the biggest models, have not been played:
-  his models are 280 KB bigger than the disc's and the game's model pool has little room to spare.
+- Bartz with his alternate costumes (2P, 3P), and Bartz against the fighters with the biggest models, have not been
+  played: his models are 280 KB bigger than the disc's and the game's model pool has little room to spare. His DLC
+  look has (see "Looks from DLC").
 - The moves' sounds have not been checked by ear; Flood's water sound is Terra's, as a stand-in.
 - Rollback's save states on Linux, the Steam Deck and Android, and in a real two-copy online battle: measured and
   checked on Windows only (see "Rollback" above).

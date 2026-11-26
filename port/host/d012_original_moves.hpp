@@ -81,4 +81,40 @@ struct Mark {
 // sizes and CRCs. `problem` says the first difference.
 [[nodiscard]] bool check(const json::Value &recipe, const Built &built, std::string &problem);
 
+// --- His looks from DLC ------------------------------------------------------
+// The build gives the moves' animations to his four looks on the disc. A DLC
+// look (the official DLC's fourth, or a costume pack) is a model file of its
+// own on the memory stick, which the build never sees: in it the moves found
+// no animation and he held still in his bind pose, and online the other copy,
+// drawing the look it has, ran the move, so the two battles went apart
+// (docs/port/original-moves.md, "Looks from DLC").
+
+// The model a DLC costume row (dlc/obj/dlc_NNNoe.bin: {u32 0x0C, u32 count}
+// and 0x44-byte rows) gives Bartz as a fighter, "P_FIV100_4P"; nothing when
+// the file is no such row, or the row is another character's, an assist's or
+// an attachment's.
+[[nodiscard]] std::optional<std::string> fighter_look_model(std::span<const std::uint8_t> row_file);
+
+enum class LookFit {
+    has_moves,    // it has the moves' animations as the build made them
+    moves_added,  // it is his model with his own animations: the moves' are added
+    cannot,       // the moves cannot go in; `why` says what is in the way
+};
+struct FittedLook {
+    LookFit fit{};
+    Bytes bytes;      // with moves_added: the model with the moves' animations
+    std::string why;  // with cannot
+};
+// How a DLC look of his can have the moves. `built` is his first look as the
+// build made it (obj/P_FIV100_1P.gmo), whose last `added` animations are the
+// moves'. A look takes them when it has the same bones and the same
+// animations, by name and in order, as that model before them: they are
+// added after its own, the same bytes the build adds to the disc's looks, so
+// every look of his runs the moves alike. `largest` is the most bytes a model
+// may come to (the game's staging block for model files).
+[[nodiscard]] FittedLook fit_look(std::span<const std::uint8_t> model, std::span<const std::uint8_t> built, std::size_t added,
+                                  std::uint64_t largest);
+// How many animations the recipe's build adds to each of his looks.
+[[nodiscard]] std::size_t added_animations(const json::Value &recipe);
+
 } // namespace d012::original_moves
