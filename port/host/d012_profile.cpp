@@ -13,6 +13,7 @@
 
 #include "gpu/frame_interpolation.hpp"
 
+#include "d012_bloom.hpp"
 #include "d012_button_prompts.hpp"
 #include "d012_cheats.hpp"
 #include "d012_disc_mod.hpp"
@@ -61,6 +62,11 @@ extern const unsigned char kBodyFont[];
 extern const std::size_t kBodyFontSize;
 extern const unsigned char kCapsFont[];
 extern const std::size_t kCapsFontSize;
+// And its pictures of the game (menu/*.png).
+extern const unsigned char kBloomOffPicture[];
+extern const std::size_t kBloomOffPictureSize;
+extern const unsigned char kBloomOnPicture[];
+extern const std::size_t kBloomOnPictureSize;
 } // namespace d012
 
 namespace portablekit {
@@ -196,6 +202,19 @@ constexpr ComboControl kCombos[] = {
 void keyboard_defaults(input::Bindings &bindings, bool &) {
     bindings[static_cast<std::size_t>(input::Action::Up)][1] = input::kWheelUp;
     bindings[static_cast<std::size_t>(input::Action::Down)][1] = input::kWheelDown;
+}
+
+// Bloom's two pictures beside its row: the world map at ×4, the same moment
+// off and on (menu/bloom-*.png).
+std::span<const SettingPictures> setting_pictures() {
+    static const SettingPictures pictures[] = {{
+        .key = "game.bloom",
+        .off = {d012::kBloomOffPicture, d012::kBloomOffPictureSize},
+        .on = {d012::kBloomOnPicture, d012::kBloomOnPictureSize},
+        .note = "The world map at Resolution ×4, the same moment with Bloom off and on.",
+        .is_on = &d012::bloom::enabled,
+    }};
+    return pictures;
 }
 
 // The menu's look (docs/port/menu.md): night blue and silver, a crystal-blue
@@ -357,6 +376,12 @@ const GameProfile &game() {
         .font_note = "It changes the game's sentence text: descriptions, lists, help lines, the names you type, and "
                      "the music selector. Titles, fighter names, YES and NO, and battle tips are pictures and stay as "
                      "they are.",
+        // Bloom (d012_bloom.cpp) leaves out what the game draws: the paused
+        // game shows it one way only, so the menu shows these.
+        .setting_pictures = setting_pictures(),
+        .pause_credit = "PC recompilation by VCKing101, not affiliated with Square Enix.\n"
+                        "DISSIDIA 012 [duodecim] FINAL FANTASY\n"
+                        "\u00A9 2008, 2011 SQUARE ENIX CO., LTD. All Rights Reserved.",
     };
     return profile;
 }

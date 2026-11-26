@@ -76,6 +76,7 @@ void menu_rows() {
     namespace ui = portablekit::ui;
     ui::section("Effects");
     ui::RowOptions options;
+    options.key = kBloomKey;  // the menu's pictures of it (GameProfile::setting_pictures)
     options.description = "The soft glow over battles and the world map.";
     if (forced() != nullptr) {
         options.disabled = true;
