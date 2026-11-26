@@ -13721,7 +13721,15 @@
     "save_header_check_088aef54": "main_helpers",
     "replay_insert_span_088c8b90": "main_helpers",
     "replay_insert_span_at_088c8de8": "main_helpers",
-    "replay_remove_span_088c8cc0": "main_helpers"
+    "replay_remove_span_088c8cc0": "main_helpers",
+    "replay_normalize_span_088c854c": "main_helpers",
+    "replay_remove_span_088c88d4": "main_helpers",
+    "ending_dispatch_08b07974": "battle_helpers",
+    "ending_update_08b07b94": "battle_helpers",
+    "replay_camera_pick_08b2337c": "battle_helpers",
+    "field_mode12_battle_start_08a505c0": "menu_helpers",
+    "replay_list_exit_08a499a0": "menu_helpers",
+    "replay_menu_exit_08a40c98": "menu_helpers"
   },
   "features": [
     {

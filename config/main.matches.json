@@ -30407,6 +30407,28 @@
       ]
     },
     {
+      "name": "replay_normalize_span_088c854c",
+      "source": "src/main/replay_normalize_span_088c854c.cpp",
+      "functions": [
+        {
+          "name": "func_088C854C",
+          "address": "0x088C854C",
+          "size": 904
+        }
+      ]
+    },
+    {
+      "name": "replay_remove_span_088c88d4",
+      "source": "src/main/replay_remove_span_088c88d4.cpp",
+      "functions": [
+        {
+          "name": "func_088C88D4",
+          "address": "0x088C88D4",
+          "size": 700
+        }
+      ]
+    },
+    {
       "name": "replay_insert_span_088c8b90",
       "source": "src/main/replay_insert_span_088c8b90.cpp",
       "functions": [

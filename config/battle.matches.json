@@ -39901,6 +39901,21 @@
       ]
     },
     {
+      "name": "ending_dispatch_08b07974",
+      "source": "src/battle/ending_dispatch_08b07974.cpp",
+      "functions": [
+        {
+          "name": "func_08B07974",
+          "address": "0x08B07974",
+          "size": 360
+        }
+      ],
+      "rodata": {
+        "address": "0x08B0CE10",
+        "size": 48
+      }
+    },
+    {
       "name": "mode_dispatch_08b07adc",
       "source": "src/battle/mode_dispatch_08b07adc.c",
       "functions": [
@@ -39919,6 +39934,17 @@
           "name": "func_08B07B44",
           "address": "0x08B07B44",
           "size": 80
+        }
+      ]
+    },
+    {
+      "name": "ending_update_08b07b94",
+      "source": "src/battle/ending_update_08b07b94.cpp",
+      "functions": [
+        {
+          "name": "func_08B07B94",
+          "address": "0x08B07B94",
+          "size": 512
         }
       ]
     },
@@ -43166,6 +43192,17 @@
           "name": "func_08B21520",
           "address": "0x08B21520",
           "size": 104
+        }
+      ]
+    },
+    {
+      "name": "replay_camera_pick_08b2337c",
+      "source": "src/battle/replay_camera_pick_08b2337c.cpp",
+      "functions": [
+        {
+          "name": "func_08B2337C",
+          "address": "0x08B2337C",
+          "size": 340
         }
       ]
     },
@@ -53429,7 +53466,18 @@
     "func_08B0AD88": "0x08B0AD88",
     "func_08B0B71C": "0x08B0B71C",
     "func_089DE6EC": "0x089DE6EC",
-    "func_089DFCA4": "0x089DFCA4"
+    "func_089DFCA4": "0x089DFCA4",
+    "func_08B0C324": "0x08B0C324",
+    "func_08B08C14": "0x08B08C14",
+    "func_088F7050": "0x088F7050",
+    "func_08B091A4": "0x08B091A4",
+    "func_08B09014": "0x08B09014",
+    "func_088AC8C8": "0x088AC8C8",
+    "D_08B0CDC0": "0x08B0CDC0",
+    "func_088CA3C8": "0x088CA3C8",
+    "func_088CA240": "0x088CA240",
+    "func_088CA2E0": "0x088CA2E0",
+    "func_088CA354": "0x088CA354"
   },
   "status": "112 matching C/C++ functions / 8380 bytes; connected curve controls, resource cleanup and second activation/cleanup group added. Broader combat ownership remains provisional."
 }

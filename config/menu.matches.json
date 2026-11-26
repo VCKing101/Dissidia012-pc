@@ -11725,6 +11725,17 @@
       ]
     },
     {
+      "name": "replay_menu_exit_08a40c98",
+      "source": "src/menu/replay_menu_exit_08a40c98.cpp",
+      "functions": [
+        {
+          "name": "func_08A40C98",
+          "address": "0x08A40C98",
+          "size": 620
+        }
+      ]
+    },
+    {
       "name": "shop_step_08a40f04",
       "source": "src/menu/shop_step_08a40f04.cpp",
       "functions": [
@@ -13021,6 +13032,21 @@
           "size": 84
         }
       ]
+    },
+    {
+      "name": "replay_list_exit_08a499a0",
+      "source": "src/menu/replay_list_exit_08a499a0.cpp",
+      "functions": [
+        {
+          "name": "func_08A499A0",
+          "address": "0x08A499A0",
+          "size": 444
+        }
+      ],
+      "rodata": {
+        "address": "0x08A4C0A0",
+        "size": 32
+      }
     },
     {
       "name": "state_step_08a49b5c",
@@ -14714,6 +14740,17 @@
           "name": "func_08A50524",
           "address": "0x08A50524",
           "size": 156
+        }
+      ]
+    },
+    {
+      "name": "field_mode12_battle_start_08a505c0",
+      "source": "src/menu/field_mode12_battle_start_08a505c0.cpp",
+      "functions": [
+        {
+          "name": "func_08A505C0",
+          "address": "0x08A505C0",
+          "size": 144
         }
       ]
     },
@@ -51331,7 +51368,8 @@
     "func_08AE06B8": "0x08AE06B8",
     "func_08AE07D0": "0x08AE07D0",
     "func_08AE22E8": "0x08AE22E8",
-    "D_08AC42A2": "0x08AC42A2"
+    "D_08AC42A2": "0x08AC42A2",
+    "func_08889BAC": "0x08889BAC"
   },
   "status": "45 matching C/C++ functions / 4344 bytes; savedata callbacks and newly audited presentation completion callback. Controller table remains14/20; broader ownership incomplete."
 }
