@@ -27,6 +27,8 @@ namespace install = portablekit::install;
 
 // The heading under the title while the compile runs.
 constexpr const char *kStage = "Compiling the game's code";
+// What Cancel does, under it: the parts made stay in the cache.
+constexpr const char *kCancelNote = "Cancelling keeps the parts made so far: the next start goes on from them.";
 
 } // namespace
 
@@ -82,7 +84,7 @@ Result run(install::InstallerUi *given, const std::string &title,
     if (own_screens) layer.set_interactive(true);
 #endif
     try {
-        if (ui != nullptr) ui->run_task(title, work);
+        if (ui != nullptr) ui->run_task(title, work, kCancelNote);
         else work();
     } catch (const install::InstallCancelled &) {
         cancelled = true;

@@ -228,6 +228,8 @@ def stage(portablekit, atracdenc):
     copy(portablekit / "third_party" / "tiny_aes" / "UNLICENSE", licenses / "tiny-AES-c-UNLICENSE.txt")
     copy(portablekit / "third_party" / "xxhash" / "LICENSE", licenses / "xxHash-LICENSE.txt")
     copy(ROOT / "port" / "fonts" / "GoudyBookletter1911-OFL.txt", licenses / "GoudyBookletter1911-OFL.txt")
+    copy(ROOT / "port" / "fonts" / "Cinzel-OFL.txt", licenses / "Cinzel-OFL.txt")
+    copy(ROOT / "port" / "fonts" / "Barlow-OFL.txt", licenses / "Barlow-OFL.txt")
     copy(LLVM / "LICENSE.TXT", licenses / "llvm-mingw-LICENSE.txt")
     commit, libgha = atracdenc
     copy(ATRACDENC_SRC / "LICENSE", licenses / "atracdenc-LICENSE.txt")

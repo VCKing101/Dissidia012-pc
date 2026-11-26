@@ -115,6 +115,7 @@ if [[ "${D012_INSTALLER:-0}" -eq 1 ]]; then
     cp "$kit/third_party/tiny_aes/UNLICENSE" "$stage/licenses/tiny-AES-c-UNLICENSE.txt"
     cp "$kit/third_party/xxhash/LICENSE" "$stage/licenses/xxHash-LICENSE.txt"
     cp "$root/src/port/fonts/GoudyBookletter1911-OFL.txt" "$stage/licenses/"
+    cp "$root/src/port/fonts/Cinzel-OFL.txt" "$root/src/port/fonts/Barlow-OFL.txt" "$stage/licenses/"
     cp "$sources/NotoSansCJK-LICENSE.txt" "$stage/licenses/NotoSansCJK-OFL.txt"
 
     step "Checking the setup's files"
@@ -192,6 +193,7 @@ cp "$kit/third_party/imgui/LICENSE.txt" "$stage/licenses/DearImGui-LICENSE.txt"
 cp "$kit/third_party/tiny_aes/UNLICENSE" "$stage/licenses/tiny-AES-c-UNLICENSE.txt"
 cp "$kit/third_party/xxhash/LICENSE" "$stage/licenses/xxHash-LICENSE.txt"
 cp "$root/src/port/fonts/GoudyBookletter1911-OFL.txt" "$stage/licenses/"
+cp "$root/src/port/fonts/Cinzel-OFL.txt" "$root/src/port/fonts/Barlow-OFL.txt" "$stage/licenses/"
 cp "$sources/NotoSansCJK-LICENSE.txt" "$stage/licenses/NotoSansCJK-OFL.txt"
 [[ -f "$root/src/dissidia012.ico" ]] && cp "$root/src/dissidia012.ico" "$stage/"
 

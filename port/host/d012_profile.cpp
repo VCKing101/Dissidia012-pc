@@ -13,6 +13,7 @@
 
 #include "gpu/frame_interpolation.hpp"
 
+#include "d012_bloom.hpp"
 #include "d012_button_prompts.hpp"
 #include "d012_cheats.hpp"
 #include "d012_disc_mod.hpp"
@@ -50,6 +51,23 @@ bool prepare_at_start(portablekit::install::InstallerUi *ui, const std::filesyst
                       const std::filesystem::path &disc_image);
 }
 #endif
+
+#include <cstddef>
+
+// The menu's faces, compiled in by port/CMakeLists.txt from fonts/.
+namespace d012 {
+extern const unsigned char kHeadingFont[];
+extern const std::size_t kHeadingFontSize;
+extern const unsigned char kBodyFont[];
+extern const std::size_t kBodyFontSize;
+extern const unsigned char kCapsFont[];
+extern const std::size_t kCapsFontSize;
+// And its pictures of the game (menu/*.png).
+extern const unsigned char kBloomOffPicture[];
+extern const std::size_t kBloomOffPictureSize;
+extern const unsigned char kBloomOnPicture[];
+extern const std::size_t kBloomOnPictureSize;
+} // namespace d012
 
 namespace portablekit {
 namespace {
@@ -186,6 +204,52 @@ void keyboard_defaults(input::Bindings &bindings, bool &) {
     bindings[static_cast<std::size_t>(input::Action::Down)][1] = input::kWheelDown;
 }
 
+// Bloom's two pictures beside its row: the world map at ×4, the same moment
+// off and on (menu/bloom-*.png).
+std::span<const SettingPictures> setting_pictures() {
+    static const SettingPictures pictures[] = {{
+        .key = "game.bloom",
+        .off = {d012::kBloomOffPicture, d012::kBloomOffPictureSize},
+        .on = {d012::kBloomOnPicture, d012::kBloomOnPictureSize},
+        .note = "The world map at Resolution ×4, the same moment with Bloom off and on.",
+        .is_on = &d012::bloom::enabled,
+    }};
+    return pictures;
+}
+
+// The menu's look (docs/port/menu.md): night blue and silver, a crystal-blue
+// bar on the focused row and the title's 012 in crimson; Cinzel for titles,
+// Barlow for text (port/CMakeLists.txt embeds them).
+const InterfaceTheme &menu_theme() {
+    static const InterfaceTheme theme{
+        .backdrop = 0x060916EEu,
+        .panel = 0x0D1430F2u,
+        .edge = 0xDFE4F038u,
+        .row_hover = 0x8FA6FF1Au,
+        .focus = 0x3A5EE8D9u,
+        .focus_end = 0x2B4AD214u,
+        .accent = 0x4A6CF0FFu,
+        .highlight = 0xD4404FFFu,
+        .heading = 0xEEF1F8FFu,
+        .section = 0x8FA6FFFFu,
+        .text = 0xE4E8F3FFu,
+        .text_dim = 0xA9B4D0FFu,
+        .text_faint = 0x7F8AA8FFu,
+        .text_disabled = 0x5D6680FFu,
+        .value = 0xC9D1E6FFu,
+        .danger = 0xE46A78FFu,
+        .good = 0x8FD19EFFu,
+        .track = 0xDFE4F029u,
+        .heading_font = {d012::kHeadingFont, d012::kHeadingFontSize},
+        .body_font = {d012::kBodyFont, d012::kBodyFontSize},
+        .caps_font = {d012::kCapsFont, d012::kCapsFontSize},
+        .title = "Dissidia",
+        .title_accent = "012",
+        .subtitle = "Duodecim Final Fantasy",
+    };
+    return theme;
+}
+
 } // namespace
 
 const GameProfile &game() {
@@ -295,6 +359,29 @@ const GameProfile &game() {
         .second_player = true,
 
         .cheats = d012::builtin_cheats(),
+
+        // The menu: its look, and what it says this game does with the
+        // right stick, the mouse and L2 and R2 (d012_camera.cpp,
+        // d012_bgm_playlist.cpp), and which of its text the font changes.
+        .theme = &menu_theme(),
+        .right_stick_camera = "the stick turns the camera in battle and on the world map, and up or down moves it "
+                              "closer or further. A full push turns it as fast as the game's own camera speed "
+                              "option; R3 recentres it in battle.",
+        .mouse_camera = "The free camera in battle and the world map turn by these degrees, and moving the mouse up "
+                        "or down moves the camera closer or further. Locked on, the mouse turns the camera as the "
+                        "right stick does.",
+        .extra_triggers = "In this game L2 and R2 switch the loading screen's D-pad between the menu music and the "
+                          "battle music.",
+        .font_preview_text = "Quick Battle  Cloud Strife  9,999 Gil  装備 アイテム",
+        .font_note = "It changes the game's sentence text: descriptions, lists, help lines, the names you type, and "
+                     "the music selector. Titles, fighter names, YES and NO, and battle tips are pictures and stay as "
+                     "they are.",
+        // Bloom (d012_bloom.cpp) leaves out what the game draws: the paused
+        // game shows it one way only, so the menu shows these.
+        .setting_pictures = setting_pictures(),
+        .pause_credit = "PC recompilation by VCKing101, not affiliated with Square Enix.\n"
+                        "DISSIDIA 012 [duodecim] FINAL FANTASY\n"
+                        "\u00A9 2008, 2011 SQUARE ENIX CO., LTD. All Rights Reserved.",
     };
     return profile;
 }

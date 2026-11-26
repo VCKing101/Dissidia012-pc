@@ -43,6 +43,16 @@ Texture hashes. Copyright (c) 2012-2021 Yann Collet. BSD 2-Clause License: `xxHa
 The serif of the titles on the save, load and keyboard screens. Copyright (c) 2010 Barry Schwartz. SIL Open Font
 License 1.1: `GoudyBookletter1911-OFL.txt`. <https://fonts.google.com/specimen/Goudy+Bookletter+1911>
 
+### Cinzel
+
+The menu's titles. Copyright 2020 The Cinzel Project Authors. SIL Open Font License 1.1: `Cinzel-OFL.txt`.
+<https://github.com/NDISCOVER/Cinzel>
+
+### Barlow and Barlow Semi Condensed
+
+The menu's text and its small capitals. Copyright 2017 The Barlow Project Authors. SIL Open Font License 1.1:
+`Barlow-OFL.txt`. <https://github.com/jpt/barlow>
+
 ## Shipped as separate libraries
 
 ### SDL3 3.4.16

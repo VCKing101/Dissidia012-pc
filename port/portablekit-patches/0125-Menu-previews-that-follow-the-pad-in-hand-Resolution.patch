@@ -1,0 +1,1291 @@
+From 847ae449df6d60d2a48d471a79e14de9961713f4 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Thu, 26 Nov 2026 20:53:01 +1030
+Subject: [PATCH] Menu: previews that follow the pad in hand, Resolution, Sharp
+ text, a game's pictures
+
+- The previews and the button hints read the controller in the player's
+  hands (Layer::menu_gamepad(): the one last pressed or pushed, any
+  connected), not only player 1's: the menu answers every pad, so a pad
+  chosen for player 2 drove the menu while its previews said to connect
+  one. When the game does not read that pad, the preview says so.
+- Resolution: close-ups of one place of the paused frame at x1, x2, the step
+  below and as paused. The lower steps are worked out with a tent filter
+  (within about 1 % of the game drawn at x1, measured on Dissidia's text and
+  pictures). The place is where a lower resolution changes the picture most,
+  nearer the middle counting more, the 2D interface left out: the renderer
+  notes where the last whole frame drew it (interface_rects()).
+- Sharp text: a block of the game's own text, its PSP-sized letters enlarged
+  (Off) and its glyphs drawn again at the resolution's scale (On), from the
+  glyphs Sharp text keeps (fonts::text_sample).
+- GameProfile::setting_pictures: two pictures of the game, off and on, for
+  a setting of the port's that the paused game cannot show both ways.
+- GameProfile::pause_credit: lines at the pause screen's bottom right.
+- The page's card (Network status, About, ...) stays at the side panel's
+  bottom from row to row; text fields name themselves in the panel; the
+  descriptions that said <prefix>_ give the variable's name.
+- <prefix>_TRACE_MENU: where the Resolution close-ups went, and why.
+
+Built and run with Dissidia 012 (Windows, clang) at 1920x1088 and 1440x816,
+with the input script's virtual gamepads. Not run: a real pad, Linux,
+Android, the framework's own build.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/fonts/sharp_text.cpp    | 104 +++++--
+ host/fonts/sharp_text.hpp    |  17 ++
+ host/gpu/vulkan_renderer.cpp |  31 +++
+ host/gpu/vulkan_renderer.hpp |   5 +
+ host/profile.hpp             |  23 ++
+ host/ui/layer.cpp            |  18 ++
+ host/ui/layer.hpp            |   7 +
+ host/ui/menu.cpp             |  78 ++++--
+ host/ui/menu_look.cpp        | 514 +++++++++++++++++++++++++++++++++--
+ host/ui/widgets.cpp          |   6 +-
+ 10 files changed, 743 insertions(+), 60 deletions(-)
+
+diff --git a/host/fonts/sharp_text.cpp b/host/fonts/sharp_text.cpp
+index 6b95dd7..31882e7 100644
+--- a/host/fonts/sharp_text.cpp
++++ b/host/fonts/sharp_text.cpp
+@@ -234,29 +234,24 @@ bool glyph_list(const psprecomp::GuestMemory &memory, const SharpTextQuery &quer
+     return true;
+ }
+ 
+-bool sharp_text(const psprecomp::GuestMemory &memory, const SharpTextQuery &query, SharpText &out) {
+-    if (!sharp_text_available() || query.factor < 2 || query.factor > 16) return false;
+-    Registry &r = registry();
+-    const std::lock_guard lock(r.mutex);
+-    std::uint32_t base = 0u, column0 = 0u, row0 = 0u;
+-    Buffer *found = checked_buffer(r, memory, query, base, column0, row0);
+-    if (found == nullptr) return false;
+-    Buffer &b = *found;
++namespace {
++
++// Buffer `b`'s glyphs drawn `factor` times as large, the part `width` by
++// `height` at (column0, row0) of the buffer: coverage, width * factor a row.
++// Returns how many glyphs reached it.
++std::size_t draw_glyphs(const Buffer &b, std::uint32_t column0, std::uint32_t row0, std::uint32_t width,
++                        std::uint32_t height, int factor, std::vector<std::uint8_t> &coverage) {
+     const GlyphTarget &t = b.target;
+-    const std::uint32_t covered_width = std::min(query.width, t.width - column0);
+-    const std::uint32_t covered_height = std::min(query.height, t.height - row0);
+-    const auto f = static_cast<std::int64_t>(query.factor);
+-    const std::int64_t out_width = covered_width * f;
+-    const std::int64_t out_height = covered_height * f;
+-    out.covered_width = covered_width;
+-    out.covered_height = covered_height;
+-    out.coverage.assign(static_cast<std::size_t>(out_width * out_height), 0u);
+-    // The covered part, in pixels of the larger buffer.
++    const auto f = static_cast<std::int64_t>(factor);
++    const std::int64_t out_width = width * f;
++    const std::int64_t out_height = height * f;
++    coverage.assign(static_cast<std::size_t>(out_width * out_height), 0u);
++    // The part, in pixels of the larger buffer.
+     const std::int64_t left = column0 * f;
+     const std::int64_t top = row0 * f;
+     std::size_t drawn = 0;
+     for (const Stamp &stamp : b.stamps) {
+-        const GlyphBitmap glyph = render_scaled(stamp.code, stamp.x64, stamp.y64, query.factor);
++        const GlyphBitmap glyph = render_scaled(stamp.code, stamp.x64, stamp.y64, factor);
+         if (glyph.pixels.empty()) continue;
+         // Inside the buffer, the clip rectangle and the covered part.
+         const std::int64_t clip_x0 = std::max<std::int64_t>({0, static_cast<std::int64_t>(stamp.clip.x) * f, left});
+@@ -276,14 +271,85 @@ bool sharp_text(const psprecomp::GuestMemory &memory, const SharpTextQuery &quer
+         const std::int64_t count = x_end - x_begin;
+         for (std::int64_t y = y_begin; y < y_end; ++y) {
+             const std::uint8_t *in = glyph.pixels.data() + (y - glyph.y) * glyph.width + (x_begin - glyph.x);
+-            std::uint8_t *row = out.coverage.data() + (y - top) * out_width + (x_begin - left);
++            std::uint8_t *row = coverage.data() + (y - top) * out_width + (x_begin - left);
+             for (std::int64_t i = 0; i < count; ++i) row[i] = std::max(row[i], in[i]);
+         }
+     }
++    return drawn;
++}
++
++} // namespace
++
++bool sharp_text(const psprecomp::GuestMemory &memory, const SharpTextQuery &query, SharpText &out) {
++    if (!sharp_text_available() || query.factor < 2 || query.factor > 16) return false;
++    Registry &r = registry();
++    const std::lock_guard lock(r.mutex);
++    std::uint32_t base = 0u, column0 = 0u, row0 = 0u;
++    Buffer *found = checked_buffer(r, memory, query, base, column0, row0);
++    if (found == nullptr) return false;
++    Buffer &b = *found;
++    const GlyphTarget &t = b.target;
++    const std::uint32_t covered_width = std::min(query.width, t.width - column0);
++    const std::uint32_t covered_height = std::min(query.height, t.height - row0);
++    out.covered_width = covered_width;
++    out.covered_height = covered_height;
++    const std::size_t drawn = draw_glyphs(b, column0, row0, covered_width, covered_height, query.factor, out.coverage);
+     b.last_used = ++r.clock;
+     trace("%08X: %ux%u of buffer %08X (%ux%u) at %dx, %zu of %zu glyphs", query.address, covered_width,
+           covered_height, base, t.width, t.height, query.factor, drawn, b.stamps.size());
+     return true;
+ }
+ 
++bool text_sample(int factor, TextSample &out) {
++    if (!sharp_text_available() || factor < 1 || factor > 16) return false;
++    Registry &r = registry();
++    const std::lock_guard lock(r.mutex);
++    const std::uint64_t font = generation();
++    std::vector<const Buffer *> usable;
++    for (const auto &[address, b] : r.buffers)
++        if (!b.foreign && !b.stamps.empty() && b.generation == font && b.expected.size() == buffer_bytes(b.target))
++            usable.push_back(&b);
++    if (usable.empty()) return false;
++    std::sort(usable.begin(), usable.end(),
++              [](const Buffer *a, const Buffer *b) { return a->last_used > b->last_used; });
++    if (usable.size() > 16u) usable.resize(16u);
++    const Buffer &b = **std::max_element(usable.begin(), usable.end(), [](const Buffer *a, const Buffer *c) {
++        return a->stamps.size() < c->stamps.size();
++    });
++    // The buffer as its glyphs left it: coverage, 4-bit low nibble first.
++    const GlyphTarget &t = b.target;
++    const bool four_bit = t.pixel_format == kFormat4;
++    const auto coverage_at = [&](std::uint32_t x, std::uint32_t y) -> std::uint8_t {
++        const std::uint8_t byte = b.expected[std::size_t{y} * t.bytes_per_line + (four_bit ? x / 2u : x)];
++        if (!four_bit) return byte;
++        return static_cast<std::uint8_t>(((x & 1u) != 0u ? byte >> 4u : byte & 0x0Fu) * 17u);
++    };
++    std::uint32_t x0 = t.width, y0 = t.height, x1 = 0u, y1 = 0u;
++    for (std::uint32_t y = 0; y < t.height; ++y)
++        for (std::uint32_t x = 0; x < t.width; ++x)
++            if (coverage_at(x, y) != 0u) {
++                x0 = std::min(x0, x);
++                y0 = std::min(y0, y);
++                x1 = std::max(x1, x + 1u);
++                y1 = std::max(y1, y + 1u);
++            }
++    if (x1 <= x0 || y1 <= y0) return false;
++    // A pixel of the buffer's own around the glyphs.
++    x0 = x0 > 0u ? x0 - 1u : 0u;
++    y0 = y0 > 0u ? y0 - 1u : 0u;
++    x1 = std::min(t.width, x1 + 1u);
++    y1 = std::min(t.height, y1 + 1u);
++    out.width = x1 - x0;
++    out.height = y1 - y0;
++    out.factor = factor;
++    out.glyphs = static_cast<std::uint32_t>(b.stamps.size());
++    out.game.resize(std::size_t{out.width} * out.height);
++    for (std::uint32_t y = 0; y < out.height; ++y)
++        for (std::uint32_t x = 0; x < out.width; ++x)
++            out.game[std::size_t{y} * out.width + x] = coverage_at(x0 + x, y0 + y);
++    if (factor >= 2) (void)draw_glyphs(b, x0, y0, out.width, out.height, factor, out.sharp);
++    else out.sharp = out.game;
++    return true;
++}
++
+ } // namespace portablekit::fonts
+diff --git a/host/fonts/sharp_text.hpp b/host/fonts/sharp_text.hpp
+index 1fa92a4..8dd6e0a 100644
+--- a/host/fonts/sharp_text.hpp
++++ b/host/fonts/sharp_text.hpp
+@@ -99,4 +99,21 @@ struct GlyphList {
+ // factor is not used.
+ bool glyph_list(const psprecomp::GuestMemory &memory, const SharpTextQuery &query, GlyphList &out);
+ 
++// A block of the game's text for the menu's preview of Sharp text: of the 16
++// glyph buffers used last that hold only glyphs drawn with the font in use,
++// the one with the most glyphs, cut to the part they cover. `game` is that
++// part as the buffer holds it, the PSP's size (coverage 0 to 255, `width` by
++// `height`); `sharp` is the same part drawn `factor` times as large, as Sharp
++// text draws it. Not checked against guest memory: the text may have left
++// the screen since.
++struct TextSample {
++    std::uint32_t width{};
++    std::uint32_t height{};
++    int factor{};
++    std::uint32_t glyphs{};
++    std::vector<std::uint8_t> game;
++    std::vector<std::uint8_t> sharp;
++};
++bool text_sample(int factor, TextSample &out);
++
+ } // namespace portablekit::fonts
+diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
+index b45f2a5..e32cd71 100644
+--- a/host/gpu/vulkan_renderer.cpp
++++ b/host/gpu/vulkan_renderer.cpp
+@@ -1189,6 +1189,11 @@ struct VulkanRenderer::Impl {
+     // none is cached.
+     bool sharp_text{true};
+     bool sharp_text_wanted{true};
++    // The 2D interface's rectangles (interface_rects()): this frame's so
++    // far, and the last whole frame's.
++    std::vector<std::array<float, 4>> interface_rects_building;
++    std::vector<std::array<float, 4>> interface_rects_shown;
++    bool shown_drawn{};  // this frame drew into the shown framebuffer
+     std::uint32_t sharp_text_cached_factor{};
+     std::uint64_t sharp_text_bytes{};  // of the cached textures drawn sharp
+     // texture_clock when the previous frame and this one began: sharp text
+@@ -8682,6 +8687,10 @@ void VulkanRenderer::begin_frame() {
+     if (!impl.ready) return;
+     const Impl::Guard guard(impl);
+     if (impl.recording) return;
++    // A frame that drew nothing shown (the game paused) keeps the last.
++    if (impl.shown_drawn) impl.interface_rects_shown.swap(impl.interface_rects_building);
++    impl.interface_rects_building.clear();
++    impl.shown_drawn = false;
+     // The next slot: its fence is the frame slot_count frames back.
+     impl.slot = (impl.slot + 1u) % impl.slot_count;
+     Impl::FrameSlot &frame = impl.slots[impl.slot];
+@@ -9618,6 +9627,21 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
+             }
+         }
+     }
++    // The 2D interface's place on the screen (interface_rects()).
++    if (!call.clear_mode && impl.shows(call.target.color_address)) impl.shown_drawn = true;
++    if (call.through && !call.clear_mode && framebuffer_source.target == nullptr && !impl.scratch.empty() &&
++        impl.shows(call.target.color_address) && impl.interface_rects_building.size() < 4096u) {
++        std::array<float, 4> rect{impl.scratch.front().x, impl.scratch.front().y, impl.scratch.front().x,
++                                  impl.scratch.front().y};
++        for (const GpuVertex &vertex : impl.scratch) {
++            rect[0] = std::min(rect[0], vertex.x);
++            rect[1] = std::min(rect[1], vertex.y);
++            rect[2] = std::max(rect[2], vertex.x);
++            rect[3] = std::max(rect[3], vertex.y);
++        }
++        if (rect[2] - rect[0] < kScreenWideDraw && rect[2] > rect[0] && rect[3] > rect[1])
++            impl.interface_rects_building.push_back(rect);
++    }
+ 
+     static const bool no_merge_env = portablekit::env("NO_DRAW_MERGE") != nullptr;
+     const bool merge = !no_merge_env && !perf::alternate_off(perf::NewPath::Merge);
+@@ -12144,6 +12168,13 @@ bool VulkanRenderer::capture_frame(const std::string &path) {
+     return write_bmp(path, pixels.data(), width, height, false);
+ }
+ 
++std::vector<std::array<float, 4>> VulkanRenderer::interface_rects() const {
++    if (!impl_) return {};
++    Impl &impl = *impl_;
++    const Impl::Guard guard(impl);
++    return impl.interface_rects_shown;
++}
++
+ bool VulkanRenderer::read_frame(std::vector<std::uint8_t> &out, std::uint32_t &out_width,
+                                 std::uint32_t &out_height) {
+     Impl &impl = *impl_;
+diff --git a/host/gpu/vulkan_renderer.hpp b/host/gpu/vulkan_renderer.hpp
+index 74afd27..6bada4c 100644
+--- a/host/gpu/vulkan_renderer.hpp
++++ b/host/gpu/vulkan_renderer.hpp
+@@ -238,6 +238,11 @@ public:
+     // A, rows top to bottom), as the menu's previews show the paused game.
+     // Waits for the GPU; false if it could not be read back.
+     bool read_frame(std::vector<std::uint8_t> &pixels, std::uint32_t &width, std::uint32_t &height);
++    // Where the last whole frame drew its 2D interface: the screen-space
++    // draws into the shown framebuffer narrower than the screen (text,
++    // icons, panels), as rectangles in the PSP's 480x272 pixels (left, top,
++    // right, bottom). The menu's Resolution preview looks elsewhere.
++    [[nodiscard]] std::vector<std::array<float, 4>> interface_rects() const;
+     // Writes the next presented window image, with the interface over it, as
+     // a BMP once it has been drawn.
+     void capture_window(const std::string &path);
+diff --git a/host/profile.hpp b/host/profile.hpp
+index 771977e..5569ff3 100644
+--- a/host/profile.hpp
++++ b/host/profile.hpp
+@@ -225,6 +225,24 @@ struct EmbeddedFont {
+     std::size_t size = 0;
+ };
+ 
++// A PNG compiled into the program.
++struct EmbeddedImage {
++    const unsigned char *data = nullptr;
++    std::size_t size = 0;
++};
++
++// Two pictures of the game the menu shows beside a setting of the port's own
++// that the paused game cannot show both ways (one that changes what the game
++// draws): the same moment with the setting off and on, at the size the game
++// drew it. GameProfile::setting_pictures.
++struct SettingPictures {
++    const char *key = nullptr;  // the row's RowOptions::key
++    EmbeddedImage off{};
++    EmbeddedImage on{};
++    const char *note = nullptr;  // under the pictures: where they were taken
++    bool (*is_on)() = nullptr;   // which of the two is in use
++};
++
+ // How the port's own interface looks (the menu, the setup, the dialogs). Each
+ // colour is 0xRRGGBBAA. Null in the profile: PortableKit's dark brown, bronze
+ // and gold, in the system's font.
+@@ -531,6 +549,11 @@ struct GameProfile {
+     // text the font changes.
+     const char *font_preview_text = nullptr;
+     const char *font_note = nullptr;
++    // Pictures for settings of the port's own (SettingPictures).
++    std::span<const SettingPictures> setting_pictures = {};
++    // Lines at the pause screen's bottom right, '\n' between them: who made
++    // the port and whose the game is.
++    const char *pause_credit = nullptr;
+ };
+ 
+ // Defined by the port, exactly once. Everything under host/ reads the game
+diff --git a/host/ui/layer.cpp b/host/ui/layer.cpp
+index e978313..3d0b03c 100644
+--- a/host/ui/layer.cpp
++++ b/host/ui/layer.cpp
+@@ -299,6 +299,9 @@ std::optional<std::uint16_t> Layer::take_captured_binding() { return std::exchan
+ 
+ bool Layer::handle_event(const SDL_Event &event) {
+     const Clock::time_point now = Clock::now();
++    if (event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) last_pad_ = event.gbutton.which;
++    if (event.type == SDL_EVENT_GAMEPAD_AXIS_MOTION && std::abs(static_cast<int>(event.gaxis.value)) > 16000)
++        last_pad_ = event.gaxis.which;
+     // Presses go to the binding being captured. Releases still reach ImGui,
+     // which saw the press that started the capture.
+     if (capturing_binding_ && interactive_) {
+@@ -391,6 +394,21 @@ bool Layer::handle_event(const SDL_Event &event) {
+     return true;
+ }
+ 
++SDL_Gamepad *Layer::menu_gamepad() const {
++    if (renderer_ == nullptr) return nullptr;
++    // SDL_GetGamepadFromID finds a gamepad only while something has it open:
++    // the renderer has the players', ImGui's backend every connected one.
++    if (last_pad_ != 0u)
++        if (SDL_Gamepad *pad = SDL_GetGamepadFromID(last_pad_)) return pad;
++    if (SDL_Gamepad *pad = renderer_->gamepad()) return pad;
++    int count = 0;
++    SDL_JoystickID *ids = SDL_GetGamepads(&count);
++    SDL_Gamepad *found = nullptr;
++    for (int i = 0; ids != nullptr && i < count && found == nullptr; ++i) found = SDL_GetGamepadFromID(ids[i]);
++    SDL_free(ids);
++    return found;
++}
++
+ void Layer::resolve_escape() {
+     if (!escape_pending_) return;
+     const Clock::time_point now = Clock::now();
+diff --git a/host/ui/layer.hpp b/host/ui/layer.hpp
+index 8b19415..ce194a7 100644
+--- a/host/ui/layer.hpp
++++ b/host/ui/layer.hpp
+@@ -8,6 +8,7 @@
+ #include <string>
+ 
+ union SDL_Event;
++struct SDL_Gamepad;
+ struct ImFont;
+ 
+ namespace portablekit::gpu {
+@@ -71,6 +72,11 @@ public:
+ 
+     // What the player last used, for the button hints.
+     [[nodiscard]] InputDevice input_device() const noexcept { return device_; }
++    // The gamepad in the player's hands: the one last pressed or pushed, of
++    // any connected (the interface reads them all, a player's or not); else
++    // player 1's; else the first connected. For the button hints and the
++    // menu's previews.
++    [[nodiscard]] SDL_Gamepad *menu_gamepad() const;
+     // Whether confirm is the south face button (the pad setting); the menu
+     // follows the game's convention.
+     [[nodiscard]] bool confirm_south() const;
+@@ -133,6 +139,7 @@ private:
+     std::optional<Clock::time_point> escape_pending_;
+     bool escape_down_{};
+     Clock::time_point last_pad_button_{};
++    std::uint32_t last_pad_{}; // SDL_JoystickID of the gamepad last used
+     // Gamepad navigation waits until no face button is held, so a button held
+     // while a screen opens does not activate its first row.
+     bool gamepad_armed_{};
+diff --git a/host/ui/menu.cpp b/host/ui/menu.cpp
+index f8d7022..156819f 100644
+--- a/host/ui/menu.cpp
++++ b/host/ui/menu.cpp
+@@ -52,6 +52,7 @@
+ #include <cmath>
+ #include <cstdio>
+ #include <cstdlib>
++#include <cstring>
+ #include <filesystem>
+ #include <iostream>
+ #include <functional>
+@@ -247,7 +248,8 @@ private:
+     // The settings screen's right side: the focused setting's name, what it
+     // does and its preview, and the page's own card.
+     void side_panel(float width);
+-    void page_card(float width);
++    // The page's own card (Audio, Network status, Cheats on now, About); its height, 0 for none.
++    float page_card(float width);
+ 
+     gpu::VulkanRenderer &renderer() { return Layer::get().renderer(); }
+ 
+@@ -261,6 +263,8 @@ private:
+     int tab_{};
+     bool first_frame_{true};
+     bool switched_{};        // the page changed this frame
++    float card_height_{};    // the page card's height last frame, for its place at the panel's bottom
++    int card_tab_{-1};       // the page it was measured on
+     bool close_{};
+     bool quit_{};
+     bool was_editing_{};
+@@ -636,7 +640,9 @@ void Menu::audio() {
+         RowOptions options = options_for(key, description);
+         if (!device) {
+             options.disabled = true;
+-            options.note = portablekit::env("NO_AUDIO") != nullptr ? "Off: <prefix>_NO_AUDIO" : "No audio device";
++            options.note = portablekit::env("NO_AUDIO") != nullptr
++                               ? std::string("Off: ") + portablekit::game().env_prefix + "_NO_AUDIO"
++                               : "No audio device";
+         }
+         return options;
+     };
+@@ -736,6 +742,7 @@ bool text_row(const char *id, const char *label, std::string &value, std::size_t
+         std::string description = o.description;
+         if (!o.note.empty()) description += "\n" + o.note;
+         Layer::get().set_description(description);
++        Layer::get().set_focused_row(label, o.key);
+     }
+     if (ImGui::IsItemDeactivatedAfterEdit() && (allow_empty || field.buffer[0] != '\0')) {
+         value = field.buffer.data();
+@@ -890,7 +897,7 @@ void Menu::controls() {
+         if (portablekit::game().second_player) {
+             device_row("Player 1", "input.player1", s.player1, first,
+                        "The controller player 1 plays on. Automatic: the keyboard and mouse, and the first "
+-                       "controller connected.");
++                       "controller connected that is not chosen for player 2.");
+             // Nothing to say while the game has no second player.
+             std::string second = name_of(renderer().second_gamepad());
+             if (keyboard2) second = "keyboard and mouse";
+@@ -1748,8 +1755,9 @@ void Menu::network() {
+                    {false, {}, "A small panel over the game with the connection, the group and the traffic."}))
+         network_overlay() = !network_overlay();
+     if (toggle_row("Log every call and packet", adhoc::Client::tracing(),
+-                   {false, {}, "The same as <prefix>_TRACE_ADHOC=1: every ad hoc call and packet header goes to the "
+-                               "console and to the network log. Busy; for finding a problem."}))
++                   {false, {}, std::string("The same as ") + portablekit::game().env_prefix +
++                                   "_TRACE_ADHOC=1: every ad hoc call and packet header goes to the console and to "
++                                   "the network log. Busy; for finding a problem."}))
+         adhoc::Client::set_tracing(!adhoc::Client::tracing());
+     if (button_row("Save network log",
+                    {false, {}, "Writes the recent network log and this page's state to a file in the data folder's "
+@@ -2095,7 +2103,7 @@ std::string cheats_summary() {
+ 
+ const char *shoulder(bool right) {
+     if (Layer::get().input_device() != InputDevice::Gamepad) return right ? "W" : "Q";
+-    SDL_Gamepad *pad = Layer::get().renderer().gamepad();
++    SDL_Gamepad *pad = Layer::get().menu_gamepad();
+     const SDL_GamepadType type = pad != nullptr ? SDL_GetGamepadType(pad) : SDL_GAMEPAD_TYPE_UNKNOWN;
+     const char *name = pad != nullptr ? SDL_GetGamepadName(pad) : nullptr;
+     if (type == SDL_GAMEPAD_TYPE_PS3 || type == SDL_GAMEPAD_TYPE_PS4 || type == SDL_GAMEPAD_TYPE_PS5 ||
+@@ -2107,7 +2115,8 @@ const char *shoulder(bool right) {
+ }
+ 
+ // A card behind what `draw_contents` draws: drawn after it, under it.
+-template <typename F> void card(float width, F &&draw_contents) {
++// Returns its height.
++template <typename F> float card(float width, F &&draw_contents) {
+     ImDrawList *draw = ImGui::GetWindowDrawList();
+     const float pad = look::px(18.0f);
+     const ImVec2 min = ImGui::GetCursorScreenPos();
+@@ -2129,6 +2138,7 @@ template <typename F> void card(float width, F &&draw_contents) {
+     draw->ChannelsMerge();
+     ImGui::SetCursorScreenPos({min.x, bottom + look::px(14.0f)});
+     ImGui::Dummy({width, 0.0f});
++    return bottom - min.y;
+ }
+ 
+ } // namespace
+@@ -2306,7 +2316,29 @@ void Menu::pause_screen() {
+         const char *version = portablekit::game().project_version;
+         lines.emplace_back("Build", version != nullptr ? std::string(version) : std::string(kBuildVersion));
+         const float line_height = std::round(font * 0.8f * 1.6f);
+-        float ly = height - std::round(font * 1.4f) - line_height * static_cast<float>(lines.size());
++        float bottom = height - std::round(font * 1.4f);
++        // The profile's credit under it, right-aligned: who made the port,
++        // whose the game is.
++        if (const char *credit = portablekit::game().pause_credit; credit != nullptr && *credit != '\0') {
++            std::vector<std::string> credit_lines;
++            for (const char *at = credit;;) {
++                const char *end = std::strchr(at, '\n');
++                credit_lines.emplace_back(at, end != nullptr ? end : at + std::strlen(at));
++                if (end == nullptr) break;
++                at = end + 1;
++            }
++            const float credit_size = std::round(font * 0.68f);
++            const float credit_height = std::round(credit_size * 1.5f);
++            float cy = bottom - credit_height * static_cast<float>(credit_lines.size()) + (credit_height - credit_size);
++            for (const std::string &line : credit_lines) {
++                const float line_width = ImGui::GetFont()->CalcTextSizeA(credit_size, FLT_MAX, 0.0f, line.c_str()).x;
++                draw->AddText(nullptr, credit_size, {std::round(x + card_width - line_width), cy}, colors::kTextDim,
++                              line.c_str());
++                cy += credit_height;
++            }
++            bottom -= credit_height * static_cast<float>(credit_lines.size()) + std::round(font * 1.2f);
++        }
++        float ly = bottom - line_height * static_cast<float>(lines.size());
+         look::hairline(draw, {x, ly - look::px(14.0f)}, card_width);
+         const float small = std::round(font * 0.8f);
+         for (const auto &[name, value] : lines) {
+@@ -2478,6 +2510,7 @@ void Menu::side_panel(float width) {
+     Layer &layer = Layer::get();
+     const float font = layer.font_size();
+     ImDrawList *draw = ImGui::GetWindowDrawList();
++    const float panel_bottom = ImGui::GetCursorScreenPos().y + ImGui::GetContentRegionAvail().y;
+     const std::string title = layer.focused_label();
+     if (!title.empty()) {
+         ImFont *face = heading_font();
+@@ -2500,15 +2533,27 @@ void Menu::side_panel(float width) {
+         ImGui::Dummy({0.0f, std::round(font * 0.9f)});
+         if (look::preview(layer.focused_key(), renderer(), width)) ImGui::Dummy({0.0f, std::round(font * 0.6f)});
+     }
+-    page_card(width);
+-}
+-
+-void Menu::page_card(float width) {
++    // The page's card stays at the panel's bottom while the focus moves from
++    // row to row, and goes below a preview only when one reaches down to it.
++    // Its height is last frame's; on a page's first frame it is measured
++    // without being shown.
++    const ImVec2 flow = ImGui::GetCursorScreenPos();
++    const bool known = card_tab_ == tab_;
++    ImGui::SetCursorScreenPos({flow.x, known ? std::max(flow.y, panel_bottom - card_height_) : flow.y});
++    if (!known) ImGui::PushClipRect({0.0f, 0.0f}, {0.0f, 0.0f}, false);
++    card_height_ = page_card(width);
++    if (!known) ImGui::PopClipRect();
++    card_tab_ = tab_;
++    ImGui::Dummy({0.0f, 0.0f});  // the cursor was moved: an item ends there
++}
++
++float Menu::page_card(float width) {
+     const settings::Settings &s = settings::current();
++    float height = 0.0f;
+     switch (tab_) {
+     case 1: {
+         audio::AudioSink &sink = audio::AudioSink::instance();
+-        card(width, [&](float) {
++        height = card(width, [&](float) {
+             section("Output");
+             info_row("Volume", s.mute ? "Muted" : std::to_string(s.volume) + "%");
+             info_row("Device", sink.has_device() ? "44100 Hz stereo" : "None");
+@@ -2520,12 +2565,12 @@ void Menu::page_card(float width) {
+         break;
+     }
+     case 3:
+-        card(width, [&](float) { network_status(); });
++        height = card(width, [&](float) { network_status(); });
+         break;
+     case 4: {
+         const cheats::Overview o = cheats::overview();
+         if (!o.available) break;
+-        card(width, [&](float) {
++        height = card(width, [&](float) {
+             section("On now");
+             std::size_t shown = 0u;
+             if (s.cheats) {
+@@ -2549,10 +2594,11 @@ void Menu::page_card(float width) {
+         break;
+     }
+     case 5:
+-        card(width, [&](float) { system_about(); });
++        height = card(width, [&](float) { system_about(); });
+         break;
+     default: break;
+     }
++    return height;
+ }
+ 
+ // The quit and setup confirmations. False when the menu should close.
+diff --git a/host/ui/menu_look.cpp b/host/ui/menu_look.cpp
+index c08bb20..599aa79 100644
+--- a/host/ui/menu_look.cpp
++++ b/host/ui/menu_look.cpp
+@@ -6,6 +6,8 @@
+ #include "ui/ui.hpp"
+ #include "ui/widgets.hpp"
+ 
++#include "fonts/game_font.hpp"
++#include "fonts/sharp_text.hpp"
+ #include "gpu/vulkan_renderer.hpp"
+ #include "input/bindings.hpp"
+ #include "input/button_prompts.hpp"
+@@ -14,6 +16,16 @@
+ 
+ #include "imgui_internal.h"
+ 
++// The pictures of GameProfile::setting_pictures are PNGs. stb_image's own
++// copy, as texture_pack.cpp has one: PNG only, from memory.
++#define STBI_ONLY_PNG
++#define STBI_NO_STDIO
++#define STBI_NO_LINEAR
++#define STBI_NO_HDR
++#define STB_IMAGE_STATIC
++#define STB_IMAGE_IMPLEMENTATION
++#include "stb_image.h"
++
+ #include <SDL3/SDL.h>
+ 
+ #include <algorithm>
+@@ -23,6 +35,7 @@
+ #include <cstdint>
+ #include <cstdio>
+ #include <cstring>
++#include <iostream>
+ #include <string>
+ #include <vector>
+ 
+@@ -97,6 +110,17 @@ std::string pad_name(SDL_Gamepad *pad) {
+     return name != nullptr ? name : "the gamepad";
+ }
+ 
++// "Live from <the pad>." and, unless it is player 1's, whose it is: the menu
++// reads every gamepad, the game only its players'.
++std::string live_from(gpu::VulkanRenderer &renderer, SDL_Gamepad *pad) {
++    const std::string text = "Live from " + pad_name(pad) + ".";
++    if (pad == renderer.gamepad()) return text;
++    if (pad == renderer.second_gamepad() && renderer.second_pad_wanted()) return text + " It is player 2's controller.";
++    return text + " The game does not read this controller now; " +
++           (portablekit::game().second_player ? "Player 1" : "Controller") +
++           ", under Gamepad, chooses the one it reads.";
++}
++
+ input::PadKind pad_kind(SDL_Gamepad *pad) {
+     if (pad == nullptr) return input::PadKind::Keyboard;
+     const char *name = SDL_GetGamepadName(pad);
+@@ -313,13 +337,14 @@ ImVec2 slot_origin(int slot) {
+     return {static_cast<float>((slot % 2) * kSlotWidth), static_cast<float>(kSlotWidth + (slot / 2) * kSlotHeight)};
+ }
+ 
+-// What the window shows around the frame's centre, `zoom` times larger:
+-// `source` scaled `ratio` times to the window by the nearest pixel or
+-// bilinearly, as the renderer's last blit does.
+-void render_crop(int slot, int w, int h, const Frame &source, float ratio, bool nearest, int zoom) {
++// What the window shows around `centre` (a share of the frame's width and
++// height), `zoom` times larger: `source` scaled `ratio` times to the window by
++// the nearest pixel or bilinearly, as the renderer's last blit does.
++void render_crop(int slot, int w, int h, const Frame &source, float ratio, bool nearest, int zoom,
++                 ImVec2 centre = {0.5f, 0.42f}) {
+     const ImVec2 origin = slot_origin(slot);
+-    const float cx = static_cast<float>(source.width) * 0.5f;
+-    const float cy = static_cast<float>(source.height) * 0.42f;
++    const float cx = static_cast<float>(source.width) * centre.x;
++    const float cy = static_cast<float>(source.height) * centre.y;
+     for (int oy = 0; oy < h; ++oy) {
+         std::uint32_t *row = atlas_row(static_cast<int>(origin.y) + oy) + static_cast<int>(origin.x);
+         const float dy = static_cast<float>(oy / zoom) - static_cast<float>(h / zoom) * 0.5f;
+@@ -334,12 +359,13 @@ void render_crop(int slot, int w, int h, const Frame &source, float ratio, bool
+     upload(static_cast<int>(origin.x), static_cast<int>(origin.y), w, h);
+ }
+ 
+-void draw_slot(ImDrawList *draw, int slot, ImVec2 at, float w, float h) {
+-    const ImVec2 o = slot_origin(slot);
++void draw_atlas(ImDrawList *draw, ImVec2 o, ImVec2 at, float w, float h) {
+     const ImVec2 min{std::round(at.x), std::round(at.y)};
+     draw->AddImage(atlas().texture->GetTexRef(), min, {min.x + w, min.y + h}, uv(o.x, o.y), uv(o.x + w, o.y + h));
+ }
+ 
++void draw_slot(ImDrawList *draw, int slot, ImVec2 at, float w, float h) { draw_atlas(draw, slot_origin(slot), at, w, h); }
++
+ // The whole frame, small, at the atlas's top left; returns its size.
+ ImVec2 thumbnail(const Frame &f) {
+     const int width = std::min(kSlotWidth, 480);
+@@ -358,8 +384,8 @@ ImVec2 thumbnail(const Frame &f) {
+ 
+ // A close-up with its caption: the choice's name, and "Chosen" by the one
+ // in use.
+-void close_up(ImDrawList *draw, int slot, ImVec2 at, float w, float h, const char *name, bool chosen) {
+-    draw_slot(draw, slot, at, w, h);
++void framed(ImDrawList *draw, ImVec2 origin, ImVec2 at, float w, float h, const std::string &name, bool chosen) {
++    draw_atlas(draw, origin, at, w, h);
+     const float edge = std::max(1.0f, px(chosen ? 2.0f : 1.0f));
+     draw->AddRect({at.x - px(3.0f), at.y - px(3.0f)}, {at.x + w + px(3.0f), at.y + h + px(3.0f)},
+                   chosen ? colors::kAccent : colors::kPanelEdge, 0.0f, 0, edge);
+@@ -371,6 +397,10 @@ void close_up(ImDrawList *draw, int slot, ImVec2 at, float w, float h, const cha
+     }
+ }
+ 
++void close_up(ImDrawList *draw, int slot, ImVec2 at, float w, float h, const std::string &name, bool chosen) {
++    framed(draw, slot_origin(slot), at, w, h, name, chosen);
++}
++
+ // --- The previews -------------------------------------------------------------
+ 
+ bool scaling(gpu::VulkanRenderer &renderer, float width) {
+@@ -516,6 +546,441 @@ bool aspect(gpu::VulkanRenderer &renderer, float width) {
+     return true;
+ }
+ 
++// --- Resolution ---------------------------------------------------------------
++
++// The frame as a Resolution of `lines` would draw it, near enough: each pixel
++// an average of the frame's pixels it covers, weighted to its centre (a tent).
++// Against Dissidia drawn at ×1 and at ×4 on the same screen, that came within
++// about 1 % of the real ×1 on both its text, which a plain average matches
++// better, and its pictures, where the centre alone does.
++Frame drawn_at(const Frame &source, std::uint32_t lines) {
++    Frame out;
++    out.tried = out.ok = true;
++    out.height = lines;
++    out.width = static_cast<std::uint32_t>(std::lround(static_cast<double>(source.width) * lines / source.height));
++    out.pixels.resize(std::size_t{out.width} * out.height * 4u);
++    const float sx = static_cast<float>(source.width) / static_cast<float>(out.width);
++    const float sy = static_cast<float>(source.height) / static_cast<float>(out.height);
++    // The weights along one axis, for each pixel of the smaller frame.
++    struct Span {
++        int first{};
++        std::vector<float> weights;
++    };
++    const auto spans = [](std::uint32_t count, float scale, std::uint32_t limit) {
++        std::vector<Span> result(count);
++        const float half = std::max(0.5f, scale * 0.5f);
++        for (std::uint32_t i = 0; i < count; ++i) {
++            const float centre = (static_cast<float>(i) + 0.5f) * scale;
++            Span &span = result[i];
++            span.first = std::max(0, static_cast<int>(std::floor(centre - half)));
++            const int last = std::min(static_cast<int>(limit) - 1, static_cast<int>(std::ceil(centre + half)));
++            float total = 0.0f;
++            for (int p = span.first; p <= last; ++p) {
++                const float w = std::max(0.0f, 1.0f - std::fabs(static_cast<float>(p) + 0.5f - centre) / half);
++                span.weights.push_back(w);
++                total += w;
++            }
++            if (total > 0.0f)
++                for (float &w : span.weights) w /= total;
++        }
++        return result;
++    };
++    const std::vector<Span> columns = spans(out.width, sx, source.width);
++    const std::vector<Span> rows = spans(out.height, sy, source.height);
++    for (std::uint32_t y = 0; y < out.height; ++y)
++        for (std::uint32_t x = 0; x < out.width; ++x) {
++            const Span &row = rows[y], &column = columns[x];
++            std::array<float, 3> sum{};
++            for (std::size_t j = 0; j < row.weights.size(); ++j) {
++                const std::uint8_t *line =
++                    source.pixels.data() + std::size_t{static_cast<std::uint32_t>(row.first) + j} * source.width * 4u;
++                for (std::size_t i = 0; i < column.weights.size(); ++i) {
++                    const std::uint8_t *p = line + (static_cast<std::size_t>(column.first) + i) * 4u;
++                    const float w = row.weights[j] * column.weights[i];
++                    for (int c = 0; c < 3; ++c) sum[static_cast<std::size_t>(c)] += w * p[c];
++                }
++            }
++            std::uint8_t *q = out.pixels.data() + (std::size_t{y} * out.width + x) * 4u;
++            for (int c = 0; c < 3; ++c)
++                q[c] = static_cast<std::uint8_t>(std::clamp(sum[static_cast<std::size_t>(c)] + 0.5f, 0.0f, 255.0f));
++            q[3] = 255u;
++        }
++    return out;
++}
++
++// Where drawing at 272 lines would change the picture most: of the places
++// `w` by `h` frame pixels large, the one whose pixels differ most from the
++// frame drawn at 272 lines and enlarged back, nearer the middle counting more
++// (where the camera keeps the player's character). Its centre, as a share of
++// the frame's width and height. The 2D interface (`skip`, in PSP pixels) is
++// left out: its pictures do not change with the resolution, and its text
++// changes with Sharp text instead. `strength` is the place's difference, per
++// pixel and colour.
++struct Place {
++    ImVec2 centre{0.5f, 0.42f};
++    float strength{};
++};
++
++Place busiest_place(const Frame &f, float w, float h, const std::vector<std::array<float, 4>> &skip) {
++    const Frame low = drawn_at(f, 272u);
++    const std::uint32_t lw = low.width, lh = low.height;
++    if (lw == 0u || lh == 0u) return {};
++    const float sx = static_cast<float>(f.width) / static_cast<float>(lw);
++    const float sy = static_cast<float>(f.height) / static_cast<float>(lh);
++    // The difference, summed for each pixel of the low frame.
++    std::vector<double> sum(std::size_t{lw} * lh, 0.0);
++    for (std::uint32_t y = 0; y < f.height; ++y)
++        for (std::uint32_t x = 0; x < f.width; ++x) {
++            const std::uint32_t back = bilinear(low, (static_cast<float>(x) + 0.5f) / sx,
++                                                (static_cast<float>(y) + 0.5f) / sy);
++            const std::uint8_t *p = f.pixels.data() + (std::size_t{y} * f.width + x) * 4u;
++            int d = 0;
++            for (int c = 0; c < 3; ++c) d += std::abs(static_cast<int>(p[c]) - static_cast<int>((back >> (8 * c)) & 0xFFu));
++            const auto lx = std::min(lw - 1u, static_cast<std::uint32_t>(static_cast<float>(x) / sx));
++            const auto ly = std::min(lh - 1u, static_cast<std::uint32_t>(static_cast<float>(y) / sy));
++            sum[std::size_t{ly} * lw + lx] += d;
++        }
++    // A PSP pixel's edge in the low frame's pixels, along one axis.
++    const auto edge = [](float psp, float psp_size, std::uint32_t size) {
++        return static_cast<std::uint32_t>(
++            std::clamp(std::round(psp / psp_size * static_cast<float>(size)), 0.0f, static_cast<float>(size)));
++    };
++    for (const std::array<float, 4> &r : skip) {
++        const std::uint32_t x0 = edge(std::floor(r[0]), 480.0f, lw), x1 = edge(std::ceil(r[2]), 480.0f, lw);
++        const std::uint32_t y0 = edge(std::floor(r[1]), 272.0f, lh), y1 = edge(std::ceil(r[3]), 272.0f, lh);
++        for (std::uint32_t y = y0; y < y1; ++y)
++            for (std::uint32_t x = x0; x < x1; ++x) sum[std::size_t{y} * lw + x] = 0.0;
++    }
++    // Summed-area table, then the window with the most.
++    std::vector<double> area(std::size_t{lw + 1u} * (lh + 1u), 0.0);
++    const auto at = [&](std::uint32_t x, std::uint32_t y) -> double & { return area[std::size_t{y} * (lw + 1u) + x]; };
++    for (std::uint32_t y = 0; y < lh; ++y)
++        for (std::uint32_t x = 0; x < lw; ++x)
++            at(x + 1u, y + 1u) = sum[std::size_t{y} * lw + x] + at(x + 1u, y) + at(x, y + 1u) - at(x, y);
++    const auto ww = std::clamp<std::uint32_t>(static_cast<std::uint32_t>(std::lround(w / sx)), 1u, lw);
++    const auto wh = std::clamp<std::uint32_t>(static_cast<std::uint32_t>(std::lround(h / sy)), 1u, lh);
++    double best = -1.0, best_raw = 0.0;
++    std::uint32_t bx = 0u, by = 0u;
++    for (std::uint32_t y = 0; y + wh <= lh; ++y)
++        for (std::uint32_t x = 0; x + ww <= lw; ++x) {
++            const double raw = at(x + ww, y + wh) - at(x + ww, y) - at(x, y + wh) + at(x, y);
++            const double dx = (x + ww * 0.5) / lw - 0.5, dy = (y + wh * 0.5) / lh - 0.5;
++            const double value = raw * std::exp(-(dx * dx + dy * dy) / (2.0 * 0.25 * 0.25));
++            if (value > best) {
++                best = value;
++                best_raw = raw;
++                bx = x;
++                by = y;
++            }
++        }
++    Place place;
++    place.centre = {(static_cast<float>(bx) + static_cast<float>(ww) * 0.5f) / static_cast<float>(lw),
++                    (static_cast<float>(by) + static_cast<float>(wh) * 0.5f) / static_cast<float>(lh)};
++    place.strength = static_cast<float>(best_raw / (static_cast<double>(ww) * wh * sx * sy * 3.0));
++    if (portablekit::env("TRACE_MENU") != nullptr)
++        std::cout << "[menu] resolution close-ups at " << place.centre.x << ", " << place.centre.y << ": "
++                  << place.strength << " a pixel; " << skip.size() << " interface rectangles left out\n";
++    return place;
++}
++
++// How much the close-ups' place changes with the resolution (Place::strength),
++// and below what the screen has little to show.
++constexpr float kLittleToShow = 1.5f;
++float &resolution_strength() {
++    static float value = 0.0f;
++    return value;
++}
++
++bool resolution(gpu::VulkanRenderer &renderer, float width) {
++    ImDrawList *draw = ImGui::GetWindowDrawList();
++    const ImVec2 start = ImGui::GetCursorScreenPos();
++    const Frame &f = paused_frame(renderer);
++    if (!f.ok) return false;
++    const settings::Settings &s = settings::current();
++    const GamePicture picture = game_picture();
++    const bool nearest = s.sharp_screen;
++    // ×1, ×2 and the step below the paused frame's, those under it.
++    const int frame_steps = static_cast<int>(std::lround(f.height / 272.0));
++    std::vector<int> steps;
++    for (const int k : {1, 2, frame_steps - 1})
++        if (k >= 1 && 272.0 * k < f.height * 0.92 && std::find(steps.begin(), steps.end(), k) == steps.end())
++            steps.push_back(k);
++    const float gap = px(20.0f);
++    const float cell_w = std::floor(std::min<float>(kSlotWidth, (width - gap) * 0.5f));
++    const float cell_h = std::floor(std::min<float>(kSlotHeight, std::round(font() * 6.0f)));
++    constexpr int kZoom = 2;
++    const std::string key = "res/" + std::to_string(f.width) + "x" + std::to_string(f.height) + "/" +
++                            std::to_string(picture.height) + "/" + std::to_string(nearest) + "/" +
++                            std::to_string(cell_w) + "/" + std::to_string(cell_h) + "@" +
++                            std::to_string(reinterpret_cast<std::uintptr_t>(f.pixels.data()));
++    if (atlas().crops_key != key) {
++        const float shown = picture.height / static_cast<float>(f.height) * static_cast<float>(kZoom);
++        const Place place = busiest_place(f, cell_w / shown, cell_h / shown, renderer.interface_rects());
++        const ImVec2 centre = place.centre;
++        resolution_strength() = place.strength;
++        for (std::size_t i = 0; i < steps.size(); ++i) {
++            const Frame lower = drawn_at(f, 272u * static_cast<std::uint32_t>(steps[i]));
++            render_crop(static_cast<int>(i), static_cast<int>(cell_w), static_cast<int>(cell_h), lower,
++                        picture.height / static_cast<float>(lower.height), nearest, kZoom, centre);
++        }
++        render_crop(static_cast<int>(steps.size()), static_cast<int>(cell_w), static_cast<int>(cell_h), f,
++                    picture.height / static_cast<float>(f.height), nearest, kZoom, centre);
++        atlas().crops_key = key;
++    }
++
++    // Changed since the game paused: the frame is still the old size.
++    const std::array<std::uint32_t, 2> target = renderer.target_size();
++    const bool changed = target[0] != f.width || target[1] != f.height;
++    float y = start.y;
++    label(draw, {start.x, y}, "On your screen", colors::kSection);
++    y += std::round(font() * 1.3f);
++    const float row_h = cell_h + std::round(font() * 1.9f);
++    const std::size_t cells = steps.size() + 1u;
++    for (std::size_t i = 0; i < cells; ++i) {
++        const bool now = i == steps.size();
++        const ImVec2 at{start.x + static_cast<float>(i % 2u) * (cell_w + gap),
++                        y + static_cast<float>(i / 2u) * row_h};
++        std::string name;
++        bool chosen = false;
++        if (now) {
++            const std::string setting =
++                s.internal_scale == 0u ? std::string("Auto") : "×" + std::to_string(s.internal_scale);
++            name = changed ? "Paused at " + size_text(f.width, f.height)
++                           : setting + ", " + size_text(f.width, f.height);
++            chosen = !changed;
++        } else {
++            const int k = steps[i];
++            name = "×" + std::to_string(k) + ", " +
++                   size_text(static_cast<double>(f.width) * 272.0 * k / f.height, 272.0 * k);
++            chosen = changed && s.internal_scale == static_cast<std::uint32_t>(k);
++        }
++        close_up(draw, static_cast<int>(i), at, cell_w, cell_h, name, chosen);
++    }
++    y += static_cast<float>((cells + 1u) / 2u) * row_h;
++    if (changed)
++        y += note(draw, {start.x, y}, width,
++                  "Now " + size_text(target[0], target[1]) + ": the game shows it when it draws again.",
++                  colors::kTextDim) +
++             px(10.0f);
++    if (resolution_strength() < kLittleToShow)
++        y += note(draw, {start.x, y}, width,
++                  "Little on this screen changes with the resolution: it sharpens the edges of models and scenery, "
++                  "not menus. Pause on the world map or in a battle to compare.",
++                  colors::kTextDim) +
++             px(10.0f);
++    y += note(draw, {start.x, y}, width,
++              "Close-ups of the paused game as your screen shows it, 2× zoom, where the resolution changes it "
++              "most, the game's own menus and text left aside. The lower resolutions are worked out from it, so "
++              "they are close to what the game draws, not exact; a higher one cannot be.");
++    ImGui::Dummy({width, y - start.y});
++    return true;
++}
++
++// --- Sharp text ---------------------------------------------------------------
++
++// Coverage `w` by `h` enlarged `scale` times to `out_w` by `out_h`, by the
++// nearest pixel or bilinearly; nothing outside it.
++std::vector<std::uint8_t> enlarged(const std::vector<std::uint8_t> &coverage, int w, int h, int out_w, int out_h,
++                                   float scale, bool nearest) {
++    std::vector<std::uint8_t> out(static_cast<std::size_t>(out_w) * static_cast<std::size_t>(out_h), 0u);
++    const auto at = [&](int x, int y) -> float {
++        if (x < 0 || y < 0 || x >= w || y >= h) return 0.0f;
++        return coverage[static_cast<std::size_t>(y) * static_cast<std::size_t>(w) + static_cast<std::size_t>(x)];
++    };
++    for (int oy = 0; oy < out_h; ++oy)
++        for (int ox = 0; ox < out_w; ++ox) {
++            const float u = (static_cast<float>(ox) + 0.5f) / scale;
++            const float v = (static_cast<float>(oy) + 0.5f) / scale;
++            float value = 0.0f;
++            if (nearest) {
++                value = at(static_cast<int>(std::floor(u)), static_cast<int>(std::floor(v)));
++            } else {
++                const float fu = u - 0.5f, fv = v - 0.5f;
++                const int x0 = static_cast<int>(std::floor(fu)), y0 = static_cast<int>(std::floor(fv));
++                const float ax = fu - static_cast<float>(x0), ay = fv - static_cast<float>(y0);
++                value = (at(x0, y0) * (1.0f - ax) + at(x0 + 1, y0) * ax) * (1.0f - ay) +
++                        (at(x0, y0 + 1) * (1.0f - ax) + at(x0 + 1, y0 + 1) * ax) * ay;
++            }
++            out[static_cast<std::size_t>(oy) * static_cast<std::size_t>(out_w) + static_cast<std::size_t>(ox)] =
++                static_cast<std::uint8_t>(std::clamp(value + 0.5f, 0.0f, 255.0f));
++        }
++    return out;
++}
++
++// Coverage put in the atlas at (x, y) as `ink` over `backdrop`, `pad` pixels
++// of backdrop around it, the whole `w` by `h`.
++void put_text(int x, int y, int w, int h, int pad, const std::vector<std::uint8_t> &coverage, int cov_w, int cov_h,
++              ImU32 ink, ImU32 backdrop) {
++    for (int oy = 0; oy < h; ++oy) {
++        std::uint32_t *row = atlas_row(y + oy) + x;
++        for (int ox = 0; ox < w; ++ox) {
++            const int cx = ox - pad, cy = oy - pad;
++            const std::uint32_t c =
++                cx >= 0 && cy >= 0 && cx < cov_w && cy < cov_h
++                    ? coverage[static_cast<std::size_t>(cy) * static_cast<std::size_t>(cov_w) + static_cast<std::size_t>(cx)]
++                    : 0u;
++            std::uint32_t pixel = 0xFF000000u;
++            for (int shift = 0; shift < 24; shift += 8) {
++                const std::uint32_t a = (backdrop >> shift) & 0xFFu, b = (ink >> shift) & 0xFFu;
++                pixel |= ((a * (255u - c) + b * c + 127u) / 255u) << shift;
++            }
++            row[ox] = pixel;
++        }
++    }
++    upload(x, y, w, h);
++}
++
++// The block of text the Sharp text preview shows, taken once a menu.
++struct TextPreview {
++    fonts::TextSample sample;
++    std::string key;  // the factor and font it was drawn with
++    bool found{};
++};
++
++TextPreview &text_preview() {
++    static TextPreview value;
++    return value;
++}
++
++bool sharp_text_preview(gpu::VulkanRenderer &renderer, float width) {
++    ImDrawList *draw = ImGui::GetWindowDrawList();
++    const ImVec2 start = ImGui::GetCursorScreenPos();
++    const settings::Settings &s = settings::current();
++    const std::array<std::uint32_t, 2> target = renderer.target_size();
++    if (target[1] == 0u) return false;
++    // As the renderer draws it: the internal resolution's lines per PSP line.
++    const int factor = static_cast<int>(std::min((target[1] + 136u) / 272u, 8u));
++    float y = start.y;
++    if (factor < 2) {
++        y += note(draw, {start.x, y}, width,
++                  "At this resolution the game's text is drawn at the PSP's size either way.", colors::kTextDim);
++        ImGui::Dummy({width, y - start.y});
++        return true;
++    }
++    TextPreview &preview = text_preview();
++    const fonts::TextSample &sample = preview.sample;
++    const std::string wanted = std::to_string(factor) + "/" + std::to_string(fonts::generation());
++    if (preview.key != wanted) {
++        preview.found = fonts::text_sample(factor, preview.sample);
++        preview.key = wanted;
++        atlas().crops_key.clear();
++    }
++    if (!preview.found) {
++        y += note(draw, {start.x, y}, width, "The game has drawn no text to show yet.", colors::kTextDim);
++        ImGui::Dummy({width, y - start.y});
++        return true;
++    }
++    // On screen: the internal resolution shown at the window's scale.
++    const GamePicture picture = game_picture();
++    const float ratio = picture.height > 0.0f ? picture.height / static_cast<float>(target[1]) : 1.0f;
++    const int pad = static_cast<int>(px(12.0f));
++    const int big_w = static_cast<int>(sample.width) * factor;
++    const int big_h = static_cast<int>(sample.height) * factor;
++    const int text_w = static_cast<int>(std::lround(static_cast<float>(big_w) * ratio));
++    const int text_h = static_cast<int>(std::lround(static_cast<float>(big_h) * ratio));
++    const int strip_w = std::min({kAtlasSize, static_cast<int>(width), text_w + pad * 2});
++    const int strip_h = std::min({kSlotHeight, static_cast<int>(std::round(font() * 5.0f)), text_h + pad * 2});
++    const std::string key = "text/" + wanted + "/" + std::to_string(s.sharp_textures) + "/" +
++                            std::to_string(s.sharp_screen) + "/" + std::to_string(ratio) + "/" +
++                            std::to_string(strip_w) + "x" + std::to_string(strip_h);
++    const ImVec2 off_origin{0.0f, static_cast<float>(kSlotWidth)};
++    const ImVec2 on_origin{0.0f, static_cast<float>(kSlotWidth + kSlotHeight)};
++    if (atlas().crops_key != key) {
++        const ImU32 backdrop = colors::kPanel | 0xFF000000u;
++        const ImU32 ink = colors::kHeading | 0xFF000000u;
++        // Off: the PSP-sized letters enlarged to the internal resolution by
++        // the Texture filter, then to the screen.
++        const std::vector<std::uint8_t> off_big =
++            enlarged(sample.game, static_cast<int>(sample.width), static_cast<int>(sample.height), big_w, big_h,
++                     static_cast<float>(factor), s.sharp_textures);
++        const int cov_w = std::min(text_w, strip_w - pad), cov_h = std::min(text_h, strip_h - pad);
++        put_text(0, kSlotWidth, strip_w, strip_h, pad,
++                 enlarged(off_big, big_w, big_h, cov_w, cov_h, ratio, s.sharp_screen), cov_w, cov_h, ink, backdrop);
++        // On: drawn at the internal resolution, then to the screen.
++        put_text(0, kSlotWidth + kSlotHeight, strip_w, strip_h, pad,
++                 enlarged(sample.sharp, big_w, big_h, cov_w, cov_h, ratio, s.sharp_screen), cov_w, cov_h, ink,
++                 backdrop);
++        atlas().crops_key = key;
++    }
++    label(draw, {start.x, y}, ("The game's text at ×" + std::to_string(factor)).c_str(), colors::kSection);
++    y += std::round(font() * 1.3f);
++    const float w = static_cast<float>(strip_w), h = static_cast<float>(strip_h);
++    framed(draw, off_origin, {start.x, y}, w, h, "Off: the PSP's letters, enlarged " + std::to_string(factor) + "×",
++           !s.sharp_text);
++    y += h + std::round(font() * 1.9f);
++    framed(draw, on_origin, {start.x, y}, w, h, "On: drawn again at " + std::to_string(factor) + "×", s.sharp_text);
++    y += h + std::round(font() * 1.9f);
++    y += note(draw, {start.x, y}, width,
++              "Text the game drew last, as large as your screen shows it. Off enlarges the PSP's letters with the "
++              "Texture filter; On draws them again from the font.");
++    ImGui::Dummy({width, y - start.y});
++    return true;
++}
++
++// --- Pictures of the game's (GameProfile::setting_pictures) -----------------------
++
++struct Picture {
++    ImTextureData *texture{};
++    int width{};
++    int height{};
++};
++
++// A PNG of the profile's as a texture, decoded once and kept.
++const Picture *picture(const EmbeddedImage &image) {
++    static std::vector<std::pair<const unsigned char *, Picture>> decoded;
++    if (image.data == nullptr || image.size == 0u) return nullptr;
++    for (const auto &[data, found] : decoded)
++        if (data == image.data) return found.texture != nullptr ? &found : nullptr;
++    Picture made;
++    int channels = 0;
++    stbi_uc *pixels = stbi_load_from_memory(image.data, static_cast<int>(image.size), &made.width, &made.height,
++                                            &channels, 4);
++    if (pixels != nullptr && made.width > 0 && made.height > 0) {
++        made.texture = new ImTextureData();
++        made.texture->Create(ImTextureFormat_RGBA32, made.width, made.height);
++        std::memcpy(made.texture->GetPixels(), pixels, static_cast<std::size_t>(made.width) * made.height * 4u);
++        ImGui::RegisterUserTexture(made.texture);
++    }
++    if (pixels != nullptr) stbi_image_free(pixels);
++    decoded.emplace_back(image.data, made);
++    return made.texture != nullptr ? &decoded.back().second : nullptr;
++}
++
++bool setting_pictures(const SettingPictures &p, float width) {
++    const Picture *off = picture(p.off);
++    const Picture *on = picture(p.on);
++    if (off == nullptr || on == nullptr) return false;
++    ImDrawList *draw = ImGui::GetWindowDrawList();
++    const ImVec2 start = ImGui::GetCursorScreenPos();
++    const float gap = px(20.0f);
++    // Side by side, at the size the game drew them or smaller.
++    const float w = std::floor(std::min((width - gap) * 0.5f, static_cast<float>(off->width)));
++    const float h = std::floor(std::min(w * static_cast<float>(off->height) / static_cast<float>(off->width),
++                                        std::round(font() * 16.0f)));
++    const float shown_w = std::floor(h * static_cast<float>(off->width) / static_cast<float>(off->height));
++    const bool now_on = p.is_on != nullptr && p.is_on();
++    float y = start.y;
++    for (int i = 0; i < 2; ++i) {
++        const Picture &pic = i == 0 ? *off : *on;
++        const bool chosen = p.is_on != nullptr && (i == 1) == now_on;
++        const ImVec2 at{std::round(start.x + static_cast<float>(i) * (shown_w + gap)), std::round(y)};
++        draw->AddImage(pic.texture->GetTexRef(), at, {at.x + shown_w, at.y + h});
++        const float edge = std::max(1.0f, px(chosen ? 2.0f : 1.0f));
++        draw->AddRect({at.x - px(3.0f), at.y - px(3.0f)}, {at.x + shown_w + px(3.0f), at.y + h + px(3.0f)},
++                      chosen ? colors::kAccent : colors::kPanelEdge, 0.0f, 0, edge);
++        const float caption_y = at.y + h + px(10.0f);
++        text(draw, {at.x, caption_y}, chosen ? colors::kHeading : colors::kTextDim, i == 0 ? "Off" : "On", 0.8f);
++        if (chosen) {
++            const std::string mark = "Chosen";
++            text(draw, {at.x + shown_w - text_width(mark, 0.8f), caption_y}, colors::kSection, mark, 0.8f);
++        }
++    }
++    y += h + std::round(font() * 1.9f);
++    if (p.note != nullptr) y += note(draw, {start.x, y}, width, p.note);
++    ImGui::Dummy({width, y - start.y});
++    return true;
++}
++
+ // The stick's last places, for its trail.
+ struct Trail {
+     std::array<ImVec2, 6> points{};
+@@ -568,7 +1033,7 @@ bool stick(gpu::VulkanRenderer &renderer, float width) {
+     ImDrawList *draw = ImGui::GetWindowDrawList();
+     const ImVec2 start = ImGui::GetCursorScreenPos();
+     const settings::Settings &s = settings::current();
+-    SDL_Gamepad *pad = renderer.gamepad();
++    SDL_Gamepad *pad = Layer::get().menu_gamepad();
+     const float x = axis(pad, SDL_GAMEPAD_AXIS_LEFTX);
+     const float y = axis(pad, SDL_GAMEPAD_AXIS_LEFTY);
+     const float size = std::floor(std::min(width * 0.45f, font() * 14.0f));
+@@ -604,8 +1069,8 @@ bool stick(gpu::VulkanRenderer &renderer, float width) {
+     }
+     float bottom = start.y + size + px(14.0f);
+     bottom += note(draw, {start.x, bottom}, width,
+-                   pad != nullptr ? "Live from " + pad_name(pad) + ". Move the left stick to try it; the D-pad leaves "
+-                                                                   "this row. The game reads 0 to 255 on each axis, 128 at rest."
++                   pad != nullptr ? live_from(renderer, pad) + " Move the left stick to try it; the D-pad leaves "
++                                                                "this row. The game reads 0 to 255 on each axis, 128 at rest."
+                                   : "Connect a gamepad to try it here.");
+     ImGui::Dummy({width, bottom - start.y});
+     return true;
+@@ -615,7 +1080,7 @@ bool diagonals(gpu::VulkanRenderer &renderer, float width) {
+     ImDrawList *draw = ImGui::GetWindowDrawList();
+     const ImVec2 start = ImGui::GetCursorScreenPos();
+     const settings::Settings &s = settings::current();
+-    SDL_Gamepad *pad = renderer.gamepad();
++    SDL_Gamepad *pad = Layer::get().menu_gamepad();
+     // The direction the stick points, or up and right while it rests: a
+     // full push that way, with the setting off and on.
+     float x = axis(pad, SDL_GAMEPAD_AXIS_LEFTX);
+@@ -655,7 +1120,7 @@ bool triggers(gpu::VulkanRenderer &renderer, float width) {
+     ImDrawList *draw = ImGui::GetWindowDrawList();
+     const ImVec2 start = ImGui::GetCursorScreenPos();
+     const settings::Settings &s = settings::current();
+-    SDL_Gamepad *pad = renderer.gamepad();
++    SDL_Gamepad *pad = Layer::get().menu_gamepad();
+     const input::PadKind kind = pad_kind(pad);
+     const char *names[2] = {"LT", "RT"};
+     if (kind == input::PadKind::PlayStation || kind == input::PadKind::SteamDeck) names[0] = "L2", names[1] = "R2";
+@@ -694,7 +1159,7 @@ bool triggers(gpu::VulkanRenderer &renderer, float width) {
+         }
+         y += std::round(font() * 1.9f);
+     }
+-    std::string about = pad != nullptr ? "Live from " + pad_name(pad) + ". The line is where a trigger starts to press."
++    std::string about = pad != nullptr ? live_from(renderer, pad) + " The line is where a trigger starts to press."
+                                        : "Connect a gamepad to try it here.";
+     if (!s.swap_triggers && extras && portablekit::game().extra_triggers != nullptr)
+         about += std::string(" ") + portablekit::game().extra_triggers;
+@@ -713,7 +1178,7 @@ bool right_stick(gpu::VulkanRenderer &renderer, float width, bool zone_row) {
+     ImDrawList *draw = ImGui::GetWindowDrawList();
+     const ImVec2 start = ImGui::GetCursorScreenPos();
+     const settings::Settings &s = settings::current();
+-    SDL_Gamepad *pad = renderer.gamepad();
++    SDL_Gamepad *pad = Layer::get().menu_gamepad();
+     const float x = axis(pad, SDL_GAMEPAD_AXIS_RIGHTX);
+     const float y = axis(pad, SDL_GAMEPAD_AXIS_RIGHTY);
+     const bool dpad = zone_row || s.right_stick == settings::RightStick::DPad;
+@@ -777,9 +1242,9 @@ bool right_stick(gpu::VulkanRenderer &renderer, float width, bool zone_row) {
+     float bottom = start.y + size + px(14.0f);
+     bottom += note(draw, {start.x, bottom}, width,
+                    pad != nullptr ? (dpad ? std::string("Past a dashed line the stick presses that way; in a corner, "
+-                                                        "two ways. Live from ")
+-                                          : std::string("Live from ")) +
+-                                        pad_name(pad) + "."
++                                                        "two ways. ")
++                                          : std::string()) +
++                                        live_from(renderer, pad)
+                                   : "Connect a gamepad to try it here.");
+     ImGui::Dummy({width, bottom - start.y});
+     return true;
+@@ -841,7 +1306,7 @@ bool prompts(gpu::VulkanRenderer &renderer, float width) {
+     ImDrawList *draw = ImGui::GetWindowDrawList();
+     const ImVec2 start = ImGui::GetCursorScreenPos();
+     const settings::Settings &s = settings::current();
+-    const input::PadKind kind = pad_kind(renderer.gamepad());
++    const input::PadKind kind = pad_kind(Layer::get().menu_gamepad());
+     const bool cross_confirms = portablekit::game().confirm_button == 1u;
+     const float gap = px(12.0f);
+     const float cell_w = std::floor((width - gap * 2.0f) / 3.0f);
+@@ -919,7 +1384,7 @@ bool confirm(gpu::VulkanRenderer &renderer, float width) {
+     ImDrawList *draw = ImGui::GetWindowDrawList();
+     const ImVec2 start = ImGui::GetCursorScreenPos();
+     const settings::Settings &s = settings::current();
+-    input::PadKind kind = pad_kind(renderer.gamepad());
++    input::PadKind kind = pad_kind(Layer::get().menu_gamepad());
+     if (kind == input::PadKind::Keyboard) kind = input::PadKind::None;
+     const float gap = px(22.0f);
+     const float cell_w = std::floor((width - gap) * 0.5f);
+@@ -1015,15 +1480,20 @@ bool preview(const std::string &key, gpu::VulkanRenderer &renderer, float width)
+     if (key == "input.right_stick_zone") return right_stick(renderer, width, true);
+     if (key == "input.mouse_sensitivity") return mouse(width);
+     if (key == "video.sharp_screen") return scaling(renderer, width);
++    if (key == "video.internal_scale") return resolution(renderer, width);
++    if (key == "text.sharp") return sharp_text_preview(renderer, width);
+     if (key == "video.aspect") return aspect(renderer, width);
+     if (key == "text.font" || key == "text.weight") return font_sample(width);
+     if (key == "input.button_prompts") return prompts(renderer, width);
++    for (const SettingPictures &p : portablekit::game().setting_pictures)
++        if (p.key != nullptr && key == p.key) return setting_pictures(p, width);
+     if (key == "input.confirm") return confirm(renderer, width);
+     return false;
+ }
+ 
+ void forget_paused_frame() {
+     paused() = Frame{};
++    text_preview() = TextPreview{};
+     atlas().thumbnail_key.clear();
+     atlas().crops_key.clear();
+ }
+diff --git a/host/ui/widgets.cpp b/host/ui/widgets.cpp
+index 9e9555a..bda3f46 100644
+--- a/host/ui/widgets.cpp
++++ b/host/ui/widgets.cpp
+@@ -202,7 +202,7 @@ float draw_face(ImDrawList *draw, ImVec2 at, SDL_GamepadButton button, ImU32 fil
+     if (draw == nullptr) return radius * 2.0f;
+     const ImVec2 center{at.x + radius, at.y + font() * 0.5f};
+     draw->AddCircleFilled(center, radius, fill);
+-    SDL_Gamepad *pad = Layer::get().attached() ? Layer::get().renderer().gamepad() : nullptr;
++    SDL_Gamepad *pad = Layer::get().attached() ? Layer::get().menu_gamepad() : nullptr;
+     SDL_GamepadButtonLabel label = pad != nullptr ? SDL_GetGamepadButtonLabel(pad, button)
+                                                   : SDL_GAMEPAD_BUTTON_LABEL_UNKNOWN;
+     if (label == SDL_GAMEPAD_BUTTON_LABEL_UNKNOWN) {
+@@ -243,7 +243,7 @@ float draw_face(ImDrawList *draw, ImVec2 at, SDL_GamepadButton button, ImU32 fil
+ }
+ 
+ const char *shoulder_name(bool right) {
+-    SDL_Gamepad *pad = Layer::get().attached() ? Layer::get().renderer().gamepad() : nullptr;
++    SDL_Gamepad *pad = Layer::get().attached() ? Layer::get().menu_gamepad() : nullptr;
+     const SDL_GamepadType type = pad != nullptr ? SDL_GetGamepadType(pad) : SDL_GAMEPAD_TYPE_UNKNOWN;
+     const char *name = pad != nullptr ? SDL_GetGamepadName(pad) : nullptr;
+     const bool playstation = type == SDL_GAMEPAD_TYPE_PS3 || type == SDL_GAMEPAD_TYPE_PS4 ||
+@@ -258,7 +258,7 @@ const char *shoulder_name(bool right) {
+ 
+ // The button left of the pad's centre, as the pad in use names it.
+ const char *select_name() {
+-    SDL_Gamepad *pad = Layer::get().attached() ? Layer::get().renderer().gamepad() : nullptr;
++    SDL_Gamepad *pad = Layer::get().attached() ? Layer::get().menu_gamepad() : nullptr;
+     switch (pad != nullptr ? SDL_GetGamepadType(pad) : SDL_GAMEPAD_TYPE_UNKNOWN) {
+     case SDL_GAMEPAD_TYPE_PS3: return "Select";
+     case SDL_GAMEPAD_TYPE_PS4: return "Share";
+-- 
+2.53.0.windows.1
+
