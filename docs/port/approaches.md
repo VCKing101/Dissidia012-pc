@@ -2,7 +2,7 @@
 
 Research date: 2026-10-18. Sources are web pages only. No repositories were cloned and no tools were run. Every factual claim links to the page it came from. Where a page did not say something, this document says so. Effort figures in the recommendation are estimates, not sourced facts, and are labelled that way.
 
-Target: Dissidia 012 Duodecim Final Fantasy, USA `ULUS10566`. One main EBOOT and three overlays with overlapping load addresses. SNC 1.2.7503.0 build. 278 functions (0.44% of about 4.7 MB of code) matched in C so far.
+Target: Dissidia 012 Duodecim Final Fantasy, USA `ULUS10566`. One main EBOOT and three overlays with overlapping load addresses. SNC 1.2.7503.0 build. 278 functions (0.44% of about 4.7 MB of code) matched in C at the research date (14,141 functions, 29.53%, by 26 November; see the [progress report](../decomp/progress.md)).
 
 Caution on sources: most of the PSP projects below are between one and four months old, and several say they were built with heavy AI help. Their status comes from their own READMEs. None of it was checked by building or running them.
 

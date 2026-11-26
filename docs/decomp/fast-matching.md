@@ -239,7 +239,7 @@ count is unchanged at 35 / 2,460. All four modules rebuild byte-identically and 
   `0x0887D868`, the function 127 call sites use to make a text) and two layout-node functions outside it
   (`0x088D44EC`, `0x088D8A98`). The rest stay near misses with readable drafts: the draw function `0x0887BC2C`, the
   layout `0x0887F294`, the bitmap-font layout `0x0887E9CC`, the image drawer `0x0887CA50` and the font init
-  `0x08881954` compile from the map's drafts but are 260–900 words off. Tonight's text files were renamed to the
+  `0x08881954` compile from the map's drafts but are 260–900 words off. That run's text files were renamed to the
   map's names before integration.
 - The rest: 172 functions in untouched ranges (main 83, menu 54, battle 35): first the functions earlier agents had
   claimed but never reached, then unclaimed functions of 380–680 bytes, then float-using functions up to 500 bytes
@@ -370,7 +370,7 @@ Collected from both agent rounds (544 hand matches). Each was confirmed by a byt
 - A spilled parameter that is also copied into another argument register for the call: SNC swaps the parameter registers and retail does not.
 - Pointer-to-member-function dispatch through state tables ending in `jalr; nop` (about 40 menu functions); an investigation was cut off by the usage limit before reporting.
 - Loop rotation in a few search loops, `sw $ra` scheduled before dependent loads, and bit sets kept as `and ~m; or m`.
-- Readable rewrites of the generated files are installed in battle and most of menu; the per-region headers (`include/<module>/auto_region*.h`) overlap and still need merging into real class headers.
+- Readable rewrites of the generated files are installed in battle and menu; 1,049 of main's 2,079 still carry Ghidra's placeholder names (26 November). The per-region headers (`include/<module>/auto_region*.h`) overlap and still need merging into real class headers.
 - Still open after 24–25 November: parameter-spill loaders (retail stores `a1` then `a0` at `4($sp)`/`0($sp)` before the first call and keeps neither in a saved register), four-halfword copy loops (`lhu; sll/sra; sh`), flags built from `mode == 1` by branches (`bne; ori 0; b; ori 1`), bool helpers on a float test (`bc1fl`/`bc1tl`), pointer-to-member dispatch through a stack table, a result variable's `ori 0` that retail puts in a loop test's delay slot, and loops where only the counter and pointer registers swap.
 - Still open after 25–26 November: a slot-release function that ends `if (flags & 1) free(self, size)`, where retail
   fills the last `beqz` delay slot with the call's first argument move (or uses `beql` with the next test's `andi`),

@@ -802,8 +802,8 @@ Other points the fix must handle (**read** / **traced**):
 
 ## 7. Functions
 
-Matched = byte-identical C in the build before tonight (`build/scratch/text-system/matched.txt`); "tonight" =
-matched tonight (`build/dc-results/agent87.md`, `agent89.md`, `agent91.md`; their files were renamed to the
+Matched = byte-identical C in the build before 25 November (`build/scratch/text-system/matched.txt`); "26 Nov" =
+matched in the 25–26 November run (`build/dc-results/agent87.md`, `agent89.md`, `agent91.md`; their files were renamed to the
 names below before integration); "no" = not matched. **Name** is the role name to use
 (lower_snake_case); the file name an earlier agent gave is in brackets where it differs. Rows marked (not text)
 sit in the range but belong to other systems; their names are the earlier ones unless the role was read.
@@ -812,7 +812,7 @@ sit in the range but belong to other systems; their names are the earlier ones u
 | --- | --- | --- | --- |
 | 0x0887A0EC | multi_dtor | yes | (not text) destructor |
 | 0x0887A19C | object_deleting_dtor [main_0887a19c] | yes | (not text) deleting destructor, members +0x1AF0/+0x1874/+0x90 |
-| 0x0887A204 | sphere_overlap | tonight | (not text) sphere overlap test |
+| 0x0887A204 | sphere_overlap | 26 Nov | (not text) sphere overlap test |
 | 0x0887A2B4 | label_handle_ctor [main_0887a2b4] | yes | label handle: vtable 0x089C9D30 at +0xC |
 | 0x0887A2EC | label_handle_dtor [main_0887a2ec] | yes | label_close, then delete if asked |
 | 0x0887A344 | label_handle_reset [main_0887a344] | yes | two words = 0 |
@@ -838,11 +838,11 @@ sit in the range but belong to other systems; their names are the earlier ones u
 | 0x0887A8F0 | text_file_has_long_headers [magic_test] | yes | 4-byte entry headers |
 | 0x0887A918 | text_file_is_utf8 [magic_test] | yes | |
 | 0x0887A940 | text_utf8_to_utf16 | no | entry -> static UTF-16 0x09B48C88 (0x3FE units), codes copied with their arguments |
-| 0x0887AACC | text_file_load | tonight | disc or package -> heap block |
+| 0x0887AACC | text_file_load | 26 Nov | disc or package -> heap block |
 | 0x0887AC24 | text_file_bind_header [header_bind] | yes | |
 | 0x0887AC70 | text_file_copy | no | copy a text file into a heap block |
 | 0x0887AD1C | text_file_free | no | |
-| 0x0887AD78 | text_new_from_file_entry | tonight | a text from an entry of a text file (colour 0, caller sets it) |
+| 0x0887AD78 | text_new_from_file_entry | 26 Nov | a text from an entry of a text file (colour 0, caller sets it) |
 | 0x0887AEAC | text_new_from_block [text_line_draw] | yes | a text from entry `index` of a {count, data} block |
 | 0x0887AFB0 | text_file_is_loaded [main_0887afb0] | yes | |
 | 0x0887AFBC | text_file_entry_string [text_line_get] | yes | entry string (UTF-8 converted) |
@@ -857,7 +857,7 @@ sit in the range but belong to other systems; their names are the earlier ones u
 | 0x0887B500 | text_multi_entry_string [text_line_after] | yes | |
 | 0x0887B5A8 / 0x0887B5F8 | text_multi_id_take / text_multi_id_give [pool_take/pool_give] | yes | 4-entry id pool |
 | 0x0887B648 | text_multi_pool_init [block_pool_init] | yes | |
-| 0x0887B6A0 | text_init | tonight | defaults: (0, -1), scales 1.0, flags 0x420, alpha -1, colour 0 |
+| 0x0887B6A0 | text_init | 26 Nov | defaults: (0, -1), scales 1.0, flags 0x420, alpha -1, colour 0 |
 | 0x0887B748 | text_set_position [play_range] | yes | x, y (y - 1 unless bitmap text) |
 | 0x0887B778 | text_set_from_matrix [sprite_place] | yes | scale = m[0], m[5]; position = m[12], m[13] |
 | 0x0887B7D0 | text_set_scale [play_pair] | yes | +0x18/+0x1C |
@@ -876,7 +876,7 @@ sit in the range but belong to other systems; their names are the earlier ones u
 | 0x0887BA5C | text_release [main_0887ba5c] | yes | 0x0887DB1C on the manager |
 | 0x0887BA80 | text_set_on_free [sprite_draw] | yes | buffer free callback (not bitmap) |
 | 0x0887BAD4 | text_reveal_step [anim_step] | yes | letter-by-letter reveal |
-| 0x0887BB6C | text_width | tonight | buffer +0x10 (or bitmap width) x scale_x |
+| 0x0887BB6C | text_width | 26 Nov | buffer +0x10 (or bitmap width) x scale_x |
 | 0x0887BBC8 / 0x0887BBF4 | text_clear_marks / text_marks [main_*] | yes | +0x28 |
 | 0x0887BC2C | text_draw | no | **draw one text** (section 4) |
 | 0x0887CA50 | text_draw_images | no | inline images of a text |
@@ -902,13 +902,13 @@ sit in the range but belong to other systems; their names are the earlier ones u
 | 0x0887D750 | font_lib_free [main_0887d750] | yes | |
 | 0x0887D7B8 | text_buffer_alloc | no | a text buffer block from the heap at manager+0x14 ("SYSTEM FONT T" or a swapped-in one; **corrected (review)**) |
 | 0x0887D828 | text_buffer_free [main_0887d828] | yes | |
-| 0x0887D868 | text_new | tonight | **make a text from a string** |
-| 0x0887DA08 | text_images_free | tonight | give an image list back to its pool |
+| 0x0887D868 | text_new | 26 Nov | **make a text from a string** |
+| 0x0887DA08 | text_images_free | 26 Nov | give an image list back to its pool |
 | 0x0887DAC0 | text_drop_source | no | buffer / bitmap record reference - 1 |
 | 0x0887DB1C | text_manager_release | no | release: drop source, unlink, back to the pool |
 | 0x0887DBD4 | text_update_all | no | **Update pass** |
 | 0x0887DE04 | text_draw_all | no | **Draw pass** |
-| 0x0887DF14 | text_bytes_to_utf16 | tonight | 8-bit string -> UTF-16 (pair table 0x089D6964, '?') |
+| 0x0887DF14 | text_bytes_to_utf16 | 26 Nov | 8-bit string -> UTF-16 (pair table 0x089D6964, '?') |
 | 0x0887E090 / 0x0887E0DC | text_image_set_set / text_image_set_reset [slot_set/slot_reset] | yes | inline image sets |
 | 0x0887E114 | text_image_new | no | an inline image node |
 | 0x0887E278 | text_manager_ctor | no | the four pools |
@@ -921,8 +921,8 @@ sit in the range but belong to other systems; their names are the earlier ones u
 | 0x0887E798 / 0x0887E7B4 | text_heap_t_save / text_heap_t_restore [main_*] | yes | +0x10/+0x14 <-> +0x20/+0x24 |
 | 0x0887E7D0 | text_images_release [main_0887e7d0] | yes | 0x0887DA08 on the manager |
 | 0x0887E7F4 | control_code_arg_units [glyph_half_width] | yes | argument units of a control code |
-| 0x0887E81C | text_copy_remapped | tonight | UTF-16 copy through the {from, to} table 0x089D6988 |
-| 0x0887E8C8 | text_length | tonight | UTF-16 length to a stop code, skipping code arguments |
+| 0x0887E81C | text_copy_remapped | 26 Nov | UTF-16 copy through the {from, to} table 0x089D6988 |
+| 0x0887E8C8 | text_length | 26 Nov | UTF-16 length to a stop code, skipping code arguments |
 | 0x0887E9CC | bitmap_text_layout | no | **lay out a 0x001C byte string** (battle banners) |
 | 0x0887EF84 | bitmap_text_draw | no | **bitmap-font draw** |
 | 0x0887F294 | text_layout | no | **measure, cut into runs, rasterise** (sceFont) |
@@ -930,7 +930,7 @@ sit in the range but belong to other systems; their names are the earlier ones u
 | 0x08881F2C, 0x08881F4C | heaps_init, dtor | yes | (not text) system heaps |
 | 0x08881F78 / 0x08881FFC | system_heaps_set / system_heaps_clear | no | (not text) +0xECDC00/+0xECDC04 |
 | 0x0888204C | system_heap_alloc | yes | (not text) |
-| 0x088820D8 | heap_alloc | tonight | (not text) |
+| 0x088820D8 | heap_alloc | 26 Nov | (not text) |
 | 0x0888208C-0x088822B4 | heap_alloc, state_init, dtor, system_task_heap, main_* | yes | (not text) heaps, task heap |
 | 0x088822BC-0x0888274C, 0x088828BC, 0x08882950 | task_construct ... task_unlink | yes | (not text) the task system |
 | 0x08882790 | task_insert_by_priority | no | (not text) |
@@ -938,16 +938,16 @@ sit in the range but belong to other systems; their names are the earlier ones u
 | 0x08882CBC / 0x08882D78 | frustum_sphere_test / frustum_sphere_test_planes | no | (not text) sphere against the frustum planes |
 | 0x08882E44-0x08882FF4 | volatile_mem_lock, object_init, sound_dtor, main_* | yes | (not text) |
 
-### Related functions outside the range (all **read**; 0x088D44EC and 0x088D8A98 matched tonight)
+### Related functions outside the range (all **read**; 0x088D44EC and 0x088D8A98 matched on 26 November)
 
 | Address | Name | Role |
 | --- | --- | --- |
 | main 0x088D40BC | layout_attach_label | link one label into a layout node's text list (flag 0x8000, alignment, pitch, matrix) |
 | main 0x088D428C | layout_attach_labels | the same for a binding table (`D012TextBinding`), optionally emptying the nodes' lists first |
-| main 0x088D44EC / 0x088D4584 | layout_bind_labels / layout_bind_label | each frame: a node part's matrix and colour into its label (0x088D44EC matched tonight: `src/main/node_texts_bind_088d44ec.c`; 0x088D4584 matched before) |
+| main 0x088D44EC / 0x088D4584 | layout_bind_labels / layout_bind_label | each frame: a node part's matrix and colour into its label (0x088D44EC matched on 26 November: `src/main/node_texts_bind_088d44ec.c`; 0x088D4584 matched before) |
 | main 0x088D442C | layout_release_labels | release the bound labels, empty the nodes' lists |
 | main 0x088D8FD0 | layout_label_open | a layout file's own label (from the label cache or a new text), linked to its node |
-| main 0x088D8A98 | layout_unlink_label | unlink a label from its node's text list, clear 0x8000, close the handle (matched tonight: `src/main/node_text_unlink_088d8a98.cpp`) |
+| main 0x088D8A98 | layout_unlink_label | unlink a label from its node's text list, clear 0x8000, close the handle (matched on 26 November: `src/main/node_text_unlink_088d8a98.cpp`) |
 | main 0x088D9E48 | layout_node_draw_texts | draw a node's texts with 0x0887BC2C at the node's z (from the layout draw 0x088D16F4) |
 | main 0x08856D70 / 0x08857134 | banner_open / banner_draw | battle banner: a text from a fighter archive's entry (0x0887AD78), drawn after the window pieces |
 | main 0x0899D2F8 | img_bind | write an image's texture commands into the display list (see docs/port/texture-pipeline.md) |
