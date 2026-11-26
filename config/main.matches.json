@@ -18956,6 +18956,17 @@
       ]
     },
     {
+      "name": "field_battle_start_08889694",
+      "source": "src/main/field_battle_start_08889694.c",
+      "functions": [
+        {
+          "name": "func_08889694",
+          "address": "0x08889694",
+          "size": 372
+        }
+      ]
+    },
+    {
       "name": "scene_check_08889808",
       "source": "src/main/scene_check_08889808.c",
       "functions": [
@@ -19637,7 +19648,7 @@
         }
       ],
       "unused_inline_symbols": [
-        "__0oEVec3asRC6EVec3"
+        "__0oOD012ReplayVec3asRC6OD012ReplayVec3"
       ]
     },
     {
@@ -25769,8 +25780,8 @@
       ]
     },
     {
-      "name": "main_088adf28",
-      "source": "src/main/auto/main_088adf28.c",
+      "name": "save_text_copy_088adf28",
+      "source": "src/main/save_text_copy_088adf28.c",
       "functions": [
         {
           "name": "func_088ADF28",
@@ -25853,6 +25864,17 @@
           "name": "func_088AE064",
           "address": "0x088AE064",
           "size": 228
+        }
+      ]
+    },
+    {
+      "name": "save_header_check_088aef54",
+      "source": "src/main/save_header_check_088aef54.c",
+      "functions": [
+        {
+          "name": "func_088AEF54",
+          "address": "0x088AEF54",
+          "size": 68
         }
       ]
     },
@@ -26058,8 +26080,8 @@
       ]
     },
     {
-      "name": "round_stop_088afb30",
-      "source": "src/main/round_stop_088afb30.c",
+      "name": "save_manager_start_088afb30",
+      "source": "src/main/save_manager_start_088afb30.c",
       "functions": [
         {
           "name": "func_088AFB30",
@@ -30326,6 +30348,21 @@
       ]
     },
     {
+      "name": "replay_clear_088c82e0",
+      "source": "src/main/replay_clear_088c82e0.cpp",
+      "functions": [
+        {
+          "name": "func_088C82E0",
+          "address": "0x088C82E0",
+          "size": 284
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fOD012ReplayVec3EZerov",
+        "__0fVD012ReplayCameraEntryFClearv"
+      ]
+    },
+    {
       "name": "store_free_088c83fc",
       "source": "src/main/store_free_088c83fc.c",
       "functions": [
@@ -30367,6 +30404,45 @@
           "address": "0x088C84E8",
           "size": 100
         }
+      ]
+    },
+    {
+      "name": "replay_insert_span_088c8b90",
+      "source": "src/main/replay_insert_span_088c8b90.cpp",
+      "functions": [
+        {
+          "name": "func_088C8B90",
+          "address": "0x088C8B90",
+          "size": 304
+        }
+      ]
+    },
+    {
+      "name": "replay_remove_span_088c8cc0",
+      "source": "src/main/replay_remove_span_088c8cc0.cpp",
+      "functions": [
+        {
+          "name": "func_088C8CC0",
+          "address": "0x088C8CC0",
+          "size": 296
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0oOD012ReplayVec3asRC6OD012ReplayVec3"
+      ]
+    },
+    {
+      "name": "replay_insert_span_at_088c8de8",
+      "source": "src/main/replay_insert_span_at_088c8de8.cpp",
+      "functions": [
+        {
+          "name": "func_088C8DE8",
+          "address": "0x088C8DE8",
+          "size": 380
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0oOD012ReplayVec3asRC6OD012ReplayVec3"
       ]
     },
     {
@@ -30425,6 +30501,38 @@
       ]
     },
     {
+      "name": "replay_edit_span_088c91ec",
+      "source": "src/main/replay_edit_span_088c91ec.cpp",
+      "functions": [
+        {
+          "name": "func_088C91EC",
+          "address": "0x088C91EC",
+          "size": 224
+        },
+        {
+          "name": "func_088C92CC",
+          "address": "0x088C92CC",
+          "size": 224
+        }
+      ]
+    },
+    {
+      "name": "replay_span_frames_088c93ac",
+      "source": "src/main/replay_span_frames_088c93ac.cpp",
+      "functions": [
+        {
+          "name": "func_088C93AC",
+          "address": "0x088C93AC",
+          "size": 224
+        },
+        {
+          "name": "func_088C948C",
+          "address": "0x088C948C",
+          "size": 216
+        }
+      ]
+    },
+    {
       "name": "main_088c9564",
       "source": "src/main/auto/main_088c9564.c",
       "functions": [
@@ -30433,6 +30541,42 @@
           "address": "0x088C9564",
           "size": 60
         }
+      ]
+    },
+    {
+      "name": "replay_reset_088c95a0",
+      "source": "src/main/replay_reset_088c95a0.cpp",
+      "functions": [
+        {
+          "name": "func_088C95A0",
+          "address": "0x088C95A0",
+          "size": 188
+        }
+      ]
+    },
+    {
+      "name": "replay_rewind_088c965c",
+      "source": "src/main/replay_rewind_088c965c.c",
+      "functions": [
+        {
+          "name": "func_088C965C",
+          "address": "0x088C965C",
+          "size": 140
+        }
+      ]
+    },
+    {
+      "name": "replay_copy_088c96e8",
+      "source": "src/main/replay_copy_088c96e8.cpp",
+      "functions": [
+        {
+          "name": "func_088C96E8",
+          "address": "0x088C96E8",
+          "size": 520
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0oOD012ReplayVec3asRC6OD012ReplayVec3"
       ]
     },
     {
@@ -30653,10 +30797,28 @@
         }
       ],
       "unused_inline_symbols": [
-        "__0oEVec3asRC6EVec3",
-        "__0oEVec3ctv",
-        "__0oGCameractv"
+        "__0oOD012ReplayVec3asRC6OD012ReplayVec3",
+        "__0oOD012ReplayVec3ctv",
+        "__0oVD012ReplayCameraEntryctv"
       ]
+    },
+    {
+      "name": "replay_play_frame_088ca9a8",
+      "source": "src/main/replay_play_frame_088ca9a8.cpp",
+      "functions": [
+        {
+          "name": "func_088CA9A8",
+          "address": "0x088CA9A8",
+          "size": 872
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fPReplayFlagsViewKhas_camerav"
+      ],
+      "rodata": {
+        "address": "0x089CBC78",
+        "size": 32
+      }
     },
     {
       "name": "bsearch_088cad10",
@@ -62955,7 +63117,10 @@
     "func_0893FDCC": "0x0893FDCC",
     "D_089D7758": "0x089D7758",
     "func_088CA9A8": "0x088CA9A8",
-    "func_0888B0A4": "0x0888B0A4"
+    "func_0888B0A4": "0x0888B0A4",
+    "D_089CBC70": "0x089CBC70",
+    "func_088C965C": "0x088C965C",
+    "func_088C8DE8": "0x088C8DE8"
   },
   "status": "97 matching C/C++ functions / 6104 bytes; typed presentation callbacks, initialization, rendering gates, exact task unlink and drawing allocation support. Larger transition/update and task factory/registration remain unfinished."
 }

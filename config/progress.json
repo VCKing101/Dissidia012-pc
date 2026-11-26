@@ -2500,7 +2500,7 @@
     "main_088ad0e8": "main_helpers",
     "main_088ad1e8": "main_helpers",
     "main_088ad994": "main_helpers",
-    "main_088adf28": "main_helpers",
+    "save_text_copy_088adf28": "main_helpers",
     "main_088adf68": "main_helpers",
     "main_088adf7c": "main_helpers",
     "main_088ae010": "main_helpers",
@@ -8977,7 +8977,7 @@
     "round_end_088af36c": "main_helpers",
     "round_start_088af3e0": "main_helpers",
     "round_start_088afb08": "main_helpers",
-    "round_stop_088afb30": "main_helpers",
+    "save_manager_start_088afb30": "main_helpers",
     "row_cell_code_088b7dc0": "main_helpers",
     "row_clear_cells_088b7d30": "main_helpers",
     "row_clear_triples_088b7d58": "main_helpers",
@@ -13709,7 +13709,19 @@
     "replay_write_record_088ca564": "main_helpers",
     "replay_record_frame_088ca680": "main_helpers",
     "replay_save_copy_0888ad50": "main_helpers",
-    "replay_task_0888948c": "main_helpers"
+    "replay_task_0888948c": "main_helpers",
+    "replay_play_frame_088ca9a8": "main_helpers",
+    "field_battle_start_08889694": "main_helpers",
+    "replay_clear_088c82e0": "main_helpers",
+    "replay_copy_088c96e8": "main_helpers",
+    "replay_edit_span_088c91ec": "main_helpers",
+    "replay_reset_088c95a0": "main_helpers",
+    "replay_rewind_088c965c": "main_helpers",
+    "replay_span_frames_088c93ac": "main_helpers",
+    "save_header_check_088aef54": "main_helpers",
+    "replay_insert_span_088c8b90": "main_helpers",
+    "replay_insert_span_at_088c8de8": "main_helpers",
+    "replay_remove_span_088c8cc0": "main_helpers"
   },
   "features": [
     {

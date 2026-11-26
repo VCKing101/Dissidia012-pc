@@ -13,24 +13,6 @@ typedef struct Pad { char p0[0x34]; PadVt *vt; char p1[0x8]; RawPad *raw; } Pad;
 extern "C" unsigned long long D_089D7758[15];
 extern "C" unsigned int func_088C8434(D012Replay *replay);
 extern "C" void func_088CA564(D012Replay *replay, int fighter);
-extern "C" void func_089A34C0(float *dst, const float *src);
-extern "C" void func_089A34E0(float *v);
-/* The camera entry as C++ sees it: the vectors' constructor and assignment are the library's zero and copy, so
-   the entry is built and assigned member by member. Same layout as D012ReplayCamera. */
-struct Vec3 {
-    float v[3];
-    Vec3() { func_089A34E0(v); }
-    Vec3 &operator=(const Vec3 &o) { func_089A34C0(v, o.v); return *this; }
-};
-struct Camera {
-    Vec3 pos_a;
-    Vec3 pos_b;
-    int frame;
-    short unk_1C;
-    short unk_1E;
-    unsigned char unk_20;
-    unsigned char unk_21[3];
-};
 
 extern "C" void func_088CA680(D012Replay *replay, Pad **pads, unsigned char *pad_changed, unsigned char camera_event)
 {
@@ -79,10 +61,10 @@ extern "C" void func_088CA680(D012Replay *replay, Pad **pads, unsigned char *pad
         if (camera_event == 1) {
             unsigned int index = func_088C8434(replay);
             if (index < D012_REPLAY_CAMERA_SLOTS) {
-                Camera cam;
-                cam.unk_1C = cam.unk_1E = cam.unk_20 = cam.unk_21[0] = cam.unk_21[1] = cam.unk_21[2] = 0;
+                D012ReplayCameraEntry cam;
+                cam.unk_1C = cam.unk_1E = cam.kind = cam.unk_21[0] = cam.unk_21[1] = cam.unk_21[2] = 0;
                 cam.frame = replay->frame_total;
-                *(Camera *)&replay->camera[index] = cam;
+                *(D012ReplayCameraEntry *)&replay->camera[index] = cam;
                 replay->camera_count++;
             } else {
                 replay->flags |= D012_REPLAY_FULL;

@@ -9,6 +9,7 @@
  * Marks in the field comments (as in text_types.h):
  *   V  verified in the disassembly (a load/store at that offset with that width, used that way)
  *   F  seen in the decrypted files (values that fit the meaning)
+ *   R  seen in a run (a replay saved again after Camera Edit, decrypted and compared)
  *   I  inferred (name/meaning from how it is used, or offset known but use not fully traced)
  *
  * Conventions: guest memory (PSP, 32-bit little endian); unknown fields are unk_XXXX (hex offset); sizes are
@@ -72,12 +73,12 @@ enum {
 
 /* A camera entry, 0x24 bytes (copied field by field by 0x0888AD50 and 0x088C96E8). */
 typedef struct D012ReplayCamera {
-    float pos_a[3];               /* +0x00 V  a vector (zero when recorded; I: filled by Camera Edit) */
-    float pos_b[3];               /* +0x0C V  a vector (zero when recorded) */
+    float pos_a[3];               /* +0x00 V  a vector (zero when recorded; R: set by Camera Edit; I: position) */
+    float pos_b[3];               /* +0x0C V  a vector (zero when recorded; R: set by Camera Edit; I: target) */
     int frame;                    /* +0x18 V F  the recorder's clock when the entry was made */
-    short unk_1C;                 /* +0x1C V */
+    short unk_1C;                 /* +0x1C V  R: 50 in a Camera Edit entry */
     short unk_1E;                 /* +0x1E V */
-    unsigned char unk_20;         /* +0x20 V */
+    unsigned char kind;           /* +0x20 V  0 recorded event or camera data, 1 a span's start, 2 its end */
     unsigned char unk_21[3];      /* +0x21 V */
 } D012ReplayCamera;
 
@@ -90,10 +91,11 @@ typedef struct D012Replay {
     int bgm;                      /* +0x22E4 V F  the battle music (FIELD +0x804 in playback; 83 and 84 seen) */
     unsigned char records[2][0x3F48]; /* +0x22E8 V F  5,400 records of 3 bytes a fighter: big-endian (mask << 8) | run */
     int record_count[2];          /* +0xA178 V F */
-    D012ReplayCamera camera[200]; /* +0xA180 V F  filled from the end: entry 199 - camera_count */
-    int unk_BDA0;                 /* +0xBDA0 V  cleared, copied */
-    int camera_count;             /* +0xBDA4 V F */
-    int unk_BDA8;                 /* +0xBDA8 V  cleared, copied */
+    D012ReplayCamera camera[200]; /* +0xA180 V F R  camera data from the front, recorded events from the back
+                                   *              (199 - camera_count), spans below them */
+    int camera_data_count;        /* +0xBDA0 V R  Camera Edit's entries, from index 0 */
+    int camera_count;             /* +0xBDA4 V F  recorded camera events */
+    int span_count;               /* +0xBDA8 V  span entries (kinds 1, 2), below the recorded events */
     int frame_total;              /* +0xBDAC V F  the recorder's clock: frames recorded (= the sum of the runs) */
     unsigned char unk_BDB0;       /* +0xBDB0 V  flipped by 0x088CA510 */
     unsigned char pad_BDB1[3];
@@ -154,6 +156,52 @@ D012_REPLAY_AT(D012ReplaySave, detail_args, 0xEA48);
 
 #ifdef __cplusplus
 }
+#endif
+
+#ifdef __cplusplus
+/* The same layout as C++ sees it in the game's code: the camera entry's vectors have a constructor and an
+ * assignment that call the library's vector zero (0x089A34E0) and copy (0x089A34C0), so the game builds, clears
+ * and copies entries member by member, and assigns the whole saved part of the replay (D012ReplayData) member by
+ * member too (the save copy 0x0888AD50 and the load copy 0x088C96E8). Matched sources use these types. */
+extern "C" void func_089A34C0(float *dst, const float *src);
+extern "C" void func_089A34E0(float *v);
+struct D012ReplayVec3 {
+    float v[3];
+    D012ReplayVec3() { func_089A34E0(v); }
+    D012ReplayVec3 &operator=(const D012ReplayVec3 &o) { func_089A34C0(v, o.v); return *this; }
+    void Zero() { func_089A34E0(v); }
+};
+struct D012ReplayCameraEntry {
+    D012ReplayVec3 pos_a;
+    D012ReplayVec3 pos_b;
+    int frame;
+    short unk_1C;
+    short unk_1E;
+    unsigned char kind;
+    unsigned char unk_21[3];
+    void Clear()
+    {
+        pos_a.Zero();
+        pos_b.Zero();
+        frame = unk_1C = unk_1E = kind = unk_21[0] = unk_21[1] = unk_21[2] = 0;
+    }
+};
+struct D012ReplaySetup { int words[0x22E4 / 4]; };
+struct D012ReplayData {
+    unsigned int magic;
+    D012ReplaySetup setup;
+    unsigned char records[2][0x3F48];
+    int record_count[2];
+    D012ReplayCameraEntry camera[200];
+    int camera_data_count;
+    int camera_count;
+    int span_count;
+    int frame_total;
+    unsigned char unk_BDB0;
+    int player_side;
+};
+D012_STATIC_ASSERT(sizeof(D012ReplayCameraEntry) == 0x24, "D012ReplayCameraEntry size");
+D012_STATIC_ASSERT(sizeof(D012ReplayData) == 0xBDB8, "D012ReplayData size");
 #endif
 
 #endif /* D012_REPLAY_TYPES_H */

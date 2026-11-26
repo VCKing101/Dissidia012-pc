@@ -10,6 +10,10 @@
 > The layouts are in [`include/main/replay_types.h`](../../include/main/replay_types.h) (`D012Replay`,
 > `D012ReplayCamera`, `D012ReplaySave`), with the same marks. Pad terms are those of [pad-module.md](pad-module.md).
 > FIELD is the battle manager object `*(0x089D6A10)`; its mode is `FIELD+0x4C`.
+>
+> One run on a copy of the test data checked section 5 (26 November, 23:27-23:33): replay 03 loaded, saved twice with
+> no edit, then once after Camera Edit's Set Camera Data; the three new files decrypted and compared
+> (`build/scratch/replay/`, shots `t08`-`t27`, log `replay1.err`).
 
 ## 0. Headline findings
 
@@ -26,7 +30,8 @@
 3. V: **The plaintext is the replay object verbatim**: file offset = replay offset + 0xE8, for replay `+0x0000` to
    `+0xBDB8`. Replay `+0x0000` is a format word **0x20081106** (written by the clear `0x088C82E0`), not "a word of the
    battle". The last 0x18 bytes are replay `+0xBDA0..+0xBDB8`: two unknowns, the camera entry count, the **total
-   frames recorded**, a flag byte and the player's side.
+   frames recorded**, a flag byte and the player's side. V (run): saving a loaded replay again writes the same
+   plaintext byte for byte; Camera Edit changes only the camera table and its count (section 5).
 4. V: **There is no checksum anywhere in the game's own code.** The only integrity checks are the PSP save
    utility's (encryption and the hash in `PARAM.SFO`) and the two header words.
 5. V: **The clock.** Recording: replay `+0xBDAC` counts every recorded frame; in all four files it equals the sum of
@@ -45,41 +50,47 @@
 
 ## 1. Functions
 
-| Address | Size | Name here | Role | C |
+| Address | Size | Name here | Role | C (26-27 Nov) |
 | --- | ---: | --- | --- | --- |
-| `0x0888948C` | 448 | `replay_task` | "FIELD::ReplayRecordAndPlayTask" (name at `0x089CA4DC`), registered by `0x0888C4C8` at `0x0888DDB8` (FIELD list, filter 3, priority 0x12C) | no |
-| `0x088CA680` | 808 | `replay_record_frame` | the recorder, once a frame unless mode 9 | no |
-| `0x088CA9A8` | 872 | `replay_play_frame` | the player, once a frame in mode 9 | no |
-| `0x088CA564` | 244 | `replay_write_record` | writes one record (a finished run) | draft matches |
+| `0x0888948C` | 448 | `replay_task` | "FIELD::ReplayRecordAndPlayTask" (name at `0x089CA4DC`), registered by `0x0888C4C8` at `0x0888DDB8` (FIELD list, filter 3, priority 0x12C) | yes |
+| `0x088CA680` | 808 | `replay_record_frame` | the recorder, once a frame unless mode 9 | yes |
+| `0x088CA9A8` | 872 | `replay_play_frame` | the player, once a frame in mode 9 | yes |
+| `0x088CA564` | 244 | `replay_write_record` | writes one record (a finished run) | yes |
 | `0x088CA664` | 28 | `code_split` | splits a 24-bit record into mask (>> 8) and run (& 0xFF) | yes |
 | `0x088CA658` | 12 | (auto) | `run + mask * 0x100`: builds a record | yes |
 | `0x088C8434` | 48 | `store_last` | the next camera entry: `199 - camera_count`, or -1 when full | yes |
-| `0x088CA528` | 24 | (inside the inventory's `0x088CA4EC`) | `!(flags & 1)`: the replay is not full | no |
-| `0x088CA510` | 24 | (inside `0x088CA4EC`) | flips the byte at `+0xBDB0` | no |
-| `0x088C82E0` | 284 | `replay_clear` | magic 0x20081106; counts, records (0x7E90 bytes), 200 camera entries and `+0xBDA0..+0xBDB8` zeroed | no |
-| `0x088C829C` | 68 | `replay_construct` | builds the two 0x1060-byte objects at `+0x4`, then clears | no |
-| `0x088C9564` | 60 | `replay_static_init` | constructor of the static object `0x08B99030` (guard `0x08B9902C`); also resets | no |
-| `0x088C95A0` | 188 | `replay_reset` | state 0, clear, cursors, `+0xBDE4` and flags zeroed | no |
-| `0x088C965C` | 140 | `replay_rewind` | state 0, cursors and `+0xBDE4` zeroed; keeps the data | no |
-| `0x088C96E8` | 520 | `replay_copy` | replay = replay (the load path), then `0x088FB028(+4)` | no |
-| `0x088C98F0` | 28 | `replay_apply_setup` | `0x088FB028(replay+4)` (I: applies the stored set-up to the battle) | no |
-| `0x088C990C` | 28 | `replay_store_setup` | `0x088FB1A4(replay+4, FIELD+0x804)` (I: stores the set-up and music) | no |
+| `0x088CA528` | 24 | (inside the inventory's `0x088CA4EC`) | `!(flags & 1)`: the replay is not full | yes |
+| `0x088CA510` | 24 | (inside `0x088CA4EC`) | flips the byte at `+0xBDB0` | yes |
+| `0x088C82E0` | 284 | `replay_clear` | magic 0x20081106; counts, records (0x7E90 bytes), 200 camera entries and `+0xBDA0..+0xBDB8` zeroed | yes |
+| `0x088C829C` | 68 | `replay_construct` | builds the two 0x1060-byte objects at `+0x4`, then clears | yes |
+| `0x088C9564` | 60 | `replay_static_init` | constructor of the static object `0x08B99030` (guard `0x08B9902C`); also resets | yes |
+| `0x088C95A0` | 188 | `replay_reset` | state 0, clear, cursors, `+0xBDE4` and flags zeroed | yes |
+| `0x088C965C` | 140 | `replay_rewind` | state 0, cursors and `+0xBDE4` zeroed; keeps the data | yes |
+| `0x088C96E8` | 520 | `replay_copy` | replay = replay (the load path), then `0x088FB028(+4)` | yes |
+| `0x088C98F0` | 28 | `replay_apply_setup` | `0x088FB028(replay+4)` (I: applies the stored set-up to the battle) | yes |
+| `0x088C990C` | 28 | `replay_store_setup` | `0x088FB1A4(replay+4, FIELD+0x804)` (I: stores the set-up and music) | yes |
 | `0x088C9928` | 16 | (auto) | `+0xBDB4` = FIELD `+0x54` (the player's side) | yes |
-| `0x088C93AC` | 224 | | `+0xBDAC` minus the spans between paired camera entries (I: the length shown) | no |
-| `0x088C9938` | 172 | `replay_stop` | state 1: both runs in progress written, state 3; state 2: state 4, the pad manager's replay flag cleared | no |
+| `0x088C93AC` | 224 | `replay_unedited_length` | `+0xBDAC` less the Camera Edit spans, at least 0 | yes |
+| `0x088C948C` | 216 | `replay_in_edit_span` | 1 if a frame lies inside a Camera Edit span | yes |
+| `0x088C913C` | 176 | `count_state1` | the number of span starts | yes |
+| `0x088C9004` | 64 | `store_extra_index` | span entry n's table slot: `199 - camera_count - n` | yes |
+| `0x088CA1A4` / `0x088CA42C` | 156 / 156 | | the camera data entry the play frame lies in (identical twins) | near (14 words) |
+| `0x088AEF54` | 68 | `save_header_check` | after a load, the buffer's first two words against the descriptor (flag 4) | yes |
+| `0x088C91EC` / `0x088C92CC` | 224 / 224 | `replay_edit_span_start` / `_end` | the n-th entry of kind 1 / 2 | yes |
+| `0x088C9938` | 172 | `replay_stop` | state 1: both runs in progress written, state 3; state 2: state 4, the pad manager's replay flag cleared | yes |
 | `0x088CA540` | 36 | (auto) | camera data at the play frame: `0x088C948C(replay, +0xBDE4)` | yes |
-| `0x08889BAC` | 132 | `field_start_replay` | the load hand-off: pads cleared, `0x088C96E8(FIELD+0x7C8, data)`, flags bit 1 from its third argument, FIELD mode 9 | no |
-| `0x08889694` | 372 | `field_battle_start` | per battle: in mode 9 `0x088C95A0` or `0x088C965C`+`0x088C98F0`; otherwise `0x088C95A0`, `0x088C9928` | no |
-| `0x088892C8` / `0x088892E8` | 32 / 384 | `ExecPadInitByChangeTask` | outside mode 9, resets a fighter's pad edges when its pad's state changes (the source of bit 15) | no |
-| `0x0888AD50` | 708 | `replay_save_copy` | allocates the 60,000-byte save object (FIELD `+0x7CC`), copies the replay into its buffer, starts the save | no |
+| `0x08889BAC` | 132 | `field_start_replay` | the load hand-off: pads cleared, `0x088C96E8(FIELD+0x7C8, data)`, flags bit 1 from its third argument, FIELD mode 9 | yes |
+| `0x08889694` | 372 | `field_battle_start` | per battle: in mode 9 `0x088C95A0` or `0x088C965C`+`0x088C98F0`; otherwise `0x088C95A0`, `0x088C9928` | yes |
+| `0x088892C8` / `0x088892E8` | 32 / 384 | `ExecPadInitByChangeTask` | outside mode 9, resets a fighter's pad edges when its pad's state changes (the source of bit 15) | yes |
+| `0x0888AD50` | 708 | `replay_save_copy` | allocates the 60,000-byte save object (FIELD `+0x7CC`), copies the replay into its buffer, starts the save | yes |
 | `0x088B0AF8` | 176 | `replay_save_init` | the replay's save descriptor | yes |
-| `0x088B0BA8` | 96 | | stores the detail text's six words at save `+0xEA48`, then `0x088AFB08` | no |
+| `0x088B0BA8` | 96 | | stores the detail text's six words at save `+0xEA48`, then `0x088AFB08` | yes |
 | `0x088B0CAC` → `0x088B0C08` | 28 / 192 | | the save's callback: titles and detail text (`0x088ADE90`, `0x088B0CC8`, `0x088ADF28`), then `0x088AFB30` | auto |
 | `0x088ADE90` | 152 | `stamp` | date into the save's name (`+0x864`) | yes |
-| `0x088ADF28` | 64 | (auto) | copies a 0x13-byte text into `+0x8E4` | yes |
-| `0x088AFB30` | 52 | `round_stop` | (I: misnamed) the save manager's next step, `0x088AF134` | yes |
-| `0x088B0CC8` | 908 | `replay_detail_text` | builds the save's detail text at `+0x864 + 0x100` (0x400 bytes): the title if given, both fighters' names, the stage, the length; nothing if the six words are out of range | draft matches |
-| `0x08872304` | 404 | `RawPad_inject` | buttons in, stick bytes rebuilt, a poll | no |
+| `0x088ADF28` | 64 | `save_text_copy` | copies UI text 0x13 into the parameters' second title (`+0x8E4`) | yes |
+| `0x088AFB30` | 52 | `save_manager_start` | the save manager starts its request: flags 0 and 2 cleared, then `0x088AF134` | yes |
+| `0x088B0CC8` | 908 | `replay_detail_text` | builds the save's detail text at `+0x864 + 0x100` (0x400 bytes): the title if given, both fighters' names, the stage, the length; nothing if the six words are out of range | yes |
+| `0x08872304` | 404 | `RawPad_inject` | buttons in, stick bytes rebuilt, a poll | near (11 words) |
 | `0x08872970` | | `LogicalPad_injectAndUpdate` | called by the player per fighter | |
 
 ## 2. The replay object (question 1)
@@ -96,9 +107,9 @@ V: one static object at `0x08B99030`, pointer at `0x089D7750`, copied into FIELD
 | `+0x22E8` | 2 × 0x3F48 | `records[2]` | V: 5,400 records of 3 bytes a fighter |
 | `+0xA178` | 2 × 4 | `record_count[2]` | V |
 | `+0xA180` | 200 × 0x24 | `camera[200]` | V: section 3.4 |
-| `+0xBDA0` | 4 | | V: cleared, saved, loaded; 0 in the files |
+| `+0xBDA0` | 4 | `camera_data_count` | V (run): Camera Edit's entries, filled from the table's front; Set Camera Data made entry 0 and set this to 1. `0x088CA1A4`/`0x088CA42C` find the entry the play frame is in. 0 in the four files |
 | `+0xBDA4` | 4 | `camera_count` | V |
-| `+0xBDA8` | 4 | | V: cleared, saved, loaded; 0 in the files |
+| `+0xBDA8` | 4 | `span_count` | V: entries of kind 1 and 2 below the recorded events (`0x088C9004`: slot `199 - camera_count - n`); `0x088C913C`, `0x088C91EC`, `0x088C92CC` loop to it. I: the camera spans of section 3.4; not made by Set Camera Data. 0 in every file seen |
 | `+0xBDAC` | 4 | `frame_total` | V: the recorder's clock |
 | `+0xBDB0` | 1 | | V: flipped by `0x088CA510`; 0 in the files |
 | `+0xBDB4` | 4 | `player_side` | V: FIELD `+0x54` at a recorded battle's start; 0 in the files |
@@ -191,11 +202,24 @@ centre (127.5 at `0x089C972C`, stored as 127) and moved by 127.5 (`0x089C9730`) 
 
 ### 3.4 Camera entries
 
-V: 200 entries of 0x24 bytes (`D012ReplayCamera`): two float vectors, a frame (`+0x18`), two halves, four bytes.
-The recorder fills them from index 199 downwards, all zero but the frame. The files hold 6 to 10 entries; index 199
-is frame 0 (all zero), then frame 72 and pairs such as 995/1027 and 2963/2995. I: Camera Edit writes the vectors and
-the other fields; `0x088C93AC` subtracts each pair's span from the clock (the length the menu shows with skipped
-stretches, or the time "Play to next camera data" skips).
+V: 200 entries of 0x24 bytes (`D012ReplayCamera`): two float vectors, a frame (`+0x18`), two halves, a kind byte
+(`+0x20`) and three bytes. The table is shared:
+
+- **Recorded events** fill it from index 199 downwards (`camera_count` at `+0xBDA4`), all zero but the frame; kind 0.
+  The files hold 6 to 10: index 199 at frame 0, then frame 72 and pairs such as 995/1027 and 2963/2995.
+- **Camera data** (Camera Edit's Set Camera Data) fill it from index 0 upwards, counted at `+0xBDA0`. V (run): one
+  Set Camera Data at 20.13 s into replay 03 wrote entry 0: both vectors (`(30.34, 36.53, -1.19)` and
+  `(24.86, 34.04, -2.45)`: I, the camera's position and target), frame 0, `+0x1C` = 50, kind 0; and `+0xBDA0` = 1.
+  The pause menu's camera counter showed 192 before (200 less the 8 recorded events) and 191 after.
+  `0x088CA1A4`/`0x088CA42C` return the entry whose frame range holds the play frame.
+- **Spans** (kind 1 starts one, kind 2 ends one) sit below the recorded events, counted at `+0xBDA8` and reached
+  through `0x088C90C0(replay, n)`. V: `0x088C91EC`/`0x088C92CC` find the n-th start and end, `0x088C913C` counts the
+  starts, `0x088C948C(replay, frame)` says whether a frame lies inside a span (1) or not (0), and the player feeds
+  that to `0x088FF8F8` each frame (with flags bit 1). `0x088C93AC` is the clock less every span's length (at least
+  0). I: another Camera Edit command makes them; none was seen.
+
+So a camera edit changes only the table and its counts (file `0xA268..0xBE88`, `0xBE88`, and `0xBE8C`/`0xBE90` if
+the other kinds change).
 
 ### 3.5 Flags bit 1 and mode 12
 
@@ -264,23 +288,23 @@ V, from the save copy and from the four decrypted files (key above; the decrypte
 | `0x6318` | 0x3F48 | `+0x6230` | fighter 1's records | |
 | `0xA260` | 8 | `+0xA178` | record counts | (26, 22) (15, 12) (19, 16) (16, 14) |
 | `0xA268` | 0x1C20 | `+0xA180` | camera entries | 10, 6, 8, 8 used |
-| `0xBE88` | 4 | `+0xBDA0` | | 0 |
-| `0xBE8C` | 4 | `+0xBDA4` | camera count | 10, 6, 8, 8 |
-| `0xBE90` | 4 | `+0xBDA8` | | 0 |
+| `0xBE88` | 4 | `+0xBDA0` | camera data count (Camera Edit) | 0 (1 after one Set Camera Data) |
+| `0xBE8C` | 4 | `+0xBDA4` | recorded camera events | 10, 6, 8, 8 |
+| `0xBE90` | 4 | `+0xBDA8` | span count | 0 |
 | `0xBE94` | 4 | `+0xBDAC` | frames recorded | 5,592, 2,849, 3,957, 3,415 |
 | `0xBE98` | 1 + 3 | `+0xBDB0` | flag byte, padding | 0 |
 | `0xBE9C` | 4 | `+0xBDB4` | the player's side | 0 |
 
 - **Checksum:** none (V: the game writes no word it could be in, and the load checks only words 0 and 1).
-- **What changes on every save:** V: nothing in the plaintext that is not in the replay object; the file holds no
-  date or counter (the date goes into the save's name and `PARAM.SFO`). The encrypted file changes on every save
-  (I: the PSP's random header; PortableKit's `encrypt_data` takes it as `random`).
-- **What a camera edit followed by Save data changes:** I: the camera entries (`0xA268..0xBE88`) and their count.
-  Nothing in `0xEC..0xA268` is written by playback (the task never calls the recorder in mode 9, and the player only
-  reads), with one caveat: the FIELD builder `0x0888C4C8` calls `0x088C990C` (store the set-up and music into the
-  replay) at `0x0888DCCC` on both of its paths, so if that runs in mode 9 too, the set-up at `0xEC..0x23D0` is
-  rewritten from the battle that was itself built from it. Whether every byte comes back the same needs one run
-  (section 9).
+- **What changes on every save:** V (run): nothing. Replay 03 loaded and saved twice with no edit (to new slots
+  Replay04 and Replay05) gave plaintext identical byte for byte to the original; the file holds no date or counter
+  (the date goes into the save's name and `PARAM.SFO`). The encrypted files differ on every save (their hashes:
+  `d3e8c877…`, `8544e110…`): the 16-byte header is random.
+- **What a camera edit followed by Save data changes:** V (run): 26 bytes, camera entry 0 (`0xA268..0xA27F` and
+  `0xA284`) and `0xBE88` (`camera_data_count`, 0 to 1). Nothing in `0x0000..0xA268`, the counts or the frames. The
+  set-up does go round a trip during playback (V: `0x088C96E8` applies it through `0x088FB028`, and the FIELD
+  builder `0x0888C4C8` stores it back through `0x088C990C` → `0x088FB1A4` at `0x0888DCCC` on both of its paths),
+  and it came back byte for byte.
 
 ## 6. The load path (question 4)
 
@@ -342,10 +366,12 @@ battle is recorded on each PSP from the injected pads and saved like any other.
 4. **The clock** (3.1): read `+0xBDAC` while recording and `+0xBDE4` while playing; both are per task call, and
    the task runs once a frame only in battle phases 2 to 4. Rewinds zero `+0xBDE4` (`0x088C965C`), so a track keyed
    to it follows "Play from beginning" by construction. A track should also stop where `frame_total` stops.
-5. **The last 0x18 bytes** need no special treatment in the key: `+0xBDA4` changes with camera edits (leave it out,
-   as the camera entries are); `+0xBDAC` (frames) and `+0xBDB4` (side) belong in it.
-6. **The set-up may be rewritten at playback** (section 5, caveat). If it is, a camera edit and Save data could
-   change bytes in `0xEC..0x23D0` and so the plan's key. To be checked before the key's range is fixed (section 9).
+5. **The last 0x18 bytes:** `+0xBDA0` (camera data) changes with Camera Edit (V, run), and `+0xBDA4`/`+0xBDA8`
+   belong to the same table: leave all three out of the key, as the camera entries are. `+0xBDAC` (frames) and
+   `+0xBDB4` (side) belong in it.
+6. **The plan's key range holds** (V, run): a re-save, with or without a camera edit, leaves `0xE8..0xA268` and
+   the counts unchanged, so a track keyed to them survives Edit and Save data. The camera table is the only part
+   that moves.
 7. **A full replay** (5,400 records for one fighter, or 200 camera events) is not offered for saving; the port's
    track can stop recording when flags bit 0 is set.
 8. **Order:** the recorder reads the stick bits after this frame's poll (V), so the port's per-frame stick bytes
@@ -353,19 +379,18 @@ battle is recorded on each PSP from the injected pads and saved like any other.
 
 ## 9. Not determined
 
-1. Whether a camera edit and Save data leave `0xEC..0xA268` unchanged (the set-up re-store above). One run on a
-   copy of the test data answers it: load a replay, Save data with no edit, then Camera Edit and Save data, and
-   compare the decrypted files.
-2. What mode 12 is.
-3. The camera entries' fields besides the frame, and what `0x0888B0A4` tests exactly.
-4. `+0xBDA0`, `+0xBDA8`, `+0xBDB0`'s meaning; `+0x20C4..+0x22E4`.
-5. The restart path's case of section 6, step 4.
+1. What mode 12 is.
+2. The camera entries' halves and bytes besides the kind (`+0x1C` was 50 in a Camera Edit entry), which Camera
+   Edit command makes spans, and what `0x0888B0A4` tests exactly (I: a fighter's special states, `0x08ADFE20` on
+   `+0x2A8`, and a battle overlay state in phase 3).
+3. `+0xBDB0`'s meaning; `+0x20C4..+0x22E4` (I: the option flags `0x09AFD960` and the rest that `0x088FB1A4` stores).
+4. The restart path's case of section 6, step 4.
 
 ## 10. The plan's open questions (its section 5)
 
 | Question | Answer |
 | --- | --- |
-| The file's first 0xE8 bytes and last 0x18 | **Answered** (V): 1, 0xBEA0, zeros; the last 0x18 are replay `+0xBDA0..+0xBDB8` (camera count, frames, side and three unknowns). No checksum. |
+| The file's first 0xE8 bytes and last 0x18 | **Answered** (V): 1, 0xBEA0, zeros; the last 0x18 are replay `+0xBDA0..+0xBDB8` (the camera data, event and span counts, frames, a flag byte, side). No checksum. Nothing changes on a re-save; Camera Edit changes only the camera table and its counts (V, run). |
 | What mode 12 is, and what the ending shows for a full replay | **Partly**: mode 12 is set by menu `0x08A505C0` and withholds the offer under one condition; its identity is open. A full replay gets the offer item in its other state (I: unavailable). |
 | What a PSP and PPSSPP show for a `PCREPLAY.BIN`-only folder | Not answered (needs PPSSPP; step 7). |
 | Whether a PSP saving over such a folder keeps `PCREPLAY.BIN` | Not answered (step 7). |
