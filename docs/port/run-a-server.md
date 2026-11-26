@@ -96,7 +96,8 @@ of a change, and drops whoever it names.
 ## The log
 
 `journalctl -u dissidia012-server` shows each login (nickname, MAC, release and address), every player turned away,
-and, once a minute when it changed, how many players are online on each release. A European disc's login shows the
+and, once a minute when it changed, how many players are online on each release and where they are: the lobbies by
+number (1 Cornelia to 16 Zanarkand), Group Battle's rooms, 1-on-1 battles, party battles and Communications. A European disc's login shows the
 North American code it plays under and its own: `(…, ULUS10566/<release>, disc ULES01505)`. The log holds players'
 addresses: keep it briefly.
 

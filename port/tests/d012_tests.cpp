@@ -26,6 +26,7 @@
 #include "d012_update_rules.hpp"
 #include "d012_versus_rules.hpp"
 #include "d012_voice_scenes.hpp"
+#include "d012_where.hpp"
 #include "model.hpp"
 #include "names.hpp"
 #include "psp_iso.hpp"
@@ -1422,6 +1423,94 @@ void test_relay_status() {
            "relay status: a short answer is not taken");
 }
 
+// The battle relay's WHERE query and answer (d012_battle_relay.hpp).
+void test_relay_where() {
+    namespace relay = d012::net::relay;
+    const std::string query = relay::where_query(0x01020304u, "0123456789abcdef-std");
+    expect(query.size() >= relay::kWhereAnswer, "relay where: a query is at least as long as its answer");
+    expect(query.compare(0, 4, "D0NL") == 0 && static_cast<std::uint8_t>(query[4]) == relay::kWhere,
+           "relay where: a query is a WHERE packet");
+    expect(static_cast<std::uint8_t>(query[relay::kHead + 4u]) == 20u &&
+               query.compare(relay::kWhereQuery, 20u, "0123456789abcdef-std") == 0,
+           "relay where: the query carries the version tag");
+    relay::Where where;
+    where.online = 9u;
+    where.menus = 1u;
+    where.lobbies[0] = 2u;
+    where.lobbies[15] = 300u;
+    where.group_battle = 3u;
+    where.duels = 2u;
+    where.party_battles = 4u;
+    where.communications = 1u;
+    const std::string answer = relay::where_answer(0x01020304u, where);
+    const auto *bytes = reinterpret_cast<const std::uint8_t *>(answer.data());
+    relay::Where back;
+    expect(answer.size() == relay::kWhereAnswer && relay::read_where_answer(bytes, answer.size(), 0x01020304u, back) &&
+               back == where,
+           "relay where: an answer reads back");
+    expect(!relay::read_where_answer(bytes, answer.size(), 0x01020305u, back),
+           "relay where: an answer to another query is not taken");
+    expect(!relay::read_where_answer(bytes, answer.size() - 1u, 0x01020304u, back),
+           "relay where: a short answer is not taken");
+    const std::string status = relay::status_query(0x01020304u, "x");
+    expect(!relay::read_where_answer(reinterpret_cast<const std::uint8_t *>(status.data()), status.size(), 0x01020304u,
+                                     back),
+           "relay where: a STATUS packet is not taken");
+}
+
+// Where the players are, from their groups (d012_where.hpp).
+void test_where_tally() {
+    namespace where = d012::where;
+    unsigned lobby = 99u;
+    expect(where::place_of("LOBBY0", lobby) == where::Place::Lobby && lobby == 0u, "where: LOBBY0 is Cornelia");
+    expect(where::place_of("LOBBY15", lobby) == where::Place::Lobby && lobby == 15u, "where: LOBBY15 is Zanarkand");
+    expect(where::place_of("LOBBY16", lobby) == where::Place::Menus, "where: no seventeenth room");
+    expect(where::place_of("MLOBBY", lobby) == where::Place::GroupBattle, "where: MLOBBY is Group Battle");
+    expect(where::place_of("48213907", lobby) == where::Place::Battle, "where: eight digits are a battle");
+    expect(where::place_of("4821390", lobby) == where::Place::Menus, "where: seven digits are not");
+    expect(where::place_of("DISCOVER", lobby) == where::Place::Communications, "where: DISCOVER is Communications");
+
+    const std::string v = "v1", other = "v2";
+    where::Tally tally;
+    // Two players in Midgar, one each in Cornelia and Group Battle, one in the
+    // menus, one trading, and one on another version in Midgar.
+    std::vector<where::Player> now = {
+        {1u, v, std::string("LOBBY8")}, {2u, v, std::string("LOBBY8")},   {3u, v, std::string("LOBBY0")},
+        {4u, v, std::string("MLOBBY")}, {5u, v, std::nullopt},             {6u, v, std::string("DISCOVER")},
+        {7u, other, std::string("LOBBY8")},
+    };
+    tally.update(now);
+    d012::net::relay::Where w = tally.of(v);
+    expect(w.online == 6u && w.lobbies[8] == 2u && w.lobbies[0] == 1u && w.group_battle == 1u && w.menus == 1u &&
+               w.communications == 1u && w.duels == 0u && w.party_battles == 0u,
+           "where: rooms, Group Battle, menus and Communications counted");
+    expect(tally.of(other).online == 1u && tally.of(other).lobbies[8] == 1u && tally.of("v3").online == 0u,
+           "where: each version counted apart");
+    // Midgar's two go into a challenge's battle, and the Group Battle player
+    // and a newcomer into a party battle of three.
+    now = {
+        {1u, v, std::string("11112222")}, {2u, v, std::string("11112222")}, {3u, v, std::string("LOBBY0")},
+        {4u, v, std::string("33334444")}, {8u, v, std::string("MLOBBY")},   {5u, v, std::nullopt},
+    };
+    tally.update(now);
+    now[4].group = std::string("33334444");
+    now.push_back({9u, v, std::string("33334444")});
+    tally.update(now);
+    w = tally.of(v);
+    expect(w.duels == 2u && w.party_battles == 3u && w.lobbies[0] == 1u && w.lobbies[8] == 0u && w.menus == 1u,
+           "where: a challenge's battle and a Group Battle's told apart by where their players came from");
+    // Players already in battles when the tally began: two is a challenge's.
+    where::Tally fresh;
+    fresh.update({{1u, v, std::string("11112222")}, {2u, v, std::string("11112222")},
+                  {3u, v, std::string("55556666")}, {4u, v, std::string("55556666")}, {5u, v, std::string("55556666")}});
+    w = fresh.of(v);
+    expect(w.duels == 2u && w.party_battles == 3u, "where: battles of players never seen before, by their size");
+    // A player back in the menus after a battle, and one who left.
+    tally.update({{1u, v, std::nullopt}});
+    w = tally.of(v);
+    expect(w.online == 1u && w.menus == 1u && w.duels == 0u, "where: players gone are no longer counted");
+}
+
 #if defined(_WIN32)
 using TestSocket = SOCKET;
 constexpr TestSocket kNoTestSocket = INVALID_SOCKET;
@@ -1513,6 +1602,15 @@ void test_relay_introductions() {
     options.port = kPort;
     options.loopback_only = true;
     options.name = "test-relay";
+    options.where = [](std::string_view version) {
+        relay::Where where;
+        if (version == "v1") {
+            where.online = 3u;
+            where.lobbies[8] = 2u;
+            where.duels = 1u;
+        }
+        return where;
+    };
     relay::start(options);
     sockaddr_in to{};
     to.sin_family = AF_INET;
@@ -1574,6 +1672,18 @@ void test_relay_introductions() {
     say(a, input);
     const std::vector<std::string> passed = take_datagrams(b, 500);
     expect(passed.size() == 1u && passed[0] == input, "relay intro: an INPUT still passes through the relay");
+
+    // WHERE, answered to anyone who asks with a query as long as the answer.
+    take_datagrams(a, 100);
+    say(a, relay::where_query(77u, "v1"));
+    relay::Where where;
+    const std::vector<std::string> answers = take_datagrams(a, 1000);
+    expect(answers.size() == 1u && relay::read_where_answer(bytes(answers[0]), answers[0].size(), 77u, where) &&
+               where.online == 3u && where.lobbies[8] == 2u && where.duels == 1u,
+           "relay where: the relay answers WHERE for a version");
+    const std::string short_query = relay::where_query(78u, "v1").substr(0, relay::kWhereAnswer - 1u);
+    say(a, short_query);
+    expect(take_datagrams(a, 300).empty(), "relay where: a query shorter than the answer goes unanswered");
     close_test_socket(a);
     close_test_socket(b);
 }
@@ -2580,6 +2690,8 @@ int main(int argc, char **argv) {
     test_voice_scenes();
     test_movie_splice();
     test_relay_status();
+    test_relay_where();
+    test_where_tally();
     test_relay_introductions();
     test_online_rules();
     test_dlc_packs();

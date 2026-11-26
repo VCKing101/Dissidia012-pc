@@ -111,8 +111,10 @@ portablekit_add_game(D012Native ${d012_corpus}
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_input.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_net.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_battle_relay.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_where.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_online.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_online_menu.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_lobby_status.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_online_rules.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_rollback.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_comm_battle.cpp"
@@ -512,6 +514,7 @@ add_executable(d012_tests "${CMAKE_CURRENT_SOURCE_DIR}/tests/d012_tests.cpp"
 target_link_libraries(d012_tests PRIVATE d012_manifest Threads::Threads)
 # The battle relay's STATUS packets (it builds without PortableKit).
 target_sources(d012_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_battle_relay.cpp"
+                                  "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_where.cpp"
                                   "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_dlc_packs_plan.cpp"
                                   "${CMAKE_CURRENT_SOURCE_DIR}/host/d012_manikin_rules.cpp"
                                   # The cheat engine, to run the battle cheats' codes.

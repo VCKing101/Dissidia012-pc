@@ -789,6 +789,77 @@ With late inputs left out, as before, those tests fail.
 **Not tested:** real players' battles, the Steam Deck and the phone (the code is shared; the header was only checked
 with GCC 13), and Group Battle's fights with the change.
 
+## 19. Who is where, in the game's own menus (26 November 2026)
+
+The owner: players see that four are online (the Network page, Discord) but not which lobby they are in, how many
+are in Group Battle, or whether they are in a battle at all; could the game's own menus say? Now the Online Lobby's
+list of 16 lobbies says it: each lobby with players in it shows "1 player" or "N players" at its bar's right end, and
+the title bar's right end shows "N online, N in battles, N in Group Battle" (and "N in Communications" when there
+are some), in the game's font, as its button hints are drawn on other screens. The counts change as players move,
+every 3 s while the list is open.
+
+**The server** (`port/server/d012_server.cpp`, `port/host/d012_where.*`, `port/host/d012_battle_relay.*`). The
+battle relay answers a new query, WHERE (15), as it answers STATUS: anyone may ask, the query must be as long as the
+answer (56 bytes) so a forged sender gains nothing, and it carries the asker's version tag, so it counts only the
+players that copy can meet. The answer is counts, never names or addresses: online, in no group (the menus), in each
+of the 16 lobbies (`LOBBY0` to `LOBBY15`), in Group Battle's rooms (`MLOBBY`: making, searching and waiting), in
+1-on-1 battles and in party battles (both an eight-digit group, from fighter select to the end), and in
+Communications (`DISCOVER`). A battle group's kind is where its players were last seen before it, kept per MAC:
+a lobby for a 1-on-1 battle, `MLOBBY` for a party battle; a player first seen in a battle (the server started while
+they fought) counts by the group's size, two for a 1-on-1 battle. The once-a-minute log line says the same per
+release ([Running a server](run-a-server.md#the-log)).
+
+A copy hosting a session answers WHERE from its own relay, from its server's players, kept up to date twice a
+second as the relay asks whether to stay open (`d012_net.cpp`, `serve`). With `D012_ADHOC_LOOPBACK` that relay
+now listens on 127.0.0.1 alone, as the rest of hosting does.
+
+**The copy** (`port/host/d012_online.*`, `where`). It asks the server the game goes online with
+(`adhoc_server_address()`: its own while hosting, the session it joined, or Play online's) at its battle port, on a
+thread of its own, every 3 s while the list asks, and keeps the answer 15 s. Nothing is asked otherwise. Against a
+server without WHERE (the official one before its update, an older host) nothing is shown.
+
+**The screen** (`port/host/d012_lobby_status.cpp`). The list is the Online Lobby object's first screen (menu
+overlay, work area at object +0x1320: layouts +0, parts +0x400, texts +0x880). Its set-up (menu 0x08A0C3C4) makes
+parts from table 0x08A11528 and texts from messages by 0x08A11838; the lobbies' bars are parts 48 to 63 (Cornelia
+to Zanarkand) with their names, texts 27 to 42, at locator 0, left aligned (texts 43 to 58 are the lit copies the
+chosen bar shows). Each frame menu 0x08A0C560 places the texts of table 0x08A11916 (main 0x088D44EC): the hook,
+after the game's own, in local versus's override of that function or, with local versus off, its own. The object's
+release (menu 0x08A0DD88) frees its layouts and then texts 0 to 97; none of its tables or code names texts 0 to
+26, so the counts are texts 0 to 15 and the title bar's 16: made from strings with the game's font (main
+0x0887D868), put on the bar right aligned (main 0x088D40BC, flags 0x14), placed each frame with the bar's locator 0
+(main 0x088D4584) and moved 139 pixels right (the bar ends 145 pixels after its name, on both columns). On the
+chosen bar they go to locator 1, where menu 0x08A0C0EC draws the name in white over its lit copy at locator 0, the
+dark shadow. The title bar's text sits on the left
+header (part 46) at (466, 16) in the hints' ink (39, 41, 65). A count that changes is a new text, the old one taken
+off its bar's list and freed (main 0x0887BA5C); the game frees the last ones. Each move of the hand empties every
+bar's list (menu 0x08A0BEF8) and puts the names back, so a count no longer on its bar's list is put back.
+`D012_NO_LOBBY_STATUS=1` turns it off.
+
+**Tested (V).** `d012_tests`: the WHERE packets, the tally (lobbies, versions apart, a 1-on-1 and a party battle
+told apart, battles seen first by their size, players gone) and a live relay answering WHERE and not a short query.
+Two copies of the clang build through `dissidia012-server --loopback` (local versus on):
+
+| Run | What happened | Seen |
+| --- | --- | --- |
+| `two1` | Copy 2 in Midgar; copy 1 opens the list, enters Cornelia, leaves Communication Mode, opens the list again | "Midgar 1 player", "2 online"; the same on the second visit (the counts made anew on the new list) |
+| `two2` | Copy 1's hand over Midgar and on to Balamb; copy 2 leaves and comes back into Cornelia | White on the lit bar, dark on the others; the count stays after the hand moves; "1 online" with no count when copy 2 left, then "Cornelia 1 player" |
+| `hosted1` | No server: copy 1 hosts (`D012_HOST_SESSION`), copy 2 joins it; copy 2 in Midgar, then copy 1 in Cornelia and copy 2 back to the list | The host's own relay answered both: copy 1 saw "Midgar 1 player", copy 2 "Cornelia 1 player", "2 online" |
+| `two3` | As `two2`, local versus off on copy 1 (`D012_LOCAL_VERSUS=0`: the module's own override) | The same, the count white on the lit bar |
+
+The Linux server program (WSL GCC 13, built as the official one is) answered WHERE with 56 bytes, left a short query
+unanswered and still answered STATUS. PortableKit's server code is unchanged since the official server's program
+(`ab941a5a`), so the new one is that program and this alone.
+
+**The official server** runs it since 26 November, 11:28:30 UTC (swapped with nobody online; the old program kept as
+`dissidia012-server.before-lobbyvis`). Checked from outside with a test login on a version tag of its own, so no
+player's counts moved: WHERE said 1 in the menus, then 1 in lobby 9 (Midgar), then 1 in the menus, then nobody, and
+STATUS still answered. Then a copy of the clang build on it (`live1`, its own version tag again), with a test player
+held in Midgar: the list said "Midgar 1 player" and "2 online", and "1 online" a few seconds after the test player
+left. The server's minute line read `1 on c9a67ff59a57826c-std (room 9 1)`.
+
+**Not tested:** real players (no release has it yet), many players, a party battle's count, the Linux and Android builds (the code is shared; not built), the Steam Deck. Group Battle's
+own screen and the lobby itself show nothing new.
+
 ## Sources
 
 - [Oracle, Always Free Resources][oci-free], read 10 November 2026: the allowances, the home region, the idle rule.

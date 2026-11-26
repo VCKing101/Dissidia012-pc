@@ -474,6 +474,18 @@ void run(const Options &options) {
                        reinterpret_cast<const sockaddr *>(&from), sizeof from);
                 continue;
             }
+            if (data[4] == kWhere) {
+                // As STATUS: only to a query as long as the answer.
+                if (!options.where || size < std::max(kWhereQuery, kWhereAnswer)) continue;
+                const std::size_t length = data[kHead + 4u];
+                if (length > kLongestTag || size < kWhereQuery + length) continue;
+                const Where where =
+                    options.where(std::string_view(reinterpret_cast<const char *>(data + kWhereQuery), length));
+                const std::string answer = where_answer(get32(data + kHead), where);
+                sendto(socket, answer.data(), static_cast<int>(answer.size()), 0,
+                       reinterpret_cast<const sockaddr *>(&from), sizeof from);
+                continue;
+            }
             if (options.admit && !options.admit(from.sin_addr.s_addr)) continue;
             const std::uint32_t tag = tag_of(data);
             const auto pass = [&](const std::vector<End> &to) {
@@ -573,6 +585,54 @@ bool read_status_answer(const std::uint8_t *data, std::size_t size, std::uint32_
         return false;
     counts.version = get32(data + kHead + 4u);
     counts.all = get32(data + kHead + 8u);
+    return true;
+}
+
+namespace {
+
+// Where's counts in the packet's order.
+template <typename W, typename Each>
+void each_count(W &where, Each each) {
+    each(where.online);
+    each(where.menus);
+    for (auto &lobby : where.lobbies) each(lobby);
+    each(where.group_battle);
+    each(where.duels);
+    each(where.party_battles);
+    each(where.communications);
+}
+
+} // namespace
+
+std::string where_query(std::uint32_t nonce, std::string_view version) {
+    if (version.size() > kLongestTag) version = version.substr(0, kLongestTag);
+    std::string out = head(kWhere);
+    put32(out, nonce);
+    out.push_back(static_cast<char>(version.size()));
+    out.append(version);
+    if (out.size() < kWhereAnswer) out.append(kWhereAnswer - out.size(), '\0');
+    return out;
+}
+
+std::string where_answer(std::uint32_t nonce, const Where &where) {
+    std::string out = head(kWhere);
+    put32(out, nonce);
+    each_count(where, [&](std::uint16_t value) {
+        out.push_back(static_cast<char>(value & 0xFFu));
+        out.push_back(static_cast<char>(value >> 8u));
+    });
+    return out;
+}
+
+bool read_where_answer(const std::uint8_t *data, std::size_t size, std::uint32_t nonce, Where &where) {
+    if (size < kWhereAnswer || std::memcmp(data, kMagic, 4u) != 0 || data[4] != kWhere ||
+        get32(data + kHead) != nonce)
+        return false;
+    const std::uint8_t *at = data + kHead + 4u;
+    each_count(where, [&](std::uint16_t &value) {
+        value = get16(at);
+        at += 2u;
+    });
     return true;
 }
 

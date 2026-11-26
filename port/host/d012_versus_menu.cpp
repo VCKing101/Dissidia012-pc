@@ -59,6 +59,7 @@
 // MIT licence; see port/README.md.
 
 #include "d012_decomp_harness.hpp"
+#include "d012_lobby_status.hpp"
 #include "d012_versus.hpp"
 
 #include <cstdint>
@@ -363,9 +364,12 @@ void free_row_texts(Guest *g) {
 
 // ---- the hooks ---------------------------------------------------------------
 
+void trace_table(const char *what, const decomp::CallState &in, std::uint32_t table);
+
 // main 0x088D3B88 (layouts, parts, table, first layout): the parts of `table`,
 // each an instance of its layout.
 void run_make_parts(Guest *g, const decomp::CallState &in, GuestRegs &) {
+    trace_table("make parts", in, in.gpr[6]);
     const gaddr layouts = in.gpr[4], parts = in.gpr[5], table = in.gpr[6];
     const std::uint32_t first = in.gpr[7];
     if (table == kPartsMade && from(in, kMenuStart, kMenuStartEnd) && menu_resident(g)) {
@@ -398,6 +402,7 @@ void run_make_parts(Guest *g, const decomp::CallState &in, GuestRegs &) {
 std::uint32_t setup_table(Guest *g, std::uint32_t table);
 
 void run_attach_texts(Guest *g, const decomp::CallState &in, GuestRegs &) {
+    trace_table("texts on parts", in, in.gpr[6]);
     const gaddr parts = in.gpr[4], texts = in.gpr[5], table = setup_table(g, in.gpr[6]);
     if ((in.gpr[7] & 0xFFu) != 0u) {
         for (gaddr p = table; ld16(g, p + 4u) != 0xFFFFu; p += 8u) {
@@ -417,6 +422,7 @@ void run_attach_texts(Guest *g, const decomp::CallState &in, GuestRegs &) {
 // main 0x088D3C24 (layouts, parts, table, count): the parts of `table`
 // released. The menu's end (menu 0x089E17F8) releases the row's first.
 void run_free_parts(Guest *g, const decomp::CallState &in, GuestRegs &) {
+    trace_table("free parts", in, in.gpr[6]);
     const gaddr parts = in.gpr[5], table = in.gpr[6];
     if (table == kPartsMade && menu_resident(g) && state().menu != 0u && parts == state().menu + kStateParts)
         free_row_parts(g, parts);
@@ -767,10 +773,15 @@ void trace_table(const char *what, const decomp::CallState &in, std::uint32_t ta
         const char *text = std::getenv("D012_TRACE_PARTY");
         return text != nullptr && *text != '\0' && std::strcmp(text, "0") != 0;
     }();
+    // D012_TRACE_MENU_TABLES=1: every menu's tables, not only Party's.
+    static const bool every = [] {
+        const char *text = std::getenv("D012_TRACE_MENU_TABLES");
+        return text != nullptr && *text != '\0' && std::strcmp(text, "0") != 0;
+    }();
     // Each table and caller once.
     static std::uint64_t seen[512];
     static std::uint32_t count = 0;
-    if (!on || !versus::party() || count >= 512u) return;
+    if (!(every || (on && versus::party())) || count >= 512u) return;
     const std::uint64_t key = static_cast<std::uint64_t>(table) << 32 | in.gpr[31];
     for (std::uint32_t i = 0; i < count; ++i)
         if (seen[i] == key) return;
@@ -894,6 +905,9 @@ void run_setup_place_texts(Guest *g, const decomp::CallState &in, GuestRegs &) {
     regs.a[2] = setup_table(g, in.gpr[6]);
     decomp::call_original(g, 0x088D44ECu, regs);
     place_row_labels(g, in.gpr[4], in.gpr[6]);
+    // The Online Lobby's room list (d012_lobby_status.cpp), which takes this
+    // function's calls itself when local versus is off.
+    lobby_status::texts_placed(g, in);
 }
 
 struct Install {

@@ -83,6 +83,7 @@
 
 #include "d012_battle_relay.hpp"
 #include "d012_frame_balance.hpp"
+#include "d012_where.hpp"
 
 #include "adhoc/session.hpp"
 
@@ -1924,12 +1925,29 @@ std::uint16_t port() {
 // The session host's relay for battles (d012_battle_relay.hpp), open while
 // this copy hosts the session. So the two fighters need not be the host, and
 // only the host's router needs the port open. The host's own fighter reaches
-// it on loopback.
+// it on loopback. It answers WHERE as the public server does, from the
+// session's players (d012_where.hpp), kept up to date twice a second as the
+// relay asks whether to stay open; both on the relay's thread.
 void serve() {
     if (!setting("D012_NET_BATTLE", "online.battle_link").empty()) return;
+    static d012::where::Tally tally;
     relay::Options options;
     options.port = port();
-    options.open = [] { return portablekit::adhoc_hosting(); };
+    // D012_ADHOC_LOOPBACK: hosting opens nothing beyond this computer.
+    options.loopback_only = portablekit::adhoc_loopback_only();
+    options.open = [] {
+        const bool hosting = portablekit::adhoc_hosting();
+        std::vector<d012::where::Player> players;
+        if (hosting)
+            for (const auto &player : portablekit::adhoc_host_status().players) {
+                std::uint64_t mac = 0u;
+                for (const std::uint8_t byte : player.mac) mac = mac << 8u | byte;
+                players.push_back({mac, player.version, player.group});
+            }
+        tally.update(players);
+        return hosting;
+    };
+    options.where = [](std::string_view version) { return tally.of(version); };
     relay::start(std::move(options));
 }
 

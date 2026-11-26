@@ -29,6 +29,7 @@ endif()
 add_executable(dissidia012-server
     "${CMAKE_CURRENT_SOURCE_DIR}/d012_server.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../host/d012_battle_relay.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../host/d012_where.cpp"
     "${d012_kit}/host/profile.cpp"
     "${d012_kit}/host/adhoc/client.cpp"
     "${d012_kit}/host/adhoc/discovery.cpp"
