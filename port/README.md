@@ -420,6 +420,21 @@ fresh install in 196 s with the optional "Battle BGM Maker" ticked: the shortcut
 ISO (from `settings.ini`) and `atracdenc.exe`, and made a PSP / PPSSPP ISO from the command line in 13 s; 0.3.0 with
 its Python tool, then 0.4.0 over it in 19 s, removed `bgm-maker/` and FFmpeg's programs and kept the mods.
 
+**The zip started by itself**: the release's zip (the setup's folder, for RecompLauncher) is often unpacked and its
+`D012Native.exe` started directly, with no setup or launcher to compile. Its first start shows PortableKit's setup
+screens, which ask for the ISO and decrypt the executable; then, with no `game-code/main.dll` beside the program,
+the profile's `prepare_game` (`host/d012_game_code.cpp`) compiles the game's code on those screens, the same steps as
+`--compile-game`, before "All set". A copy whose disc is set up but whose code is missing (a setup whose compile
+failed, or a zip copy started before this) compiles on screens of its own at its next start. Cancel, or closing the
+window, stops the compile at the next part and the game does not start; the parts already made stay in
+`game-code-cache/`, so the next start goes on from them. With `D012_GAME_CODE_DIR` set nothing is compiled. Before
+this, such a copy only said "The game's code is not compiled yet" and to run the setup again. Checked on 26 November
+2026 with a zip from `package_installer.py`'s own steps, unpacked into a new folder: the ISO dropped on the first
+screen and used in place, 324 parts compiled in 3 min 18 s on the setup screens, then "All set" and Play started the
+game. With `game-code/` and the cache deleted from that copy, the next start compiled on its own screens; Esc at part
+64 stopped it 12 s later with 87 parts kept, the start after compiled the other 237 and played, and Esc in the game
+still opened the menu.
+
 ```powershell
 cmake -S port -B tools/local/port/build-d012-installer -G Ninja -DCMAKE_BUILD_TYPE=Release `
       -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DD012_INSTALLER_BUILD=ON -DPORTABLEKIT_RELEASE=ON

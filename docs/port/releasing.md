@@ -80,6 +80,9 @@ Tests:
   `--game <iso>` starts it. The first time a release has the zip, tell the RecompLauncher maintainer (Xarishark, on
   PR 21) where it is; keep its name exactly `Dissidia012-PC-<version>-Windows-x64.zip`, the pattern their catalogue
   looks for.
+- The zip started by itself, as many players do: unpacked into a new folder, `D012Native.exe` with no arguments
+  shows the setup screens; drop the ISO on the window, choose "Use it where it is", and the game's code compiles on
+  the next screen ("Making the game's code from your disc") before "All set" and Play.
 
 ## 3. Linux: the AppImage
 

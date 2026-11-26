@@ -205,7 +205,8 @@ Both settings are kept in `settings.ini`, not in the game's save ([notes](docs/p
 **Using [RecompLauncher](https://recomplauncher.com/game/dissidia012-pc)?** Install the port there and pick your
 ISO: it runs the same setup without a window (`D012Native.exe --prepare --game <your .iso>`), then starts the game.
 Its video settings show on the game's page. The release's portable zip, `Dissidia012-PC-<version>-Windows-x64.zip`,
-is what it installs; the steps below are for the setup program.
+is what it installs; the steps below are for the setup program. Unpacked the zip yourself? Start `D012Native.exe`: its
+first start asks for your ISO and compiles the game's code, as the setup does.
 
 **1. Download** `Dissidia012-PC-<version>-Windows-x64-Setup.exe` from the
 [latest release](https://github.com/VCKing101/Dissidia012-pc/releases). Nothing else needs to be installed first.
