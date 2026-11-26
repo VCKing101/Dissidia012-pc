@@ -13735,7 +13735,9 @@
     "effect_slot_start_08addcf8": "battle_helpers",
     "ending_pad_step_08b07500": "battle_helpers",
     "replay_cam_counter_08b2c9d4": "battle_helpers",
-    "replay_cam_label_08b2bedc": "battle_helpers"
+    "replay_cam_label_08b2bedc": "battle_helpers",
+    "replay_cam_edit_input_08b274ac": "battle_helpers",
+    "replay_pause_step_08b2721c": "battle_helpers"
   },
   "features": [
     {

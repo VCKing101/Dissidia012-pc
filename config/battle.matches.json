@@ -43420,6 +43420,39 @@
       ]
     },
     {
+      "name": "replay_pause_step_08b2721c",
+      "source": "src/battle/replay_pause_step_08b2721c.cpp",
+      "functions": [
+        {
+          "name": "func_08B2721C",
+          "address": "0x08B2721C",
+          "size": 656
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fBBCisiTBT",
+        "__0fBBCk8P6DPadLT",
+        "__0fBBDk10P6DPadLT",
+        "__0fBBDk20P6DPadLT"
+      ]
+    },
+    {
+      "name": "replay_cam_edit_input_08b274ac",
+      "source": "src/battle/replay_cam_edit_input_08b274ac.cpp",
+      "functions": [
+        {
+          "name": "func_08B274AC",
+          "address": "0x08B274AC",
+          "size": 844
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0fBBCk8P6DPadLT",
+        "__0fBBDk10P6DPadLT",
+        "__0fBBEbusyiTBT"
+      ]
+    },
+    {
       "name": "angle_step_08b277f8",
       "source": "src/battle/angle_step_08b277f8.c",
       "functions": [
@@ -53545,7 +53578,27 @@
     "func_088C83FC": "0x088C83FC",
     "D_08B2CCC8": "0x08B2CCC8",
     "func_0887DFF4": "0x0887DFF4",
-    "D_08B2C260": "0x08B2C260"
+    "D_08B2C260": "0x08B2C260",
+    "func_08B2391C": "0x08B2391C",
+    "func_0888B0A4": "0x0888B0A4",
+    "func_08B26D20": "0x08B26D20",
+    "D_08B278D0": "0x08B278D0",
+    "D_08B278C8": "0x08B278C8",
+    "func_088C9AEC": "0x088C9AEC",
+    "func_088C9FE8": "0x088C9FE8",
+    "func_088CA4C8": "0x088CA4C8",
+    "func_088CA4EC": "0x088CA4EC",
+    "D_089D6030": "0x089D6030",
+    "D_089D603B": "0x089D603B",
+    "D_08B28588": "0x08B28588",
+    "D_08B278A0": "0x08B278A0",
+    "func_088C9F2C": "0x088C9F2C",
+    "func_08889B68": "0x08889B68",
+    "func_088CA510": "0x088CA510",
+    "D_089D6D80": "0x089D6D80",
+    "func_088A5F1C": "0x088A5F1C",
+    "func_08889B34": "0x08889B34",
+    "D_08B27918": "0x08B27918"
   },
   "status": "112 matching C/C++ functions / 8380 bytes; connected curve controls, resource cleanup and second activation/cleanup group added. Broader combat ownership remains provisional."
 }
