@@ -2073,4 +2073,83 @@ bool check(const json::Value &recipe, const Built &built, std::string &problem) 
     return true;
 }
 
+// ---------------------------------------------------------------------------
+// His looks from DLC
+
+std::optional<std::string> fighter_look_model(std::span<const std::uint8_t> row_file) {
+    // dlc/obj/dlc_NNNoe.bin: {u32 0x0C, u32 count}, then the row the game takes
+    // (main 0x08847068, docs/research/character-assets.md section 7): +6 the
+    // character, +8 the flags (8: an assist), +0x24 the model's name.
+    constexpr std::size_t kRowAt = 8u, kRowSize = 0x44u, kModelName = 0x24u, kNameSize = 0x10u;
+    if (row_file.size() < kRowAt + kRowSize || u32(row_file, 0u) != 0x0Cu || u32(row_file, 4u) < 1u) return std::nullopt;
+    const Span row = row_file.subspan(kRowAt, kRowSize);
+    if (row[6u] != kCharId || (row[8u] & 8u) != 0u) return std::nullopt;
+    std::string name = text_at(row, kModelName, kNameSize);
+    // As the game's own scan takes a fighter's row (0x08846CCC): "P_", not "_W".
+    if (!name.starts_with("P_") || name.ends_with("_W")) return std::nullopt;
+    return name;
+}
+
+namespace {
+
+constexpr unsigned kGmoBone = 0x0004u;
+
+std::vector<std::string> bone_names(Span data, const GmoModel &model) {
+    std::vector<std::string> names;
+    for (const GmoChunk &kid : gmo_children(data, model.at))
+        if (kid.type == kGmoBone) names.push_back(gmo_name(data, kid));
+    return names;
+}
+
+bool same_names(Span a, const std::vector<GmoChunk> &as, Span b, const std::vector<GmoChunk> &bs, std::size_t count) {
+    for (std::size_t i = 0u; i < count; ++i)
+        if (gmo_name(a, as[i]) != gmo_name(b, bs[i])) return false;
+    return true;
+}
+
+bool same_bytes(Span a, const GmoChunk &x, Span b, const GmoChunk &y) {
+    return x.size == y.size && std::memcmp(a.data() + x.at, b.data() + y.at, x.size) == 0;
+}
+
+} // namespace
+
+FittedLook fit_look(std::span<const std::uint8_t> model, std::span<const std::uint8_t> built, std::size_t added,
+                    std::uint64_t largest) {
+    FittedLook out;
+    const auto cannot = [&out](std::string why) {
+        out.fit = LookFit::cannot;
+        out.why = std::move(why);
+        return out;
+    };
+    // His first look as the build made it: his own animations, then the moves'.
+    const GmoModel his = gmo_model(built);
+    if (added == 0u || his.motions.size() <= added) fail("the built model has no animations of the moves");
+    const std::size_t own = his.motions.size() - added;
+    try {
+        const GmoModel look = gmo_model(model);
+        if (bone_names(model, look) != bone_names(built, his)) return cannot("its bones are not his");
+        if (look.motions.size() == his.motions.size()) {
+            if (!same_names(model, look.motions, built, his.motions, his.motions.size())) return cannot("its animations are not his");
+            for (std::size_t i = own; i < his.motions.size(); ++i)
+                if (!same_bytes(model, look.motions[i], built, his.motions[i]))
+                    return cannot("it has the moves' animations, but not as this build makes them");
+            out.fit = LookFit::has_moves;
+            return out;
+        }
+        if (look.motions.size() != own || !same_names(model, look.motions, built, his.motions, own))
+            return cannot("its animations are not his");
+        std::vector<Bytes> chunks;
+        for (std::size_t i = own; i < his.motions.size(); ++i) chunks.push_back(slice(built, his.motions[i].at, his.motions[i].size));
+        Bytes bytes = gmo_append_motions(model, chunks);
+        if (bytes.size() > largest) return cannot("with the moves it would be bigger than the game's block for a model");
+        out.fit = LookFit::moves_added;
+        out.bytes = std::move(bytes);
+        return out;
+    } catch (const Error &failure) {
+        return cannot(std::string("it is not a model as the moves know them (") + failure.what() + ")");
+    }
+}
+
+std::size_t added_animations(const json::Value &recipe) { return member(recipe, "animations").members.size(); }
+
 } // namespace d012::original_moves

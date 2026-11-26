@@ -177,4 +177,13 @@ void install(portablekit::HleRegistrar &) {
     portablekit::hle_extension::add_file_provider(serve_file);
 }
 
+std::optional<std::vector<std::uint8_t>> served_file(std::uint32_t crc) {
+    const auto found = served().find(crc);
+    if (found == served().end()) return std::nullopt;
+    if (found->second.rewritten) return found->second.bytes;
+    std::ifstream in(found->second.path, std::ios::binary);
+    if (!in) return std::nullopt;
+    return std::vector<std::uint8_t>((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+}
+
 } // namespace d012::dlc_packs

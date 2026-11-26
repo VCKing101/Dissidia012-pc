@@ -17,6 +17,7 @@
 #include "d012_model_memory.hpp"
 #include "d012_mod_abilities.hpp"
 #include "d012_mods.hpp"
+#include "d012_original_moves_feature.hpp"
 #include "d012_rollback.hpp"
 #include "d012_skill_pages.hpp"
 #include "d012_sync.hpp"
@@ -121,6 +122,10 @@ void register_extra_hle(portablekit::HleRegistrar &hle) {
 
     // What DLC the game will find, in the log (d012_dlc.cpp).
     dlc::install(hle);
+    // Bartz's looks from DLC given his original moves as the game reads them
+    // (d012_original_moves_feature.cpp): before the packs, whose files it
+    // must see.
+    original_moves::install_looks();
     // DLC packs, a folder each in <data dir>/dlc (d012_dlc_packs.cpp).
     dlc_packs::install(hle);
     // Online play: the log unbuffered and the clock reads traced in network
