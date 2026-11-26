@@ -27,8 +27,7 @@ sys.path.insert(0, str(ROOT / "tools" / "port"))
 import prepare_game_dir  # noqa: E402
 
 DISC_VERSION = "1.00"
-# Redump's v1.00 entries: docs/decomp/usa-comparison.md for the USA disc, docs/port/regions.md for the
-# European one. Both images have the same size.
+# Redump's v1.00 entries for both discs: docs/port/regions.md. Both images have the same size.
 RELEASES = {  # DISC_ID in PARAM.SFO: (region, SHA-1 of the whole image)
     "ULUS10566": ("USA", "ec23f5beac89312a2a25654e202ae1c997999c9e"),
     "ULES01505": ("Europe", "2e6e8b71a1f66a5ba1390fa68ea36188ac4fe2b6"),

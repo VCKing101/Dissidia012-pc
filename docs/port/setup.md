@@ -169,7 +169,7 @@ skipped.
 
 | Input | Check |
 | --- | --- |
-| ISO | `PARAM.SFO` says disc `ULUS10566` or `ULES01505`, version 1.00; the size is 1,754,529,792 bytes; the three overlays and `LIBSUPPREACC.PRX` have the retail SHA-256 values; the whole image's SHA-1 is `ec23f5beac89312a2a25654e202ae1c997999c9e` (Redump's USA v1.00 entry, see [usa-comparison.md](../decomp/usa-comparison.md)) or `2e6e8b71a1f66a5ba1390fa68ea36188ac4fe2b6` (Redump's European v1.00 entry, see [regions.md](regions.md)). Compressed images (`.cso`, `.chd`) are refused |
+| ISO | `PARAM.SFO` says disc `ULUS10566` or `ULES01505`, version 1.00; the size is 1,754,529,792 bytes; the three overlays and `LIBSUPPREACC.PRX` have the retail SHA-256 values; the whole image's SHA-1 is `ec23f5beac89312a2a25654e202ae1c997999c9e` (Redump's USA v1.00 entry, see [regions.md](regions.md)) or `2e6e8b71a1f66a5ba1390fa68ea36188ac4fe2b6` (Redump's European v1.00 entry, see [regions.md](regions.md)). Compressed images (`.cso`, `.chd`) are refused |
 | EBOOT | The file decrypted from the ISO, or the one given with `-Eboot`: an ELF file (not the encrypted `~PSP` one) with the SHA-256 above. `D012Native --install` also checks the disc ID and the SHA-256 of the disc's `EBOOT.BIN` before it decrypts |
 | SDL3-devel-3.4.18-VC.zip | SHA-256 `78d84602ae616cfe26b33a73b7d3b9b6b56e8a6650e53d92c9c6ca938f747acd` |
 | glslang-16.6.0-windows-x86_64-release.zip | SHA-256 `82bf434e69b9bb4829de7e2b4bc2c5e7a7861e53d66cf75e5cc70f5f694a8d9b` |

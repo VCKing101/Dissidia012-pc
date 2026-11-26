@@ -14,7 +14,7 @@ Extra recovered C functions: **24**, using SNC 1.2.7503.0 at `-O2 -g`. Debug gen
 
 The [battle milestone](battle-build-milestone.md) rebuilds `OVL_BATTLE_APP.ELF` byte-for-byte, integrating **ten C functions / 112 bytes**. Battle uses the installed historical VFPU assembler, six explicit raw fallback words and preserved original data.
 
-The [menu milestone](menu-build-milestone.md) adds a byte-identical overlay with eleven C functions / 180 bytes. The [main milestone](full-build-milestone.md) adds fifteen more / 836 bytes and completes the four-file build foundation. Current recovery is **60 exact functions / 3,244 bytes**. Most source, encrypted/ISO packaging and gameplay validation remain unfinished.
+The [menu milestone](menu-build-milestone.md) adds a byte-identical overlay with eleven C functions / 180 bytes. The [main milestone](full-build-milestone.md) adds fifteen more / 836 bytes and completes the four-file build foundation. That brought recovery to 60 exact functions / 3,244 bytes; it now stands at 14,141 functions ([progress report](progress.md)). Most source, encrypted/ISO packaging and gameplay validation remain unfinished.
 
 Ghidra successfully imported the overlay using the PSP ELF loader and Allegrex processor. Its first analysis identified **97 provisional functions** and exported pseudocode to the ignored `analysis/ULUS10566/extra/` directory. The later inventory review added three leaf routines, giving **100 extra-overlay functions**. Revision 2 reviews their boundaries and classifies the whole loaded payload, establishing **9.28% matching C by code bytes**. The [deferred battle audit](deferred-battle-audit.md) brings the four-module inventory to **21,279 candidates** in revision 6. Main/menu/battle remain provisional; two new battle candidates are explicitly untraced. See [inventory findings](inventory-findings.md) and the [extra layout audit](extra-layout-audit.md).
 
@@ -24,7 +24,7 @@ The USA EBOOT decrypted successfully with `pspdecrypt` and is in `analysis/ULUS1
 
 `0bc8e779aad2814a3d1bd77346f69ca5e16665845ed053cd0ad44a9cbfaefe6d`
 
-That is identical to `EBOOT.OLD` in the supplied modified EU-labelled image. Combined with the previously identical overlays, substantial code can be investigated against the verified USA reference. This finding does not certify the other image's regional provenance or asset contents. The decrypted main ELF has blank section names and no recovered compiler comments; those properties are present in the verified retail input rather than evidence of the Prometheus patch.
+The European disc, ULES01505, decrypts to the same executable and has the same overlays ([other releases](../port/regions.md)). The decrypted main ELF has blank section names and no recovered compiler comments; those properties are present in the verified retail input.
 
 ## Installed tools
 

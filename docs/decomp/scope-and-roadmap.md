@@ -2,7 +2,7 @@
 
 **Superseded as the project's main direction, first by a PPSSPP-plugin mod (kept out of the public repository) and now by the [native PC port](../port/README.md).** This document still defines how matching progress is measured and remains the reference for that work.
 
-Matching-decompilation plan, 12 October 2026. This supersedes the proposed milestones in the initial EU-image research. The fixed target is **USA ULUS10566 v1.00**. Current measured results are in [progress.md](progress.md); the machine-readable scope and feature assignments are in `config/progress.json`.
+Matching-decompilation plan, 12 October 2026. The fixed target is **USA ULUS10566 v1.00**. Current measured results are in [progress.md](progress.md); the machine-readable scope and feature assignments are in `config/progress.json`.
 
 ## Primary objective and boundaries
 

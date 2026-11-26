@@ -1,6 +1,6 @@
 """Read a PSP ISO9660 image and emit metadata; never modify or extract game files.
 
-Usage: python tools/inspect_iso.py ULES-01505.ISO --output docs/decomp/iso-inventory.json
+Usage: python tools/inspect_iso.py <ISO> --output docs/decomp/iso-inventory-usa.json
 Standard library only. Supports ordinary single-extent ISO9660 files, not UDF/CSO.
 """
 

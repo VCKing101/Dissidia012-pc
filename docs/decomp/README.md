@@ -16,17 +16,7 @@ The [working environment](getting-started.md) is ready: **the decrypted main exe
 
 The maintained [scope and roadmap](scope-and-roadmap.md) sets the whole-project milestones and progress rules. The [current progress report](progress.md) separates source recovery, build fidelity and feature evidence ranks. [Controller coverage](menu-controller-coverage.md) is 75% by handler count and 35.61% by bytes; this is one local scope, not the whole menu or game. Inventories cover **21,282 candidates**, including the [reviewed member callback](member-audit-milestone.md) and [deferred battle setup](deferred-battle-audit.md); unknown regions and untraced entries remain explicit. Extra is **9.28% matching C by reviewed code bytes**. The other module audits and the whole-game headline remain unfinished.
 
-Follow-up: the added USA ULUS10566 v1.00 ISO matches the size and SHA-1 in PPSSPP's Redump database and is the recommended starting reference. See [the USA comparison](usa-comparison.md) and [USA inventory](iso-inventory-usa.json). The EU research below describes the originally supplied image.
-
-Read [the research and startup plan](project-research.md) for the workflow, tools, sources and game-specific findings. [The inventory](iso-inventory.json) records the supplied image's hashes, file extents and executable metadata.
-
-**The supplied ISO is modified and truncated:** its EBOOT is a Prometheus loader, and 139,905,024 bytes of the declared ending movie are unavailable. A complete unmodified dump is needed as the retail reference. Preliminary investigation can use the fully present ELF overlays, subject to later comparison with that reference.
-
-Reproduce the metadata inspection with Python 3:
-
-```powershell
-python tools/inspect_iso.py ULES-01505.ISO --output docs/decomp/iso-inventory.json
-```
+The reference disc is the USA v1.00 dump whose size and SHA-1 match Redump entry 22911 (hashes in `config/ulus10566.json`; disc metadata in [iso-inventory-usa.json](iso-inventory-usa.json), written by `tools/inspect_iso.py`). The European disc, ULES01505, decrypts to the same executable and has the same overlays ([other releases](../port/regions.md)).
 
 All four scoped builds are verified and local test ISOs boot to the initial autosave notice. Retail encryption/signing, most recovered C/C++ source and the full three-case gameplay comparison remain unfinished.
 
