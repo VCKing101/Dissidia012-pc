@@ -13704,7 +13704,12 @@
     "slot_setup_08abfc04": "menu_helpers",
     "text_recolor_08a975e0": "menu_helpers",
     "bits_dispatch_089dedb0": "battle_helpers",
-    "record_median_08af0f14": "battle_helpers"
+    "record_median_08af0f14": "battle_helpers",
+    "replay_detail_text_088b0cc8": "main_helpers",
+    "replay_write_record_088ca564": "main_helpers",
+    "replay_record_frame_088ca680": "main_helpers",
+    "replay_save_copy_0888ad50": "main_helpers",
+    "replay_task_0888948c": "main_helpers"
   },
   "features": [
     {

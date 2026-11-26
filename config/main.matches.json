@@ -18934,6 +18934,17 @@
       ]
     },
     {
+      "name": "replay_task_0888948c",
+      "source": "src/main/replay_task_0888948c.c",
+      "functions": [
+        {
+          "name": "func_0888948C",
+          "address": "0x0888948C",
+          "size": 448
+        }
+      ]
+    },
+    {
       "name": "main_0888964c",
       "source": "src/main/auto/main_0888964c.c",
       "functions": [
@@ -19613,6 +19624,20 @@
           "address": "0x0888AD24",
           "size": 44
         }
+      ]
+    },
+    {
+      "name": "replay_save_copy_0888ad50",
+      "source": "src/main/replay_save_copy_0888ad50.cpp",
+      "functions": [
+        {
+          "name": "func_0888AD50",
+          "address": "0x0888AD50",
+          "size": 708
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0oEVec3asRC6EVec3"
       ]
     },
     {
@@ -26179,6 +26204,17 @@
       ]
     },
     {
+      "name": "replay_detail_text_088b0cc8",
+      "source": "src/main/replay_detail_text_088b0cc8.c",
+      "functions": [
+        {
+          "name": "func_088B0CC8",
+          "address": "0x088B0CC8",
+          "size": 908
+        }
+      ]
+    },
+    {
       "name": "record_init_088b1194",
       "source": "src/main/record_init_088b1194.c",
       "functions": [
@@ -30574,6 +30610,17 @@
       ]
     },
     {
+      "name": "replay_write_record_088ca564",
+      "source": "src/main/replay_write_record_088ca564.cpp",
+      "functions": [
+        {
+          "name": "func_088CA564",
+          "address": "0x088CA564",
+          "size": 244
+        }
+      ]
+    },
+    {
       "name": "main_088ca658",
       "source": "src/main/auto/main_088ca658.c",
       "functions": [
@@ -30593,6 +30640,22 @@
           "address": "0x088CA664",
           "size": 28
         }
+      ]
+    },
+    {
+      "name": "replay_record_frame_088ca680",
+      "source": "src/main/replay_record_frame_088ca680.cpp",
+      "functions": [
+        {
+          "name": "func_088CA680",
+          "address": "0x088CA680",
+          "size": 808
+        }
+      ],
+      "unused_inline_symbols": [
+        "__0oEVec3asRC6EVec3",
+        "__0oEVec3ctv",
+        "__0oGCameractv"
       ]
     },
     {
@@ -62886,7 +62949,13 @@
     "func_08811598": "0x08811598",
     "D_089C6EFC": "0x089C6EFC",
     "D_089C6F04": "0x089C6F04",
-    "D_089C6F0C": "0x089C6F0C"
+    "D_089C6F0C": "0x089C6F0C",
+    "D_089CB758": "0x089CB758",
+    "func_088ABAF4": "0x088ABAF4",
+    "func_0893FDCC": "0x0893FDCC",
+    "D_089D7758": "0x089D7758",
+    "func_088CA9A8": "0x088CA9A8",
+    "func_0888B0A4": "0x0888B0A4"
   },
   "status": "97 matching C/C++ functions / 6104 bytes; typed presentation callbacks, initialization, rendering gates, exact task unlink and drawing allocation support. Larger transition/update and task factory/registration remain unfinished."
 }
