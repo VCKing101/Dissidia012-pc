@@ -1,0 +1,89 @@
+From e36009b4085edba147cdac5d0b0bf3e03a8b9052 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Thu, 26 Nov 2026 21:14:37 +1030
+Subject: [PATCH] Setup screens: a step's caller says what its Cancel does
+
+InstallerUi::run_task takes a cancel_note, shown under the step's Cancel in
+place of "Cancelling removes everything this step has written so far.",
+which stays the default and is right for the setup's own steps. A port's
+compile at a start keeps the parts it made when cancelled, so it says that
+instead.
+
+Built and run with Dissidia 012's setup build (Windows, clang): its compile
+screen shows the port's note. Not run: Linux, Android.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ host/install/installer.cpp | 2 +-
+ host/install/installer.hpp | 7 +++++--
+ host/ui/setup_screens.cpp  | 9 ++++++---
+ 3 files changed, 12 insertions(+), 6 deletions(-)
+
+diff --git a/host/install/installer.cpp b/host/install/installer.cpp
+index 9ec666d..aad82f9 100644
+--- a/host/install/installer.cpp
++++ b/host/install/installer.cpp
+@@ -371,7 +371,7 @@ std::filesystem::path copy_image_document(const std::string &uri, const std::fil
+ }
+ #endif
+ 
+-void InstallerUi::run_task(const std::string &, const std::function<void()> &work) { work(); }
++void InstallerUi::run_task(const std::string &, const std::function<void()> &work, const std::string &) { work(); }
+ 
+ bool run_installer(InstallerUi &ui, const std::filesystem::path &data_dir) {
+     for (;;) {
+diff --git a/host/install/installer.hpp b/host/install/installer.hpp
+index 3179c9c..159c6a2 100644
+--- a/host/install/installer.hpp
++++ b/host/install/installer.hpp
+@@ -92,8 +92,11 @@ public:
+     // Runs work that may take a while: checking an image, installing. The
+     // default runs it right here. A front end with a window runs it on
+     // another thread and keeps drawing; progress() is then called from that
+-    // thread, and may throw InstallCancelled to stop the work.
+-    virtual void run_task(const std::string &title, const std::function<void()> &work);
++    // thread, and may throw InstallCancelled to stop the work. `cancel_note`
++    // is what the screen says cancelling does; empty, that what the step has
++    // written so far is removed, as it is for the setup's own steps.
++    virtual void run_task(const std::string &title, const std::function<void()> &work,
++                          const std::string &cancel_note = {});
+     virtual void progress(const std::string &stage, std::uint64_t done, std::uint64_t total) = 0;
+     // Reports a failed check or step. True: pick another image; false: quit.
+     // Cancelling in choose_image() or choose_storage() goes back a step: to
+diff --git a/host/ui/setup_screens.cpp b/host/ui/setup_screens.cpp
+index 1cabeff..eb35d98 100644
+--- a/host/ui/setup_screens.cpp
++++ b/host/ui/setup_screens.cpp
+@@ -65,7 +65,8 @@ public:
+     std::optional<fs::path> choose_image() override;
+     std::optional<install::ImageStorage> choose_storage(const fs::path &image, const install::ImageInfo &info,
+                                                         const fs::path &data_dir) override;
+-    void run_task(const std::string &title, const std::function<void()> &work) override;
++    void run_task(const std::string &title, const std::function<void()> &work,
++                  const std::string &cancel_note = {}) override;
+     void progress(const std::string &stage, std::uint64_t done, std::uint64_t total) override;
+     bool offer_retry(const std::string &message) override;
+     void finished(const fs::path &data_dir) override;
+@@ -275,7 +276,8 @@ std::optional<install::ImageStorage> SetupScreens::choose_storage(const fs::path
+     return choice;
+ }
+ 
+-void SetupScreens::run_task(const std::string &title, const std::function<void()> &work) {
++void SetupScreens::run_task(const std::string &title, const std::function<void()> &work,
++                            const std::string &cancel_note) {
+     Layer &layer = Layer::get();
+     {
+         std::lock_guard lock(mutex_);
+@@ -342,7 +344,8 @@ void SetupScreens::run_task(const std::string &title, const std::function<void()
+             if (first) focus_next_row();
+             first = false;
+             if (big_button(cancel_ ? "Cancelling…" : "Cancel", width, false, cancel_)) cancel_ = true;
+-            layer.set_description("Cancelling removes everything this step has written so far.");
++            layer.set_description(cancel_note.empty() ? "Cancelling removes everything this step has written so far."
++                                                      : cancel_note);
+             begin_footer();
+             hints({{Control::Back, "Cancel"}});
+             end_panel();
+-- 
+2.53.0.windows.1
+
