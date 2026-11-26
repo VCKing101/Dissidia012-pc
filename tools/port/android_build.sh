@@ -266,6 +266,7 @@ if [[ "$player" -eq 1 ]]; then
     mkdir -p "$assets/licenses"
     cp "$rt/android-runtime/licenses/"* "$rt/android-runtime/SOURCES.txt" "$assets/licenses/"
     cp "$root/src/port/fonts/GoudyBookletter1911-OFL.txt" "$assets/licenses/"
+    cp "$root/src/port/fonts/Cinzel-OFL.txt" "$root/src/port/fonts/Barlow-OFL.txt" "$assets/licenses/"
     # The player's app installs its own updates from the menu: Android's
     # installer asks the player each time (host/d012_update_install.cpp).
     extra=(EXTRA_LIBS="$programs" EXTRA_ASSETS="$assets" NOTICES="$root/src/port/android/THIRD_PARTY_NOTICES.md"

@@ -1,0 +1,3243 @@
+From f433d67b6ffbbc474d31c201fa9d8e41df5a1a22 Mon Sep 17 00:00:00 2001
+From: VCKing101 <59761021+VCKing101@users.noreply.github.com>
+Date: Thu, 26 Nov 2026 16:02:06 +1030
+Subject: [PATCH] Menu: a pause screen, a settings screen with previews, and a
+ game's own look
+
+The menu sized everything from its text, 3.4 % of the window's height, so a
+large display showed the same eight rows larger (37 px text at 1080 lines).
+Its text is now about 21 px from 800 to 1080 lines and about 2 % of the
+height above (Layer::menu_font_size(), Layer::MenuScale); a phone keeps the
+old size. The other screens keep theirs.
+
+- A pause screen first: Resume, Settings, Controls, Cheats, Resolution and
+  Frame rate in place, Quit game; the game stays in view on the right.
+- The settings screen: the six pages behind a tab strip, the rows on the
+  left, and a side panel with the focused row's name, description and, for
+  some settings, a preview of what it does (ui/menu_look.cpp): the stick's
+  dead zone and the value the game reads, full diagonals, trigger point,
+  right stick, mouse sensitivity, scaling filter and aspect ratio from the
+  paused frame (VulkanRenderer::read_frame, split out of capture_frame),
+  font, button prompts and confirm button. The Network page's Status and
+  the System page's About move to the panel as cards. RowOptions::key names
+  the setting a row changes.
+- On the stick's own rows the left stick moves the preview, not the focus
+  (Layer::set_left_stick_ignored); the D-pad leaves them.
+- GameProfile::theme (InterfaceTheme): the interface's colours, faces and
+  title, for every screen of the port's own; PortableKit's brown and gold
+  without one. The rows, sections, buttons and hints are drawn in it.
+- What the menu says a game does comes from the profile
+  (right_stick_camera, mouse_camera, extra_triggers, font_preview_text,
+  font_note); the rest names no game: no quests, bows or HD release.
+- <prefix>_CLASSIC_MENU=1 draws the panel of before; <prefix>_MENU_TEXT_SIZE
+  sets the menu's text size.
+
+Built and run with Dissidia 012 (Windows, clang): every page and preview,
+at 1920x1088 and 1440x816, with the input script's virtual gamepad. Not run:
+a real pad, Linux, Android, the framework's own build.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ cmake/PortableKit.cmake      |    1 +
+ host/gpu/vulkan_renderer.cpp |   46 +-
+ host/gpu/vulkan_renderer.hpp |    4 +
+ host/profile.hpp             |   61 ++
+ host/ui/font_menu.cpp        |   36 +-
+ host/ui/font_menu.hpp        |    6 +
+ host/ui/layer.cpp            |  110 +++-
+ host/ui/layer.hpp            |   32 ++
+ host/ui/menu.cpp             |  839 +++++++++++++++++++++++----
+ host/ui/menu_look.cpp        | 1031 ++++++++++++++++++++++++++++++++++
+ host/ui/menu_look.hpp        |   41 ++
+ host/ui/save_screen.cpp      |    4 +-
+ host/ui/widgets.cpp          |  247 +++++---
+ host/ui/widgets.hpp          |   80 ++-
+ 14 files changed, 2313 insertions(+), 225 deletions(-)
+ create mode 100644 host/ui/menu_look.cpp
+ create mode 100644 host/ui/menu_look.hpp
+
+diff --git a/cmake/PortableKit.cmake b/cmake/PortableKit.cmake
+index 82ded68..0ce61e2 100644
+--- a/cmake/PortableKit.cmake
++++ b/cmake/PortableKit.cmake
+@@ -120,6 +120,7 @@ set(PORTABLEKIT_RENDERER_SOURCES
+     host/ui/input_script.cpp
+     host/ui/layer.cpp
+     host/ui/menu.cpp
++    host/ui/menu_look.cpp
+     host/ui/adhoc_chooser.cpp
+     host/ui/choice_screen.cpp
+     host/ui/dialog_skin.cpp
+diff --git a/host/gpu/vulkan_renderer.cpp b/host/gpu/vulkan_renderer.cpp
+index b62c357..b45f2a5 100644
+--- a/host/gpu/vulkan_renderer.cpp
++++ b/host/gpu/vulkan_renderer.cpp
+@@ -12121,6 +12121,31 @@ double VulkanRenderer::frame_rate_now() const noexcept {
+ }
+ 
+ bool VulkanRenderer::capture_frame(const std::string &path) {
++    std::vector<std::uint8_t> pixels;
++    std::uint32_t width = 0;
++    std::uint32_t height = 0;
++    if (!read_frame(pixels, width, height)) return false;
++    Impl &impl = *impl_;
++    // The capture is the game's own target, before the window blit; draw the
++    // overlay over it the same way, so captures show what the window shows.
++    if (impl.overlay_visible) {
++        const std::uint32_t scale = perf::overlay_scale(height);
++        const std::uint32_t inset = 4u * scale;
++        if (inset + perf::kOverlayWidth * scale <= width && inset + perf::kOverlayHeight * scale <= height) {
++            for (std::uint32_t y = 0; y < perf::kOverlayHeight * scale; ++y) {
++                std::uint8_t *row = pixels.data() + static_cast<std::size_t>(inset + y) * width * 4u;
++                for (std::uint32_t x = 0; x < perf::kOverlayWidth * scale; ++x) {
++                    const std::uint32_t pixel = impl.overlay_pixels[(y / scale) * perf::kOverlayWidth + x / scale];
++                    std::memcpy(row + (inset + x) * 4u, &pixel, 4u);
++                }
++            }
++        }
++    }
++    return write_bmp(path, pixels.data(), width, height, false);
++}
++
++bool VulkanRenderer::read_frame(std::vector<std::uint8_t> &out, std::uint32_t &out_width,
++                                std::uint32_t &out_height) {
+     Impl &impl = *impl_;
+     if (!impl.ready) return false;
+     const Impl::Guard guard(impl);
+@@ -12179,23 +12204,10 @@ bool VulkanRenderer::capture_frame(const std::string &path) {
+     vkUnmapMemory(impl.device, staging_memory);
+     vkDestroyBuffer(impl.device, staging, nullptr);
+     vkFreeMemory(impl.device, staging_memory, nullptr);
+-
+-    // The capture is the game's own target, before the window blit; draw the
+-    // overlay over it the same way, so captures show what the window shows.
+-    if (impl.overlay_visible) {
+-        const std::uint32_t scale = perf::overlay_scale(height);
+-        const std::uint32_t inset = 4u * scale;
+-        if (inset + perf::kOverlayWidth * scale <= width && inset + perf::kOverlayHeight * scale <= height) {
+-            for (std::uint32_t y = 0; y < perf::kOverlayHeight * scale; ++y) {
+-                std::uint8_t *row = pixels.data() + static_cast<std::size_t>(inset + y) * width * 4u;
+-                for (std::uint32_t x = 0; x < perf::kOverlayWidth * scale; ++x) {
+-                    const std::uint32_t pixel = impl.overlay_pixels[(y / scale) * perf::kOverlayWidth + x / scale];
+-                    std::memcpy(row + (inset + x) * 4u, &pixel, 4u);
+-                }
+-            }
+-        }
+-    }
+-    return write_bmp(path, pixels.data(), width, height, false);
++    out = std::move(pixels);
++    out_width = width;
++    out_height = height;
++    return true;
+ }
+ 
+ void VulkanRenderer::stop_presenting() {
+diff --git a/host/gpu/vulkan_renderer.hpp b/host/gpu/vulkan_renderer.hpp
+index a60c300..74afd27 100644
+--- a/host/gpu/vulkan_renderer.hpp
++++ b/host/gpu/vulkan_renderer.hpp
+@@ -234,6 +234,10 @@ public:
+     // Writes the last rendered frame as a BMP; returns false if it could not be
+     // read back. Used for screenshots without touching the window system.
+     bool capture_frame(const std::string &path);
++    // The last rendered frame's pixels at the internal resolution (R, G, B,
++    // A, rows top to bottom), as the menu's previews show the paused game.
++    // Waits for the GPU; false if it could not be read back.
++    bool read_frame(std::vector<std::uint8_t> &pixels, std::uint32_t &width, std::uint32_t &height);
+     // Writes the next presented window image, with the interface over it, as
+     // a BMP once it has been drawn.
+     void capture_window(const std::string &path);
+diff --git a/host/profile.hpp b/host/profile.hpp
+index c7fbbf2..771977e 100644
+--- a/host/profile.hpp
++++ b/host/profile.hpp
+@@ -219,6 +219,47 @@ struct ProfileVariant {
+     std::span<const std::uint32_t> overlay_slots = {};
+ };
+ 
++// A TrueType or OpenType face the port carries in its executable.
++struct EmbeddedFont {
++    const unsigned char *data = nullptr;
++    std::size_t size = 0;
++};
++
++// How the port's own interface looks (the menu, the setup, the dialogs). Each
++// colour is 0xRRGGBBAA. Null in the profile: PortableKit's dark brown, bronze
++// and gold, in the system's font.
++struct InterfaceTheme {
++    std::uint32_t backdrop;      // over the game behind a full-window screen
++    std::uint32_t panel;         // a panel, a card or a popup
++    std::uint32_t edge;          // a panel's edge, the hairlines between parts
++    std::uint32_t row_hover;     // a row under the pointer
++    std::uint32_t focus;         // the focused row's bar, where it starts
++    std::uint32_t focus_end;     // and where it fades to, on the right
++    std::uint32_t accent;        // switches, sliders, arrows: what can be changed
++    std::uint32_t highlight;     // the open tab's line, the title's accent
++    std::uint32_t heading;       // titles
++    std::uint32_t section;       // a section's name, over its rows
++    std::uint32_t text;
++    std::uint32_t text_dim;      // descriptions, labels of values
++    std::uint32_t text_faint;    // notes, the arrows of a row not focused
++    std::uint32_t text_disabled;
++    std::uint32_t value;         // a setting's value
++    std::uint32_t danger;        // Quit, Disconnect
++    std::uint32_t good;          // connected, at rest
++    std::uint32_t track;         // an empty switch or slider
++    // Faces: titles and section names, everything else, and the short
++    // capitals of tabs and labels. Empty: the system's text face for all.
++    EmbeddedFont heading_font{};
++    EmbeddedFont body_font{};
++    EmbeddedFont caps_font{};
++    // The pause screen's title: `title`, then `title_accent` in the highlight
++    // colour, and `subtitle` in small capitals under them. Null title: the
++    // project name.
++    const char *title = nullptr;
++    const char *title_accent = nullptr;
++    const char *subtitle = nullptr;
++};
++
+ struct GameProfile {
+     // --- What the port is called -------------------------------------------
+     const char *app_name;          // the executable: "MHP3rdNative"
+@@ -470,6 +511,26 @@ struct GameProfile {
+     // The cheats the port offers on the Cheats page, besides the player's own
+     // cheat file (cheats/cheats.hpp). Empty: only the file's.
+     std::span<const BuiltinCheat> cheats = {};
++
++    // --- The menu ---------------------------------------------------------------
++    // Its colours, faces and title. Null: PortableKit's own.
++    const InterfaceTheme *theme = nullptr;
++    // What the menu says this game does with what the framework hands it, in
++    // whole sentences. Null: a sentence that suits any game.
++    // Controls > Right stick, set to Camera.
++    const char *right_stick_camera = nullptr;
++    // Controls > Mouse sensitivity, after "Degrees the camera turns for each
++    // count of mouse motion.": where the mouse turns it, and what up and down
++    // do.
++    const char *mouse_camera = nullptr;
++    // Controls > Trigger point, when the triggers press the extra L2 and R2
++    // (extra_buttons): what those do in this game.
++    const char *extra_triggers = nullptr;
++    // Video > Font: the line its preview draws (UTF-8), some of it in the
++    // game's other script so the fallback face shows; and which of the game's
++    // text the font changes.
++    const char *font_preview_text = nullptr;
++    const char *font_note = nullptr;
+ };
+ 
+ // Defined by the port, exactly once. Everything under host/ reads the game
+diff --git a/host/ui/font_menu.cpp b/host/ui/font_menu.cpp
+index 19a04c2..376f341 100644
+--- a/host/ui/font_menu.cpp
++++ b/host/ui/font_menu.cpp
+@@ -1,5 +1,7 @@
+ #include "ui/font_menu.hpp"
+ 
++#include "../profile.hpp"
++
+ #include "ui/layer.hpp"
+ #include "ui/widgets.hpp"
+ 
+@@ -18,6 +20,7 @@
+ #include <cctype>
+ #include <cmath>
+ #include <cstdio>
++#include <cstring>
+ #include <filesystem>
+ #include <iostream>
+ #include <string>
+@@ -26,9 +29,26 @@
+ namespace portablekit::ui {
+ namespace {
+ 
+-// The preview line: English as the patched game shows it, and some of the
+-// Japanese it still has.
+-constexpr char32_t kPreviewText[] = U"Urgent Quest  Yukumo Chief  1500z  装備 アイテム";
++// The preview line: the profile's (GameProfile::font_preview_text), or one
++// that suits any game, with some Japanese so the fallback face shows.
++constexpr char kGenericPreviewText[] = "Aa Bb Cc  0123456789  装備 アイテム";
++
++std::u32string preview_text() {
++    const char *utf8 = portablekit::game().font_preview_text;
++    if (utf8 == nullptr || *utf8 == '\0') utf8 = kGenericPreviewText;
++    std::u32string out;
++    const char *end = utf8 + std::strlen(utf8);
++    for (const char *s = utf8; s < end;) {
++        unsigned int c = 0;
++        const int length = ImTextCharFromUtf8(&c, s, end);
++        if (length <= 0) break;
++        out += static_cast<char32_t>(c);
++        s += length;
++    }
++    return out;
++}
++
++bool preview_in_rows = true;
+ // Text height in PSP pixels of most of the game's text.
+ constexpr float kPreviewTextSize = 14.0f;
+ constexpr int kPreviewWidth = 1024;
+@@ -43,6 +63,7 @@ float px(float value) { return std::round(value * Layer::get().scale()); }
+ RowOptions options_for(const char *key, std::string description) {
+     RowOptions options;
+     options.description = std::move(description);
++    options.key = key;
+     if (const std::string variable = settings::overridden_by(key); !variable.empty()) {
+         options.disabled = true;
+         options.note = "Set by " + variable;
+@@ -132,7 +153,8 @@ void build_preview(Preview &p, int size) {
+         return cell[static_cast<std::size_t>(y) * fonts::kCell + x];
+     };
+     int pen = 0;
+-    for (const char32_t *c = kPreviewText; *c != 0; ++c) {
++    const std::u32string text = preview_text();
++    for (const char32_t *c = text.c_str(); *c != 0; ++c) {
+         const int width = half_width(*c) ? size / 2 : size;
+         if (pen + width > kPreviewWidth) break;
+         if (*c != U' ') {
+@@ -192,6 +214,10 @@ std::string current_font_label() {
+ 
+ bool font_list_open() { return list_open; }
+ 
++void font_preview() { draw_preview(); }
++
++void set_font_preview_in_rows(bool in_rows) { preview_in_rows = in_rows; }
++
+ void font_rows() {
+     settings::Settings &s = settings::current();
+     fonts::start_catalog();
+@@ -231,7 +257,7 @@ void font_rows() {
+         settings::save();
+         Layer::get().renderer().set_sharp_text(s.sharp_text);
+     }
+-    draw_preview();
++    if (preview_in_rows) draw_preview();
+     if (button_row("Open the fonts folder",
+                    {false, {}, "Fonts put in this folder (.ttf, .otf, .ttc) are listed first under Font: " +
+                                    fonts::user_font_folder()})) {
+diff --git a/host/ui/font_menu.hpp b/host/ui/font_menu.hpp
+index 68ab462..ddc39fd 100644
+--- a/host/ui/font_menu.hpp
++++ b/host/ui/font_menu.hpp
+@@ -15,4 +15,10 @@ void font_rows();
+ // the menu keeps itself open too.
+ bool font_list(bool back);
+ 
++// The preview of the game's text in the chosen face, as the Text section
++// draws it: for the menu's side panel, which then has it instead of the
++// rows (set_font_preview_in_rows(false)).
++void font_preview();
++void set_font_preview_in_rows(bool in_rows);
++
+ } // namespace portablekit::ui
+diff --git a/host/ui/layer.cpp b/host/ui/layer.cpp
+index dde2937..e978313 100644
+--- a/host/ui/layer.cpp
++++ b/host/ui/layer.cpp
+@@ -15,6 +15,7 @@
+ 
+ #include "backends/imgui_impl_sdl3.h"
+ #include "imgui.h"
++#include "imgui_internal.h"
+ 
+ #include <SDL3/SDL.h>
+ 
+@@ -117,6 +118,19 @@ bool exists(const char *path) {
+     return std::filesystem::is_regular_file(install::path_from_utf8(path), ec);
+ }
+ 
++// The theme's faces (GameProfile::theme), null when it has none.
++ImFont *g_heading_font = nullptr;
++ImFont *g_caps_font = nullptr;
++
++ImFont *add_embedded(const EmbeddedFont &face, bool merge) {
++    if (face.data == nullptr || face.size == 0u) return nullptr;
++    ImFontConfig config;
++    config.FontDataOwnedByAtlas = false;  // it lives in the executable
++    config.MergeMode = merge;
++    return ImGui::GetIO().Fonts->AddFontFromMemoryTTF(const_cast<unsigned char *>(face.data),
++                                                      static_cast<int>(face.size), 0.0f, &config);
++}
++
+ void load_fonts() {
+     ImGuiIO &io = ImGui::GetIO();
+     const char *text_font = portablekit::env("UI_FONT");
+@@ -128,7 +142,37 @@ void load_fonts() {
+         if (text_font != nullptr) break;
+         if (exists(candidate)) text_font = candidate;
+     }
+-    ImFont *font = text_font != nullptr ? io.Fonts->AddFontFromFileTTF(text_font) : nullptr;
++    // The theme's body face first, so it is the default; the system's face
++    // then fills in what it lacks (Cyrillic, say), as the Japanese one below
++    // does for both.
++    const InterfaceTheme *theme = portablekit::game().theme;
++    ImFont *body = theme != nullptr && portablekit::env("UI_FONT") == nullptr ? add_embedded(theme->body_font, false)
++                                                                              : nullptr;
++    if (body != nullptr && text_font != nullptr) {
++        ImFontConfig merge;
++        merge.MergeMode = true;
++        io.Fonts->AddFontFromFileTTF(text_font, 0.0f, &merge);
++    }
++    ImFont *font = body != nullptr ? body : text_font != nullptr ? io.Fonts->AddFontFromFileTTF(text_font) : nullptr;
++    // Titles and capitals, each with the system's face behind it too.
++    const auto themed = [&](const EmbeddedFont &face) {
++        if (theme == nullptr || font == nullptr) return static_cast<ImFont *>(nullptr);
++        ImFont *added = add_embedded(face, false);
++        if (added != nullptr && text_font != nullptr) {
++            ImFontConfig merge;
++            merge.MergeMode = true;
++            io.Fonts->AddFontFromFileTTF(text_font, 0.0f, &merge);
++        }
++        return added;
++    };
++    // The theme's other faces come after the Japanese one, which merges into
++    // the face added last.
++    const auto add_themed = [&] {
++        if (theme == nullptr) return;
++        g_heading_font = themed(theme->heading_font);
++        g_caps_font = themed(theme->caps_font);
++        io.FontDefault = font;
++    };
+ #if defined(__ANDROID__)
+     // Android's own faces are variable fonts; the Japanese font the app
+     // carries has Latin too, and the symbols the menu uses (… ○ ×).
+@@ -137,6 +181,7 @@ void load_fonts() {
+             font = io.Fonts->AddFontFromFileTTF(install::path_to_utf8(bundled).c_str());
+             if (font != nullptr) {
+                 std::cout << "[ui] text in " << install::path_to_utf8(bundled.filename()) << "\n";
++                add_themed();
+                 return;
+             }
+         }
+@@ -155,6 +200,7 @@ void load_fonts() {
+         io.Fonts->AddFontFromFileTTF(candidate.c_str(), 0.0f, &merge);
+         break;
+     }
++    add_themed();
+ }
+ 
+ bool face_button_held() {
+@@ -201,6 +247,7 @@ bool Layer::attach(gpu::VulkanRenderer &renderer) {
+     }
+     // Any connected pad drives the interface, not only the one the game reads.
+     ImGui_ImplSDL3_SetGamepadMode(ImGui_ImplSDL3_GamepadMode_AutoAll);
++    apply_theme_colours(portablekit::game().theme);
+     load_fonts();
+     load_game_text_font();
+     std::string error;
+@@ -367,14 +414,53 @@ bool Layer::take_back() {
+ 
+ std::optional<std::filesystem::path> Layer::take_dropped_file() { return std::exchange(dropped_, std::nullopt); }
+ 
++namespace {
++ImGuiStyle &menu_style() {
++    static ImGuiStyle style;
++    return style;
++}
++ImGuiStyle &saved_style() {
++    static ImGuiStyle style;
++    return style;
++}
++} // namespace
++
+ void Layer::apply_theme() {
+     const ImGuiIO &io = ImGui::GetIO();
++    const float lines = io.DisplaySize.y;
+     // About 27 px on a Steam Deck's 800 lines, 18 px in the default 544-line
+     // window, growing with larger windows.
+-    const float size = std::clamp(std::round(io.DisplaySize.y * 0.034f), 16.0f, 72.0f);
+-    if (size == font_size_) return;
++    const float size = std::clamp(std::round(lines * 0.034f), 16.0f, 72.0f);
++    // The menu: 21 px from a Steam Deck's 800 lines to 1080 (a hand's
++    // reach and a desk's), then growing with the display, about 2 % of its
++    // height; smaller in a small window. A phone keeps the screens' size,
++    // which its fingers need. <prefix>_MENU_TEXT_SIZE sets it; the classic
++    // menu (<prefix>_CLASSIC_MENU) has the screens' size.
++    float menu = std::round(std::max(lines * 0.0185f, std::min(21.0f, lines * 0.0265f)));
++    menu = std::clamp(menu, 16.0f, 48.0f);
++    if (settings::kPlatform == settings::Platform::Android || portablekit::env_set("CLASSIC_MENU")) menu = size;
++    if (const char *forced = portablekit::env("MENU_TEXT_SIZE"); forced != nullptr && std::atof(forced) >= 8.0)
++        menu = std::round(static_cast<float>(std::atof(forced)));
++    if (size == font_size_ && menu == menu_font_size_) return;
+     font_size_ = size;
++    menu_font_size_ = menu;
+     ImGui::GetStyle() = make_style(scale(), font_size_);
++    menu_style() = make_style(menu_font_size_ / 20.0f, menu_font_size_);
++}
++
++Layer::MenuScale::MenuScale() {
++    Layer &layer = Layer::get();
++    saved_ = layer.font_size_;
++    saved_style() = ImGui::GetStyle();
++    layer.font_size_ = layer.menu_font_size_;
++    ImGui::GetStyle() = menu_style();
++    ImGui::PushFont(nullptr, layer.menu_font_size_);
++}
++
++Layer::MenuScale::~MenuScale() {
++    ImGui::PopFont();
++    ImGui::GetStyle() = saved_style();
++    Layer::get().font_size_ = saved_;
+ }
+ 
+ // The on-screen controls over an interface screen press its gamepad keys
+@@ -418,10 +504,25 @@ void Layer::begin_frame() {
+     if (gamepad_armed_) io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
+     else io.ConfigFlags &= ~ImGuiConfigFlags_NavEnableGamepad;
+     feed_touch_buttons();
++    if (ignore_left_stick_) {
++        // The backend has queued the stick's directions for this frame:
++        // take them out, and leave the stick at rest as far as ImGui knows.
++        static constexpr ImGuiKey kStick[] = {ImGuiKey_GamepadLStickLeft, ImGuiKey_GamepadLStickRight,
++                                              ImGuiKey_GamepadLStickUp, ImGuiKey_GamepadLStickDown};
++        ImVector<ImGuiInputEvent> &queue = ImGui::GetCurrentContext()->InputEventsQueue;
++        for (int i = queue.Size - 1; i >= 0; --i) {
++            const ImGuiInputEvent &e = queue[i];
++            if (e.Type == ImGuiInputEventType_Key && std::find(std::begin(kStick), std::end(kStick), e.Key.Key) != std::end(kStick))
++                queue.erase(queue.Data + i);
++        }
++        for (const ImGuiKey key : kStick) io.AddKeyAnalogEvent(key, false, 0.0f);
++    }
+     apply_theme();
+     if (fonts::generation() != g_game_text_generation) load_game_text_font();
+     ImGui::NewFrame();
+     description_.clear();
++    focused_label_.clear();
++    focused_key_.clear();
+ }
+ 
+ void Layer::end_frame() {
+@@ -449,6 +550,9 @@ ImFont *game_text_font() {
+     return g_game_text_font != nullptr ? g_game_text_font : ImGui::GetFont();
+ }
+ 
++ImFont *heading_font() { return g_heading_font; }
++ImFont *caps_font() { return g_caps_font; }
++
+ GamePicture game_picture() {
+     const Layer &layer = Layer::get();
+     if (!layer.attached()) return {};
+diff --git a/host/ui/layer.hpp b/host/ui/layer.hpp
+index 2fdcb5b..8b19415 100644
+--- a/host/ui/layer.hpp
++++ b/host/ui/layer.hpp
+@@ -80,9 +80,37 @@ public:
+     [[nodiscard]] float font_size() const noexcept { return font_size_; }
+     [[nodiscard]] float scale() const noexcept { return font_size_ / 20.0f; }
+ 
++    // The menu's text size: smaller than the other screens' on a large
++    // display, where it has room to show more. While a MenuScale lives,
++    // font_size(), scale(), the style and ImGui's font size are the menu's.
++    [[nodiscard]] float menu_font_size() const noexcept { return menu_font_size_; }
++    class MenuScale {
++    public:
++        MenuScale();
++        ~MenuScale();
++        MenuScale(const MenuScale &) = delete;
++        MenuScale &operator=(const MenuScale &) = delete;
++
++    private:
++        float saved_{};
++    };
++
+     // Explanation of the focused row, shown above the button hints.
+     void set_description(const std::string &text) { description_ = text; }
+     [[nodiscard]] const std::string &description() const noexcept { return description_; }
++    // The focused row's label and setting key (RowOptions::key), for the
++    // menu's side panel. Cleared each frame like the description.
++    void set_focused_row(const std::string &label, const char *key) {
++        focused_label_ = label;
++        focused_key_ = key != nullptr ? key : "";
++    }
++    [[nodiscard]] const std::string &focused_label() const noexcept { return focused_label_; }
++    [[nodiscard]] const std::string &focused_key() const noexcept { return focused_key_; }
++
++    // While set, the left stick does not navigate the interface or change a
++    // row: the menu's stick previews read it instead, and the D-pad still
++    // moves. From the next frame.
++    void set_left_stick_ignored(bool ignored) { ignore_left_stick_ = ignored; }
+ 
+ private:
+     bool handle_event(const SDL_Event &event);
+@@ -95,7 +123,11 @@ private:
+     bool window_closed_{};
+     InputDevice device_{InputDevice::Keyboard};
+     float font_size_{};
++    float menu_font_size_{};
+     std::string description_;
++    std::string focused_label_;
++    std::string focused_key_;
++    bool ignore_left_stick_{};
+ 
+     using Clock = std::chrono::steady_clock;
+     std::optional<Clock::time_point> escape_pending_;
+diff --git a/host/ui/menu.cpp b/host/ui/menu.cpp
+index 4907ad8..f8d7022 100644
+--- a/host/ui/menu.cpp
++++ b/host/ui/menu.cpp
+@@ -8,6 +8,7 @@
+ #include "ui/font_menu.hpp"
+ #include "ui/input_script.hpp"
+ #include "ui/layer.hpp"
++#include "ui/menu_look.hpp"
+ #include "ui/message_dialog.hpp"
+ #include "ui/save_list_dialog.hpp"
+ #include "ui/save_screen.hpp"
+@@ -84,6 +85,7 @@ std::string size_text(std::uint32_t scale) {
+ RowOptions options_for(const char *key, std::string description) {
+     RowOptions options;
+     options.description = std::move(description);
++    options.key = key;
+     if (const std::string variable = settings::overridden_by(key); !variable.empty()) {
+         options.disabled = true;
+         options.note = "Set by " + variable;
+@@ -200,29 +202,65 @@ std::atomic<bool> &menu_close_requested() {
+ 
+ class Menu {
+ public:
+-    explicit Menu(bool paused) : paused_(paused) {}
++    explicit Menu(bool paused) : paused_(paused), classic_(portablekit::env_set("CLASSIC_MENU")) {}
++    ~Menu() {
++        look::forget_paused_frame();
++        set_font_preview_in_rows(true);
++        Layer::get().set_left_stick_ignored(false);
++    }
++    Menu(const Menu &) = delete;
++    Menu &operator=(const Menu &) = delete;
+     // One frame; false once the menu closes.
+     bool frame();
+     [[nodiscard]] bool quit() const noexcept { return quit_; }
+ 
+ private:
+     enum class Confirm { None, Quit, Setup };
++    // The pause screen comes first; its Settings, Controls and Cheats open
++    // the settings screen at their page, and Back returns to it.
++    enum class Screen { Pause, Settings };
+ 
+     void video();
++    void video_tail();
++    void resolution_row();
++    void frame_rate_row();
+     void audio();
+     void controls();
+     void tilt_controls();
+     void network();
++    void network_status();
+     void cheat_page();
+     bool cheat_file_screen();
+     void system();
++    void system_about();
+     bool confirm_dialog();
+ 
++    void page();
++    [[nodiscard]] bool sub_screen_open() const;
++    // The panel of before, all pages behind tabs (<prefix>_CLASSIC_MENU=1).
++    void classic_frame();
++    void pause_screen();
++    bool pause_item(const char *label, const std::string &hint, const std::string &description, int index,
++                    bool danger = false);
++    void settings_screen();
++    bool tab_strip(ImVec2 at);
++    // The settings screen's right side: the focused setting's name, what it
++    // does and its preview, and the page's own card.
++    void side_panel(float width);
++    void page_card(float width);
++
+     gpu::VulkanRenderer &renderer() { return Layer::get().renderer(); }
+ 
+     bool paused_{};  // the game is paused behind the menu, rather than running
++    bool classic_{};
++    Screen screen_{Screen::Pause};
++    int pause_focus_{};      // the pause screen's item to focus when it shows again
++    bool refocus_pause_{};
++    float pause_item_lines_{2.85f};  // a pause item's height in text heights
++    bool pane_shown_{};      // the settings screen has room for its side panel
+     int tab_{};
+     bool first_frame_{true};
++    bool switched_{};        // the page changed this frame
+     bool close_{};
+     bool quit_{};
+     bool was_editing_{};
+@@ -234,8 +272,29 @@ private:
+     bool focus_cheat_file_row_{};  // back from them: the row that opened them
+ };
+ 
++bool Menu::sub_screen_open() const {
++    // Back closes the font list, the texture packs, the cheat file or the
++    // save import and export before it leaves the page.
++    return (tab_ == 0 && (font_list_open() || texture_pack_screen_open())) || (tab_ == 4 && cheat_file_open_) ||
++           (tab_ == 5 && save_screen_open());
++}
++
++void Menu::page() {
++    switch (tab_) {
++    case 0: video(); break;
++    case 1: audio(); break;
++    case 2: controls(); break;
++    case 3: network(); break;
++    case 4: cheat_page(); break;
++    default: system(); break;
++    }
++}
++
+ bool Menu::frame() {
+     Layer &layer = Layer::get();
++    // The menu's own text size, smaller than the other screens' on a large
++    // display; the keyboard and the dialogs opened from it share it.
++    const Layer::MenuScale scale;
+     // A text field's keyboard takes the whole screen until it closes.
+     if (text_input_open()) {
+         text_input_frame();
+@@ -249,12 +308,38 @@ bool Menu::frame() {
+     const ImGuiKey cancel = layer.confirm_south() ? ImGuiKey_GamepadFaceRight : ImGuiKey_GamepadFaceDown;
+     const bool pad_back = ImGui::IsKeyPressed(cancel, false);
+     const bool start = ImGui::IsKeyPressed(ImGuiKey_GamepadStart, false);
+-    // Back closes the font list, or the save import and export, before it
+-    // closes the menu.
+-    const bool font_list_was_open = (tab_ == 0 && (font_list_open() || texture_pack_screen_open())) ||
+-                                    (tab_ == 4 && cheat_file_open_) || (tab_ == 5 && save_screen_open());
++    const bool sub_screen = sub_screen_open();
+     back_ = back || pad_back;
+ 
++    if (classic_) classic_frame();
++    else if (screen_ == Screen::Pause) pause_screen();
++    else settings_screen();
++
++    if (confirm_ != Confirm::None) {
++        if ((back || pad_back) && confirm_opened_) confirm_ = Confirm::None;
++    } else if (!sub_screen && (((back || pad_back) && !was_editing_) || start)) {
++        // Back on the settings returns to the pause screen; on the pause
++        // screen, and Start anywhere, it resumes the game.
++        if (!classic_ && screen_ == Screen::Settings && !start) {
++            screen_ = Screen::Pause;
++            refocus_pause_ = true;
++        } else {
++            close_ = true;
++        }
++    }
++    if (menu_close_requested().exchange(false)) close_ = true;
++    if (close_ && !quit_ && texture_pack_import_busy()) close_ = false;
++    if (!confirm_dialog()) return false;
++    was_editing_ = ImGui::IsAnyItemActive();
++    // On the stick's own rows the left stick moves their preview, not the
++    // focus; the D-pad leaves them.
++    const std::string &key = layer.focused_key();
++    layer.set_left_stick_ignored(!classic_ && screen_ == Screen::Settings && pane_shown_ &&
++                                 (key == "input.dead_zone" || key == "input.stick_square"));
++    return !close_;
++}
++
++void Menu::classic_frame() {
+     begin_panel("##menu", portablekit::game().project_name, paused_ ? "Paused" : "Running", true);
+     static const char *const kTabs[] = {"Video", "Audio", "Controls", "Network", "Cheats", "System"};
+     const bool switched = tab_bar(kTabs, 6, tab_) || first_frame_;
+@@ -264,14 +349,7 @@ bool Menu::frame() {
+         focus_next_row();
+         ImGui::SetScrollY(0.0f);
+     }
+-    switch (tab_) {
+-    case 0: video(); break;
+-    case 1: audio(); break;
+-    case 2: controls(); break;
+-    case 3: network(); break;
+-    case 4: cheat_page(); break;
+-    default: system(); break;
+-    }
++    page();
+     begin_footer();
+     if (tab_ == 5)
+         hints({{Control::Confirm, "Select"}, {Control::Back, "Back"}, {Control::Tabs, "Section"},
+@@ -283,17 +361,6 @@ bool Menu::frame() {
+                {Control::Tabs, "Section"},
+                {Control::Menu, "Resume"}});
+     end_panel();
+-
+-    if (confirm_ != Confirm::None) {
+-        if ((back || pad_back) && confirm_opened_) confirm_ = Confirm::None;
+-    } else if (!font_list_was_open && (((back || pad_back) && !was_editing_) || start)) {
+-        close_ = true;
+-    }
+-    if (menu_close_requested().exchange(false)) close_ = true;
+-    if (close_ && !quit_ && texture_pack_import_busy()) close_ = false;
+-    if (!confirm_dialog()) return false;
+-    was_editing_ = ImGui::IsAnyItemActive();
+-    return !close_;
+ }
+ 
+ void Menu::video() {
+@@ -301,25 +368,7 @@ void Menu::video() {
+     if (texture_pack_screen(back_)) return;
+     settings::Settings &s = settings::current();
+     section("Picture");
+-    {
+-        RowOptions o = options_for("video.internal_scale",
+-                                   "Auto draws the game at the window's own size and follows it (at most 1632 "
+-                                   "lines). ×1 to ×6 draw 272 lines per step, 480×272 times the step unless the "
+-                                   "aspect ratio is Fill. Higher is sharper and needs more from the GPU.");
+-        const std::array<std::uint32_t, 2> size = renderer().target_size();
+-        const std::string drawn = std::to_string(size[0]) + "×" + std::to_string(size[1]);
+-        const std::string value =
+-            (s.internal_scale == 0u ? std::string("Auto") : "×" + std::to_string(s.internal_scale)) + "   " + drawn;
+-        if (const int delta = choice_row("Resolution", value, o)) {
+-            // Auto, then ×1 up to the menu's largest (or a larger one a
+-            // variable once chose).
+-            const int limit = std::max<int>(kMenuMaxInternalScale, static_cast<int>(s.internal_scale));
+-            s.internal_scale =
+-                static_cast<std::uint32_t>(cycle(static_cast<int>(s.internal_scale), delta, limit + 1));
+-            renderer().set_internal_scale(s.internal_scale);
+-            settings::save();
+-        }
+-    }
++    resolution_row();
+ #if !defined(__ANDROID__)
+     // A phone is always full screen: no window to size.
+     {
+@@ -423,6 +472,43 @@ void Menu::video() {
+             settings::save();
+         }
+     }
++    frame_rate_row();
++    {
++        RowOptions o = options_for("video.frame_rate_auto",
++                                   "On lowers the frame rate by itself when presenting that often would slow the "
++                                   "game. Off keeps the chosen rate, and the game may then run below full speed.");
++        if (s.unthrottled || s.frame_rate == settings::FrameRate::Fps30) o.disabled = true;
++        if (choice_row("Lower when behind", s.frame_rate_auto ? "On" : "Off", o)) {
++            s.frame_rate_auto = !s.frame_rate_auto;
++            renderer().set_frame_rate_auto(s.frame_rate_auto);
++            settings::save();
++        }
++    }
++    video_tail();
++}
++
++void Menu::resolution_row() {
++    settings::Settings &s = settings::current();
++    RowOptions o = options_for("video.internal_scale",
++                               "Auto draws the game at the window's own size and follows it (at most 1632 "
++                               "lines). ×1 to ×6 draw 272 lines per step, 480×272 times the step unless the "
++                               "aspect ratio is Fill. Higher is sharper and needs more from the GPU.");
++    const std::array<std::uint32_t, 2> size = renderer().target_size();
++    const std::string drawn = std::to_string(size[0]) + "×" + std::to_string(size[1]);
++    const std::string value =
++        (s.internal_scale == 0u ? std::string("Auto") : "×" + std::to_string(s.internal_scale)) + "   " + drawn;
++    if (const int delta = choice_row("Resolution", value, o)) {
++        // Auto, then ×1 up to the menu's largest (or a larger one a
++        // variable once chose).
++        const int limit = std::max<int>(kMenuMaxInternalScale, static_cast<int>(s.internal_scale));
++        s.internal_scale = static_cast<std::uint32_t>(cycle(static_cast<int>(s.internal_scale), delta, limit + 1));
++        renderer().set_internal_scale(s.internal_scale);
++        settings::save();
++    }
++}
++
++void Menu::frame_rate_row() {
++    settings::Settings &s = settings::current();
+     {
+         // The game's own rate stands first; the rates at or below it are not
+         // offered (a game at 60 has no 45 or 60 to blend up to).
+@@ -467,17 +553,11 @@ void Menu::video() {
+             settings::save();
+         }
+     }
+-    {
+-        RowOptions o = options_for("video.frame_rate_auto",
+-                                   "On lowers the frame rate by itself when presenting that often would slow the "
+-                                   "game. Off keeps the chosen rate, and the game may then run below full speed.");
+-        if (s.unthrottled || s.frame_rate == settings::FrameRate::Fps30) o.disabled = true;
+-        if (choice_row("Lower when behind", s.frame_rate_auto ? "On" : "Off", o)) {
+-            s.frame_rate_auto = !s.frame_rate_auto;
+-            renderer().set_frame_rate_auto(s.frame_rate_auto);
+-            settings::save();
+-        }
+-    }
++}
++
++// The Video page after Frame rate and Lower when behind.
++void Menu::video_tail() {
++    settings::Settings &s = settings::current();
+     if (choice_row("Game speed", s.unthrottled ? "Unlimited" : "Normal",
+                    options_for("video.unthrottled", "Normal holds the game to real time. Unlimited lets it run as "
+                                                     "fast as frames can be drawn, which also speeds up the game."))) {
+@@ -609,18 +689,16 @@ bool text_row(const char *id, const char *label, std::string &value, std::size_t
+     }
+     if (!ImGui::IsAnyItemActive() || !field.focused)
+         std::snprintf(field.buffer.data(), field.buffer.size(), "%s", value.c_str());
+-    const float row_height = std::round(Layer::get().font_size() * 1.9f);
++    const float row_height = std::round(Layer::get().font_size() * 2.05f);
+     const ImVec2 start = ImGui::GetCursorScreenPos();
+     const float width = ImGui::GetContentRegionAvail().x;
+     ImDrawList *draw = ImGui::GetWindowDrawList();
+     // Highlighted like the other rows; the field reports its focus only after
+     // it is drawn, so last frame's state is used.
+-    if (field.focused)
+-        draw->AddRectFilled(start, {start.x + width, start.y + row_height}, colors::kRowFocus,
+-                            std::round(6.0f * Layer::get().scale()));
+-    draw->AddText({start.x + std::round(16.0f * Layer::get().scale()),
++    if (field.focused) draw_focus_bar(draw, start, {start.x + width, start.y + row_height});
++    draw->AddText({start.x + std::round(24.0f * Layer::get().scale()),
+                    start.y + (row_height - Layer::get().font_size()) * 0.5f},
+-                  o.disabled ? colors::kTextDisabled : colors::kText, label);
++                  o.disabled ? colors::kTextDisabled : field.focused ? colors::kHeading : colors::kText, label);
+     const float field_width = std::min(width * 0.45f, Layer::get().font_size() * 12.0f);
+     ImGui::SetCursorScreenPos({start.x + width - field_width - std::round(16.0f * Layer::get().scale()),
+                                start.y + (row_height - ImGui::GetFrameHeight()) * 0.5f});
+@@ -896,8 +974,13 @@ void Menu::controls() {
+         const int current = static_cast<int>(s.right_stick);
+         if (const int delta = choice_row(
+                 "Right stick", kModes[current],
+-                options_for("input.right_stick", "Camera uses the HD release's own right-stick camera. D-pad "
+-                                                 "presses the D-pad instead, like the PSP's camera controls."))) {
++                options_for("input.right_stick",
++                            std::string("Camera: ") +
++                                (portablekit::game().right_stick_camera != nullptr
++                                     ? portablekit::game().right_stick_camera
++                                     : "the stick turns the game's camera.") +
++                                " D-pad: it presses the D-pad instead, as the PSP's camera controls do. Off: "
++                                "it does nothing."))) {
+             s.right_stick = static_cast<settings::RightStick>(cycle(current, delta, 3));
+             settings::save();
+         }
+@@ -910,7 +993,7 @@ void Menu::controls() {
+     // pushed; for any other the rows would change nothing.
+     if (const CameraDriver *driver = portablekit::game().camera; driver != nullptr) {
+         RowOptions o = options_for("input.analog_camera",
+-                                   "Turn and tilt the quest camera as far as the stick is pushed, instead of the "
++                                   "Turn and tilt the camera as far as the stick is pushed, instead of the "
+                                    "game's fixed-speed turn and vertical presets. Release holds the angle; the D-pad "
+                                    "and recentre return to the game's camera. Off is the game's own camera, untouched.");
+         if (!camera && !o.disabled) {
+@@ -1011,8 +1094,10 @@ void Menu::controls() {
+             settings::save();
+         }
+         o = options_for("input.mouse_sensitivity",
+-                        "Degrees the camera turns for each count of mouse motion. While a bow or a bowgun aims, "
+-                        "the mouse is slowed as Aim speed is to Camera speed.");
++                        std::string("Degrees the camera turns for each count of mouse motion.") +
++                            (portablekit::game().mouse_camera != nullptr
++                                 ? std::string(" ") + portablekit::game().mouse_camera
++                                 : std::string()));
+         if (!s.mouse && !o.disabled) {
+             o.disabled = true;
+             o.note = "Mouse is off";
+@@ -1656,6 +1741,61 @@ void Menu::network() {
+     }
+     for (void (*rows)() : port_network_rows()) rows();
+ 
++    if (!pane_shown_ || classic_) network_status();
++
++    section("Troubleshooting");
++    if (toggle_row("Network overlay", network_overlay(),
++                   {false, {}, "A small panel over the game with the connection, the group and the traffic."}))
++        network_overlay() = !network_overlay();
++    if (toggle_row("Log every call and packet", adhoc::Client::tracing(),
++                   {false, {}, "The same as <prefix>_TRACE_ADHOC=1: every ad hoc call and packet header goes to the "
++                               "console and to the network log. Busy; for finding a problem."}))
++        adhoc::Client::set_tracing(!adhoc::Client::tracing());
++    if (button_row("Save network log",
++                   {false, {}, "Writes the recent network log and this page's state to a file in the data folder's "
++                               "logs folder, to send with a problem report."})) {
++        std::filesystem::path directory;
++        try {
++            directory = install::user_data_directory() / "logs";
++        } catch (const std::exception &) {
++            directory = "logs";
++        }
++        const std::filesystem::path path = client.save_log(directory, network_log_about());
++        saved_log_path() = path.empty() ? "Could not write to " + install::path_to_utf8(directory)
++                                        : install::path_to_utf8(path);
++        std::cout << "[adhoc] network log: " << saved_log_path() << std::endl;
++    }
++    if (!saved_log_path().empty()) info_row("Saved", saved_log_path());
++    if (button_row("Reconnect now", {d.state == adhoc::ServerState::Off, {},
++                                     "Drop the server connection and connect again at once. The group is joined "
++                                     "again; a battle in progress may end, as when a connection drops."}))
++        client.reconnect_now();
++    if (button_row("Disconnect", {!d.group && !d.joining, {},
++                                  "Leave the group as if the other players were lost. The game shows its own "
++                                  "disconnection message."},
++                   colors::kDanger))
++        client.disconnect_now();
++
++    ImGui::Dummy({0.0f, font_gap()});
++    if (button_row("Restore network defaults", {false, {}, "Ad hoc play off and no server. Your address stays."})) {
++        const settings::Settings &defaults = settings::defaults();
++        const auto restore = [&](const char *key, auto &value, const auto &fallback) {
++            if (settings::overridden_by(key).empty()) value = fallback;
++        };
++        restore("network.adhoc", s.adhoc, defaults.adhoc);
++        restore("network.server", s.adhoc_server, defaults.adhoc_server);
++        restore("network.online_server", s.adhoc_online_server, defaults.adhoc_online_server);
++        restore("network.nickname", s.adhoc_nickname, defaults.adhoc_nickname);
++        settings::save();
++        if (adhoc_has_public_server()) adhoc_choose_nothing();  // saves and applies
++        else adhoc_apply_settings();
++    }
++}
++
++// The Network page's Status: rows on the page, or the side panel's card.
++void Menu::network_status() {
++    const settings::Settings &s = settings::current();
++    const adhoc::Diagnostics d = adhoc::Client::get().diagnostics();
+     section("Status");
+     info_row("Connection", connection_text(d));
+     if (adhoc::relay_unreachable(d)) paragraph(relay_unreachable_text(d), colors::kDanger);
+@@ -1719,54 +1859,6 @@ void Menu::network() {
+     info_row("Since start", traffic_text(d.total));
+     info_row("Problems", std::to_string(d.dropped) + " datagrams dropped, " + std::to_string(d.timeouts) +
+                              " calls timed out, " + std::to_string(d.reconnects) + " reconnections");
+-
+-    section("Troubleshooting");
+-    if (toggle_row("Network overlay", network_overlay(),
+-                   {false, {}, "A small panel over the game with the connection, the group and the traffic."}))
+-        network_overlay() = !network_overlay();
+-    if (toggle_row("Log every call and packet", adhoc::Client::tracing(),
+-                   {false, {}, "The same as <prefix>_TRACE_ADHOC=1: every ad hoc call and packet header goes to the "
+-                               "console and to the network log. Busy; for finding a problem."}))
+-        adhoc::Client::set_tracing(!adhoc::Client::tracing());
+-    if (button_row("Save network log",
+-                   {false, {}, "Writes the recent network log and this page's state to a file in the data folder's "
+-                               "logs folder, to send with a problem report."})) {
+-        std::filesystem::path directory;
+-        try {
+-            directory = install::user_data_directory() / "logs";
+-        } catch (const std::exception &) {
+-            directory = "logs";
+-        }
+-        const std::filesystem::path path = client.save_log(directory, network_log_about());
+-        saved_log_path() = path.empty() ? "Could not write to " + install::path_to_utf8(directory)
+-                                        : install::path_to_utf8(path);
+-        std::cout << "[adhoc] network log: " << saved_log_path() << std::endl;
+-    }
+-    if (!saved_log_path().empty()) info_row("Saved", saved_log_path());
+-    if (button_row("Reconnect now", {d.state == adhoc::ServerState::Off, {},
+-                                     "Drop the server connection and connect again at once. The group is joined "
+-                                     "again; a quest in progress may end, as when a connection drops."}))
+-        client.reconnect_now();
+-    if (button_row("Disconnect", {!d.group && !d.joining, {},
+-                                  "Leave the group as if the other players were lost. The game shows its own "
+-                                  "disconnection message."},
+-                   colors::kDanger))
+-        client.disconnect_now();
+-
+-    ImGui::Dummy({0.0f, font_gap()});
+-    if (button_row("Restore network defaults", {false, {}, "Ad hoc play off and no server. Your address stays."})) {
+-        const settings::Settings &defaults = settings::defaults();
+-        const auto restore = [&](const char *key, auto &value, const auto &fallback) {
+-            if (settings::overridden_by(key).empty()) value = fallback;
+-        };
+-        restore("network.adhoc", s.adhoc, defaults.adhoc);
+-        restore("network.server", s.adhoc_server, defaults.adhoc_server);
+-        restore("network.online_server", s.adhoc_online_server, defaults.adhoc_online_server);
+-        restore("network.nickname", s.adhoc_nickname, defaults.adhoc_nickname);
+-        settings::save();
+-        if (adhoc_has_public_server()) adhoc_choose_nothing();  // saves and applies
+-        else adhoc_apply_settings();
+-    }
+ }
+ 
+ void Menu::cheat_page() {
+@@ -1895,7 +1987,7 @@ void Menu::system() {
+     if (toggle_row("Pause during multiplayer", s.menu_pause_multiplayer,
+                    options_for("ui.menu_pause_multiplayer",
+                                "In ad hoc play the game keeps running behind the menu unless this is on: a paused "
+-                               "game stops answering the other players and can drop a quest. Applies the next time "
++                               "game stops answering the other players and can end the battle. Applies the next time "
+                                "the menu opens."))) {
+         s.menu_pause_multiplayer = !s.menu_pause_multiplayer;
+         settings::save();
+@@ -1946,6 +2038,17 @@ void Menu::system() {
+ 
+     for (void (*rows)() : port_system_rows()) rows();
+ 
++    if (!pane_shown_ || classic_) system_about();
++}
++
++// The System page's About: rows on the page, or the side panel's card.
++void Menu::system_about() {
++    std::string data_dir;
++    try {
++        data_dir = install::path_to_utf8(install::user_data_directory());
++    } catch (const std::exception &e) {
++        data_dir = e.what();
++    }
+     section("About");
+     if (const char *version = portablekit::game().project_version; version != nullptr) {
+         info_row(portablekit::game().project_name, version);
+@@ -1962,24 +2065,527 @@ void Menu::system() {
+     info_row("Interface", std::string("Dear ImGui ") + IMGUI_VERSION);
+ }
+ 
++// --- The pause screen and the settings screen ------------------------------------
++
++namespace {
++
++// The name the pause screen and the settings screen give the game: the
++// theme's title and its accent, or the project's name.
++struct Title {
++    std::string main;
++    std::string accent;
++};
++
++Title game_title_parts() {
++    const InterfaceTheme *theme = portablekit::game().theme;
++    if (theme != nullptr && theme->title != nullptr)
++        return {theme->title, theme->title_accent != nullptr ? theme->title_accent : ""};
++    return {portablekit::game().project_name, ""};
++}
++
++// What the pause screen says by Cheats: how many are on.
++std::string cheats_summary() {
++    const cheats::Overview o = cheats::overview();
++    if (!o.available || !settings::current().cheats) return "Off";
++    std::size_t on = 0u;
++    for (const cheats::BuiltinRow &row : o.builtin) on += row.choice != 0u ? 1u : 0u;
++    for (const cheats::CheatRow &row : o.cheats) on += row.enabled ? 1u : 0u;
++    return on == 0u ? std::string("None on") : std::to_string(on) + " on";
++}
++
++const char *shoulder(bool right) {
++    if (Layer::get().input_device() != InputDevice::Gamepad) return right ? "W" : "Q";
++    SDL_Gamepad *pad = Layer::get().renderer().gamepad();
++    const SDL_GamepadType type = pad != nullptr ? SDL_GetGamepadType(pad) : SDL_GAMEPAD_TYPE_UNKNOWN;
++    const char *name = pad != nullptr ? SDL_GetGamepadName(pad) : nullptr;
++    if (type == SDL_GAMEPAD_TYPE_PS3 || type == SDL_GAMEPAD_TYPE_PS4 || type == SDL_GAMEPAD_TYPE_PS5 ||
++        (name != nullptr && std::strstr(name, "Steam Deck") != nullptr))
++        return right ? "R1" : "L1";
++    if (type == SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO || type == SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_PAIR)
++        return right ? "R" : "L";
++    return right ? "RB" : "LB";
++}
++
++// A card behind what `draw_contents` draws: drawn after it, under it.
++template <typename F> void card(float width, F &&draw_contents) {
++    ImDrawList *draw = ImGui::GetWindowDrawList();
++    const float pad = look::px(18.0f);
++    const ImVec2 min = ImGui::GetCursorScreenPos();
++    draw->ChannelsSplit(2);
++    draw->ChannelsSetCurrent(1);
++    ImGui::SetCursorScreenPos({min.x + pad, min.y + pad});
++    ImGui::BeginGroup();
++    ImGui::PushItemWidth(width - 2.0f * pad);
++    ImGui::Dummy({width - 2.0f * pad, 0.0f});
++    begin_card();
++    draw_contents(width - 2.0f * pad);
++    end_card();
++    ImGui::PopItemWidth();
++    ImGui::EndGroup();
++    const float bottom = ImGui::GetItemRectMax().y + pad * 0.6f;
++    draw->ChannelsSetCurrent(0);
++    draw->AddRectFilled(min, {min.x + width, bottom}, colors::kPanel);
++    draw->AddRect(min, {min.x + width, bottom}, colors::kPanelEdge, 0.0f, 0, std::max(1.0f, look::px(1.0f)));
++    draw->ChannelsMerge();
++    ImGui::SetCursorScreenPos({min.x, bottom + look::px(14.0f)});
++    ImGui::Dummy({width, 0.0f});
++}
++
++} // namespace
++
++bool Menu::pause_item(const char *label, const std::string &hint, const std::string &description, int index,
++                      bool danger) {
++    Layer &layer = Layer::get();
++    const float font = layer.font_size();
++    const float height = std::round(font * pause_item_lines_);
++    const ImVec2 min = ImGui::GetCursorScreenPos();
++    const float width = ImGui::GetContentRegionAvail().x;
++    const ImVec2 max{min.x + width, min.y + height};
++    const bool pressed = ImGui::InvisibleButton(label, {width, height}, ImGuiButtonFlags_EnableNav);
++    if ((first_frame_ && index == 0) || (refocus_pause_ && index == pause_focus_)) {
++        ImGui::FocusItem();
++        refocus_pause_ = false;
++    }
++    const bool focused = ImGui::IsItemFocused();
++    const bool hovered = ImGui::IsItemHovered();
++    ImDrawList *draw = ImGui::GetWindowDrawList();
++    if (focused) draw_focus_bar(draw, min, max);
++    else if (hovered) draw->AddRectFilled(min, max, colors::kRowHover);
++    ImFont *face = heading_font();
++    const float size = std::round(font * (face != nullptr ? 1.43f : 1.3f));
++    const float x = min.x + std::round(font * 2.4f);
++    const float y = std::round(min.y + (height - size) * 0.5f);
++    const ImU32 ink = focused ? colors::kHeading : danger ? colors::kDanger : colors::kText;
++    draw->AddText(face, size, {x, y}, ink, label);
++    if (!hint.empty() && !focused) {
++        const float label_width = (face != nullptr ? face : ImGui::GetFont())->CalcTextSizeA(size, FLT_MAX, 0.0f, label).x;
++        const float small = std::round(font * 0.72f);
++        draw->AddText(nullptr, small, {x + label_width + std::round(font * 1.0f), std::round(min.y + (height - small) * 0.5f)},
++                      colors::kTextDim, hint.c_str());
++    }
++    if (focused || (hovered && layer.description().empty())) {
++        layer.set_description(description);
++        layer.set_focused_row(label, nullptr);
++    }
++    return pressed;
++}
++
++void Menu::pause_screen() {
++    Layer &layer = Layer::get();
++    const ImGuiIO &io = ImGui::GetIO();
++    const float width = io.DisplaySize.x;
++    const float height = io.DisplaySize.y;
++    const float font = layer.font_size();
++    // The game stays in view on the right; the left, under the menu, darkens.
++    ImDrawList *behind = ImGui::GetBackgroundDrawList();
++    const ImU32 strong = look::faded(colors::kBackdrop, 1.0f);
++    const ImU32 middle = look::faded(colors::kBackdrop, 0.9f);
++    const ImU32 weak = look::faded(colors::kBackdrop, 0.42f);
++    const ImU32 faint = look::faded(colors::kBackdrop, 0.24f);
++    behind->AddRectFilledMultiColor({0.0f, 0.0f}, {width * 0.3f, height}, strong, middle, middle, strong);
++    behind->AddRectFilledMultiColor({width * 0.3f, 0.0f}, {width * 0.62f, height}, middle, weak, weak, middle);
++    behind->AddRectFilledMultiColor({width * 0.62f, 0.0f}, {width, height}, weak, faint, faint, weak);
++    // And the bottom, under the hints and the corner's lines.
++    const ImU32 none = look::faded(colors::kBackdrop, 0.0f);
++    const ImU32 floor = look::faded(colors::kBackdrop, 0.8f);
++    behind->AddRectFilledMultiColor({0.0f, height * 0.72f}, {width, height}, none, none, floor, floor);
++
++    ImGui::SetNextWindowPos({0.0f, 0.0f}, ImGuiCond_Always);
++    ImGui::SetNextWindowSize(io.DisplaySize, ImGuiCond_Always);
++    ImGui::Begin("##pause", nullptr,
++                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
++                     ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoBringToFrontOnFocus |
++                     ImGuiWindowFlags_NoScrollWithMouse);
++    ImDrawList *draw = ImGui::GetWindowDrawList();
++    const float left = std::round(std::max(font * 1.5f, width * 0.0625f));
++    const float text_x = left + std::round(font * 2.4f);
++    const float list_width = std::min(width - left * 2.0f, std::max(font * 24.0f, width * 0.34f));
++
++    // A hairline down the left, fading at both ends.
++    {
++        const float x = left + std::round(font * 0.6f);
++        const float top = height * 0.11f;
++        const float bottom = height * 0.89f;
++        const float middle_y = (top + bottom) * 0.5f;
++        const ImU32 line = look::faded(colors::kHeading, 0.45f);
++        const ImU32 none = look::faded(colors::kHeading, 0.0f);
++        const float w = std::max(1.0f, look::px(1.0f));
++        draw->AddRectFilledMultiColor({x, top}, {x + w, middle_y}, none, none, line, line);
++        draw->AddRectFilledMultiColor({x, middle_y}, {x + w, bottom}, line, line, none, none);
++    }
++
++    // The title.
++    float y = std::round(height * 0.11f);
++    look::label(draw, {text_x, y}, paused_ ? "Paused" : "Running", colors::kSection, 0.72f);
++    y += std::round(font * 1.35f);
++    {
++        const Title title = game_title_parts();
++        ImFont *face = heading_font();
++        const float size = std::round(std::min(font * 3.6f, height * 0.08f));
++        ImFont *measure = face != nullptr ? face : ImGui::GetFont();
++        draw->AddText(face, size, {text_x, y}, colors::kHeading, title.main.c_str());
++        if (!title.accent.empty()) {
++            const float main_width = measure->CalcTextSizeA(size, FLT_MAX, 0.0f, (title.main + " ").c_str()).x;
++            draw->AddText(face, size, {text_x + main_width, y}, colors::kHighlight, title.accent.c_str());
++        }
++        y += std::round(size * 1.1f);
++        const InterfaceTheme *theme = portablekit::game().theme;
++        if (theme != nullptr && theme->subtitle != nullptr) {
++            const float small = std::round(font * 0.95f);
++            spaced_text(draw, face, small, {text_x, y}, colors::kTextDim, theme->subtitle, small * 0.2f);
++            y += std::round(small * 1.6f);
++        }
++    }
++
++    // The list: a third of the way down, or higher on a short screen, so
++    // that Quit game fits above the description.
++    const float hints_top = height - std::round(font * 2.6f);
++    const float description_top = hints_top - std::round(font * 2.8f);
++    y = std::max(y + font * 1.6f, std::min(height * 0.35f, description_top - font * 22.0f));
++    // Five items and the quick settings between them; on a short screen the
++    // items close up rather than push Quit game out of view.
++    pause_item_lines_ = std::clamp((description_top - font * 0.6f - y) / font - 9.2f, 10.0f, 14.25f) / 5.0f;
++    ImGui::SetCursorScreenPos({left, y});
++    ImGui::BeginChild("##pause list", {list_width, std::max(font * 6.0f, description_top - y - font * 0.6f)},
++                      ImGuiChildFlags_NavFlattened, ImGuiWindowFlags_NoBackground);
++    if (pause_item("Resume", "", "Back to the game.", 0)) close_ = true;
++    const auto open = [&](int tab, int index) {
++        screen_ = Screen::Settings;
++        tab_ = tab;
++        pause_focus_ = index;
++        switched_ = true;
++    };
++    if (pause_item("Settings", "Video · Audio · Network · System", "Every setting, page by page.", 1)) open(0, 1);
++    if (pause_item("Controls", "Pad, keyboard and mouse", "The gamepad, the keyboard and the mouse.", 2)) open(2, 2);
++    if (pause_item("Cheats", cheats_summary(), "The cheats this game offers, and your own cheat file.", 3))
++        open(4, 3);
++    // Two settings to change at once, without the settings screen.
++    {
++        ImGui::Dummy({0.0f, look::px(8.0f)});
++        const ImVec2 at = ImGui::GetCursorScreenPos();
++        const float drawn = look::label(draw, {at.x + std::round(font * 2.4f), at.y}, "Quick settings",
++                                        colors::kSection, 0.66f);
++        look::hairline(draw, {at.x + std::round(font * 2.4f) + drawn + look::px(14.0f), at.y + std::round(font * 0.38f)},
++                       std::max(0.0f, list_width - std::round(font * 2.4f) - drawn - look::px(14.0f)));
++        ImGui::Dummy({0.0f, std::round(font * 1.1f)});
++        const float indent = std::round(font * 2.4f) - look::px(24.0f);
++        ImGui::Indent(indent);
++        resolution_row();
++        frame_rate_row();
++        ImGui::Unindent(indent);
++    }
++    ImGui::Dummy({0.0f, look::px(8.0f)});
++    look::hairline(draw, {ImGui::GetCursorScreenPos().x + std::round(font * 2.4f), ImGui::GetCursorScreenPos().y},
++                   list_width * 0.5f);
++    ImGui::Dummy({0.0f, look::px(8.0f)});
++    if (pause_item("Quit game", "",
++                   std::string("Close ") + portablekit::game().project_name + ". Progress since your last save is lost.",
++                   4, true))
++        confirm_ = Confirm::Quit;
++    touch_scroll();
++    ImGui::EndChild();
++
++    // What the focused item does, and the buttons.
++    ImGui::PushTextWrapPos(text_x + list_width - font * 2.4f);
++    ImGui::SetCursorScreenPos({text_x, description_top});
++    ImGui::PushStyleColor(ImGuiCol_Text, colors::kTextDim);
++    ImGui::TextUnformatted(layer.description().c_str());
++    ImGui::PopStyleColor();
++    ImGui::PopTextWrapPos();
++    ImGui::SetCursorScreenPos({text_x, hints_top});
++    hints({{Control::Confirm, "Select"}, {Control::Change, "Change"}, {Control::Back, "Resume"}});
++
++    // What is going on, in the corner.
++    {
++        const settings::Settings &s = settings::current();
++        const float card_width = std::min(font * 15.0f, width * 0.3f);
++        const float x = width - left - card_width;
++        std::vector<std::pair<std::string, std::string>> lines;
++        lines.emplace_back("Online", s.adhoc ? connection_text(adhoc::Client::get().diagnostics()) : "Off");
++        lines.emplace_back("Disc", portablekit::active_disc_id_display());
++        const char *version = portablekit::game().project_version;
++        lines.emplace_back("Build", version != nullptr ? std::string(version) : std::string(kBuildVersion));
++        const float line_height = std::round(font * 0.8f * 1.6f);
++        float ly = height - std::round(font * 1.4f) - line_height * static_cast<float>(lines.size());
++        look::hairline(draw, {x, ly - look::px(14.0f)}, card_width);
++        const float small = std::round(font * 0.8f);
++        for (const auto &[name, value] : lines) {
++            draw->AddText(nullptr, small, {x, ly}, colors::kTextDim, name.c_str());
++            const float value_width = ImGui::GetFont()->CalcTextSizeA(small, FLT_MAX, 0.0f, value.c_str()).x;
++            draw->AddText(nullptr, small, {x + card_width - value_width, ly}, colors::kText, value.c_str());
++            ly += line_height;
++        }
++    }
++    ImGui::End();
++    first_frame_ = false;
++}
++
++bool Menu::tab_strip(ImVec2 at) {
++    static const char *const kTabs[] = {"Video", "Audio", "Controls", "Network", "Cheats", "System"};
++    constexpr int kCount = 6;
++    const int before = tab_;
++    const bool typing = ImGui::GetIO().WantTextInput;
++    if (ImGui::IsKeyPressed(ImGuiKey_GamepadL1, false) || (!typing && ImGui::IsKeyPressed(ImGuiKey_Q, false)))
++        tab_ = (tab_ + kCount - 1) % kCount;
++    if (ImGui::IsKeyPressed(ImGuiKey_GamepadR1, false) || (!typing && ImGui::IsKeyPressed(ImGuiKey_W, false)))
++        tab_ = (tab_ + 1) % kCount;
++
++    const float font = Layer::get().font_size();
++    ImDrawList *draw = ImGui::GetWindowDrawList();
++    const float cap_height = std::round(font * 1.1f);
++    float x = at.x;
++    x += look::cap(draw, {x, at.y + std::round(font * 0.15f)}, shoulder(false)) + std::round(font * 0.7f);
++    const float size = std::round(font * 0.9f);
++    const float spacing = size * 0.12f;
++    ImGui::PushItemFlag(ImGuiItemFlags_NoNav, true);
++    for (int i = 0; i < kCount; ++i) {
++        std::string name(kTabs[i]);
++        for (char &c : name)
++            if (c >= 'a' && c <= 'z') c = static_cast<char>(c - 'a' + 'A');
++        const float text_width = spaced_text(nullptr, caps_font(), size, {}, 0, name.c_str(), spacing);
++        const float pad = std::round(font * 0.75f);
++        const ImVec2 min{x, at.y - look::px(4.0f)};
++        const ImVec2 max{x + text_width + pad * 2.0f, at.y + cap_height + look::px(8.0f)};
++        ImGui::SetCursorScreenPos(min);
++        ImGui::PushID(i);
++        if (ImGui::InvisibleButton("tab", {max.x - min.x, max.y - min.y})) tab_ = i;
++        const bool hovered = ImGui::IsItemHovered();
++        ImGui::PopID();
++        const bool active = i == tab_;
++        const ImU32 ink = active ? colors::kHeading : hovered ? colors::kText : colors::kTextFaint;
++        spaced_text(draw, caps_font(), size, {x + pad, at.y + (cap_height - size) * 0.5f}, ink, name.c_str(), spacing);
++        if (active)
++            draw->AddRectFilled({x + pad, max.y - look::px(3.0f)}, {x + pad + text_width, max.y}, colors::kHighlight);
++        x = max.x;
++    }
++    ImGui::PopItemFlag();
++    look::cap(draw, {x + std::round(font * 0.7f) - std::round(font * 0.75f), at.y + std::round(font * 0.15f)},
++              shoulder(true));
++    return tab_ != before;
++}
++
++void Menu::settings_screen() {
++    Layer &layer = Layer::get();
++    const ImGuiIO &io = ImGui::GetIO();
++    const float width = io.DisplaySize.x;
++    const float height = io.DisplaySize.y;
++    const float font = layer.font_size();
++    ImGui::GetBackgroundDrawList()->AddRectFilled({0.0f, 0.0f}, io.DisplaySize, colors::kBackdrop);
++    ImGui::SetNextWindowPos({0.0f, 0.0f}, ImGuiCond_Always);
++    ImGui::SetNextWindowSize(io.DisplaySize, ImGuiCond_Always);
++    ImGui::Begin("##settings", nullptr,
++                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
++                     ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoBringToFrontOnFocus |
++                     ImGuiWindowFlags_NoScrollWithMouse);
++    ImDrawList *draw = ImGui::GetWindowDrawList();
++    const float margin = std::round(std::max(font * 1.5f, width * 0.0625f));
++    const float top = std::round(std::max(font * 1.1f, height * 0.06f));
++
++    // The header: what the game is doing, "Settings", the pages, the game.
++    look::label(draw, {margin, top}, paused_ ? "Paused" : "Running", colors::kSection, 0.68f);
++    ImFont *face = heading_font();
++    const float title_size = std::round(font * 2.3f);
++    const float title_top = top + std::round(font * 1.05f);
++    draw->AddText(face, title_size, {margin, title_top}, colors::kHeading, "Settings");
++    const float title_width = (face != nullptr ? face : ImGui::GetFont())->CalcTextSizeA(title_size, FLT_MAX, 0.0f, "Settings").x;
++    const float title_bottom = title_top + title_size;
++    const bool switched = tab_strip({margin + title_width + std::round(font * 2.4f), title_bottom - std::round(font * 1.45f)}) ||
++                          switched_ || first_frame_;
++    switched_ = false;
++    first_frame_ = false;
++    {
++        const Title title = game_title_parts();
++        const std::string whole = title.accent.empty() ? title.main : title.main + " " + title.accent;
++        const float small = std::round(font * 0.72f);
++        const float w = ImGui::GetFont()->CalcTextSizeA(small, FLT_MAX, 0.0f, whole.c_str()).x;
++        if (margin + title_width + font * 32.0f + w < width - margin) {
++            const float x = width - margin - w;
++            const float ty = title_bottom - small - look::px(6.0f);
++            draw->AddText(nullptr, small, {x, ty}, colors::kTextDim, title.main.c_str());
++            if (!title.accent.empty()) {
++                const float main_w = ImGui::GetFont()->CalcTextSizeA(small, FLT_MAX, 0.0f, (title.main + " ").c_str()).x;
++                draw->AddText(nullptr, small, {x + main_w, ty}, colors::kHighlight, title.accent.c_str());
++            }
++        }
++    }
++    const float rule_y = title_bottom + std::round(font * 0.7f);
++    look::hairline(draw, {margin, rule_y}, width - margin * 2.0f);
++
++    // The page's rows on the left, the side panel on the right.
++    const float body_top = rule_y + std::round(font * 0.9f);
++    const float footer_top = height - std::round(font * 3.4f);
++    pane_shown_ = width >= font * 50.0f;
++    set_font_preview_in_rows(!pane_shown_);
++    const float rows_left = margin - look::px(24.0f);
++    const float rows_width = pane_shown_ ? std::round((width - margin * 2.0f) * 0.5f) + look::px(24.0f)
++                                         : width - margin * 2.0f + look::px(24.0f);
++    const float description_height = pane_shown_ ? 0.0f : std::round(font * 2.6f);
++    const float body_height = footer_top - body_top - font * 0.5f - description_height;
++    ImGui::SetCursorScreenPos({rows_left, body_top});
++    ImGui::BeginChild("content", {rows_width, body_height}, ImGuiChildFlags_NavFlattened,
++                      ImGuiWindowFlags_NoBackground);
++    if (switched) {
++        focus_next_row();
++        ImGui::SetScrollY(0.0f);
++    }
++    page();
++    touch_scroll();
++    ImGui::EndChild();
++    if (pane_shown_) {
++        const float pane_left = rows_left + rows_width + std::round(font * 3.2f);
++        const float pane_width = width - margin - pane_left;
++        ImGui::SetCursorScreenPos({pane_left, body_top + look::px(10.0f)});
++        ImGui::BeginChild("##side", {pane_width, body_height - look::px(10.0f)}, 0,
++                          ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoScrollbar |
++                              ImGuiWindowFlags_NoScrollWithMouse);
++        side_panel(pane_width);
++        ImGui::EndChild();
++    } else {
++        ImGui::SetCursorScreenPos({margin, footer_top - description_height});
++        ImGui::PushTextWrapPos(width - margin);
++        ImGui::PushStyleColor(ImGuiCol_Text, colors::kTextDim);
++        ImGui::TextUnformatted(layer.description().c_str());
++        ImGui::PopStyleColor();
++        ImGui::PopTextWrapPos();
++    }
++
++    // The buttons, at the bottom right.
++    look::hairline(draw, {margin, footer_top}, width - margin * 2.0f);
++    const bool change = tab_ != 5;
++    const float hint_width = change ? hints_width({{Control::Confirm, "Select"},
++                                                   {Control::Change, "Change"},
++                                                   {Control::Back, "Pause menu"},
++                                                   {Control::Tabs, "Section"},
++                                                   {Control::Menu, "Resume"}})
++                                    : hints_width({{Control::Confirm, "Select"},
++                                                   {Control::Back, "Pause menu"},
++                                                   {Control::Tabs, "Section"},
++                                                   {Control::Menu, "Resume"}});
++    ImGui::SetCursorScreenPos({std::max(margin, width - margin - hint_width), footer_top + std::round(font * 1.0f)});
++    if (change)
++        hints({{Control::Confirm, "Select"},
++               {Control::Change, "Change"},
++               {Control::Back, "Pause menu"},
++               {Control::Tabs, "Section"},
++               {Control::Menu, "Resume"}});
++    else
++        hints({{Control::Confirm, "Select"}, {Control::Back, "Pause menu"}, {Control::Tabs, "Section"},
++               {Control::Menu, "Resume"}});
++    ImGui::End();
++}
++
++void Menu::side_panel(float width) {
++    Layer &layer = Layer::get();
++    const float font = layer.font_size();
++    ImDrawList *draw = ImGui::GetWindowDrawList();
++    const std::string title = layer.focused_label();
++    if (!title.empty()) {
++        ImFont *face = heading_font();
++        const float size = std::round(font * 1.5f);
++        const ImVec2 at = ImGui::GetCursorScreenPos();
++        draw->AddText(face, size, at, colors::kHeading, title.c_str(), nullptr, width);
++        ImGui::Dummy({width, (face != nullptr ? face : ImGui::GetFont())
++                                 ->CalcTextSizeA(size, FLT_MAX, width, title.c_str())
++                                 .y +
++                                 look::px(10.0f)});
++        if (!layer.description().empty()) {
++            ImGui::PushFont(nullptr, std::round(font * 0.88f));
++            ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + std::min(width, font * 32.0f));
++            ImGui::PushStyleColor(ImGuiCol_Text, colors::kText);
++            ImGui::TextUnformatted(layer.description().c_str());
++            ImGui::PopStyleColor();
++            ImGui::PopTextWrapPos();
++            ImGui::PopFont();
++        }
++        ImGui::Dummy({0.0f, std::round(font * 0.9f)});
++        if (look::preview(layer.focused_key(), renderer(), width)) ImGui::Dummy({0.0f, std::round(font * 0.6f)});
++    }
++    page_card(width);
++}
++
++void Menu::page_card(float width) {
++    const settings::Settings &s = settings::current();
++    switch (tab_) {
++    case 1: {
++        audio::AudioSink &sink = audio::AudioSink::instance();
++        card(width, [&](float) {
++            section("Output");
++            info_row("Volume", s.mute ? "Muted" : std::to_string(s.volume) + "%");
++            info_row("Device", sink.has_device() ? "44100 Hz stereo" : "None");
++            if (paused_)
++                paragraph("Silent while the game is paused behind this menu. With Pause the game when the menu opens "
++                          "off (System), it keeps playing while you change this.",
++                          colors::kTextDim);
++        });
++        break;
++    }
++    case 3:
++        card(width, [&](float) { network_status(); });
++        break;
++    case 4: {
++        const cheats::Overview o = cheats::overview();
++        if (!o.available) break;
++        card(width, [&](float) {
++            section("On now");
++            std::size_t shown = 0u;
++            if (s.cheats) {
++                for (const cheats::BuiltinRow &row : o.builtin) {
++                    if (row.choice == 0u) continue;
++                    info_row(row.name.c_str(), row.labels.empty() ? std::string("On") : row.labels[row.choice - 1u]);
++                    ++shown;
++                }
++                std::size_t on = 0u;
++                for (const cheats::CheatRow &row : o.cheats) on += row.enabled ? 1u : 0u;
++                if (on != 0u) {
++                    info_row("PPSSPP cheat file", std::to_string(on) + " on");
++                    ++shown;
++                }
++            }
++            if (!s.cheats) paragraph("Use cheats is off: none of them runs.", colors::kTextDim);
++            else if (shown == 0u) paragraph("None is on.", colors::kTextDim);
++            if (s.cheats && cheats::paused_online())
++                paragraph("Paused while you play online. They come back on when you leave.", colors::kTextDim);
++        });
++        break;
++    }
++    case 5:
++        card(width, [&](float) { system_about(); });
++        break;
++    default: break;
++    }
++}
++
+ // The quit and setup confirmations. False when the menu should close.
+ bool Menu::confirm_dialog() {
+     if (confirm_ != Confirm::None && !ImGui::IsPopupOpen("##confirm")) ImGui::OpenPopup("##confirm");
+     const ImGuiIO &io = ImGui::GetIO();
+     const float font = Layer::get().font_size();
+     ImGui::SetNextWindowPos({io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f}, ImGuiCond_Always, {0.5f, 0.5f});
+-    ImGui::SetNextWindowSize({std::min(io.DisplaySize.x * 0.9f, font * 26.0f), 0.0f}, ImGuiCond_Always);
++    ImGui::SetNextWindowSize({std::min(io.DisplaySize.x * 0.9f, font * 30.0f), 0.0f}, ImGuiCond_Always);
++    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {std::round(font * 2.0f), std::round(font * 1.6f)});
+     bool keep_open = true;
+     confirm_opened_ = false;
+     if (ImGui::BeginPopupModal("##confirm", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings)) {
+         if (confirm_ == Confirm::None) {
+             ImGui::CloseCurrentPopup();
+             ImGui::EndPopup();
++            ImGui::PopStyleVar();
+             return true;
+         }
+         confirm_opened_ = true;
+         const bool quit = confirm_ == Confirm::Quit;
+-        heading(quit ? "Quit the game?" : "Set up game data again?");
++        {
++            ImDrawList *draw = ImGui::GetWindowDrawList();
++            const ImVec2 pos = ImGui::GetWindowPos();
++            draw->AddRectFilled(pos, {pos.x + ImGui::GetWindowSize().x, pos.y + std::max(2.0f, look::px(2.0f))},
++                                colors::kHighlight);
++            const char *title = quit ? "Quit the game?" : "Set up game data again?";
++            const float size = std::round(font * 1.9f);
++            ImFont *face = heading_font();
++            const ImVec2 at = ImGui::GetCursorScreenPos();
++            draw->AddText(face, size, at, colors::kHeading, title);
++            ImGui::Dummy({0.0f, size + look::px(10.0f)});
++        }
+         paragraph(quit ? "Progress since your last save is lost."
+                        : std::string(portablekit::game().project_name) + " closes the game and opens the setup, where you choose the disc image again. "
+                          "Progress since your last save is lost.",
+@@ -2002,6 +2608,7 @@ bool Menu::confirm_dialog() {
+         if (confirm_ == Confirm::None || !keep_open) ImGui::CloseCurrentPopup();
+         ImGui::EndPopup();
+     }
++    ImGui::PopStyleVar();
+     return keep_open;
+ }
+ 
+diff --git a/host/ui/menu_look.cpp b/host/ui/menu_look.cpp
+new file mode 100644
+index 0000000..c08bb20
+--- /dev/null
++++ b/host/ui/menu_look.cpp
+@@ -0,0 +1,1031 @@
++#include "ui/menu_look.hpp"
++
++#include "../profile.hpp"
++#include "ui/font_menu.hpp"
++#include "ui/layer.hpp"
++#include "ui/ui.hpp"
++#include "ui/widgets.hpp"
++
++#include "gpu/vulkan_renderer.hpp"
++#include "input/bindings.hpp"
++#include "input/button_prompts.hpp"
++#include "input/stick.hpp"
++#include "settings/settings.hpp"
++
++#include "imgui_internal.h"
++
++#include <SDL3/SDL.h>
++
++#include <algorithm>
++#include <array>
++#include <chrono>
++#include <cmath>
++#include <cstdint>
++#include <cstdio>
++#include <cstring>
++#include <string>
++#include <vector>
++
++namespace portablekit::ui::look {
++namespace {
++
++float font() { return Layer::get().font_size(); }
++
++std::string printed(const char *pattern, double a, double b = 0.0) {
++    char text[96];
++    std::snprintf(text, sizeof(text), pattern, a, b);
++    return text;
++}
++
++std::string size_text(double width, double height) {
++    return std::to_string(static_cast<int>(std::lround(width))) + " × " +
++           std::to_string(static_cast<int>(std::lround(height)));
++}
++
++// Text in the body face, `size` a share of the text size; returns its height.
++float text(ImDrawList *draw, ImVec2 at, ImU32 colour, const std::string &value, float size = 1.0f,
++           float wrap = 0.0f) {
++    const float pixels = std::round(font() * size);
++    ImFont *face = ImGui::GetFont();
++    draw->AddText(face, pixels, {std::round(at.x), std::round(at.y)}, colour, value.c_str(), nullptr, wrap);
++    return face->CalcTextSizeA(pixels, FLT_MAX, wrap, value.c_str()).y;
++}
++
++float text_width(const std::string &value, float size = 1.0f) {
++    return ImGui::GetFont()->CalcTextSizeA(std::round(font() * size), FLT_MAX, 0.0f, value.c_str()).x;
++}
++
++// A label and its value on one line of a readout; returns the line's height.
++float readout(ImDrawList *draw, ImVec2 at, float label_width, const char *name, const std::string &value,
++              ImU32 colour = colors::kText) {
++    text(draw, at, colors::kTextDim, name, 0.8f);
++    text(draw, {at.x + label_width, at.y}, colour, value, 0.8f);
++    return std::round(font() * 0.8f * 1.65f);
++}
++
++void dashed_line(ImDrawList *draw, ImVec2 a, ImVec2 b, ImU32 colour, float dash, float thickness) {
++    const float length = std::hypot(b.x - a.x, b.y - a.y);
++    if (length <= 0.0f) return;
++    const ImVec2 step{(b.x - a.x) / length, (b.y - a.y) / length};
++    for (float t = 0.0f; t < length; t += dash * 2.0f) {
++        const float end = std::min(length, t + dash);
++        draw->AddLine({a.x + step.x * t, a.y + step.y * t}, {a.x + step.x * end, a.y + step.y * end}, colour,
++                      thickness);
++    }
++}
++
++void dashed_rect(ImDrawList *draw, ImVec2 min, ImVec2 max, ImU32 colour, float dash, float thickness) {
++    dashed_line(draw, min, {max.x, min.y}, colour, dash, thickness);
++    dashed_line(draw, {max.x, min.y}, max, colour, dash, thickness);
++    dashed_line(draw, max, {min.x, max.y}, colour, dash, thickness);
++    dashed_line(draw, {min.x, max.y}, min, colour, dash, thickness);
++}
++
++// The note under a preview, wrapped to its width; returns the height used.
++float note(ImDrawList *draw, ImVec2 at, float width, const std::string &value, ImU32 colour = colors::kTextFaint) {
++    return text(draw, at, colour, value, 0.75f, width);
++}
++
++// The stick's position, -1..1, right and down positive.
++float axis(SDL_Gamepad *pad, SDL_GamepadAxis id) {
++    if (pad == nullptr) return 0.0f;
++    return std::clamp(static_cast<float>(SDL_GetGamepadAxis(pad, id)) / 32767.0f, -1.0f, 1.0f);
++}
++
++std::string pad_name(SDL_Gamepad *pad) {
++    const char *name = pad != nullptr ? SDL_GetGamepadName(pad) : nullptr;
++    return name != nullptr ? name : "the gamepad";
++}
++
++input::PadKind pad_kind(SDL_Gamepad *pad) {
++    if (pad == nullptr) return input::PadKind::Keyboard;
++    const char *name = SDL_GetGamepadName(pad);
++    if (name != nullptr && std::strstr(name, "Steam Deck") != nullptr) return input::PadKind::SteamDeck;
++    switch (SDL_GetGamepadType(pad)) {
++    case SDL_GAMEPAD_TYPE_PS3:
++    case SDL_GAMEPAD_TYPE_PS4:
++    case SDL_GAMEPAD_TYPE_PS5: return input::PadKind::PlayStation;
++    case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO:
++    case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_LEFT:
++    case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_RIGHT:
++    case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_PAIR: return input::PadKind::Nintendo;
++    default: return input::PadKind::Xbox;
++    }
++}
++
++// --- Face buttons ------------------------------------------------------------
++
++enum class Shape { Cross, Circle, Square, Triangle };
++
++void shape(ImDrawList *draw, ImVec2 c, float r, Shape s, ImU32 ink) {
++    const float k = r * 0.46f;
++    const float t = std::max(1.5f, r * 0.15f);
++    switch (s) {
++    case Shape::Cross:
++        draw->AddLine({c.x - k, c.y - k}, {c.x + k, c.y + k}, ink, t);
++        draw->AddLine({c.x - k, c.y + k}, {c.x + k, c.y - k}, ink, t);
++        break;
++    case Shape::Circle: draw->AddCircle(c, k * 1.1f, ink, 0, t); break;
++    case Shape::Square: draw->AddRect({c.x - k, c.y - k}, {c.x + k, c.y + k}, ink, 0.0f, 0, t); break;
++    case Shape::Triangle:
++        draw->AddTriangle({c.x, c.y - k * 1.15f}, {c.x + k * 1.15f, c.y + k * 0.8f}, {c.x - k * 1.15f, c.y + k * 0.8f},
++                          ink, t);
++        break;
++    }
++}
++
++void letter(ImDrawList *draw, ImVec2 c, float r, const char *value, ImU32 ink) {
++    const float size = std::round(r * 1.2f);
++    const ImVec2 measured = ImGui::GetFont()->CalcTextSizeA(size, FLT_MAX, 0.0f, value);
++    draw->AddText(ImGui::GetFont(), size, {std::round(c.x - measured.x * 0.5f), std::round(c.y - measured.y * 0.5f)},
++                  ink, value);
++}
++
++Shape shape_at(input::FaceButton face) {
++    switch (face) {
++    case input::FaceButton::South: return Shape::Cross;
++    case input::FaceButton::East: return Shape::Circle;
++    case input::FaceButton::West: return Shape::Square;
++    default: return Shape::Triangle;
++    }
++}
++
++const char *xbox_letter(input::FaceButton face) {
++    switch (face) {
++    case input::FaceButton::South: return "A";
++    case input::FaceButton::East: return "B";
++    case input::FaceButton::West: return "X";
++    default: return "Y";
++    }
++}
++
++const char *nintendo_letter(input::FaceButton face) {
++    switch (face) {
++    case input::FaceButton::South: return "B";
++    case input::FaceButton::East: return "A";
++    case input::FaceButton::West: return "Y";
++    default: return "X";
++    }
++}
++
++ImU32 xbox_colour(input::FaceButton face) {
++    switch (face) {
++    case input::FaceButton::South: return IM_COL32(63, 143, 74, 255);
++    case input::FaceButton::East: return IM_COL32(176, 58, 58, 255);
++    case input::FaceButton::West: return IM_COL32(47, 95, 176, 255);
++    default: return IM_COL32(168, 134, 42, 255);
++    }
++}
++
++// A face button as the pad of `kind` labels the one at `face`.
++void face_button(ImDrawList *draw, ImVec2 c, float r, input::PadKind kind, input::FaceButton face, bool lit) {
++    const ImU32 disc = lit ? colors::kRowFocus : IM_COL32(26, 29, 41, 255);
++    const ImU32 ink = lit ? colors::kHeading : colors::kTextDim;
++    draw->AddCircleFilled(c, r, disc);
++    draw->AddCircle(c, r, lit ? colors::kHeading : colors::kTextFaint, 0, std::max(1.0f, px(1.0f)));
++    switch (kind) {
++    case input::PadKind::Xbox:
++    case input::PadKind::SteamDeck: letter(draw, c, r, xbox_letter(face), ink); break;
++    case input::PadKind::Nintendo: letter(draw, c, r, nintendo_letter(face), ink); break;
++    default: shape(draw, c, r, shape_at(face), ink); break;
++    }
++}
++
++// --- The paused frame ------------------------------------------------------------
++
++struct Frame {
++    bool tried{};
++    bool ok{};
++    std::vector<std::uint8_t> pixels;  // R, G, B, A
++    std::uint32_t width{};
++    std::uint32_t height{};
++};
++
++Frame &paused() {
++    static Frame frame;
++    return frame;
++}
++
++const Frame &paused_frame(gpu::VulkanRenderer &renderer) {
++    Frame &frame = paused();
++    if (!frame.tried) {
++        frame.tried = true;
++        frame.ok = renderer.read_frame(frame.pixels, frame.width, frame.height) && frame.width > 0u &&
++                   frame.height > 0u && frame.pixels.size() >= std::size_t{frame.width} * frame.height * 4u;
++    }
++    return frame;
++}
++
++// The frame halved or more, box-filtered, as a lower Resolution would draw
++// it (near enough for a preview).
++Frame scaled_down(const Frame &source, std::uint32_t lines) {
++    Frame out;
++    out.tried = out.ok = true;
++    out.height = lines;
++    out.width = static_cast<std::uint32_t>(std::lround(static_cast<double>(source.width) * lines / source.height));
++    out.pixels.resize(std::size_t{out.width} * out.height * 4u);
++    const double sx = static_cast<double>(source.width) / out.width;
++    const double sy = static_cast<double>(source.height) / out.height;
++    for (std::uint32_t y = 0; y < out.height; ++y)
++        for (std::uint32_t x = 0; x < out.width; ++x) {
++            const auto x0 = static_cast<std::uint32_t>(x * sx);
++            const auto y0 = static_cast<std::uint32_t>(y * sy);
++            const auto x1 = std::max(x0 + 1u, std::min(source.width, static_cast<std::uint32_t>((x + 1) * sx)));
++            const auto y1 = std::max(y0 + 1u, std::min(source.height, static_cast<std::uint32_t>((y + 1) * sy)));
++            std::array<std::uint32_t, 3> sum{};
++            std::uint32_t count = 0;
++            for (std::uint32_t yy = y0; yy < y1; ++yy)
++                for (std::uint32_t xx = x0; xx < x1; ++xx) {
++                    const std::uint8_t *p = source.pixels.data() + (std::size_t{yy} * source.width + xx) * 4u;
++                    for (int c = 0; c < 3; ++c) sum[static_cast<std::size_t>(c)] += p[c];
++                    ++count;
++                }
++            std::uint8_t *q = out.pixels.data() + (std::size_t{y} * out.width + x) * 4u;
++            for (int c = 0; c < 3; ++c) q[c] = static_cast<std::uint8_t>(sum[static_cast<std::size_t>(c)] / count);
++            q[3] = 255u;
++        }
++    return out;
++}
++
++std::uint32_t texel(const Frame &f, int x, int y) {
++    x = std::clamp(x, 0, static_cast<int>(f.width) - 1);
++    y = std::clamp(y, 0, static_cast<int>(f.height) - 1);
++    std::uint32_t value = 0;
++    std::memcpy(&value, f.pixels.data() + (static_cast<std::size_t>(y) * f.width + x) * 4u, 4u);
++    return value | 0xFF000000u;  // opaque, whatever the target's alpha
++}
++
++std::uint32_t bilinear(const Frame &f, float u, float v) {
++    u -= 0.5f;
++    v -= 0.5f;
++    const int x0 = static_cast<int>(std::floor(u));
++    const int y0 = static_cast<int>(std::floor(v));
++    const float fx = u - static_cast<float>(x0);
++    const float fy = v - static_cast<float>(y0);
++    const std::uint32_t a = texel(f, x0, y0), b = texel(f, x0 + 1, y0), c = texel(f, x0, y0 + 1),
++                        d = texel(f, x0 + 1, y0 + 1);
++    std::uint32_t out = 0xFF000000u;
++    for (int shift = 0; shift < 24; shift += 8) {
++        const auto ch = [&](std::uint32_t p) { return static_cast<float>((p >> shift) & 0xFFu); };
++        const float value = (ch(a) * (1.0f - fx) + ch(b) * fx) * (1.0f - fy) + (ch(c) * (1.0f - fx) + ch(d) * fx) * fy;
++        out |= static_cast<std::uint32_t>(std::clamp(value + 0.5f, 0.0f, 255.0f)) << shift;
++    }
++    return out;
++}
++
++// One texture the previews draw from, in parts: the frame's thumbnail at the
++// top, close-ups below.
++constexpr int kAtlasSize = 1024;
++constexpr int kSlotWidth = 512;
++constexpr int kSlotHeight = 256;
++
++struct Atlas {
++    ImTextureData *texture{};
++    std::string thumbnail_key;
++    std::string crops_key;
++};
++
++Atlas &atlas() {
++    static Atlas value;
++    if (value.texture == nullptr) {
++        value.texture = new ImTextureData();
++        value.texture->Create(ImTextureFormat_RGBA32, kAtlasSize, kAtlasSize);
++        std::memset(value.texture->GetPixels(), 0, std::size_t{kAtlasSize} * kAtlasSize * 4u);
++        ImGui::RegisterUserTexture(value.texture);
++    }
++    return value;
++}
++
++std::uint32_t *atlas_row(int y) {
++    return static_cast<std::uint32_t *>(atlas().texture->GetPixels()) + static_cast<std::size_t>(y) * kAtlasSize;
++}
++
++void upload(int x, int y, int w, int h) {
++    ImTextureData *t = atlas().texture;
++    if (t->Status == ImTextureStatus_OK || t->Status == ImTextureStatus_WantUpdates)
++        ImTextureDataQueueUpload(t, x, y, w, h);
++}
++
++ImVec2 uv(float x, float y) { return {x / kAtlasSize, y / kAtlasSize}; }
++
++// Slot `slot` (0-3) of the close-ups: its top left in the atlas.
++ImVec2 slot_origin(int slot) {
++    return {static_cast<float>((slot % 2) * kSlotWidth), static_cast<float>(kSlotWidth + (slot / 2) * kSlotHeight)};
++}
++
++// What the window shows around the frame's centre, `zoom` times larger:
++// `source` scaled `ratio` times to the window by the nearest pixel or
++// bilinearly, as the renderer's last blit does.
++void render_crop(int slot, int w, int h, const Frame &source, float ratio, bool nearest, int zoom) {
++    const ImVec2 origin = slot_origin(slot);
++    const float cx = static_cast<float>(source.width) * 0.5f;
++    const float cy = static_cast<float>(source.height) * 0.42f;
++    for (int oy = 0; oy < h; ++oy) {
++        std::uint32_t *row = atlas_row(static_cast<int>(origin.y) + oy) + static_cast<int>(origin.x);
++        const float dy = static_cast<float>(oy / zoom) - static_cast<float>(h / zoom) * 0.5f;
++        const float v = cy + (dy + 0.5f) / ratio;
++        for (int ox = 0; ox < w; ++ox) {
++            const float dx = static_cast<float>(ox / zoom) - static_cast<float>(w / zoom) * 0.5f;
++            const float u = cx + (dx + 0.5f) / ratio;
++            row[ox] = nearest ? texel(source, static_cast<int>(std::floor(u)), static_cast<int>(std::floor(v)))
++                              : bilinear(source, u, v);
++        }
++    }
++    upload(static_cast<int>(origin.x), static_cast<int>(origin.y), w, h);
++}
++
++void draw_slot(ImDrawList *draw, int slot, ImVec2 at, float w, float h) {
++    const ImVec2 o = slot_origin(slot);
++    const ImVec2 min{std::round(at.x), std::round(at.y)};
++    draw->AddImage(atlas().texture->GetTexRef(), min, {min.x + w, min.y + h}, uv(o.x, o.y), uv(o.x + w, o.y + h));
++}
++
++// The whole frame, small, at the atlas's top left; returns its size.
++ImVec2 thumbnail(const Frame &f) {
++    const int width = std::min(kSlotWidth, 480);
++    const int height = std::min(kSlotWidth, static_cast<int>(std::lround(480.0 * f.height / f.width)));
++    const std::string key = std::to_string(f.width) + "x" + std::to_string(f.height) + "@" +
++                            std::to_string(reinterpret_cast<std::uintptr_t>(f.pixels.data()));
++    if (atlas().thumbnail_key != key) {
++        const Frame small = scaled_down(f, static_cast<std::uint32_t>(height));
++        for (int y = 0; y < height; ++y)
++            for (int x = 0; x < width; ++x) atlas_row(y)[x] = texel(small, x, y);
++        upload(0, 0, width, height);
++        atlas().thumbnail_key = key;
++    }
++    return {static_cast<float>(width), static_cast<float>(height)};
++}
++
++// A close-up with its caption: the choice's name, and "Chosen" by the one
++// in use.
++void close_up(ImDrawList *draw, int slot, ImVec2 at, float w, float h, const char *name, bool chosen) {
++    draw_slot(draw, slot, at, w, h);
++    const float edge = std::max(1.0f, px(chosen ? 2.0f : 1.0f));
++    draw->AddRect({at.x - px(3.0f), at.y - px(3.0f)}, {at.x + w + px(3.0f), at.y + h + px(3.0f)},
++                  chosen ? colors::kAccent : colors::kPanelEdge, 0.0f, 0, edge);
++    const float y = at.y + h + px(10.0f);
++    text(draw, {at.x, y}, chosen ? colors::kHeading : colors::kTextDim, name, 0.8f);
++    if (chosen) {
++        const std::string mark = "Chosen";
++        text(draw, {at.x + w - text_width(mark, 0.8f), y}, colors::kSection, mark, 0.8f);
++    }
++}
++
++// --- The previews -------------------------------------------------------------
++
++bool scaling(gpu::VulkanRenderer &renderer, float width) {
++    ImDrawList *draw = ImGui::GetWindowDrawList();
++    const ImVec2 start = ImGui::GetCursorScreenPos();
++    const Frame &f = paused_frame(renderer);
++    if (!f.ok) return false;
++    const GamePicture picture = game_picture();
++    const float ratio = picture.height / static_cast<float>(f.height);
++    const bool same = std::fabs(ratio - 1.0f) < 0.03f;
++    const bool sharp = settings::current().sharp_screen;
++    const float gap = px(20.0f);
++    const float pair_w = std::floor(std::min<float>(kSlotWidth, (width - gap) * 0.5f));
++    const float single_w = std::floor(std::min<float>(kSlotWidth, width));
++    const float h = std::floor(std::min<float>(kSlotHeight, std::round(font() * 7.5f)));
++    constexpr int kZoom = 2;
++    const bool lower = f.height >= 800u;  // a frame drawn at ×3 or more: ×2 can be shown
++    const std::string key = std::to_string(f.width) + "x" + std::to_string(f.height) + "/" + std::to_string(ratio) +
++                            "/" + std::to_string(pair_w) + "/" + std::to_string(h) + "@" +
++                            std::to_string(reinterpret_cast<std::uintptr_t>(f.pixels.data()));
++    const float ratio2 = picture.height / 544.0f;
++    if (atlas().crops_key != key) {
++        if (same) {
++            render_crop(0, static_cast<int>(single_w), static_cast<int>(h), f, ratio, true, kZoom);
++        } else {
++            render_crop(0, static_cast<int>(pair_w), static_cast<int>(h), f, ratio, true, kZoom);
++            render_crop(1, static_cast<int>(pair_w), static_cast<int>(h), f, ratio, false, kZoom);
++        }
++        if (same && lower) {
++            const Frame half = scaled_down(f, 544u);
++            render_crop(2, static_cast<int>(pair_w), static_cast<int>(h), half, ratio2, true, kZoom);
++            render_crop(3, static_cast<int>(pair_w), static_cast<int>(h), half, ratio2, false, kZoom);
++        }
++        atlas().crops_key = key;
++    }
++
++    float y = start.y;
++    label(draw, {start.x, y}, "On your screen now", colors::kSection);
++    y += std::round(font() * 1.3f);
++    const std::string drawn = size_text(f.width, f.height);
++    const std::string shown = size_text(picture.width, picture.height);
++    if (same) {
++        close_up(draw, 0, {start.x, y}, single_w, h, sharp ? "Sharp" : "Smooth", false);
++        y += h + std::round(font() * 1.7f);
++        y += note(draw, {start.x, y}, width,
++                  "Sharp and Smooth look the same here: the game is drawn at " + drawn + " and shown at " + shown +
++                      ", almost one to one.",
++                  colors::kTextDim) +
++             px(16.0f);
++        if (lower) {
++            label(draw, {start.x, y}, ("At Resolution ×2, enlarged " + printed("%.1f", ratio2) + "×").c_str(),
++                  colors::kSection);
++            y += std::round(font() * 1.3f);
++            close_up(draw, 2, {start.x, y}, pair_w, h, "Sharp", sharp);
++            close_up(draw, 3, {start.x + pair_w + gap, y}, pair_w, h, "Smooth", !sharp);
++            y += h + std::round(font() * 1.7f);
++        }
++    } else {
++        close_up(draw, 0, {start.x, y}, pair_w, h, "Sharp", sharp);
++        close_up(draw, 1, {start.x + pair_w + gap, y}, pair_w, h, "Smooth", !sharp);
++        y += h + std::round(font() * 1.7f);
++        const std::string how =
++            ratio > 1.0f ? "enlarged " + printed("%.2f", ratio) + "×" : "shrunk to " + printed("%.0f", ratio * 100.0) + "%";
++        y += note(draw, {start.x, y}, width, "Drawn at " + drawn + ", shown at " + shown + ": " + how + ".",
++                  colors::kTextDim) +
++             px(16.0f);
++    }
++    y += note(draw, {start.x, y}, width, "Close-ups of the paused game, 2× zoom.");
++    ImGui::Dummy({width, y - start.y});
++    return true;
++}
++
++bool aspect(gpu::VulkanRenderer &renderer, float width) {
++    ImDrawList *draw = ImGui::GetWindowDrawList();
++    const ImVec2 start = ImGui::GetCursorScreenPos();
++    const Frame &f = paused_frame(renderer);
++    if (!f.ok) return false;
++    const ImVec2 thumb = thumbnail(f);
++    const ImGuiIO &io = ImGui::GetIO();
++    const float window_w = io.DisplaySize.x;
++    const float window_h = io.DisplaySize.y;
++    const bool fill = gpu::VulkanRenderer::supports_fill();
++    const int count = fill ? 3 : 2;
++    const float gap = px(22.0f);
++    float box_w = (width - gap * static_cast<float>(count - 1)) / static_cast<float>(count);
++    float box_h = box_w * window_h / window_w;
++    if (box_h > font() * 7.0f) {
++        box_h = font() * 7.0f;
++        box_w = box_h * window_w / window_h;
++    }
++    box_w = std::floor(box_w);
++    box_h = std::floor(box_h);
++    const settings::Aspect chosen = gpu::VulkanRenderer::usable_aspect(settings::current().aspect);
++    const float picture_aspect = static_cast<float>(f.width) / static_cast<float>(f.height);
++    const ImTextureRef texture = atlas().texture->GetTexRef();
++    const ImVec2 whole = uv(thumb.x, thumb.y);
++    for (int i = 0; i < count; ++i) {
++        const auto which = static_cast<settings::Aspect>(i);
++        const ImVec2 min{std::round(start.x + static_cast<float>(i) * (box_w + gap)), std::round(start.y)};
++        const ImVec2 max{min.x + box_w, min.y + box_h};
++        draw->AddRectFilled(min, max, IM_COL32(0, 0, 0, 255));
++        std::string size;
++        if (which == settings::Aspect::Original) {
++            const float fit = std::min(box_w / picture_aspect, box_h);
++            const float w = fit * picture_aspect;
++            const ImVec2 a{min.x + (box_w - w) * 0.5f, min.y + (box_h - fit) * 0.5f};
++            draw->AddImage(texture, a, {a.x + w, a.y + fit}, {0.0f, 0.0f}, whole);
++            const float shown_h = std::min(window_w / picture_aspect, window_h);
++            size = size_text(shown_h * picture_aspect, shown_h);
++        } else if (which == settings::Aspect::Stretch) {
++            draw->AddImage(texture, min, max, {0.0f, 0.0f}, whole);
++            size = size_text(window_w, window_h);
++        } else {
++            // Fill widens or narrows the view itself; from a paused frame the
++            // nearest likeness is its middle at the window's shape.
++            const float box_aspect = box_w / box_h;
++            ImVec2 a{0.0f, 0.0f};
++            ImVec2 b = whole;
++            if (box_aspect < picture_aspect) {
++                const float keep = box_aspect / picture_aspect;
++                a.x = whole.x * (1.0f - keep) * 0.5f;
++                b.x = whole.x - a.x;
++            } else {
++                const float keep = picture_aspect / box_aspect;
++                a.y = whole.y * (1.0f - keep) * 0.5f;
++                b.y = whole.y - a.y;
++            }
++            draw->AddImage(texture, min, max, a, b);
++            size = size_text(window_w, window_h);
++        }
++        const bool on = which == chosen;
++        draw->AddRect({min.x - px(3.0f), min.y - px(3.0f)}, {max.x + px(3.0f), max.y + px(3.0f)},
++                      on ? colors::kAccent : colors::kPanelEdge, 0.0f, 0, std::max(1.0f, px(on ? 2.0f : 1.0f)));
++        static const char *const kNames[] = {"Original", "Stretch", "Fill"};
++        const float y = max.y + px(10.0f);
++        text(draw, {min.x, y}, on ? colors::kHeading : colors::kTextDim, kNames[i], 0.8f);
++        text(draw, {max.x - text_width(size, 0.75f), y + px(1.0f)}, colors::kTextFaint, size, 0.75f);
++    }
++    float y = start.y + box_h + std::round(font() * 1.8f);
++    y += note(draw, {start.x, y}, width,
++              "In your window's shape, " + size_text(window_w, window_h) + ". From the paused game.");
++    ImGui::Dummy({width, y - start.y});
++    return true;
++}
++
++// The stick's last places, for its trail.
++struct Trail {
++    std::array<ImVec2, 6> points{};
++    int count{};
++    std::chrono::steady_clock::time_point last{};
++};
++
++void stick_gate(ImDrawList *draw, ImVec2 c, float radius, float dead_zone, bool square, bool live, float x, float y,
++                Trail *trail) {
++    const float line = std::max(1.0f, px(1.5f));
++    draw->AddRectFilled({c.x - radius * 1.19f, c.y - radius * 1.19f}, {c.x + radius * 1.19f, c.y + radius * 1.19f},
++                        faded(colors::kPanel, 0.8f));
++    if (square)
++        dashed_rect(draw, {c.x - radius, c.y - radius}, {c.x + radius, c.y + radius}, faded(colors::kSection, 0.75f),
++                    px(5.0f), line);
++    draw->AddCircle(c, radius, faded(colors::kText, 0.45f), 64, line);
++    draw->AddLine({c.x - radius, c.y}, {c.x + radius, c.y}, faded(colors::kText, 0.12f), 1.0f);
++    draw->AddLine({c.x, c.y - radius}, {c.x, c.y + radius}, faded(colors::kText, 0.12f), 1.0f);
++    if (dead_zone > 0.0f) {
++        draw->AddCircleFilled(c, radius * dead_zone, faded(colors::kDanger, 0.35f), 32);
++        draw->AddCircle(c, radius * dead_zone, colors::kDanger, 32, line);
++    }
++    if (!live) return;
++    const ImVec2 dot{c.x + x * radius, c.y + y * radius};
++    if (trail != nullptr) {
++        const auto now = std::chrono::steady_clock::now();
++        if (now - trail->last > std::chrono::milliseconds(45)) {
++            for (int i = static_cast<int>(trail->points.size()) - 1; i > 0; --i)
++                trail->points[static_cast<std::size_t>(i)] = trail->points[static_cast<std::size_t>(i - 1)];
++            trail->points[0] = {x, y};
++            trail->count = std::min(trail->count + 1, static_cast<int>(trail->points.size()));
++            trail->last = now;
++        }
++        for (int i = trail->count - 1; i >= 1; --i) {
++            const ImVec2 p = trail->points[static_cast<std::size_t>(i)];
++            draw->AddCircleFilled({c.x + p.x * radius, c.y + p.y * radius}, px(4.5f),
++                                  faded(colors::kSection, 0.5f - 0.07f * static_cast<float>(i)));
++        }
++    }
++    draw->AddLine(c, dot, colors::kAccent, std::max(1.5f, px(2.0f)));
++    draw->AddCircleFilled(dot, px(9.0f), colors::kAccent);
++    draw->AddCircle(dot, px(9.0f), colors::kHeading, 0, std::max(1.5f, px(2.0f)));
++}
++
++std::string nub_text(const input::stick::Nub &nub) {
++    return std::to_string(static_cast<int>(nub.x)) + ", " + std::to_string(static_cast<int>(nub.y));
++}
++
++bool stick(gpu::VulkanRenderer &renderer, float width) {
++    ImDrawList *draw = ImGui::GetWindowDrawList();
++    const ImVec2 start = ImGui::GetCursorScreenPos();
++    const settings::Settings &s = settings::current();
++    SDL_Gamepad *pad = renderer.gamepad();
++    const float x = axis(pad, SDL_GAMEPAD_AXIS_LEFTX);
++    const float y = axis(pad, SDL_GAMEPAD_AXIS_LEFTY);
++    const float size = std::floor(std::min(width * 0.45f, font() * 14.0f));
++    const float radius = size * 0.42f;
++    const ImVec2 c{start.x + size * 0.5f, start.y + size * 0.5f};
++    static Trail trail;
++    stick_gate(draw, c, radius, s.dead_zone, s.stick_square, pad != nullptr, x, y, &trail);
++
++    const float column = start.x + size + px(30.0f);
++    const float label_w = std::round(font() * 6.0f);
++    float ly = start.y + px(6.0f);
++    const input::stick::Nub nub = input::stick::to_nub(x, y, {s.dead_zone, input::stick::kFullDeflection, s.stick_square});
++    const float length = std::hypot(x, y);
++    if (pad != nullptr) {
++        ly += readout(draw, {column, ly}, label_w, "Left stick", printed("%.2f, %.2f", x, y));
++        ly += readout(draw, {column, ly}, label_w, "Game reads", nub_text(nub));
++    }
++    ly += readout(draw, {column, ly}, label_w, "Dead zone",
++                  std::to_string(static_cast<int>(std::lround(s.dead_zone * 100.0f))) + "%", colors::kDanger);
++    if (pad != nullptr)
++        ly += readout(draw, {column, ly}, label_w, "Now", length <= s.dead_zone ? "inside the dead zone" : "past it",
++                      length <= s.dead_zone ? colors::kGood : colors::kText);
++    // The legend.
++    ly += px(8.0f);
++    const float swatch = std::round(font() * 0.55f);
++    draw->AddCircleFilled({column + swatch * 0.5f, ly + swatch * 0.6f}, swatch * 0.5f, faded(colors::kDanger, 0.6f));
++    text(draw, {column + swatch + px(8.0f), ly}, colors::kTextDim, "Ignored", 0.75f);
++    ly += std::round(font() * 1.2f);
++    if (s.stick_square) {
++        dashed_line(draw, {column, ly + swatch * 0.6f}, {column + swatch * 1.6f, ly + swatch * 0.6f},
++                    colors::kSection, px(3.0f), std::max(1.0f, px(1.5f)));
++        text(draw, {column + swatch * 1.6f + px(8.0f), ly}, colors::kTextDim, "The PSP's range, Full diagonals", 0.75f);
++    }
++    float bottom = start.y + size + px(14.0f);
++    bottom += note(draw, {start.x, bottom}, width,
++                   pad != nullptr ? "Live from " + pad_name(pad) + ". Move the left stick to try it; the D-pad leaves "
++                                                                   "this row. The game reads 0 to 255 on each axis, 128 at rest."
++                                  : "Connect a gamepad to try it here.");
++    ImGui::Dummy({width, bottom - start.y});
++    return true;
++}
++
++bool diagonals(gpu::VulkanRenderer &renderer, float width) {
++    ImDrawList *draw = ImGui::GetWindowDrawList();
++    const ImVec2 start = ImGui::GetCursorScreenPos();
++    const settings::Settings &s = settings::current();
++    SDL_Gamepad *pad = renderer.gamepad();
++    // The direction the stick points, or up and right while it rests: a
++    // full push that way, with the setting off and on.
++    float x = axis(pad, SDL_GAMEPAD_AXIS_LEFTX);
++    float y = axis(pad, SDL_GAMEPAD_AXIS_LEFTY);
++    float length = std::hypot(x, y);
++    if (length <= s.dead_zone || pad == nullptr) {
++        x = 0.70710678f;
++        y = -0.70710678f;
++        length = 1.0f;
++    }
++    x /= length;
++    y /= length;
++    const float size = std::floor(std::min((width - px(24.0f)) * 0.5f, font() * 11.0f));
++    const float radius = size * 0.4f;
++    for (int i = 0; i < 2; ++i) {
++        const bool square = i == 1;
++        const ImVec2 origin{start.x + static_cast<float>(i) * (size + px(24.0f)), start.y};
++        const ImVec2 c{origin.x + size * 0.5f, origin.y + size * 0.5f};
++        const input::stick::Nub nub = input::stick::to_nub(x, y, {0.0f, input::stick::kFullDeflection, square});
++        const float gx = (static_cast<float>(nub.x) - 128.0f) / (nub.x >= 128 ? 127.0f : 128.0f);
++        const float gy = (static_cast<float>(nub.y) - 128.0f) / (nub.y >= 128 ? 127.0f : 128.0f);
++        stick_gate(draw, c, radius, 0.0f, true, true, gx, gy, nullptr);
++        const bool on = square == s.stick_square;
++        const std::string caption = std::string(square ? "On" : "Off") + " · reads " + nub_text(nub);
++        text(draw, {origin.x, origin.y + size + px(8.0f)}, on ? colors::kHeading : colors::kTextDim, caption, 0.8f);
++    }
++    float bottom = start.y + size + std::round(font() * 1.9f);
++    bottom += note(draw, {start.x, bottom}, width,
++                   pad != nullptr ? "A full push the way " + pad_name(pad) +
++                                        "'s left stick points (up and right while it rests). The D-pad leaves this row."
++                                  : "A full push up and right.");
++    ImGui::Dummy({width, bottom - start.y});
++    return true;
++}
++
++bool triggers(gpu::VulkanRenderer &renderer, float width) {
++    ImDrawList *draw = ImGui::GetWindowDrawList();
++    const ImVec2 start = ImGui::GetCursorScreenPos();
++    const settings::Settings &s = settings::current();
++    SDL_Gamepad *pad = renderer.gamepad();
++    const input::PadKind kind = pad_kind(pad);
++    const char *names[2] = {"LT", "RT"};
++    if (kind == input::PadKind::PlayStation || kind == input::PadKind::SteamDeck) names[0] = "L2", names[1] = "R2";
++    if (kind == input::PadKind::Nintendo) names[0] = "ZL", names[1] = "ZR";
++    const bool extras = (portablekit::active_extra_buttons() & input::kExtraL2) != 0u;
++    const char *presses[2] = {"L", "R"};
++    if (!s.swap_triggers && extras) presses[0] = "L2", presses[1] = "R2";
++    const SDL_GamepadAxis axes[2] = {SDL_GAMEPAD_AXIS_LEFT_TRIGGER, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER};
++    const float name_w = std::round(font() * 2.2f);
++    const float status_w = std::round(font() * 6.0f);
++    const float bar_w = width - name_w - status_w - px(24.0f);
++    float y = start.y + std::round(font() * 1.1f);
++    const float bar_h = std::round(font() * 0.6f);
++    for (int i = 0; i < 2; ++i) {
++        const float value = std::max(0.0f, axis(pad, axes[i]));
++        const bool pressed = pad != nullptr && value > s.trigger;
++        text(draw, {start.x, y - font() * 0.25f}, colors::kHeading, names[i], 0.85f);
++        const ImVec2 min{start.x + name_w, y};
++        const ImVec2 max{min.x + bar_w, y + bar_h};
++        draw->AddRectFilled(min, max, colors::kTrack);
++        draw->AddRectFilled(min, {min.x + bar_w * value, max.y}, pressed ? colors::kAccent : colors::kTextFaint);
++        const float mark = min.x + bar_w * s.trigger;
++        draw->AddLine({mark, min.y - px(7.0f)}, {mark, max.y + px(7.0f)}, colors::kHeading, std::max(1.5f, px(2.0f)));
++        if (i == 0) {
++            const std::string point = std::to_string(static_cast<int>(std::lround(s.trigger * 100.0f))) + "%";
++            text(draw, {mark - text_width(point, 0.7f) * 0.5f, min.y - font() * 1.15f}, colors::kTextDim, point, 0.7f);
++        }
++        const std::string status = pressed ? std::string("Presses ") + presses[i] : "Not pressed";
++        const ImVec2 at{max.x + px(24.0f), y - font() * 0.25f};
++        if (pressed) {
++            const float w = text_width(status, 0.75f) + px(16.0f);
++            draw->AddRectFilled({at.x, at.y - px(2.0f)}, {at.x + w, at.y + font() * 0.95f}, colors::kRowFocus);
++            text(draw, {at.x + px(8.0f), at.y}, colors::kHeading, status, 0.75f);
++        } else {
++            text(draw, at, colors::kTextFaint, status, 0.75f);
++        }
++        y += std::round(font() * 1.9f);
++    }
++    std::string about = pad != nullptr ? "Live from " + pad_name(pad) + ". The line is where a trigger starts to press."
++                                       : "Connect a gamepad to try it here.";
++    if (!s.swap_triggers && extras && portablekit::game().extra_triggers != nullptr)
++        about += std::string(" ") + portablekit::game().extra_triggers;
++    if (s.swap_triggers) about += " With Swap shoulders and triggers on, they press L and R.";
++    y += note(draw, {start.x, y}, width, about);
++    ImGui::Dummy({width, y - start.y});
++    return true;
++}
++
++const char *direction(float x, float y) {
++    if (std::fabs(x) >= std::fabs(y)) return x < 0.0f ? "left" : "right";
++    return y < 0.0f ? "up" : "down";
++}
++
++bool right_stick(gpu::VulkanRenderer &renderer, float width, bool zone_row) {
++    ImDrawList *draw = ImGui::GetWindowDrawList();
++    const ImVec2 start = ImGui::GetCursorScreenPos();
++    const settings::Settings &s = settings::current();
++    SDL_Gamepad *pad = renderer.gamepad();
++    const float x = axis(pad, SDL_GAMEPAD_AXIS_RIGHTX);
++    const float y = axis(pad, SDL_GAMEPAD_AXIS_RIGHTY);
++    const bool dpad = zone_row || s.right_stick == settings::RightStick::DPad;
++    if (!dpad && s.right_stick == settings::RightStick::Off) return false;
++    const float size = std::floor(std::min(width * 0.42f, font() * 12.0f));
++    const float radius = size * 0.42f;
++    const ImVec2 c{start.x + size * 0.5f, start.y + size * 0.5f};
++    const float line = std::max(1.0f, px(1.5f));
++    draw->AddRectFilled({start.x, start.y}, {start.x + size, start.y + size}, faded(colors::kPanel, 0.8f));
++    std::string state;
++    if (dpad) {
++        const float zone = s.right_stick_zone;
++        const bool left = x < -zone, right = x > zone, up = y < -zone, down = y > zone;
++        const ImU32 lit = faded(colors::kAccent, 0.35f);
++        if (left) draw->AddRectFilled({c.x - radius, c.y - radius}, {c.x - radius * zone, c.y + radius}, lit);
++        if (right) draw->AddRectFilled({c.x + radius * zone, c.y - radius}, {c.x + radius, c.y + radius}, lit);
++        if (up) draw->AddRectFilled({c.x - radius, c.y - radius}, {c.x + radius, c.y - radius * zone}, lit);
++        if (down) draw->AddRectFilled({c.x - radius, c.y + radius * zone}, {c.x + radius, c.y + radius}, lit);
++        for (const float k : {-zone, zone}) {
++            dashed_line(draw, {c.x + radius * k, c.y - radius}, {c.x + radius * k, c.y + radius}, colors::kText,
++                        px(4.0f), line);
++            dashed_line(draw, {c.x - radius, c.y + radius * k}, {c.x + radius, c.y + radius * k}, colors::kText,
++                        px(4.0f), line);
++        }
++        std::string pressed;
++        const auto add = [&](bool on, const char *name) {
++            if (on) pressed += (pressed.empty() ? "" : " and ") + std::string(name);
++        };
++        add(up, "Up");
++        add(down, "Down");
++        add(left, "Left");
++        add(right, "Right");
++        state = pressed.empty() ? "Presses nothing" : "Presses " + pressed;
++    } else {
++        const float length = std::hypot(x, y);
++        if (length <= s.dead_zone) {
++            state = "At rest";
++        } else {
++            const float amount = std::min((length - s.dead_zone) / (1.0f - s.dead_zone), 1.0f);
++            state = std::string("Pushed ") + direction(x, y) + ", " +
++                    std::to_string(static_cast<int>(std::lround(amount * 100.0f))) + "%";
++        }
++        draw->AddCircleFilled(c, radius * s.dead_zone, faded(colors::kDanger, 0.3f), 32);
++    }
++    draw->AddCircle(c, radius, faded(colors::kText, 0.45f), 64, line);
++    if (pad != nullptr) {
++        const ImVec2 dot{c.x + x * radius, c.y + y * radius};
++        draw->AddLine(c, dot, colors::kAccent, std::max(1.5f, px(2.0f)));
++        draw->AddCircleFilled(dot, px(8.0f), colors::kAccent);
++        draw->AddCircle(dot, px(8.0f), colors::kHeading, 0, std::max(1.5f, px(2.0f)));
++    }
++    const float column = start.x + size + px(28.0f);
++    float ly = start.y + px(6.0f);
++    label(draw, {column, ly}, dpad ? "D-pad" : "Camera", colors::kSection);
++    ly += std::round(font() * 1.2f);
++    const float heading_size = std::round(font() * 1.15f);
++    draw->AddText(heading_font(), heading_size, {column, ly}, colors::kHeading, state.c_str());
++    ly += heading_size + px(10.0f);
++    if (pad != nullptr)
++        readout(draw, {column, ly}, std::round(font() * 5.5f), "Right stick", printed("%.2f, %.2f", x, y));
++    float bottom = start.y + size + px(14.0f);
++    bottom += note(draw, {start.x, bottom}, width,
++                   pad != nullptr ? (dpad ? std::string("Past a dashed line the stick presses that way; in a corner, "
++                                                        "two ways. Live from ")
++                                          : std::string("Live from ")) +
++                                        pad_name(pad) + "."
++                                  : "Connect a gamepad to try it here.");
++    ImGui::Dummy({width, bottom - start.y});
++    return true;
++}
++
++bool mouse(float width) {
++    ImDrawList *draw = ImGui::GetWindowDrawList();
++    const ImVec2 start = ImGui::GetCursorScreenPos();
++    const float sensitivity = settings::current().mouse_sensitivity;
++    constexpr float kCounts = 100.0f;
++    const float degrees = kCounts * sensitivity;
++    // An arrow for the mouse's 100 counts, and the camera's turn as a wedge.
++    const float arrow_w = std::round(font() * 6.0f);
++    float y = start.y + px(6.0f);
++    text(draw, {start.x, y}, colors::kTextDim, "Mouse moves", 0.8f);
++    const float ay = y + std::round(font() * 1.6f);
++    draw->AddLine({start.x, ay}, {start.x + arrow_w - px(10.0f), ay}, colors::kHeading, std::max(1.5f, px(2.0f)));
++    draw->AddTriangleFilled({start.x + arrow_w, ay}, {start.x + arrow_w - px(12.0f), ay - px(6.0f)},
++                            {start.x + arrow_w - px(12.0f), ay + px(6.0f)}, colors::kHeading);
++    text(draw, {start.x, ay + px(10.0f)}, colors::kHeading, "100 counts", 0.9f);
++    const float r = std::round(font() * 4.2f);
++    const ImVec2 c{start.x + arrow_w + px(40.0f), start.y + r + px(8.0f)};
++    const float sweep = std::min(degrees, 180.0f) * 3.14159265f / 180.0f;
++    const float a0 = -3.14159265f * 0.5f;
++    draw->PathLineTo(c);
++    draw->PathArcTo(c, r, a0, a0 + sweep, 32);
++    draw->PathFillConvex(faded(colors::kAccent, 0.35f));
++    draw->PathArcTo(c, r, a0, a0 + sweep, 32);
++    draw->PathStroke(colors::kAccent, 0, std::max(1.5f, px(2.0f)));
++    draw->AddLine(c, {c.x, c.y - r}, faded(colors::kText, 0.35f), std::max(1.0f, px(1.5f)));
++    draw->AddCircleFilled(c, px(5.0f), colors::kHeading);
++    const float column = c.x + r + px(26.0f);
++    text(draw, {column, y}, colors::kTextDim, "Camera turns", 0.8f);
++    const std::string turned = printed("%.0f°", degrees);
++    const float big = std::round(font() * 1.6f);
++    draw->AddText(heading_font(), big, {column, y + std::round(font() * 1.1f)}, colors::kHeading, turned.c_str());
++    const std::string full = std::to_string(static_cast<int>(std::lround(360.0f / std::max(sensitivity, 0.01f)))) +
++                             " counts for a full turn";
++    text(draw, {column, y + std::round(font() * 1.2f) + big}, colors::kTextDim, full, 0.8f);
++    float bottom = std::max(c.y + r, ay + font() * 1.6f) + px(14.0f);
++    bottom += note(draw, {start.x, bottom}, width,
++                   printed("At %.2f", sensitivity) + "° a count of the mouse's own motion.");
++    ImGui::Dummy({width, bottom - start.y});
++    return true;
++}
++
++bool font_sample(float width) {
++    font_preview();
++    if (const char *about = portablekit::game().font_note; about != nullptr) {
++        ImDrawList *draw = ImGui::GetWindowDrawList();
++        const ImVec2 at = ImGui::GetCursorScreenPos();
++        const float h = note(draw, {at.x + px(16.0f), at.y + px(4.0f)}, width - px(32.0f), about, colors::kTextDim);
++        ImGui::Dummy({width, h + px(8.0f)});
++    }
++    return true;
++}
++
++bool prompts(gpu::VulkanRenderer &renderer, float width) {
++    ImDrawList *draw = ImGui::GetWindowDrawList();
++    const ImVec2 start = ImGui::GetCursorScreenPos();
++    const settings::Settings &s = settings::current();
++    const input::PadKind kind = pad_kind(renderer.gamepad());
++    const bool cross_confirms = portablekit::game().confirm_button == 1u;
++    const float gap = px(12.0f);
++    const float cell_w = std::floor((width - gap * 2.0f) / 3.0f);
++    const float cell_h = std::round(font() * 3.6f);
++    const float r = std::round(font() * 0.62f);
++    for (int i = 0; i < input::kPromptSettings; ++i) {
++        const auto setting = static_cast<input::PromptSetting>(i);
++        const input::ButtonPrompts p = input::button_prompts(setting, kind, s.confirm_south, cross_confirms, false);
++        const ImVec2 min{start.x + static_cast<float>(i % 3) * (cell_w + gap),
++                         start.y + static_cast<float>(i / 3) * (cell_h + gap)};
++        const ImVec2 max{min.x + cell_w, min.y + cell_h};
++        const bool on = setting == s.button_prompts;
++        draw->AddRectFilled(min, max, on ? faded(colors::kRowFocus, 0.35f) : faded(colors::kText, 0.05f));
++        if (on) draw->AddRect(min, max, colors::kAccent, 0.0f, 0, std::max(1.0f, px(2.0f)));
++        float gx = min.x + px(12.0f) + r;
++        const float gy = min.y + px(10.0f) + r;
++        // Confirm, back and the top face button, as the game's prompts show them.
++        const struct {
++            input::FaceButton face;
++            input::PromptKey key;
++            Shape psp;
++            ImU32 psp_colour;
++        } kShown[] = {{p.cross, input::PromptKey::Cross, Shape::Cross, IM_COL32(127, 167, 255, 255)},
++                      {p.circle, input::PromptKey::Circle, Shape::Circle, IM_COL32(255, 122, 122, 255)},
++                      {p.triangle, input::PromptKey::Triangle, Shape::Triangle, IM_COL32(111, 214, 160, 255)}};
++        for (const auto &shown : kShown) {
++            const ImVec2 c{gx, gy};
++            switch (p.style) {
++            case input::PromptStyle::Psp:
++                draw->AddCircleFilled(c, r, IM_COL32(58, 61, 72, 255));
++                shape(draw, c, r, shown.psp, shown.psp_colour);
++                gx += r * 2.0f + px(6.0f);
++                break;
++            case input::PromptStyle::PlayStation:
++                draw->AddCircleFilled(c, r, IM_COL32(26, 29, 41, 255));
++                shape(draw, c, r, shape_at(shown.face), IM_COL32(238, 241, 248, 255));
++                gx += r * 2.0f + px(6.0f);
++                break;
++            case input::PromptStyle::Xbox:
++                draw->AddCircleFilled(c, r, xbox_colour(shown.face));
++                letter(draw, c, r, xbox_letter(shown.face), IM_COL32(255, 255, 255, 255));
++                gx += r * 2.0f + px(6.0f);
++                break;
++            case input::PromptStyle::Nintendo:
++                draw->AddCircleFilled(c, r, IM_COL32(74, 77, 88, 255));
++                letter(draw, c, r, nintendo_letter(shown.face), IM_COL32(255, 255, 255, 255));
++                gx += r * 2.0f + px(6.0f);
++                break;
++            case input::PromptStyle::Keyboard: {
++                const input::Binding binding =
++                    s.bindings[static_cast<std::size_t>(input::prompt_key_action(static_cast<std::size_t>(shown.key)))][0];
++                const std::string name = binding == input::kNone ? "—" : input::name(binding);
++                gx += cap(draw, {gx - r, gy - r * 0.95f}, name.c_str()) + px(6.0f);
++                break;
++            }
++            }
++        }
++        text(draw, {min.x + px(12.0f), max.y - std::round(font() * 1.35f)}, on ? colors::kHeading : colors::kTextDim,
++             input::prompt_setting_label(setting), 0.8f);
++        if (setting == input::PromptSetting::Automatic) {
++            static const char *const kStyles[] = {"PSP", "Xbox", "PlayStation", "Nintendo", "keys"};
++            const std::string now = std::string("now ") + kStyles[static_cast<int>(p.style)];
++            text(draw, {max.x - px(10.0f) - text_width(now, 0.7f), max.y - std::round(font() * 1.3f)},
++                 colors::kTextFaint, now, 0.7f);
++        }
++    }
++    float y = start.y + 2.0f * (cell_h + gap) + px(4.0f);
++    y += note(draw, {start.x, y}, width,
++              "Confirm, back and the top button, as the game's own prompts show them. PSP is the game's own symbols.");
++    ImGui::Dummy({width, y - start.y});
++    return true;
++}
++
++bool confirm(gpu::VulkanRenderer &renderer, float width) {
++    ImDrawList *draw = ImGui::GetWindowDrawList();
++    const ImVec2 start = ImGui::GetCursorScreenPos();
++    const settings::Settings &s = settings::current();
++    input::PadKind kind = pad_kind(renderer.gamepad());
++    if (kind == input::PadKind::Keyboard) kind = input::PadKind::None;
++    const float gap = px(22.0f);
++    const float cell_w = std::floor((width - gap) * 0.5f);
++    const float r = std::round(font() * 0.85f);
++    const float cell_h = r * 7.0f;
++    for (int i = 0; i < 2; ++i) {
++        const bool south = i == 0;
++        const ImVec2 min{start.x + static_cast<float>(i) * (cell_w + gap), start.y};
++        const ImVec2 max{min.x + cell_w, min.y + cell_h};
++        const bool on = south == s.confirm_south;
++        draw->AddRectFilled(min, max, on ? faded(colors::kRowFocus, 0.25f) : faded(colors::kText, 0.04f));
++        if (on) draw->AddRect(min, max, colors::kAccent, 0.0f, 0, std::max(1.0f, px(2.0f)));
++        const ImVec2 c{(min.x + max.x) * 0.5f, min.y + cell_h * 0.47f};
++        const float d = r * 2.2f;
++        const input::FaceButton yes = south ? input::FaceButton::South : input::FaceButton::East;
++        const input::FaceButton no = south ? input::FaceButton::East : input::FaceButton::South;
++        const struct {
++            input::FaceButton face;
++            ImVec2 at;
++        } kButtons[] = {{input::FaceButton::North, {c.x, c.y - d}},
++                        {input::FaceButton::West, {c.x - d, c.y}},
++                        {input::FaceButton::East, {c.x + d, c.y}},
++                        {input::FaceButton::South, {c.x, c.y + d}}};
++        for (const auto &b : kButtons) face_button(draw, b.at, r, kind, b.face, b.face == yes);
++        const auto tag = [&](input::FaceButton face, const char *value, bool strong) {
++            // Left of the bottom button, right of the right one.
++            const ImVec2 at = face == input::FaceButton::South
++                                  ? ImVec2{c.x - r - px(10.0f) - text_width(value, 0.75f), c.y + d - font() * 0.4f}
++                                  : ImVec2{c.x + d + r + px(10.0f), c.y - font() * 0.4f};
++            text(draw, at, strong ? colors::kHeading : colors::kTextDim, value, 0.75f);
++        };
++        tag(yes, "Confirm", true);
++        tag(no, "Back", false);
++        const std::string name = south ? "Bottom (Western)" : "Right (Japanese)";
++        text(draw, {min.x + px(10.0f), max.y + px(8.0f)}, on ? colors::kHeading : colors::kTextDim, name, 0.8f);
++    }
++    float y = start.y + cell_h + std::round(font() * 1.9f);
++    const bool cross = portablekit::game().confirm_button == 1u;
++    y += note(draw, {start.x, y}, width,
++              std::string("The game itself confirms with ") + (cross ? "×" : "○") +
++                  "; this chooses which button sends it. The game's prompts follow, except in the PSP style.");
++    ImGui::Dummy({width, y - start.y});
++    return true;
++}
++
++} // namespace
++
++float px(float value) { return std::round(value * Layer::get().scale()); }
++
++ImU32 faded(ImU32 colour, float factor) {
++    const auto alpha = static_cast<float>((colour >> IM_COL32_A_SHIFT) & 0xFFu) * std::clamp(factor, 0.0f, 1.0f);
++    return (colour & ~IM_COL32_A_MASK) | (static_cast<ImU32>(alpha + 0.5f) << IM_COL32_A_SHIFT);
++}
++
++float label(ImDrawList *draw, ImVec2 at, const char *value, ImU32 colour, float size) {
++    std::string upper(value);
++    for (char &c : upper)
++        if (c >= 'a' && c <= 'z') c = static_cast<char>(c - 'a' + 'A');
++    const float pixels = std::round(font() * size);
++    return spaced_text(draw, caps_font(), pixels, at, colour, upper.c_str(), pixels * 0.18f);
++}
++
++void hairline(ImDrawList *draw, ImVec2 from, float width) {
++    const float line = std::max(1.0f, px(1.0f));
++    const ImU32 strong = faded(colors::kHeading, 0.55f);
++    const ImU32 none = faded(colors::kHeading, 0.0f);
++    draw->AddRectFilledMultiColor(from, {from.x + width, from.y + line}, strong, none, none, strong);
++}
++
++float cap(ImDrawList *draw, ImVec2 at, const char *value) {
++    const float size = std::round(font() * 0.72f);
++    ImFont *face = caps_font() != nullptr ? caps_font() : ImGui::GetFont();
++    const ImVec2 measured = face->CalcTextSizeA(size, FLT_MAX, 0.0f, value);
++    const float h = std::round(font() * 1.1f);
++    const float w = std::max(h, measured.x + px(14.0f));
++    if (draw != nullptr) {
++        draw->AddRect(at, {at.x + w, at.y + h}, colors::kTextFaint, px(4.0f), 0, std::max(1.0f, px(1.0f)));
++        draw->AddText(face, size, {std::round(at.x + (w - measured.x) * 0.5f), std::round(at.y + (h - measured.y) * 0.5f)},
++                      colors::kHeading, value);
++    }
++    return w;
++}
++
++void diamond(ImDrawList *draw, ImVec2 c, float r, ImU32 colour) {
++    draw->AddQuadFilled({c.x, c.y - r}, {c.x + r, c.y}, {c.x, c.y + r}, {c.x - r, c.y}, colour);
++}
++
++bool preview(const std::string &key, gpu::VulkanRenderer &renderer, float width) {
++    if (key == "input.dead_zone") return stick(renderer, width);
++    if (key == "input.stick_square") return diagonals(renderer, width);
++    if (key == "input.trigger") return triggers(renderer, width);
++    if (key == "input.right_stick") return right_stick(renderer, width, false);
++    if (key == "input.right_stick_zone") return right_stick(renderer, width, true);
++    if (key == "input.mouse_sensitivity") return mouse(width);
++    if (key == "video.sharp_screen") return scaling(renderer, width);
++    if (key == "video.aspect") return aspect(renderer, width);
++    if (key == "text.font" || key == "text.weight") return font_sample(width);
++    if (key == "input.button_prompts") return prompts(renderer, width);
++    if (key == "input.confirm") return confirm(renderer, width);
++    return false;
++}
++
++void forget_paused_frame() {
++    paused() = Frame{};
++    atlas().thumbnail_key.clear();
++    atlas().crops_key.clear();
++}
++
++} // namespace portablekit::ui::look
+diff --git a/host/ui/menu_look.hpp b/host/ui/menu_look.hpp
+new file mode 100644
+index 0000000..5564f05
+--- /dev/null
++++ b/host/ui/menu_look.hpp
+@@ -0,0 +1,41 @@
++#pragma once
++
++#include "imgui.h"
++
++#include <string>
++
++namespace portablekit::gpu {
++class VulkanRenderer;
++}
++
++// The parts of the menu's look that are not rows (menu.cpp lays the screens
++// out with them) and the previews in its side panel: what the focused
++// setting does, drawn from the player's own pad, mouse and paused game.
++// Everything is sized from the menu's text size and coloured from the
++// theme (widgets.hpp).
++namespace portablekit::ui::look {
++
++// Pixels for a length given in units of 20 px text.
++[[nodiscard]] float px(float value);
++// A colour with its alpha multiplied by `factor`.
++[[nodiscard]] ImU32 faded(ImU32 colour, float factor);
++
++// Small capitals with space between the letters, as the menu's labels are
++// set; `size` is a share of the text size. Returns the width drawn.
++float label(ImDrawList *draw, ImVec2 at, const char *text, ImU32 colour, float size = 0.7f);
++// A hairline from `from`, `width` long, fading out to the right.
++void hairline(ImDrawList *draw, ImVec2 from, float width);
++// A key cap, such as L1 or Esc, with its top left at `at`; returns its width.
++float cap(ImDrawList *draw, ImVec2 at, const char *text);
++// A diamond centred on `centre`.
++void diamond(ImDrawList *draw, ImVec2 centre, float radius, ImU32 colour);
++
++// The preview for the setting under `key` (RowOptions::key), drawn at the
++// cursor across `width`. False when that setting has none.
++bool preview(const std::string &key, gpu::VulkanRenderer &renderer, float width);
++
++// Forgets the paused frame the previews read, as the menu closes: the next
++// menu reads the frame it opens over.
++void forget_paused_frame();
++
++} // namespace portablekit::ui::look
+diff --git a/host/ui/save_screen.cpp b/host/ui/save_screen.cpp
+index 57c2b04..d0590c0 100644
+--- a/host/ui/save_screen.cpp
++++ b/host/ui/save_screen.cpp
+@@ -602,7 +602,7 @@ void save_rows() {
+                                      "a folder holding it or the save folders. A save it replaces is kept."}))
+         open_browser(Stage::ChooseImport);
+     if (button_row("Export save…", {!available, {},
+-                                     "Copy your game data and downloaded quests to a folder you pick (Android does "
++                                     "Copy your saves to a folder you pick (Android does "
+                                      "not offer Download itself: make or pick a folder in it)."}))
+         open_browser(Stage::ChooseExport);
+ #else
+@@ -612,7 +612,7 @@ void save_rows() {
+                                      "it. A save it replaces is kept, not deleted."}))
+         open_browser(Stage::ChooseImport);
+     if (button_row("Export save…", {!available, {},
+-                                     "Copy your game data and downloaded quests to a folder you choose, to take them "
++                                     "Copy your saves to a folder you choose, to take them "
+                                      "to a PSP or another machine."}))
+         open_browser(Stage::ChooseExport);
+ #endif
+diff --git a/host/ui/widgets.cpp b/host/ui/widgets.cpp
+index 1049cde..9e9555a 100644
+--- a/host/ui/widgets.cpp
++++ b/host/ui/widgets.cpp
+@@ -1,5 +1,6 @@
+ #include "ui/widgets.hpp"
+ 
++#include "../profile.hpp"
+ #include "ui/layer.hpp"
+ 
+ #include "gpu/vulkan_renderer.hpp"
+@@ -14,9 +15,56 @@
+ #include <cstring>
+ 
+ namespace portablekit::ui {
++
++void apply_theme_colours(const InterfaceTheme *theme) {
++    if (theme == nullptr) return;
++    // 0xRRGGBBAA as ImGui packs it.
++    const auto c = [](std::uint32_t rgba) {
++        return IM_COL32((rgba >> 24u) & 0xFFu, (rgba >> 16u) & 0xFFu, (rgba >> 8u) & 0xFFu, rgba & 0xFFu);
++    };
++    colors::kBackdrop = c(theme->backdrop);
++    colors::kPanel = c(theme->panel);
++    colors::kPanelEdge = c(theme->edge);
++    colors::kRow = IM_COL32(0, 0, 0, 0);
++    colors::kRowHover = c(theme->row_hover);
++    colors::kRowFocus = c(theme->focus);
++    colors::kFocusEnd = c(theme->focus_end);
++    colors::kAccent = c(theme->accent);
++    colors::kAccentBright = c(theme->heading);
++    colors::kHighlight = c(theme->highlight);
++    colors::kHeading = c(theme->heading);
++    colors::kSection = c(theme->section);
++    colors::kText = c(theme->text);
++    colors::kTextDim = c(theme->text_dim);
++    colors::kTextFaint = c(theme->text_faint);
++    colors::kTextDisabled = c(theme->text_disabled);
++    colors::kValue = c(theme->value);
++    colors::kDanger = c(theme->danger);
++    colors::kGood = c(theme->good);
++    colors::kTrack = c(theme->track);
++}
++
++float spaced_text(ImDrawList *draw, ImFont *font, float size, ImVec2 at, ImU32 colour, const char *text,
++                  float spacing) {
++    if (font == nullptr) font = ImGui::GetFont();
++    float x = at.x;
++    const char *end = text + std::strlen(text);
++    for (const char *s = text; s < end;) {
++        unsigned int c = 0;
++        const int length = ImTextCharFromUtf8(&c, s, end);
++        if (length <= 0) break;
++        const float width = font->CalcTextSizeA(size, FLT_MAX, 0.0f, s, s + length).x;
++        if (draw != nullptr) draw->AddText(font, size, {std::round(x), at.y}, colour, s, s + length);
++        x += width + spacing;
++        s += length;
++    }
++    return std::max(0.0f, x - spacing - at.x);
++}
++
+ namespace {
+ 
+ bool focus_next = false;
++bool card_mode = false;
+ 
+ // Moves the gamepad and keyboard focus to the item just submitted when
+ // focus_next_row() asked for it. SetKeyboardFocusHere() would not do: it
+@@ -66,9 +114,28 @@ struct Row {
+     bool hovered{};
+ };
+ 
++} // namespace
++
++void draw_focus_bar(ImDrawList *draw, ImVec2 min, ImVec2 max) {
++    // A bar that fades out to the right, a hairline of light along its top,
++    // and a diamond on its left edge.
++    const float fade_at = min.x + (max.x - min.x) * 0.6f;
++    draw->AddRectFilled(min, {fade_at, max.y}, colors::kRowFocus);
++    draw->AddRectFilledMultiColor({fade_at, min.y}, max, colors::kRowFocus, colors::kFocusEnd, colors::kFocusEnd,
++                                  colors::kRowFocus);
++    const ImU32 shine = IM_COL32(255, 255, 255, 40);
++    draw->AddRectFilledMultiColor(min, {max.x, min.y + std::max(1.0f, px(1.0f))}, shine, IM_COL32(255, 255, 255, 0),
++                                  IM_COL32(255, 255, 255, 0), shine);
++    const float r = std::max(3.0f, font() * 0.3f);
++    const ImVec2 c{min.x + r + 1.0f, (min.y + max.y) * 0.5f};
++    draw->AddQuadFilled({c.x, c.y - r}, {c.x + r, c.y}, {c.x, c.y + r}, {c.x - r, c.y}, colors::kHeading);
++}
++
++namespace {
++
+ // The part every row shares: a full-width focusable strip with its label.
+ Row row(const char *label, const RowOptions &options, ImU32 color = colors::kText, float height_lines = 1.0f) {
+-    const float height = std::round(font() * (0.9f + height_lines));
++    const float height = std::round(font() * (1.05f + height_lines));
+     Row result;
+     result.min = ImGui::GetCursorScreenPos();
+     const float width = ImGui::GetContentRegionAvail().x;
+@@ -79,21 +146,16 @@ Row row(const char *label, const RowOptions &options, ImU32 color = colors::kTex
+     result.hovered = ImGui::IsItemHovered();
+ 
+     ImDrawList *draw = ImGui::GetWindowDrawList();
+-    const float rounding = px(6.0f);
+-    if (result.focused) {
+-        draw->AddRectFilled(result.min, result.max, colors::kRowFocus, rounding);
+-        draw->AddRectFilled(result.min, {result.min.x + px(4.0f), result.max.y}, colors::kAccent, rounding,
+-                            ImDrawFlags_RoundCornersLeft);
+-    } else if (result.hovered) {
+-        draw->AddRectFilled(result.min, result.max, colors::kRowHover, rounding);
+-    }
++    if (result.focused) draw_focus_bar(draw, result.min, result.max);
++    else if (result.hovered) draw->AddRectFilled(result.min, result.max, colors::kRowHover);
+     const float text_y = result.min.y + (height - font()) * 0.5f;
+-    draw->AddText({result.min.x + px(16.0f), text_y}, options.disabled ? colors::kTextDisabled : color, label,
+-                  shown_end(label));
++    const ImU32 ink = options.disabled ? colors::kTextDisabled : result.focused ? colors::kHeading : color;
++    draw->AddText({result.min.x + px(24.0f), text_y}, ink, label, shown_end(label));
+     if (result.focused || (result.hovered && Layer::get().description().empty())) {
+         std::string description = options.description;
+         if (!options.note.empty()) description += (description.empty() ? "" : "\n") + options.note;
+         Layer::get().set_description(description);
++        Layer::get().set_focused_row(std::string(label, shown_end(label)), options.key);
+     }
+     return result;
+ }
+@@ -212,11 +274,13 @@ const char *select_name() {
+ ImGuiStyle make_style(float scale, float font_size) {
+     ImGuiStyle style;
+     ImGui::StyleColorsDark(&style);
+-    style.WindowRounding = 12.0f;
+-    style.ChildRounding = 8.0f;
+-    style.FrameRounding = 6.0f;
+-    style.PopupRounding = 10.0f;
+-    style.GrabRounding = 6.0f;
++    // A game's theme draws square edges; PortableKit's own are rounded.
++    const bool square = portablekit::game().theme != nullptr;
++    style.WindowRounding = square ? 0.0f : 12.0f;
++    style.ChildRounding = square ? 0.0f : 8.0f;
++    style.FrameRounding = square ? 0.0f : 6.0f;
++    style.PopupRounding = square ? 0.0f : 10.0f;
++    style.GrabRounding = square ? 0.0f : 6.0f;
+     style.WindowBorderSize = 1.5f;
+     style.PopupBorderSize = 1.5f;
+     style.WindowPadding = {26.0f, 20.0f};
+@@ -233,18 +297,18 @@ ImGuiStyle make_style(float scale, float font_size) {
+     c[ImGuiCol_TextDisabled] = rgba(colors::kTextDisabled);
+     c[ImGuiCol_WindowBg] = rgba(colors::kPanel);
+     c[ImGuiCol_ChildBg] = ImVec4(0, 0, 0, 0);
+-    c[ImGuiCol_PopupBg] = rgba(IM_COL32(38, 27, 19, 252));
+-    c[ImGuiCol_ModalWindowDimBg] = rgba(IM_COL32(8, 5, 3, 150));
++    c[ImGuiCol_PopupBg] = rgba(colors::kPanel);
++    c[ImGuiCol_ModalWindowDimBg] = rgba(colors::kBackdrop);
+     c[ImGuiCol_Border] = rgba(colors::kPanelEdge);
+-    c[ImGuiCol_FrameBg] = rgba(IM_COL32(255, 240, 210, 20));
++    c[ImGuiCol_FrameBg] = rgba(colors::kRowHover);
+     c[ImGuiCol_FrameBgHovered] = rgba(colors::kRowHover);
+     c[ImGuiCol_FrameBgActive] = rgba(colors::kRowFocus);
+-    c[ImGuiCol_TextSelectedBg] = rgba(IM_COL32(217, 166, 75, 110));
++    c[ImGuiCol_TextSelectedBg] = rgba(colors::kRowFocus);
+     c[ImGuiCol_ScrollbarBg] = ImVec4(0, 0, 0, 0);
+-    c[ImGuiCol_ScrollbarGrab] = rgba(IM_COL32(143, 93, 36, 160));
+-    c[ImGuiCol_ScrollbarGrabHovered] = rgba(IM_COL32(176, 122, 54, 200));
++    c[ImGuiCol_ScrollbarGrab] = rgba(colors::kPanelEdge);
++    c[ImGuiCol_ScrollbarGrabHovered] = rgba(colors::kTextFaint);
+     c[ImGuiCol_ScrollbarGrabActive] = rgba(colors::kAccent);
+-    c[ImGuiCol_Separator] = rgba(IM_COL32(143, 93, 36, 120));
++    c[ImGuiCol_Separator] = rgba(colors::kPanelEdge);
+     // Rows draw their own focus; ImGui's rectangle would double it.
+     c[ImGuiCol_NavCursor] = ImVec4(0, 0, 0, 0);
+     return style;
+@@ -279,7 +343,7 @@ void begin_panel(const char *id, const std::string &title, const std::string &su
+     const ImVec2 line = ImGui::GetCursorScreenPos();
+     const float line_width = ImGui::GetContentRegionAvail().x;
+     draw->AddRectFilledMultiColor(line, {line.x + line_width, line.y + px(2.0f)}, colors::kAccent,
+-                                  IM_COL32(143, 93, 36, 0), IM_COL32(143, 93, 36, 0), colors::kAccent);
++                                  IM_COL32(0, 0, 0, 0), IM_COL32(0, 0, 0, 0), colors::kAccent);
+     ImGui::Dummy({0.0f, px(10.0f)});
+ }
+ 
+@@ -307,7 +371,7 @@ void begin_footer() {
+     ImDrawList *draw = ImGui::GetWindowDrawList();
+     const ImVec2 line = ImGui::GetCursorScreenPos();
+     const float width = ImGui::GetContentRegionAvail().x;
+-    draw->AddLine({line.x, line.y + px(4.0f)}, {line.x + width, line.y + px(4.0f)}, IM_COL32(143, 93, 36, 90),
++    draw->AddLine({line.x, line.y + px(4.0f)}, {line.x + width, line.y + px(4.0f)}, colors::kPanelEdge,
+                   px(1.0f));
+     ImGui::Dummy({0.0f, px(10.0f)});
+     // Two lines for the description, whatever it holds, so the hints stay put.
+@@ -398,10 +462,10 @@ int choice_row(const char *label, const std::string &value, const RowOptions &op
+     }
+     const bool live = r.focused || r.hovered;
+     ImDrawList *draw = ImGui::GetWindowDrawList();
+-    draw_value(r, value, options, px(16.0f) + font() * 1.1f, live ? colors::kAccentBright : colors::kText);
++    draw_value(r, value, options, px(16.0f) + font() * 1.1f, live ? colors::kHeading : colors::kValue);
+     // A locked row shows its value without the arrows that would change it.
+     if (options.disabled) return 0;
+-    const ImU32 arrow = live ? colors::kAccent : colors::kTextDim;
++    const ImU32 arrow = r.focused ? colors::kHeading : live ? colors::kAccent : colors::kTextFaint;
+     draw_triangle(draw, {right_arrow_x, mid_y}, font() * 0.55f, true, arrow);
+     draw_triangle(draw, {left_arrow_x, mid_y}, font() * 0.55f, false, arrow);
+     return delta;
+@@ -419,13 +483,17 @@ bool toggle_row(const char *label, bool value, const RowOptions &options) {
+     const ImVec2 max{r.max.x - px(16.0f), mid_y + height * 0.5f};
+     const ImVec2 min{max.x - width, mid_y - height * 0.5f};
+     const bool on = toggled ? !value : value;
+-    const ImU32 track = options.disabled ? colors::kTrack : on ? colors::kAccent : colors::kTrack;
++    const ImU32 track = options.disabled ? colors::kTrack
++                        : on ? (r.focused ? colors::kHeading : colors::kAccent)
++                             : colors::kTrack;
+     draw->AddRectFilled(min, max, track, height * 0.5f);
+     const float knob = height * 0.5f - px(3.0f);
+     const ImVec2 knob_center{on ? max.x - height * 0.5f : min.x + height * 0.5f, mid_y};
+-    draw->AddCircleFilled(knob_center, knob, options.disabled ? colors::kTextDisabled : colors::kText);
++    draw->AddCircleFilled(knob_center, knob, options.disabled ? colors::kTextDisabled
++                                             : on && r.focused ? colors::kRowFocus
++                                                               : colors::kHeading);
+     draw_value(r, on ? "On" : "Off", options, px(16.0f) + width + px(12.0f),
+-               on ? colors::kAccentBright : colors::kTextDim);
++               r.focused ? colors::kHeading : on ? colors::kValue : colors::kTextFaint);
+     return toggled;
+ }
+ 
+@@ -462,13 +530,13 @@ bool slider_row(const char *label, int &value, int minimum, int maximum, int ste
+     const bool live = (r.focused || r.hovered) && !options.disabled;
+     draw->AddRectFilled(bar_min, bar_max, colors::kTrack, px(3.0f));
+     draw->AddRectFilled(bar_min, {bar_min.x + bar_width * t, bar_max.y},
+-                        options.disabled ? colors::kTextDisabled : colors::kAccent, px(3.0f));
++                        options.disabled ? colors::kTextDisabled : r.focused ? colors::kHeading : colors::kAccent,
++                        px(3.0f));
+     draw->AddCircleFilled({bar_min.x + bar_width * t, mid_y}, font() * (live ? 0.42f : 0.34f),
+                           options.disabled ? colors::kTextDisabled : live ? colors::kAccentBright : colors::kText);
+     char text[32];
+     std::snprintf(text, sizeof(text), format, value);
+-    draw_value(r, text, options, px(16.0f) + bar_width + font() * 1.0f,
+-               live ? colors::kAccentBright : colors::kText);
++    draw_value(r, text, options, px(16.0f) + bar_width + font() * 1.0f, live ? colors::kHeading : colors::kValue);
+     return value != before;
+ }
+ 
+@@ -476,8 +544,9 @@ bool button_row(const char *label, const RowOptions &options, ImU32 color) {
+     const Row r = row(label, options, color);
+     ImDrawList *draw = ImGui::GetWindowDrawList();
+     const float mid_y = (r.min.y + r.max.y) * 0.5f;
+-    const ImU32 chevron = options.disabled ? colors::kTextDisabled : (r.focused || r.hovered) ? colors::kAccent
+-                                                                                            : colors::kTextDim;
++    const ImU32 chevron = options.disabled ? colors::kTextDisabled : r.focused ? colors::kHeading
++                                                                 : r.hovered ? colors::kAccent
++                                                                             : colors::kTextFaint;
+     const float x = r.max.x - px(16.0f) - font() * 0.3f;
+     const float s = font() * 0.28f;
+     draw->AddLine({x - s, mid_y - s * 1.6f}, {x + s * 0.6f, mid_y}, chevron, px(2.0f));
+@@ -491,12 +560,14 @@ bool value_row(const char *label, const std::string &value, const RowOptions &op
+     ImDrawList *draw = ImGui::GetWindowDrawList();
+     const float mid_y = (r.min.y + r.max.y) * 0.5f;
+     const bool live = (r.focused || r.hovered) && !options.disabled;
+-    const ImU32 chevron = options.disabled ? colors::kTextDisabled : live ? colors::kAccent : colors::kTextDim;
++    const ImU32 chevron = options.disabled ? colors::kTextDisabled : r.focused ? colors::kHeading
++                                                                 : live      ? colors::kAccent
++                                                                             : colors::kTextFaint;
+     const float x = r.max.x - px(16.0f) - font() * 0.3f;
+     const float s = font() * 0.28f;
+     draw->AddLine({x - s, mid_y - s * 1.6f}, {x + s * 0.6f, mid_y}, chevron, px(2.0f));
+     draw->AddLine({x + s * 0.6f, mid_y}, {x - s, mid_y + s * 1.6f}, chevron, px(2.0f));
+-    draw_value(r, value, options, px(16.0f) + font() * 1.1f, live ? colors::kAccentBright : colors::kText);
++    draw_value(r, value, options, px(16.0f) + font() * 1.1f, live ? colors::kHeading : colors::kValue);
+     return r.pressed && !options.disabled;
+ }
+ 
+@@ -545,7 +616,27 @@ bool list_row(const char *id, const std::string &name, const std::string &detail
+     return r.pressed;
+ }
+ 
++void begin_card() { card_mode = true; }
++void end_card() { card_mode = false; }
++bool in_card() { return card_mode; }
++
+ void info_row(const char *label, const std::string &value) {
++    if (card_mode) {
++        // The label in a column of its own, the value beside it, wrapped.
++        const ImVec2 min = ImGui::GetCursorScreenPos();
++        const float width = ImGui::CalcItemWidth();
++        const float label_width = std::min(width * 0.34f, font() * 8.5f);
++        const float value_width = std::max(font() * 4.0f, width - label_width - px(14.0f));
++        const char *end = shown_end(label);
++        const float label_height = ImGui::CalcTextSize(label, end, false, label_width).y;
++        const float value_height = ImGui::CalcTextSize(value.c_str(), nullptr, false, value_width).y;
++        ImDrawList *draw = ImGui::GetWindowDrawList();
++        draw->AddText(nullptr, 0.0f, min, colors::kTextDim, label, end, label_width);
++        draw->AddText(nullptr, 0.0f, {min.x + label_width + px(14.0f), min.y}, colors::kText, value.c_str(), nullptr,
++                      value_width);
++        ImGui::Dummy({width, std::max(label_height, value_height) + px(7.0f)});
++        return;
++    }
+     // Label above, value below and wrapped: paths can be long.
+     const float width = ImGui::GetContentRegionAvail().x - px(32.0f);
+     const float value_height = ImGui::CalcTextSize(value.c_str(), nullptr, false, width).y;
+@@ -555,24 +646,52 @@ void info_row(const char *label, const std::string &value) {
+     const bool focused = ImGui::IsItemFocused();
+     ImDrawList *draw = ImGui::GetWindowDrawList();
+     const ImVec2 max{min.x + width + px(32.0f), min.y + height};
+-    if (focused) draw->AddRectFilled(min, max, colors::kRowFocus, px(6.0f));
++    if (focused) draw_focus_bar(draw, min, max);
+     ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * 0.8f);
+-    draw->AddText({min.x + px(16.0f), min.y + px(5.0f)}, colors::kTextDim, label,
++    draw->AddText({min.x + px(24.0f), min.y + px(5.0f)}, colors::kTextDim, label,
+                   shown_end(label));
+     ImGui::PopFont();
+-    draw->AddText(nullptr, 0.0f, {min.x + px(16.0f), min.y + font() * 0.95f}, colors::kText, value.c_str(), nullptr,
+-                  width);
++    draw->AddText(nullptr, 0.0f, {min.x + px(24.0f), min.y + font() * 0.95f}, colors::kText, value.c_str(), nullptr,
++                  width - px(8.0f));
++}
++
++namespace {
++// ASCII letters in capitals, for the small capitals of headings.
++std::string capitals(const char *text) {
++    std::string out(text);
++    for (char &c : out)
++        if (c >= 'a' && c <= 'z') c = static_cast<char>(c - 'a' + 'A');
++    return out;
+ }
++} // namespace
+ 
+ void section(const char *title) {
+-    ImGui::Dummy({0.0f, px(8.0f)});
+-    ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * 0.8f);
+-    ImGui::PushStyleColor(ImGuiCol_Text, colors::kAccent);
+-    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + px(16.0f));
+-    ImGui::TextUnformatted(title);
+-    ImGui::PopStyleColor();
+-    ImGui::PopFont();
+-    ImGui::Dummy({0.0f, px(2.0f)});
++    ImDrawList *draw = ImGui::GetWindowDrawList();
++    if (card_mode) {
++        ImGui::Dummy({0.0f, px(6.0f)});
++        const ImVec2 at = ImGui::GetCursorScreenPos();
++        const float size = std::round(font() * 0.7f);
++        const std::string text = capitals(title);
++        spaced_text(draw, caps_font(), size, at, colors::kSection, text.c_str(), size * 0.16f);
++        ImGui::Dummy({0.0f, size + px(8.0f)});
++        return;
++    }
++    ImGui::Dummy({0.0f, px(10.0f)});
++    const ImVec2 at = ImGui::GetCursorScreenPos();
++    const float width = ImGui::GetContentRegionAvail().x;
++    ImFont *face = heading_font();
++    const float size = std::round(font() * 0.74f);
++    const std::string text = capitals(title);
++    const float x = at.x + px(24.0f);
++    const float drawn = spaced_text(draw, face, size, {x, at.y}, colors::kSection, text.c_str(), size * 0.2f);
++    // A hairline on to the right, fading out.
++    const float line_y = std::round(at.y + size * 0.58f);
++    const float line_x = x + drawn + px(14.0f);
++    if (line_x < at.x + width)
++        draw->AddRectFilledMultiColor({line_x, line_y}, {at.x + width, line_y + std::max(1.0f, px(1.0f))},
++                                      colors::kPanelEdge, IM_COL32(0, 0, 0, 0), IM_COL32(0, 0, 0, 0),
++                                      colors::kPanelEdge);
++    ImGui::Dummy({0.0f, size + px(8.0f)});
+ }
+ 
+ bool big_button(const char *label, float width, bool primary, bool disabled) {
+@@ -584,25 +703,26 @@ bool big_button(const char *label, float width, bool primary, bool disabled) {
+     const bool focused = ImGui::IsItemFocused();
+     const bool hovered = ImGui::IsItemHovered();
+     ImDrawList *draw = ImGui::GetWindowDrawList();
+-    const float rounding = px(8.0f);
++    const float line = std::max(1.0f, px(1.0f));
+     ImU32 text = colors::kText;
+     if (disabled) {
+-        draw->AddRect(min, max, colors::kTextDisabled, rounding, 0, px(1.5f));
++        draw->AddRect(min, max, colors::kTextDisabled, 0.0f, 0, line);
+         text = colors::kTextDisabled;
+-    } else if (primary) {
+-        draw->AddRectFilled(min, max, focused || hovered ? colors::kAccentBright : colors::kAccent, rounding);
+-        text = colors::kPanel;
++    } else if (focused) {
++        draw_focus_bar(draw, min, max);
++        draw->AddRect(min, max, colors::kRowFocus, 0.0f, 0, line);
++        text = colors::kHeading;
+     } else {
+-        draw->AddRectFilled(min, max, focused ? colors::kRowFocus : hovered ? colors::kRowHover : colors::kRow,
+-                            rounding);
+-        draw->AddRect(min, max, focused ? colors::kAccent : colors::kPanelEdge, rounding, 0, px(1.5f));
++        draw->AddRectFilled(min, max, hovered ? colors::kRowHover : colors::kRow);
++        draw->AddRect(min, max, primary ? colors::kAccent : colors::kPanelEdge, 0.0f, 0, line);
++        text = primary ? colors::kHeading : colors::kText;
+     }
+-    if (focused && !disabled)
+-        draw->AddRect({min.x - px(3.0f), min.y - px(3.0f)}, {max.x + px(3.0f), max.y + px(3.0f)},
+-                      colors::kAccentBright, rounding + px(3.0f), 0, px(2.0f));
+     const char *end = shown_end(label);
+-    const ImVec2 size = ImGui::CalcTextSize(label, end);
+-    draw->AddText({min.x + (width - size.x) * 0.5f, min.y + (height - size.y) * 0.5f}, text, label, end);
++    ImFont *face = heading_font();
++    const float size = face != nullptr ? std::round(font() * 1.05f) : font();
++    const ImVec2 measured = (face != nullptr ? face : ImGui::GetFont())->CalcTextSizeA(size, FLT_MAX, 0.0f, label, end);
++    draw->AddText(face, size, {min.x + (width - measured.x) * 0.5f, min.y + (height - measured.y) * 0.5f}, text,
++                  label, end);
+     return pressed && !disabled;
+ }
+ 
+@@ -624,7 +744,8 @@ void progress_bar(float fraction, const std::string &overlay) {
+ 
+ void paragraph(const std::string &text, ImU32 color) {
+     ImGui::PushStyleColor(ImGuiCol_Text, color);
+-    ImGui::PushTextWrapPos(0.0f);
++    // In a card, within the card's width (its item width).
++    ImGui::PushTextWrapPos(card_mode ? ImGui::GetCursorPosX() + ImGui::CalcItemWidth() : 0.0f);
+     ImGui::TextUnformatted(text.c_str());
+     ImGui::PopTextWrapPos();
+     ImGui::PopStyleColor();
+diff --git a/host/ui/widgets.hpp b/host/ui/widgets.hpp
+index 7986937..18e0990 100644
+--- a/host/ui/widgets.hpp
++++ b/host/ui/widgets.hpp
+@@ -5,29 +5,61 @@
+ #include <initializer_list>
+ #include <string>
+ 
++namespace portablekit {
++struct InterfaceTheme;
++}
++
+ // The look of the interface and the controls its screens are built from.
+ // Everything is sized from the current text size, so it scales with the
+ // window, and every control works with a gamepad, a keyboard and a mouse.
+ namespace portablekit::ui {
+ 
+-// Colours from the project's logo: dark brown, bronze and gold.
++// The interface's colours. PortableKit's own come from the project's logo:
++// dark brown, bronze and gold. A game's profile may give its own
++// (GameProfile::theme); apply_theme_colours() sets them once, at attach.
+ namespace colors {
+-inline constexpr ImU32 kBackdrop = IM_COL32(12, 8, 5, 170);
+-inline constexpr ImU32 kPanel = IM_COL32(30, 21, 15, 246);
+-inline constexpr ImU32 kPanelEdge = IM_COL32(143, 93, 36, 255);
+-inline constexpr ImU32 kRow = IM_COL32(255, 240, 210, 10);
+-inline constexpr ImU32 kRowHover = IM_COL32(233, 199, 122, 28);
+-inline constexpr ImU32 kRowFocus = IM_COL32(217, 166, 75, 64);
+-inline constexpr ImU32 kAccent = IM_COL32(217, 166, 75, 255);
+-inline constexpr ImU32 kAccentBright = IM_COL32(251, 230, 166, 255);
+-inline constexpr ImU32 kText = IM_COL32(246, 220, 174, 255);
+-inline constexpr ImU32 kTextDim = IM_COL32(179, 154, 124, 255);
+-inline constexpr ImU32 kTextDisabled = IM_COL32(120, 103, 86, 255);
+-inline constexpr ImU32 kDanger = IM_COL32(214, 102, 76, 255);
+-inline constexpr ImU32 kGood = IM_COL32(150, 196, 120, 255);
+-inline constexpr ImU32 kTrack = IM_COL32(255, 240, 210, 36);
++inline ImU32 kBackdrop = IM_COL32(12, 8, 5, 170);
++inline ImU32 kPanel = IM_COL32(30, 21, 15, 246);
++inline ImU32 kPanelEdge = IM_COL32(143, 93, 36, 255);
++inline ImU32 kRow = IM_COL32(255, 240, 210, 10);
++inline ImU32 kRowHover = IM_COL32(233, 199, 122, 28);
++inline ImU32 kRowFocus = IM_COL32(217, 166, 75, 64);
++inline ImU32 kAccent = IM_COL32(217, 166, 75, 255);
++inline ImU32 kAccentBright = IM_COL32(251, 230, 166, 255);
++inline ImU32 kText = IM_COL32(246, 220, 174, 255);
++inline ImU32 kTextDim = IM_COL32(179, 154, 124, 255);
++inline ImU32 kTextDisabled = IM_COL32(120, 103, 86, 255);
++inline ImU32 kDanger = IM_COL32(214, 102, 76, 255);
++inline ImU32 kGood = IM_COL32(150, 196, 120, 255);
++inline ImU32 kTrack = IM_COL32(255, 240, 210, 36);
++// The menu's: the focused row's bar fades from kRowFocus to kFocusEnd;
++// kHighlight marks the open tab and the title's accent.
++inline ImU32 kFocusEnd = IM_COL32(217, 166, 75, 0);
++inline ImU32 kHighlight = IM_COL32(217, 166, 75, 255);
++inline ImU32 kHeading = IM_COL32(251, 230, 166, 255);
++inline ImU32 kSection = IM_COL32(217, 166, 75, 255);
++inline ImU32 kTextFaint = IM_COL32(150, 128, 104, 255);
++inline ImU32 kValue = IM_COL32(246, 220, 174, 255);
+ } // namespace colors
+ 
++// Sets the colours above from a game's theme; null leaves PortableKit's.
++void apply_theme_colours(const portablekit::InterfaceTheme *theme);
++
++// The theme's faces, null when the profile has none: titles and section
++// names, and the capitals of tabs and labels.
++[[nodiscard]] ImFont *heading_font();
++[[nodiscard]] ImFont *caps_font();
++
++// Text with extra space between its letters (`spacing` pixels), as the
++// menu's small capitals are set. Returns its width; draws nothing without a
++// draw list.
++float spaced_text(ImDrawList *draw, ImFont *font, float size, ImVec2 at, ImU32 colour, const char *text,
++                  float spacing);
++
++// The focused row's bar between min and max: it fades out to the right and
++// has a diamond on its left edge.
++void draw_focus_bar(ImDrawList *draw, ImVec2 min, ImVec2 max);
++
+ // The system dialogs a game opens over itself (the message and save-data
+ // dialogs) are not the port's menus: they are drawn as a translucent band
+ // across the running game, white text centred in it, a soft highlight on the
+@@ -71,6 +103,9 @@ struct RowOptions {
+     bool disabled{};
+     std::string note;         // shown dimmed next to the value, e.g. who decides it
+     std::string description;  // shown in the footer while the row is focused
++    // The setting's key in settings.ini (options_for() fills it): the menu's
++    // side panel draws a preview for some of them.
++    const char *key{};
+ };
+ 
+ // A setting with a few values, changed with left/right or by activating it.
+@@ -96,6 +131,13 @@ bool list_row(const char *id, const std::string &name, const std::string &detail
+ void info_row(const char *label, const std::string &value);
+ void section(const char *title);
+ 
++// Between these, info_row() and section() draw a card of information, as the
++// menu's side panel shows a page's status: each line a label and its value
++// side by side, none of them focusable, and paragraph() a line of the card.
++void begin_card();
++void end_card();
++[[nodiscard]] bool in_card();
++
+ // Focuses the next row, e.g. the first row after switching tabs.
+ void focus_next_row();
+ 
+@@ -131,10 +173,10 @@ struct Hint {
+ // The colours hints are drawn in; the default is the menus' look.
+ struct HintStyle {
+     ImU32 text{colors::kTextDim};
+-    ImU32 face{colors::kAccent};      // a face button's disc
+-    ImU32 face_ink{colors::kPanel};   // and the shape or letter on it
+-    ImU32 cap_edge{colors::kTextDim}; // a key or shoulder button's outline
+-    ImU32 cap_text{colors::kText};
++    ImU32 face{colors::kHeading};       // a face button's disc
++    ImU32 face_ink{colors::kPanel};     // and the shape or letter on it
++    ImU32 cap_edge{colors::kTextFaint}; // a key or shoulder button's outline
++    ImU32 cap_text{colors::kHeading};
+ };
+ inline constexpr HintStyle kBandHints{band::kTextDim, IM_COL32(235, 238, 245, 235), IM_COL32(20, 24, 32, 255),
+                                       band::kTextDim, band::kText};
+-- 
+2.53.0.windows.1
+
