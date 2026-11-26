@@ -45,7 +45,8 @@ game asks again.
 
 1. Choose **Play Online** when the game asks, or on the Network page.
 2. Everyone playing online on your release shares the game's 16 lobbies. Agree on one with the other player, for
-   example on Discord, or find a busy one.
+   example on Discord, or find a busy one: the Online Lobby's list shows how many players are in each lobby, and at
+   the top how many are online, in battles and in Group Battle.
 3. Challenge as in [Then, in the game](#then-in-the-game).
 
 In **Group Battle**, Search for a Room lists every open room on the server. In **Communications**, everyone online
@@ -93,11 +94,12 @@ Both players do the same from here.
 
 1. On the main menu, choose **Communications Mode**, then **Online Lobby**.
 2. Both pick **the same lobby**, for example 1 Cornelia. Lobbies 1 to 8 are for customised characters, 9 to 16 for
-   preset ones.
+   preset ones. Each lobby with players in it says how many; the top right says how many are online, in battles
+   and in Group Battle.
 
    <p>
      <img src="../images/online-game-menu.png" width="49%" alt="The main menu with Communications Mode open and Online Lobby highlighted">
-     <img src="../images/online-game-lobbies.png" width="49%" alt="The Online Lobby's 16 lobbies, Cornelia highlighted">
+     <img src="../images/online-game-lobbies.png" width="49%" alt="The Online Lobby's 16 lobbies, Cornelia highlighted, Midgar showing 1 player, and 2 online at the top right">
    </p>
 
 3. In the lobby the other player's Friend Card appears, marked **Online**. One player selects it and chooses
@@ -182,6 +184,8 @@ Everyone plays online, or hosts or joins one session. Then, in the game:
   keeps them hidden.
 - **Communications on the server** trades Friend Cards and quests with everyone there at the same moment, strangers
   included.
+- **Every game on your release** can see how many players are in each lobby, in battles and in Group Battle. Not
+  who they are.
 
 How to run a server of your own: [Running a server](run-a-server.md). To use one, type its address in **Online
 server** on the Network page (under Ad hoc play); Play Online then goes there.

@@ -28,6 +28,14 @@
 // A fighter asks again every few seconds while its battle goes direct: it keeps
 // its place at the relay, and its router's path to it, for a move back.
 //
+// Where everyone is (d012_where.hpp), answered as STATUS is:
+// - WHERE (15), a copy to the relay: "D0NL", 15, tag 0, u32 a number of the
+//   copy's choosing, u8 length and a version tag, padded with zeros to the
+//   answer's length.
+// - The answer: "D0NL", 15, tag 0, the same u32, then a u16 for each count of
+//   Where below in its order, the lobbies' sixteen in theirs, for the players
+//   online with that tag.
+//
 // It needs nothing of PortableKit's, so the server program builds it alone.
 // MIT licence; see port/README.md.
 
@@ -47,14 +55,31 @@ inline constexpr std::uint8_t kStream = 10u;
 inline constexpr std::uint8_t kStatus = 11u;
 inline constexpr std::uint8_t kAsk = 12u;
 inline constexpr std::uint8_t kIntro = 13u;
+inline constexpr std::uint8_t kWhere = 15u;  // 14 is the fighters' PUNCH (d012_net.cpp)
 inline constexpr std::size_t kStatusQuery = kHead + 5u;    // and the tag's bytes
 inline constexpr std::size_t kStatusAnswer = kHead + 12u;
 inline constexpr std::size_t kAskSize = kHead + 7u;
 inline constexpr std::size_t kIntroSize = kHead + 13u;
+inline constexpr std::size_t kLobbies = 16u;  // the Online Lobby's rooms
+inline constexpr std::size_t kWhereQuery = kHead + 5u;  // and the tag's bytes
+inline constexpr std::size_t kWhereAnswer = kHead + 4u + 2u * (6u + kLobbies);
 
 struct Counts {
     std::uint32_t version{};  // players online with the asked tag
     std::uint32_t all{};      // players online in all
+};
+
+// The players online with one version tag, by where they are in
+// Communication Mode (d012_where.hpp).
+struct Where {
+    std::uint16_t online{};          // all of them
+    std::uint16_t menus{};           // in none of the places below: the game's menus, Friend Cards
+    std::uint16_t lobbies[kLobbies]{};  // in each Online Lobby room, Cornelia (0) to Zanarkand (15)
+    std::uint16_t group_battle{};    // in Group Battle's rooms: making, searching, waiting
+    std::uint16_t duels{};           // in an Online Lobby battle: fighter select or the fight
+    std::uint16_t party_battles{};   // in a Group Battle's battle, fighting or watching
+    std::uint16_t communications{};  // trading Friend Cards and quests
+    friend bool operator==(const Where &, const Where &) = default;
 };
 
 // An IPv4 address and a port, both in network byte order (as in sockaddr_in).
@@ -82,6 +107,8 @@ struct Options {
     std::function<bool(std::uint32_t address)> admit;
     // The answer to STATUS for a version tag. Null: STATUS goes unanswered.
     std::function<Counts(std::string_view version)> status;
+    // The answer to WHERE for a version tag. Null: WHERE goes unanswered.
+    std::function<Where(std::string_view version)> where;
     // How the log names it.
     std::string name = "battle-relay";
     // A line about each battle on standard output: every 30 s while the relay
@@ -103,6 +130,12 @@ void start(Options options);
 // not one, or answers another query).
 [[nodiscard]] std::string status_query(std::uint32_t nonce, std::string_view version);
 [[nodiscard]] bool read_status_answer(const std::uint8_t *data, std::size_t size, std::uint32_t nonce, Counts &counts);
+
+// Packets for WHERE: a query, an answer, and an answer read back (false when
+// `data` is not one, or answers another query).
+[[nodiscard]] std::string where_query(std::uint32_t nonce, std::string_view version);
+[[nodiscard]] std::string where_answer(std::uint32_t nonce, const Where &where);
+[[nodiscard]] bool read_where_answer(const std::uint8_t *data, std::size_t size, std::uint32_t nonce, Where &where);
 
 // Packets for a direct battle: ASK and INTRO written, and read back (false
 // when `data` is not one).

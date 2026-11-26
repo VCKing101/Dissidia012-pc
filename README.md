@@ -165,7 +165,8 @@ analog, each player's right-stick camera and an input delay set from the connect
    - **Play Online**: through the game's server. Nothing to set up; everyone on your release is in the game's lobbies.
    - **Host a Session**: a private session. The game shows your internet address, copied for you to send.
    - **Join a Session**: a friend's session, on your network or by the address they sent.
-2. Pick the same lobby as the other player, and one challenges the other.
+2. Pick the same lobby as the other player, and one challenges the other. The list of lobbies shows how many players
+   are in each, and how many are online, in battles and in Group Battle.
 
 ![The game's Online screen: How do you want to play? with Play Online, Host a Session, Join a Session and Back](docs/images/online-chooser.png)
 

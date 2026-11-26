@@ -5,8 +5,9 @@
 //   copies on different versions kept apart, nobody shown another player's
 //   address, a player's MAC and relay sockets kept theirs, per-address limits;
 // - the battle relay (UDP 27420, port/host/d012_battle_relay.hpp), for copies
-//   whose players are logged in only, and the STATUS answer: the players
-//   online with a copy's version;
+//   whose players are logged in only, and the STATUS and WHERE answers: the
+//   players online with a copy's version, and where they are (lobby rooms,
+//   Group Battle, battles; port/host/d012_where.hpp);
 // - a ban list, a file of addresses and copies' MACs, read again when it
 //   changes.
 //
@@ -17,6 +18,7 @@
 // MIT licence; see port/README.md.
 
 #include "d012_battle_relay.hpp"
+#include "d012_where.hpp"
 
 #include "adhoc/protocol.hpp"
 #include "adhoc/server.hpp"
@@ -172,13 +174,15 @@ private:
 };
 
 // Who is online, for the battle relay's thread: the addresses players log in
-// from (only they may use the relay) and the count on each version.
+// from (only they may use the relay), the count on each version and where
+// they are.
 class Online {
 public:
     void update(const portablekit::adhoc::ServerStatus &status) {
         std::set<std::uint32_t> addresses;
         std::map<std::uint32_t, std::vector<std::string>> names;
         std::map<std::string, std::uint32_t> versions;
+        std::vector<d012::where::Player> places;
         for (const auto &player : status.players) {
             in_addr v4{};
             if (inet_pton(AF_INET, player.address.c_str(), &v4) == 1) {
@@ -186,8 +190,12 @@ public:
                 names[v4.s_addr].push_back(player.nickname);
             }
             ++versions[player.version];
+            std::uint64_t mac = 0u;
+            for (const std::uint8_t byte : player.mac) mac = mac << 8u | byte;
+            places.push_back({mac, player.version, player.group});
         }
         std::lock_guard lock(mutex_);
+        tally_.update(places);
         addresses_ = std::move(addresses);
         names_ = std::move(names);
         versions_ = std::move(versions);
@@ -212,13 +220,30 @@ public:
         counts.all = all_;
         return counts;
     }
+    d012::net::relay::Where where(std::string_view version) const {
+        std::lock_guard lock(mutex_);
+        return tally_.of(version);
+    }
     std::string summary() const {
         std::lock_guard lock(mutex_);
         std::ostringstream out;
         out << all_ << " players online";
-        for (const auto &[version, count] : versions_)
-            out << (version == versions_.begin()->first ? ": " : ", ") << count << " on "
+        for (const auto &[version, count] : versions_) {
+            out << (version == versions_.begin()->first ? ": " : "; ") << count << " on "
                 << (version.empty() ? std::string("no version") : version);
+            // Where they are: rooms by number (1 Cornelia to 16 Zanarkand).
+            const d012::net::relay::Where where = tally_.of(version);
+            std::string places;
+            const auto add = [&](const std::string &text) { places += (places.empty() ? "" : ", ") + text; };
+            for (std::size_t room = 0; room < d012::net::relay::kLobbies; ++room)
+                if (where.lobbies[room] != 0u)
+                    add("room " + std::to_string(room + 1u) + " " + std::to_string(where.lobbies[room]));
+            if (where.group_battle != 0u) add("Group Battle rooms " + std::to_string(where.group_battle));
+            if (where.duels != 0u) add("1-on-1 battles " + std::to_string(where.duels));
+            if (where.party_battles != 0u) add("party battles " + std::to_string(where.party_battles));
+            if (where.communications != 0u) add("Communications " + std::to_string(where.communications));
+            if (!places.empty()) out << " (" << places << ")";
+        }
         return out.str();
     }
 
@@ -228,6 +253,7 @@ private:
     std::map<std::uint32_t, std::vector<std::string>> names_;
     std::map<std::string, std::uint32_t> versions_;
     std::uint32_t all_{};
+    d012::where::Tally tally_;
 };
 
 void usage() {
@@ -317,6 +343,7 @@ int main(int argc, char **argv) {
     relay.loopback_only = loopback;
     relay.admit = [&online](std::uint32_t address) { return online.admits(address); };
     relay.status = [&online](std::string_view version) { return online.counts(version); };
+    relay.where = [&online](std::string_view version) { return online.where(version); };
     relay.name = "battle-relay";
     relay.report_battles = true;
     relay.who = [&online](std::uint32_t address) { return online.name_at(address); };

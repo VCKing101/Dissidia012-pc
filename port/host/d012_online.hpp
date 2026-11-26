@@ -22,6 +22,8 @@
 // the file altogether.
 // MIT licence; see port/README.md.
 
+#include "d012_battle_relay.hpp"
+
 #include <string>
 
 namespace d012::online {
@@ -37,5 +39,14 @@ inline constexpr const char *kServerFile =
 // Players on the server with this copy's version, or -1 while not known.
 // Never waits.
 [[nodiscard]] int players();
+
+// Where the players with this copy's version are (d012_where.hpp), for the
+// game's own Online Lobby screens (d012_lobby_status.cpp): the answer to
+// WHERE (d012_battle_relay.hpp) from the server the game goes online with
+// (`server`, PortableKit's adhoc_server_address(): the copy's own while it
+// hosts, the session it joined, or Play online's), at its battle port, asked
+// every few seconds while asked for. False while not known. Never waits; on
+// the game's thread.
+[[nodiscard]] bool where(const std::string &server, net::relay::Where &out);
 
 } // namespace d012::online
