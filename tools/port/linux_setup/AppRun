@@ -16,11 +16,88 @@
 # nothing; D012_SETUP_COPY_ISO=1 copies the image; D012_SETUP_NO_MENU=1 adds
 # no menu entry; D012_SETUP_JOBS=<n> passes --jobs to the compile.
 #
+# Started by RecompLauncher (RECOMPLAUNCHER=1) there is no setup: the launcher
+# unpacks the AppImage into the game's folder and runs this file for Play and
+# for its setup step (recomplauncher.json), so it runs payload/D012Native with
+# the same arguments. Given RECOMPLAUNCHER_DATA, that is the data directory
+# (D012_DATA_DIR, unless already set), and its first start copies in the data
+# of an earlier copy (launcher_data below). Without RECOMPLAUNCHER=1 none of
+# this runs.
+#
 # MIT licence; see README.md at the repository root.
 set -uo pipefail
 
 here="$(dirname "$(readlink -f "$0")")"
 payload="$here/payload"
+
+# launcher_data <dir>: true when <dir> is the data directory to use. Its first
+# time, the first of the old places that holds a memory stick (ms0/) is copied
+# into it: payload/data (the program started by hand in the launcher's
+# folder), data/ (the setup run into that folder) or ~/Games/Dissidia012/data
+# (the setup's own folder). Each item is copied to <name>.d012-part, named in
+# the journal, then renamed into place; an item already there is kept, except
+# settings.ini, which the launcher writes before every start and the old one
+# replaces. The mark, written last, says it is done. False while it is not:
+# this start uses the old place (old_data), the items journaled so far are
+# taken out again, and the next start tries again. The old place is only read.
+old_data=""
+launcher_data() {
+    local data="$1" mark="$1/.copied-old-data" journal="$1/.copying-old-data"
+    local candidate item name
+    [[ -e "$mark" ]] && return 0
+    shopt -s dotglob nullglob
+    undo() {
+        local done_name
+        if [[ -f "$journal" ]]; then
+            while IFS= read -r done_name; do
+                [[ -n "$done_name" && "$done_name" != */* && "$done_name" != . && "$done_name" != .. ]] &&
+                    rm -rf -- "${data:?}/$done_name"
+            done < "$journal"
+        fi
+        rm -rf -- "$data"/*.d012-part
+        rm -f -- "$journal"
+    }
+    undo
+    for candidate in "$payload/data" "$here/data" ${HOME:+"$HOME/Games/Dissidia012/data"}; do
+        if [[ -d "$candidate/ms0" && "$(readlink -f "$candidate")" != "$(readlink -f "$data")" ]]; then
+            old_data="$candidate"
+            break
+        fi
+    done
+    if [[ -n "$old_data" ]]; then
+        : > "$journal" || { undo; return 1; }
+        for item in "$old_data"/*; do
+            name="$(basename -- "$item")"
+            [[ "$name" == *$'\n'* || "$name" == *.d012-part || "$name" == .copied-old-data || "$name" == .copying-old-data ]] &&
+                continue
+            [[ "$name" != settings.ini && ( -e "$data/$name" || -L "$data/$name" ) ]] && continue
+            cp -a -- "$item" "$data/$name.d012-part" &&
+                printf '%s\n' "$name" >> "$journal" &&
+                mv -fT -- "$data/$name.d012-part" "$data/$name" || { undo; return 1; }
+        done
+        sync -f "$data" 2>/dev/null
+    fi
+    : > "$mark.d012-part" && mv -fT -- "$mark.d012-part" "$mark" || { undo; return 1; }
+    rm -f -- "$journal"
+    return 0
+}
+
+if [[ "${RECOMPLAUNCHER:-}" == 1 ]]; then
+    if [[ -n "${RECOMPLAUNCHER_DATA:-}" && -z "${D012_DATA_DIR:-}" ]]; then
+        mkdir -p -- "$RECOMPLAUNCHER_DATA"
+        if launcher_data "$RECOMPLAUNCHER_DATA" || [[ -z "$old_data" ]]; then
+            export D012_DATA_DIR="$RECOMPLAUNCHER_DATA"
+        else
+            echo "Your saves and settings were not all copied into $RECOMPLAUNCHER_DATA; this start uses $old_data, and the next one copies them again." >&2
+            export D012_DATA_DIR="$old_data"
+        fi
+    fi
+    # The launcher reads the setup step's progress lines from its output.
+    [[ "${1:-}" == --prepare ]] && export D012_KEEP_OUTPUT=1
+    cd "$payload" || exit 1
+    exec "$payload/D012Native" "$@"
+fi
+
 version="$(cat "$here/VERSION" 2>/dev/null || echo "?")"
 title="Dissidia 012 (PC port) setup"
 app_name="Dissidia 012 (PC port)"

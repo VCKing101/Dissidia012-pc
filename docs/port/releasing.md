@@ -10,7 +10,7 @@ all named with the version in `tools/port/release-version.txt`:
 |---|---|---|
 | `Dissidia012-PC-<version>-Windows-x64-Setup.exe` | Windows, the setup wizard (see below the table) | `tools/port/package_installer.py` |
 | `Dissidia012-PC-<version>-Windows-x64.zip` | Windows through [RecompLauncher](https://recomplauncher.com/game/dissidia012-pc): the same files, `recomplauncher.json` at the top | `tools/port/package_installer.py` |
-| `Dissidia012-Setup-<version>-x86_64.AppImage` | Linux and the Steam Deck | `tools/port/linux_setup.sh` (WSL) |
+| `Dissidia012-Setup-<version>-x86_64.AppImage` | Linux and the Steam Deck, and RecompLauncher on Linux (`recomplauncher.json` inside) | `tools/port/linux_setup.sh` (WSL) |
 | `Dissidia012-BgmMaker-<version>-x86_64.AppImage` | the Battle BGM Maker on Linux and the Steam Deck, on its own | `tools/port/linux_bgm_maker.sh` (WSL) |
 | `Dissidia012-<version>-Android-arm64.apk` | Android 10 and later, arm64 | `tools/port/android_build.sh --release` (WSL) |
 | `SHA256SUMS` | all five, `sha256sum -c` format (two spaces) | collected by hand from the scripts' |

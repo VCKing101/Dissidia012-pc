@@ -12,7 +12,8 @@
 # 2. The toolchain (tools/port/linux_toolchain.sh: ~/d012-linux/toolchain),
 #    when it is not made yet.
 # 3. The AppDir: tools/port/linux_setup/AppRun (the wizard), its desktop file
-#    and icon, VERSION, and payload/ (what is installed) with toolchain/.
+#    and icon, VERSION, recomplauncher.json (RecompLauncher reads it from the
+#    AppImage), and payload/ (what is installed) with toolchain/.
 # 4. tools/port/linux_check_setup.py: no game files, no paths of this machine,
 #    a program without the game's code.
 # 5. appimagetool with the pinned type-2 runtime, and SHA256SUMS. The result
@@ -89,6 +90,7 @@ install -m 755 "$repo/tools/port/linux_setup/AppRun" "$appdir/AppRun"
 cp "$repo/tools/port/linux_setup/dissidia012-setup.desktop" "$repo/tools/port/linux_setup/dissidia012-setup.svg" "$appdir/"
 ln -s dissidia012-setup.svg "$appdir/.DirIcon"
 echo "$version" > "$appdir/VERSION"
+cp "$repo/recomplauncher.json" "$appdir/recomplauncher.json"
 cp -a "$root/setup/payload" "$appdir/payload"
 cp -a "$root/toolchain" "$appdir/payload/toolchain"
 cp "$root/toolchain/licenses/"* "$appdir/payload/licenses/"
