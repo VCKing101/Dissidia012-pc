@@ -9,27 +9,55 @@
     "check": { "iso9660": "UMD_DATA.BIN" }
   },
   "start": {
-    "program": ["D012Native.exe"]
+    "program": ["D012Native.exe", "Dissidia012-Setup-x86_64.AppImage"]
   },
   "prepare": {
-    "program": ["D012Native.exe"],
+    "program": ["D012Native.exe", "Dissidia012-Setup-x86_64.AppImage"],
     "args": ["--prepare", "--game", "{game}"],
-    "label": "Your game's code, made on this PC from your disc",
-    "timeout": 3600
+    "label": "Your game's code, made on this PC from your disc"
   },
   "config": [
     {
       "id": "main",
       "format": "ini",
-      "file": [{ "path": "{install}/data/settings.ini" }]
+      "file": [
+        { "path": "{install}/data/settings.ini", "if": "{install}/D012Native.exe" },
+        { "path": "{data}/settings.ini" }
+      ]
     }
   ],
   "folders": {
-    "saves": [{ "path": "{install}/data/ms0/PSP/SAVEDATA" }],
-    "logs": [{ "path": "{install}/data/logs" }],
-    "mods": [{ "path": "{install}/data/mods" }]
+    "saves": [
+      { "path": "{install}/data/ms0/PSP/SAVEDATA", "if": "{install}/D012Native.exe" },
+      { "path": "{data}/ms0/PSP/SAVEDATA", "if": "{data}/.copied-old-data" },
+      { "path": "{install}/payload/data/ms0/PSP/SAVEDATA", "if": "{install}/payload/data/ms0" },
+      { "path": "{install}/data/ms0/PSP/SAVEDATA", "if": "{install}/data/ms0" },
+      { "path": "{home}/Games/Dissidia012/data/ms0/PSP/SAVEDATA", "if": "{home}/Games/Dissidia012/data/ms0" },
+      { "path": "{data}/ms0/PSP/SAVEDATA" }
+    ],
+    "logs": [
+      { "path": "{install}/data/logs", "if": "{install}/D012Native.exe" },
+      { "path": "{data}/logs", "if": "{data}/.copied-old-data" },
+      { "path": "{install}/payload/data/logs", "if": "{install}/payload/data/ms0" },
+      { "path": "{install}/data/logs", "if": "{install}/data/ms0" },
+      { "path": "{home}/Games/Dissidia012/data/logs", "if": "{home}/Games/Dissidia012/data/ms0" },
+      { "path": "{data}/logs" }
+    ],
+    "mods": [
+      { "path": "{install}/data/mods", "if": "{install}/D012Native.exe" },
+      { "path": "{data}/mods", "if": "{data}/.copied-old-data" },
+      { "path": "{install}/payload/data/mods", "if": "{install}/payload/data/ms0" },
+      { "path": "{install}/data/mods", "if": "{install}/data/ms0" },
+      { "path": "{home}/Games/Dissidia012/data/mods", "if": "{home}/Games/Dissidia012/data/ms0" },
+      { "path": "{data}/mods" }
+    ]
   },
-  "saves": ["{install}/data/ms0/PSP/SAVEDATA"],
+  "saves": [
+    "{install}/data/ms0/PSP/SAVEDATA",
+    "{data}/ms0/PSP/SAVEDATA",
+    "{install}/payload/data/ms0/PSP/SAVEDATA",
+    "{home}/Games/Dissidia012/data/ms0/PSP/SAVEDATA"
+  ],
   "settings": [
     {
       "id": "window",
